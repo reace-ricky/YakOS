@@ -1,6 +1,7 @@
 """YakOS Core - data loading, player pool building, and PuLP optimizer."""
 import os
 from typing import Dict, Any, Tuple
+from datetime import date
 
 import numpy as np
 import pandas as pd
@@ -33,7 +34,7 @@ def load_opt_pool_from_config(cfg: Dict[str, Any]) -> pd.DataFrame:
         "load_opt_pool_from_config is deprecated; "
         "call run_lineups_from_config(cfg) instead."
     )
-# ------------------------------------------------------------------
+
 
 # --------------------------------------------------------------------
 # Internal loader for historical parquet pools
@@ -62,7 +63,6 @@ def _load_opt_pool_from_parquet(slate_date: str,
         )
 
     opt_pool = pd.read_parquet(path)
-    print(f"[load_opt_pool] Loaded {len(opt_pool)} rows from {path}")
 
     if "salary" in opt_pool.columns:
         opt_pool = opt_pool[opt_pool["salary"].notna() & (opt_pool["salary"] > 0)]
@@ -89,9 +89,18 @@ def build_player_pool(opt_pool: pd.DataFrame,
     """
     df = opt_pool.copy()
 
-    df = df.dropna(subset=["player_id", "salary", "proj"])
+    proj_col = cfg.get("PROJ_COL", "proj")
+    if proj_col not in df.columns:
+        raise ValueError(
+            f"Projection column '{proj_col}' not found in pool columns: {list(df.columns)}"
+        )
+
+    df = df.dropna(subset=["player_id", "salary", proj_col])
     df = df[df["salary"] > 0]
-    df = df[df["proj"] > 0]
+    df = df[df[proj_col] > 0]
+
+    # normalize to 'proj' for downstream optimizer
+    df["proj"] = df[proj_col]
 
     if "player_name" not in df.columns:
         if "name" in df.columns:
@@ -131,14 +140,12 @@ def build_player_pool(opt_pool: pd.DataFrame,
 
     cols = [c for c in base_cols if c in df.columns]
     df = df[cols].reset_index(drop=True)
-    print(f"[build_player_pool] Final pool: {len(df)} players, cols={list(df.columns)}")
 
     # --- EXCLUDE: remove players by name ---
     exclude_list = [n.strip() for n in cfg.get("EXCLUDE", [])]
     if exclude_list:
         before = len(df)
         df = df[~df["player_name"].isin(exclude_list)].reset_index(drop=True)
-        print(f"[build_player_pool] Excluded {before - len(df)} players: {exclude_list}")
 
     # --- BUMP: multiply projections by user factor ---
     bump_map = cfg.get("BUMP", {})
@@ -146,13 +153,7 @@ def build_player_pool(opt_pool: pd.DataFrame,
         for pname, mult in bump_map.items():
             mask = df["player_name"] == pname
             if mask.any():
-                old_proj = df.loc[mask, "proj"].values[0]
                 df.loc[mask, "proj"] = df.loc[mask, "proj"] * mult
-                new_proj = df.loc[mask, "proj"].values[0]
-                print(
-                    f"[build_player_pool] BUMP {pname}: proj {old_proj:.1f} "
-                    f"-> {new_proj:.1f} (x{mult})"
-                )
 
     return df
 
@@ -184,7 +185,7 @@ def build_multiple_lineups_with_exposure(
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     num_lineups = int(cfg.get("NUM_LINEUPS", 20))
     salary_cap = int(cfg.get("SALARY_CAP", 50000))
-    max_exposure = float(cfg.get("MAX_EXPOSURE", 0.6))
+    max_exposure = float(cfg.get("MAX_EXPOSURE", 0.35))
     min_salary = int(cfg.get("MIN_SALARY_USED", 46000))
     own_weight = float(cfg.get("OWN_WEIGHT", 0.0))
     max_appearances = max(1, int(num_lineups * max_exposure))
@@ -226,8 +227,6 @@ def build_multiple_lineups_with_exposure(
                 for i in range(n)
                 for s in DK_POS_SLOTS
             )
-            if lu_num == 0:
-                print(f"[optimizer] Using blended objective: own_weight={own_weight}")
         else:
             prob += pulp.lpSum(
                 players[i]["proj"] * x[(i, s)]
@@ -293,7 +292,6 @@ def build_multiple_lineups_with_exposure(
 
         prob.solve(pulp.PULP_CBC_CMD(msg=0))
         if prob.status != 1:
-            print(f"[optimizer] Lineup {lu_num} infeasible, skipping.")
             continue
 
         for i in range(n):
@@ -329,7 +327,6 @@ def build_multiple_lineups_with_exposure(
 # --------------------------------------------------------------------
 # Public engine entrypoint
 # --------------------------------------------------------------------
-from datetime import date
 def run_lineups_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
     Single public engine entrypoint:
@@ -371,9 +368,6 @@ def run_lineups_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
 
     # Empty pool guard
     if opt_pool.empty:
-        print(
-            f"[run_lineups_from_config] WARNING: No players in pool for {slate_date}"
-        )
         return {
             "pool_df": opt_pool,
             "lineups": [],
@@ -389,10 +383,6 @@ def run_lineups_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
             and (opt_pool["proj"] > 0).any()
         )
         if not has_real_proj:
-            print(
-                "[run_lineups] Live pool has no valid projections, "
-                "applying projections to raw pool first"
-            )
             opt_pool = apply_projections(opt_pool, merged)
             opt_pool = apply_ownership(opt_pool)
             opt_pool = compute_leverage(opt_pool)
@@ -405,21 +395,10 @@ def run_lineups_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if data_mode != "live":
         if "actual_fp" not in pool_df.columns and "proj" in pool_df.columns:
             pool_df["actual_fp"] = pool_df["proj"].copy()
-            print(
-                f"[proj_sep] Copied parquet proj -> actual_fp for "
-                f"{len(pool_df)} players"
-            )
 
         pool_df = apply_projections(pool_df, merged)
         pool_df = apply_ownership(pool_df)
         pool_df = compute_leverage(pool_df)
-
-        if "actual_fp" in pool_df.columns:
-            print(
-                f"[proj_sep] proj mean={pool_df['proj'].mean():.1f}, "
-                f"actual_fp mean={pool_df['actual_fp'].mean():.1f}, "
-                f"same={(pool_df['proj'] == pool_df['actual_fp']).all()}"
-            )
 
     # 3) Optimize
     lineups_df, exposures_df = build_multiple_lineups_with_exposure(
@@ -446,33 +425,25 @@ def run_lineups_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "config": merged,
     }
 
-    salary_cap = int(merged.get('SALARY_CAP', 50000))
+    salary_cap = int(merged.get("SALARY_CAP", 50000))
     lineup_size = DK_LINEUP_SIZE
     validation_errors = []
-    for lu_idx in lineups_df['lineup_index'].unique():
-        lu = lineups_df[lineups_df['lineup_index'] == lu_idx]
+    for lu_idx in lineups_df["lineup_index"].unique():
+        lu = lineups_df[lineups_df["lineup_index"] == lu_idx]
         if len(lu) != lineup_size:
             validation_errors.append(
-                'Lineup %d: expected %d players, got %d'
+                "Lineup %d: expected %d players, got %d"
                 % (lu_idx, lineup_size, len(lu))
             )
-        lu_salary = lu['salary'].sum()
+        lu_salary = lu["salary"].sum()
         if lu_salary > salary_cap:
             validation_errors.append(
-                'Lineup %d: salary %d exceeds cap %d'
+                "Lineup %d: salary %d exceeds cap %d"
                 % (lu_idx, lu_salary, salary_cap)
             )
 
-
     if validation_errors:
-        for err in validation_errors:
-            print("[VALIDATION ERROR] %s" % err)
         raise ValueError("Validation failed: %d error(s)" % len(validation_errors))
-
-    print(
-        "[validate] All %d lineups passed (size=%d, salary<=%d)"
-        % (num_lineups, lineup_size, salary_cap)
-    )
 
     return {
         "lineups_df": lineups_df,
