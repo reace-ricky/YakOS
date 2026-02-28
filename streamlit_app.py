@@ -1,4 +1,4 @@
-"""YakOS DFS Optimizer - Ricky's Slate Room + Calibration Lab."""
+"""YakOS DFS Optimizer - Ricky's Slate Room + Optimizer + Calibration Lab."""
 
 import sys
 import os
@@ -18,6 +18,24 @@ from yak_core.calibration import (  # type: ignore
     compute_calibration_metrics,
     identify_calibration_gaps,
     load_calibration_config,
+    save_calibration_config,
+    DFS_ARCHETYPES,
+    DK_CONTEST_TYPES,
+    DK_CONTEST_TYPE_MAP,
+    apply_archetype,
+    get_calibration_queue,
+    action_queue_items,
+    suggest_config_from_queue,
+)
+from yak_core.right_angle import (  # type: ignore
+    ricky_annotate,
+    detect_stack_alerts,
+    detect_pace_environment,
+    detect_high_value_plays,
+)
+from yak_core.sims import (  # type: ignore
+    run_monte_carlo_for_lineups,
+    simulate_live_updates,
 )
 
 
@@ -135,6 +153,25 @@ def to_csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
 
 
+# Percentage projection boost applied to high-smash players when
+# "Apply sim learnings" is clicked.  Kept small (5 %) to avoid over-fitting
+# to a single sim run.
+_SIM_LEARNING_BOOST = 0.05
+
+
+def _slate_value_leader(pool_df: pd.DataFrame) -> str:
+    """Return a formatted string naming the top value play (FP per $1K) in the pool."""
+    if pool_df.empty:
+        return "—"
+    df = pool_df[pool_df["salary"] > 0].copy()
+    df["_v"] = df["proj"] / (df["salary"] / 1000.0)
+    top = df.nlargest(1, "_v")
+    if top.empty:
+        return "—"
+    row = top.iloc[0]
+    return f"{row['player_name']} ({row['_v']:.2f}x)"
+
+
 def ensure_session_state():
     if "lineups_df" not in st.session_state:
         st.session_state["lineups_df"] = None
@@ -150,6 +187,22 @@ def ensure_session_state():
         st.session_state["lab_metrics"] = None
     if "lab_contest_type" not in st.session_state:
         st.session_state["lab_contest_type"] = "GPP"
+    # New state keys
+    if "promoted_lineups" not in st.session_state:
+        # list of dicts: {label, lineups_df, metadata}
+        st.session_state["promoted_lineups"] = []
+    if "cal_queue_df" not in st.session_state:
+        st.session_state["cal_queue_df"] = None
+    if "archetype" not in st.session_state:
+        st.session_state["archetype"] = "Balanced"
+    if "dk_contest_type" not in st.session_state:
+        st.session_state["dk_contest_type"] = "Tournament (GPP)"
+    if "sim_pool_df" not in st.session_state:
+        st.session_state["sim_pool_df"] = None
+    if "sim_lineups_df" not in st.session_state:
+        st.session_state["sim_lineups_df"] = None
+    if "sim_results_df" not in st.session_state:
+        st.session_state["sim_results_df"] = None
 
 
 def run_optimizer(
@@ -158,6 +211,7 @@ def run_optimizer(
     max_exposure: float,
     min_salary_used: int,
     proj_col: str = "proj",  # which column to use: 'proj', 'floor', 'ceil', or 'sim85'
+    archetype: str = "Balanced",
 ) -> Tuple[pd.DataFrame | None, pd.DataFrame | None]:
     # Remap the chosen projection style to 'proj' so the optimizer always reads 'proj'.
     # We work on a copy to leave the caller's DataFrame unchanged.
@@ -168,6 +222,9 @@ def run_optimizer(
             opt_pool["proj"] = pd.to_numeric(opt_pool[proj_col], errors="coerce").fillna(0)
         else:
             st.warning(f"Column '{proj_col}' not found; falling back to 'proj'.")
+
+    # Apply DFS archetype adjustments
+    opt_pool = apply_archetype(opt_pool, archetype)
 
     cfg: Dict[str, Any] = {
         "SITE": "dk",
@@ -283,16 +340,20 @@ with st.sidebar:
         ),
     )
 
-tab_front, tab_lab = st.tabs(["Ricky's Slate Room", "Calibration + Sims (Lab)"])
+tab_slate, tab_optimizer, tab_lab = st.tabs([
+    "🏀 Ricky's Slate Room",
+    "⚡ Optimizer",
+    "🔬 Calibration Lab",
+])
 
 
 # ============================================================
-# Tab 1: Ricky's Slate Room (public)
+# Tab 1: 🏀 Ricky's Slate Room
 # ============================================================
-with tab_front:
-    st.subheader("Ricky's Slate Room")
+with tab_slate:
+    st.subheader("🏀 Ricky's Slate Room")
 
-    # 1) Upload + pool
+    # --- Pool upload ---
     st.markdown("### 1. Upload Today's Projection CSV")
 
     if sport == "PGA":
@@ -309,328 +370,436 @@ with tab_front:
             raw_df = pd.read_csv(uploaded_file)
             pool_df = rename_rg_columns_to_yakos(raw_df)
             st.session_state["pool_df"] = pool_df
-
-            st.markdown("##### Pool KPIs")
-            n_players = len(pool_df)
-            avg_salary = pool_df["salary"].mean()
-            median_proj = pool_df["proj"].median()
-            max_own = pool_df["ownership"].max() if "ownership" in pool_df.columns else None
-
-            kpi_cols = st.columns(4)
-            kpi_cols[0].metric("Player count", f"{n_players}")
-            kpi_cols[1].metric("Avg salary", f"{avg_salary:,.0f}")
-            kpi_cols[2].metric("Median proj", f"{median_proj:.2f}")
-            if max_own is not None:
-                kpi_cols[3].metric("Max ownership", f"{max_own:.1f}%")
-
-            with st.expander("View cleaned pool data", expanded=False):
-                st.dataframe(pool_df, use_container_width=True, height=400)
         else:
             st.info("Upload a RotoGrinders NBA CSV to begin.")
             st.session_state["pool_df"] = None
             pool_df = None
 
-        # 2) Slate controls
-        st.markdown("### 2. Slate & Contest Context")
+        pool_df = st.session_state.get("pool_df")
 
-        col_slate_left, col_slate_right = st.columns(2)
-        with col_slate_left:
-            slate_type = st.selectbox(
-                "Slate Type",
-                ["Classic", "Showdown Captain"],
-                index=0,
-            )
+        # --- KPIs ---
+        if pool_df is not None and not pool_df.empty:
+            st.markdown("### 2. Pool KPIs")
+            n_players = len(pool_df)
+            avg_salary = pool_df["salary"].mean()
+            median_proj = pool_df["proj"].median()
+            top_proj = pool_df["proj"].max()
+            max_own = pool_df["ownership"].max() if "ownership" in pool_df.columns else None
+            avg_own = pool_df["ownership"].mean() if "ownership" in pool_df.columns else None
 
-        showdown_game = None
-        if st.session_state["pool_df"] is not None:
-            games = get_showdown_games(st.session_state["pool_df"])
-        else:
-            games = []
+            kpi_c1, kpi_c2, kpi_c3, kpi_c4, kpi_c5 = st.columns(5)
+            kpi_c1.metric("Players", f"{n_players}")
+            kpi_c2.metric("Avg Salary", f"${avg_salary:,.0f}")
+            kpi_c3.metric("Median Proj", f"{median_proj:.1f}")
+            kpi_c4.metric("Top Proj", f"{top_proj:.1f}")
+            if max_own is not None:
+                kpi_c5.metric("Max Ownership", f"{max_own:.1f}%")
 
-        with col_slate_right:
-            if slate_type == "Showdown Captain":
-                if games:
-                    showdown_game = st.selectbox("Showdown Game", games)
+            if avg_own is not None:
+                value_leader = _slate_value_leader(pool_df)
+                st.caption(
+                    f"Avg ownership: {avg_own:.1f}% | Slate value leader: {value_leader}"
+                )
+
+            with st.expander("View cleaned pool", expanded=False):
+                st.dataframe(pool_df, use_container_width=True, height=350)
+
+            # --- Right Angle Ricky Edge Analysis ---
+            st.markdown("### 3. 📐 Right Angle Ricky — Edge Analysis")
+
+            col_edge_l, col_edge_r = st.columns(2)
+
+            with col_edge_l:
+                st.markdown("#### 🔥 Stack Alerts")
+                stack_alerts = detect_stack_alerts(pool_df)
+                if stack_alerts:
+                    for alert in stack_alerts:
+                        st.markdown(f"- {alert}")
                 else:
-                    st.warning("No games detected in pool for Showdown. Upload a valid CSV.")
-                    showdown_game = None
+                    st.info("No strong stack signals detected.")
 
-        contest_type = st.selectbox(
-            "Contest Type",
-            ["GPP", "50/50", "Single Entry", "MME", "Captain"],
-            index=0,
-        )
+                st.markdown("#### ⚡ Pace / Game Environment")
+                pace_notes = detect_pace_environment(pool_df)
+                if pace_notes:
+                    for note in pace_notes:
+                        st.markdown(f"- {note}")
+                else:
+                    st.info("Upload a pool with opponent data for game environment analysis.")
 
-        # 3) Ricky's analysis stub
-        st.markdown("### 3. Ricky's Slate Notes")
+            with col_edge_r:
+                st.markdown("#### 💎 High-Value Plays")
+                value_plays = detect_high_value_plays(pool_df)
+                if value_plays:
+                    for play in value_plays:
+                        st.markdown(f"- {play}")
+                else:
+                    st.info("No stand-out value plays identified.")
 
-        col_notes_left, col_notes_right = st.columns(2)
-
-        with col_notes_left:
-            st.markdown("#### Pace & Environment")
-            st.write(
-                "- Fast-paced spots and high total games will show up heavily in Ricky's lineups.\n"
-                "- Slow, sloggy games will be used more for value or leverage than primary stacks.\n"
-                "- Blowout risk reduces floor for thin rotations; Ricky will cap exposure there."
-            )
-
-            st.markdown("#### Stacks & Correlation")
-            st.write(
-                "- Same-team 2- and 3-man stacks are preferred in high total, close-spread games.\n"
-                "- Bring-backs are encouraged when the opponent also has strong projection and minutes.\n"
-                "- Showdown Captain lineups will emphasize strong captain candidates plus correlated flex pieces."
-            )
-
-        with col_notes_right:
-            st.markdown("#### Contest-Type Lean")
-            st.write(
-                "- GPP: prioritize ceiling, leverage vs heavy chalk, and correlated stacks.\n"
-                "- 50/50: tighter player pool, higher floor, less correlation risk.\n"
-                "- Single Entry: in-between; strong lineups that aren't pure mega-chalk.\n"
-                "- Captain: focus on high-usage, high-ceiling captains with complementary pieces."
-            )
-            st.info(
-                "These notes will eventually be driven directly from YakOS sims and calibration for "
-                "each slate and contest type."
-            )
-
-        # 4) Ricky's featured lineups
-        st.markdown("### 4. Ricky's Featured Lineups (Preset)")
-
-        pool_for_opt = None
-        if st.session_state["pool_df"] is not None:
-            pool_for_opt = apply_slate_filters(
-                st.session_state["pool_df"], slate_type, showdown_game
-            )
-
-        if pool_for_opt is not None and not pool_for_opt.empty:
-            preset_lineups_df, _ = run_optimizer(
-                pool_for_opt,
-                num_lineups=5,
-                max_exposure=0.35,
-                min_salary_used=46500,
-                proj_col="proj",
-            )
-
-            if preset_lineups_df is not None and not preset_lineups_df.empty:
-                st.success("Ricky generated 5 featured lineups for this context.")
-                unique_lineups_preset = sorted(preset_lineups_df["lineup_index"].unique())
-                num_preset = len(unique_lineups_preset)
-                preset_idx = st.number_input(
-                    "Featured Lineup #",
-                    min_value=1,
-                    max_value=num_preset,
-                    value=1,
-                    step=1,
+                st.markdown("#### 📋 Quick Notes")
+                st.write(
+                    "- **High-paced games**: prioritise correlation; stack teammates from high-total games.\n"
+                    "- **Stack alerts**: same-team 2-man and 3-man stacks outperform in GPPs.\n"
+                    "- **Value plays**: cheap differentiators with strong minutes projections.\n"
+                    "- **Ownership leverage**: contrarian plays reduce correlation with the field."
                 )
-                current_index = unique_lineups_preset[preset_idx - 1]
-                rows = preset_lineups_df[preset_lineups_df["lineup_index"] == current_index].copy()
-                total_salary = rows["salary"].sum()
-                total_proj = rows["proj"].sum()
-                st.markdown(
-                    f"**Featured Lineup {preset_idx}** -- Salary: {int(total_salary):,} | Proj: {total_proj:.2f}"
+                st.info(
+                    "These notes auto-update based on the uploaded pool. "
+                    "Sims and calibration learnings will sharpen the signals."
                 )
 
-                display_cols = [c for c in ["slot", "team", "player_name", "salary", "proj"] if c in rows.columns]
-                lineup_display = rows[display_cols].copy()
-                if "team" in lineup_display.columns:
-                    lineup_display["team"] = lineup_display["team"].fillna("")
-                if "salary" in lineup_display.columns:
-                    lineup_display["salary"] = lineup_display["salary"].astype(int)
+            # --- Calibration Queue Lineups ---
+            st.markdown("### 4. 📥 Lineups from Calibration Queue")
 
-                st.dataframe(lineup_display, use_container_width=True, height=260)
+            promoted = st.session_state.get("promoted_lineups", [])
+            if promoted:
+                for i, entry in enumerate(promoted):
+                    label = entry.get("label", f"Promoted Set {i + 1}")
+                    lu_df = entry.get("lineups_df")
+                    meta = entry.get("metadata", {})
+                    with st.expander(f"**{label}** — {meta.get('contest_type', '')} | {len(lu_df['lineup_index'].unique()) if lu_df is not None else 0} lineups", expanded=(i == 0)):
+                        if lu_df is not None and not lu_df.empty:
+                            # Annotate with Ricky confidence scores
+                            annotated = ricky_annotate(lu_df)
+                            unique_lu = sorted(annotated["lineup_index"].unique())
+                            sel_lu = st.selectbox(
+                                "Select lineup",
+                                range(1, len(unique_lu) + 1),
+                                key=f"promoted_lu_{i}",
+                            )
+                            lu_rows = annotated[annotated["lineup_index"] == unique_lu[sel_lu - 1]].copy()
+                            conf = lu_rows["confidence"].iloc[0] if "confidence" in lu_rows.columns else "—"
+                            tag = lu_rows["tag"].iloc[0] if "tag" in lu_rows.columns else "—"
+                            st.markdown(
+                                f"**Confidence**: {conf} | **Tag**: {tag} | "
+                                f"Salary: {int(lu_rows['salary'].sum()):,} | Proj: {lu_rows['proj'].sum():.1f}"
+                            )
+                            disp_cols = [c for c in ["slot", "team", "player_name", "salary", "proj", "confidence", "tag"] if c in lu_rows.columns]
+                            st.dataframe(lu_rows[disp_cols], use_container_width=True, height=240)
+                        else:
+                            st.info("No lineups in this set.")
             else:
-                st.info("No featured lineups available for this context yet.")
+                st.info(
+                    "No lineups have been promoted yet. "
+                    "Run sims in the **🔬 Calibration Lab** and use "
+                    "**Post to Ricky's Slate Room** to surface high-confidence lineups here."
+                )
+
         else:
-            st.info("Upload a pool and set a slate to see featured lineups.")
+            st.info("Upload a projection CSV above to see edge analysis and lineups.")
 
-        # 5) Build Your Own Lineups
-        st.markdown("### 5. Build Your Own Lineups")
 
-        st.write(
-            "Use the same pool and context above to generate your own lineups. "
-            "Adjust settings in the sidebar, then click Build Lineups."
-        )
+# ============================================================
+# Tab 2: ⚡ Optimizer
+# ============================================================
+with tab_optimizer:
+    st.subheader("⚡ Optimizer")
+    st.markdown(
+        "Build lineups for today's slate. Choose your DraftKings contest type, "
+        "DFS archetype, and projection style — then let the optimizer do the work."
+    )
 
-        if pool_for_opt is not None and not pool_for_opt.empty:
-            if st.button("Build Lineups", type="primary"):
-                with st.spinner("Running optimizer..."):
-                    lineups_df, exposures_df = run_optimizer(
+    if sport == "PGA":
+        st.info("PGA support is coming soon. Please select NBA for now.")
+    else:
+        pool_df_opt = st.session_state.get("pool_df")
+        if pool_df_opt is None:
+            st.warning("Upload a projection CSV in **🏀 Ricky's Slate Room** first.")
+        else:
+            # --- Contest & slate controls ---
+            st.markdown("### 1. Contest & Slate Context")
+            col_opt_l, col_opt_r = st.columns(2)
+
+            with col_opt_l:
+                slate_type_opt = st.selectbox(
+                    "Slate Type",
+                    ["Classic", "Showdown Captain"],
+                    index=0,
+                    key="opt_slate_type",
+                )
+
+                dk_contest_sel = st.selectbox(
+                    "DraftKings Contest Type",
+                    DK_CONTEST_TYPES,
+                    index=DK_CONTEST_TYPES.index(st.session_state["dk_contest_type"])
+                    if st.session_state["dk_contest_type"] in DK_CONTEST_TYPES
+                    else 0,
+                    key="opt_dk_contest",
+                    help="Mirror of the contest types available in the DraftKings lobby.",
+                )
+                st.session_state["dk_contest_type"] = dk_contest_sel
+                internal_contest = DK_CONTEST_TYPE_MAP.get(dk_contest_sel, "GPP")
+
+            showdown_game_opt = None
+            with col_opt_r:
+                if slate_type_opt == "Showdown Captain":
+                    games = get_showdown_games(pool_df_opt)
+                    if games:
+                        showdown_game_opt = st.selectbox("Showdown Game", games, key="opt_showdown")
+                    else:
+                        st.warning("No games detected. Upload a valid pool.")
+
+                archetype_sel = st.selectbox(
+                    "DFS Archetype",
+                    list(DFS_ARCHETYPES.keys()),
+                    index=list(DFS_ARCHETYPES.keys()).index(st.session_state["archetype"])
+                    if st.session_state["archetype"] in DFS_ARCHETYPES
+                    else 0,
+                    key="opt_archetype",
+                    help=(
+                        "Ceiling Hunter = max upside (GPP) | "
+                        "Floor Lock = cash game | "
+                        "Contrarian = low ownership | "
+                        "Stacker = team correlation | "
+                        "Balanced = default"
+                    ),
+                )
+                st.session_state["archetype"] = archetype_sel
+                arch_desc = DFS_ARCHETYPES[archetype_sel]["description"]
+                st.caption(f"📌 {arch_desc}")
+
+            # --- Optimizer controls ---
+            st.markdown("### 2. Build Controls")
+            ctrl_c1, ctrl_c2, ctrl_c3 = st.columns(3)
+            with ctrl_c1:
+                num_lu_opt = st.slider("Lineups", 1, 300, num_lineups_user, key="opt_num_lu")
+            with ctrl_c2:
+                max_exp_opt = st.slider("Max exposure", 0.05, 1.0, max_exposure_user, step=0.05, key="opt_exp")
+            with ctrl_c3:
+                min_sal_opt = st.number_input("Min salary used", 0, 50000, min_salary_used_user, step=500, key="opt_sal")
+
+            proj_style_opt = st.selectbox(
+                "Projection style (ceiling/floor driver)",
+                ["proj", "floor", "ceil", "sim85"],
+                index=0,
+                key="opt_proj_style",
+                help=(
+                    "proj = base projection | floor = conservative / cash-game | "
+                    "ceil = ceiling / GPP | sim85 = 85th-percentile sim output"
+                ),
+            )
+
+            # Apply slate filter
+            pool_for_opt = apply_slate_filters(pool_df_opt, slate_type_opt, showdown_game_opt)
+
+            if st.button("🚀 Build Lineups", type="primary", key="opt_build_btn"):
+                with st.spinner(f"Optimizing ({dk_contest_sel} / {archetype_sel})..."):
+                    lu_df, exp_df = run_optimizer(
                         pool_for_opt,
-                        num_lineups=num_lineups_user,
-                        max_exposure=max_exposure_user,
-                        min_salary_used=min_salary_used_user,
-                        proj_col=proj_style,
+                        num_lineups=num_lu_opt,
+                        max_exposure=max_exp_opt,
+                        min_salary_used=min_sal_opt,
+                        proj_col=proj_style_opt,
+                        archetype=archetype_sel,
                     )
-                    st.session_state["lineups_df"] = lineups_df
-                    st.session_state["exposures_df"] = exposures_df
+                    st.session_state["lineups_df"] = lu_df
+                    st.session_state["exposures_df"] = exp_df
                     st.session_state["current_lineup_index"] = 0
 
-            lineups_df = st.session_state["lineups_df"]
-            exposures_df = st.session_state["exposures_df"]
+            lineups_df = st.session_state.get("lineups_df")
+            exposures_df = st.session_state.get("exposures_df")
 
             if lineups_df is not None and not lineups_df.empty:
-                unique_lineups = sorted(lineups_df["lineup_index"].unique())
-                num_total = len(unique_lineups)
-                st.success(f"Generated {num_total} lineups.")
+                unique_lu = sorted(lineups_df["lineup_index"].unique())
+                st.success(f"Generated {len(unique_lu)} lineups ({dk_contest_sel} / {archetype_sel})")
 
-                lineup_idx = st.number_input(
-                    "Lineup #",
-                    min_value=1,
-                    max_value=num_total,
-                    value=1,
-                    step=1,
-                )
-                current_index = unique_lineups[lineup_idx - 1]
-                rows = lineups_df[lineups_df["lineup_index"] == current_index].copy()
-                total_salary = rows["salary"].sum()
-                total_proj = rows["proj"].sum()
+                lu_idx = st.number_input("Lineup #", 1, len(unique_lu), 1, step=1, key="opt_lu_idx")
+                cur_idx = unique_lu[lu_idx - 1]
+                rows = lineups_df[lineups_df["lineup_index"] == cur_idx].copy()
                 st.markdown(
-                    f"**Lineup {lineup_idx}** -- Salary: {int(total_salary):,} | Proj: {total_proj:.2f}"
+                    f"**Lineup {lu_idx}** — Salary: {int(rows['salary'].sum()):,} | "
+                    f"Proj: {rows['proj'].sum():.2f}"
                 )
-                display_cols = [c for c in ["slot", "team", "player_name", "salary", "proj"] if c in rows.columns]
-                lineup_display = rows[display_cols].copy()
-                if "team" in lineup_display.columns:
-                    lineup_display["team"] = lineup_display["team"].fillna("")
-                if "salary" in lineup_display.columns:
-                    lineup_display["salary"] = lineup_display["salary"].astype(int)
-                st.dataframe(lineup_display, use_container_width=True, height=260)
+                disp_cols = [c for c in ["slot", "team", "player_name", "salary", "proj"] if c in rows.columns]
+                lu_display = rows[disp_cols].copy()
+                if "salary" in lu_display.columns:
+                    lu_display["salary"] = lu_display["salary"].astype(int)
+                st.dataframe(lu_display, use_container_width=True, height=260)
 
-                # Exposure table
                 if exposures_df is not None and not exposures_df.empty:
                     with st.expander("Player Exposures", expanded=False):
                         st.dataframe(exposures_df, use_container_width=True, height=400)
 
-                # Downloads
-                dl_col1, dl_col2 = st.columns(2)
-                with dl_col1:
+                dl1, dl2 = st.columns(2)
+                with dl1:
                     st.download_button(
-                        label="Download lineups CSV",
+                        "Download lineups CSV",
                         data=to_csv_bytes(lineups_df),
                         file_name="yakos_lineups.csv",
                         mime="text/csv",
+                        key="opt_dl_lu",
                     )
-                with dl_col2:
+                with dl2:
                     if exposures_df is not None and not exposures_df.empty:
                         st.download_button(
-                            label="Download exposures CSV",
+                            "Download exposures CSV",
                             data=to_csv_bytes(exposures_df),
                             file_name="yakos_exposures.csv",
                             mime="text/csv",
+                            key="opt_dl_exp",
                         )
-        else:
-            st.info("Upload a pool above to build lineups.")
+
 
 # ============================================================
-# ============================================================
-# Tab 2: Calibration + Sims (Lab)
+# Tab 3: 🔬 Calibration Lab
 # ============================================================
 with tab_lab:
-    st.subheader("Calibration + Sims (Lab)")
+    st.subheader("🔬 Calibration Lab")
     st.markdown(
-        "Compare past optimizer output against actual DFS results. "
-        "Select a historical slate to review projections vs actuals."
+        "Review prior-day lineups, run sims, tune configs, and promote "
+        "high-confidence lineups to Ricky's Slate Room."
     )
 
     # Load historical data
     hist_df = load_historical_lineups()
 
+    # ---- Section A: Calibration Queue ----
+    st.markdown("### A. Calibration Queue — Prior-Day Lineups")
+
     if hist_df.empty:
         st.warning(
             "No historical data found. Add `data/historical_lineups.csv` to the repo "
-            "with columns: slate_date, lineup_id, name, pos, team, opp, salary, proj, actual, own."
+            "with columns: slate_date, contest_name, lineup_id, pos, team, name, "
+            "salary, own, actual."
         )
     else:
-        available_dates = sorted(hist_df["slate_date"].unique(), reverse=True)
-        selected_date = st.selectbox("Slate date", available_dates)
+        queue_df = get_calibration_queue(hist_df, prior_dates=3)
+        if st.session_state.get("cal_queue_df") is None:
+            st.session_state["cal_queue_df"] = queue_df
 
+        cal_queue = st.session_state["cal_queue_df"]
+
+        if cal_queue is not None and not cal_queue.empty:
+            available_dates = sorted(cal_queue["slate_date"].unique(), reverse=True)
+            queue_date_sel = st.selectbox("Queue slate date", available_dates, key="queue_date")
+            date_queue = cal_queue[cal_queue["slate_date"] == queue_date_sel]
+
+            # KPIs for the queue date
+            kq_cols = st.columns(4)
+            n_lu = date_queue["lineup_id"].nunique()
+            avg_actual = date_queue["actual"].mean() if "actual" in date_queue.columns else 0
+            avg_own = date_queue["own"].mean() if "own" in date_queue.columns else 0
+            n_reviewed = (date_queue["queue_status"] == "reviewed").sum() if "queue_status" in date_queue.columns else 0
+            kq_cols[0].metric("Lineups in queue", n_lu)
+            kq_cols[1].metric("Avg actual score", f"{avg_actual:.1f}")
+            kq_cols[2].metric("Avg ownership", f"{avg_own:.1f}%")
+            kq_cols[3].metric("Reviewed", n_reviewed)
+
+            with st.expander("View queue lineups", expanded=True):
+                st.dataframe(date_queue, use_container_width=True, height=300)
+
+            # Individual / Bulk action
+            st.markdown("#### Review & Action")
+            all_lu_ids = sorted(date_queue["lineup_id"].unique().tolist())
+            col_act_l, col_act_r = st.columns(2)
+            with col_act_l:
+                sel_ids = st.multiselect(
+                    "Select lineup IDs to action",
+                    all_lu_ids,
+                    default=all_lu_ids,
+                    key="queue_sel_ids",
+                )
+                action_choice = st.selectbox(
+                    "Action",
+                    ["reviewed", "apply_config", "dismissed"],
+                    key="queue_action",
+                )
+            with col_act_r:
+                st.markdown(" ")
+                st.markdown(" ")
+                if st.button("Apply action to selected", key="queue_apply_btn"):
+                    updated_q = action_queue_items(
+                        st.session_state["cal_queue_df"], sel_ids, action_choice
+                    )
+                    st.session_state["cal_queue_df"] = updated_q
+                    st.success(f"Marked {len(sel_ids)} lineup(s) as '{action_choice}'.")
+
+                if st.button("Bulk: mark all as reviewed", key="queue_bulk_btn"):
+                    updated_q = action_queue_items(
+                        st.session_state["cal_queue_df"], all_lu_ids, "reviewed"
+                    )
+                    st.session_state["cal_queue_df"] = updated_q
+                    st.success("All lineups marked as reviewed.")
+
+                if st.button("Suggest config changes from queue", key="queue_suggest_btn"):
+                    cal_cfg = load_calibration_config()
+                    suggested = suggest_config_from_queue(
+                        st.session_state["cal_queue_df"], cal_cfg
+                    )
+                    st.success("Config suggestions derived from queue analysis.")
+                    st.json(suggested)
+
+    # ---- Section B: Ad Hoc Historical Lineup Builder ----
+    st.markdown("---")
+    st.markdown("### B. Ad Hoc Historical Lineup Builder")
+    st.markdown(
+        "Select a past slate date, apply YakOS projections to the RG pool, "
+        "generate optimizer lineups, and compare against actuals."
+    )
+
+    if not hist_df.empty:
+        available_dates_lab = sorted(hist_df["slate_date"].unique(), reverse=True)
+        selected_date = st.selectbox("Slate date", available_dates_lab, key="lab_date_sel")
         slate_data = hist_df[hist_df["slate_date"] == selected_date].copy()
 
-        # KPIs for the slate
-        st.markdown("#### Slate Summary (Historical Entries)")
-        kpi_cols_lab = st.columns(4)
-
-        num_lineups_hist = slate_data["lineup_id"].nunique()
-
-        if "proj" in slate_data.columns:
-            avg_proj = (
-                slate_data.groupby("lineup_id")["proj"]
-                .sum()
-                .mean()
-            )
-        else:
-            avg_proj = 0
-
-        avg_actual = (
-            slate_data.groupby("lineup_id")["actual"]
-            .sum()
-            .mean()
-            if "actual" in slate_data.columns
-            else 0
+        # Historical slate KPIs
+        st.markdown("#### Historical Slate Summary")
+        kpi_lab = st.columns(4)
+        n_lu_hist = slate_data["lineup_id"].nunique()
+        avg_proj_hist = (
+            slate_data.groupby("lineup_id")["proj"].sum().mean()
+            if "proj" in slate_data.columns else 0
         )
+        avg_actual_hist = (
+            slate_data.groupby("lineup_id")["actual"].sum().mean()
+            if "actual" in slate_data.columns else 0
+        )
+        proj_err_hist = avg_actual_hist - avg_proj_hist if avg_actual_hist else 0
+        kpi_lab[0].metric("Lineups", n_lu_hist)
+        kpi_lab[1].metric("Avg Projected", f"{avg_proj_hist:.1f}")
+        kpi_lab[2].metric("Avg Actual", f"{avg_actual_hist:.1f}")
+        kpi_lab[3].metric("Avg Error", f"{proj_err_hist:+.1f}")
 
-        proj_error = avg_actual - avg_proj if avg_actual else 0
-
-        kpi_cols_lab[0].metric("Lineups", f"{num_lineups_hist}")
-        kpi_cols_lab[1].metric("Avg Projected", f"{avg_proj:.1f}")
-        kpi_cols_lab[2].metric("Avg Actual", f"{avg_actual:.1f}")
-        kpi_cols_lab[3].metric("Avg Error", f"{proj_error:+.1f}")
-
-        # Player-level accuracy
-        st.markdown("##### Player Projection Accuracy (Historical Entries)")
         if "actual" in slate_data.columns:
-            agg_cols = {"actual": "mean", "salary": "first", "own": "mean"}
+            agg_cols_hist = {"actual": "mean", "salary": "first", "own": "mean"}
             if "proj" in slate_data.columns:
-                agg_cols["proj"] = "mean"
+                agg_cols_hist["proj"] = "mean"
             player_agg = (
-                slate_data.groupby("name")
-                .agg(agg_cols)
-                .reset_index()
+                slate_data.groupby("name").agg(agg_cols_hist).reset_index()
             )
             if "proj" in player_agg.columns:
                 player_agg["error"] = player_agg["actual"] - player_agg["proj"]
                 player_agg["abs_error"] = player_agg["error"].abs()
                 player_agg = player_agg.sort_values("abs_error", ascending=False)
-            else:
-                player_agg = player_agg.sort_values("actual", ascending=False)
-            st.dataframe(player_agg, use_container_width=True, height=300)
-        else:
-            st.info("Add an 'actual' column to historical data to see accuracy metrics.")
+            with st.expander("Player accuracy (historical entries)", expanded=False):
+                st.dataframe(player_agg, use_container_width=True, height=300)
 
-        # RG pool comparison
+        # RG pool vs actuals
         rg_file = RG_POOL_FILES.get(str(selected_date))
         if rg_file:
             st.markdown("##### RG Pool vs Actuals")
             rg_pool = load_rg_pool(rg_file)
             if (not rg_pool.empty) and ("actual" in slate_data.columns):
-                merged = rg_pool.merge(
+                merged_hist = rg_pool.merge(
                     slate_data[["name", "actual"]].rename(
                         columns={"name": "player_name"}
                     ).drop_duplicates(),
                     on="player_name",
                     how="left",
                 )
-                merged["error"] = merged["actual"] - merged["proj"]
-                display_cols = [
+                merged_hist["error"] = merged_hist["actual"] - merged_hist["proj"]
+                disp_cols_hist = [
                     c for c in ["player_name", "pos", "team", "salary", "proj", "actual", "error", "ownership"]
-                    if c in merged.columns
+                    if c in merged_hist.columns
                 ]
-                st.dataframe(
-                    merged[display_cols].sort_values("error", ascending=False),
-                    use_container_width=True,
-                    height=400,
-                )
+                with st.expander("RG pool vs actuals table", expanded=False):
+                    st.dataframe(
+                        merged_hist[disp_cols_hist].sort_values("error", ascending=False),
+                        use_container_width=True,
+                        height=400,
+                    )
 
-        # ----------------------------------------------------------------
-        # Backtest Optimizer: generate lineups from RG pool + compare
-        # ----------------------------------------------------------------
-        st.markdown("---")
-        st.markdown("### Generate & Compare Backtest Lineups")
-        st.markdown(
-            "Run the YakOS optimizer on the RG pool for this slate date, "
-            "then compare those generated lineups against actual DFS scores."
-        )
-
+        # Backtest optimizer
+        st.markdown("#### Generate & Compare Backtest Lineups")
         rg_file_bt = RG_POOL_FILES.get(str(selected_date))
         if not rg_file_bt:
             st.info(
@@ -642,98 +811,73 @@ with tab_lab:
             if rg_pool_bt.empty:
                 st.warning("RG pool file loaded but contains no valid players.")
             else:
-                col_bt_l, col_bt_r = st.columns(2)
-                with col_bt_l:
-                    bt_num_lineups = st.slider(
-                        "Backtest lineups",
-                        min_value=1,
-                        max_value=150,
-                        value=20,
-                        step=1,
-                        key="bt_num_lineups",
+                bt_col_l, bt_col_r = st.columns(2)
+                with bt_col_l:
+                    bt_num_lu = st.slider("Backtest lineups", 1, 150, 20, key="bt_num_lu")
+                    bt_min_sal = st.number_input("Min salary", 0, 50000, 46500, step=500, key="bt_min_sal")
+                with bt_col_r:
+                    bt_max_exp = st.slider("Max exposure", 0.05, 1.0, 0.35, step=0.05, key="bt_max_exp")
+                    bt_dk_contest = st.selectbox(
+                        "DraftKings Contest Type",
+                        DK_CONTEST_TYPES,
+                        key="bt_contest_sel",
                     )
-                    bt_min_salary = st.number_input(
-                        "Min salary used",
-                        min_value=0,
-                        max_value=50000,
-                        value=46500,
-                        step=500,
-                        key="bt_min_salary",
-                    )
-                with col_bt_r:
-                    bt_max_exposure = st.slider(
-                        "Max exposure",
-                        min_value=0.05,
-                        max_value=1.0,
-                        value=0.35,
-                        step=0.05,
-                        key="bt_max_exposure",
-                    )
-                    bt_contest_type = st.selectbox(
-                        "Contest type",
-                        ["GPP", "50/50", "Single Entry", "MME", "Captain"],
-                        key="bt_contest_type_sel",
+                    bt_archetype = st.selectbox(
+                        "DFS Archetype",
+                        list(DFS_ARCHETYPES.keys()),
+                        key="bt_archetype_sel",
                     )
 
-                if st.button("Run Backtest", type="primary", key="lab_backtest_btn"):
+                if st.button("▶ Run Backtest", type="primary", key="lab_backtest_btn"):
                     with st.spinner("Running backtest optimizer..."):
                         cal_config = load_calibration_config()
+                        bt_internal_contest = DK_CONTEST_TYPE_MAP.get(bt_dk_contest, "GPP")
                         try:
-                            bt_lineups_df, _ = run_backtest_lineups(
-                                pool=rg_pool_bt,
-                                num_lineups=bt_num_lineups,
-                                max_exposure=bt_max_exposure,
-                                min_salary_used=bt_min_salary,
-                                contest_type=bt_contest_type,
+                            # Apply archetype before backtest
+                            bt_pool_arched = apply_archetype(rg_pool_bt, bt_archetype)
+                            bt_lu_df, _ = run_backtest_lineups(
+                                pool=bt_pool_arched,
+                                num_lineups=bt_num_lu,
+                                max_exposure=bt_max_exp,
+                                min_salary_used=bt_min_sal,
+                                contest_type=bt_internal_contest,
                                 config=cal_config,
                             )
                             if "actual" in slate_data.columns:
-                                actuals_lookup = (
+                                actuals_lkp = (
                                     slate_data[["name", "actual"]]
                                     .rename(columns={"name": "player_name"})
                                     .drop_duplicates("player_name")
                                 )
-                                metrics = compute_calibration_metrics(
-                                    bt_lineups_df, actuals_lookup
-                                )
+                                metrics = compute_calibration_metrics(bt_lu_df, actuals_lkp)
                             else:
                                 metrics = None
                                 st.warning(
-                                    "Historical data has no 'actual' column — "
+                                    "No 'actual' column in historical data — "
                                     "lineups generated but comparison unavailable."
                                 )
-                            st.session_state["lab_lineups_df"] = bt_lineups_df
+                            st.session_state["lab_lineups_df"] = bt_lu_df
                             st.session_state["lab_metrics"] = metrics
-                            st.session_state["lab_contest_type"] = bt_contest_type
+                            st.session_state["lab_contest_type"] = bt_dk_contest
                             st.success(
-                                f"Generated {bt_lineups_df['lineup_index'].nunique()} "
-                                "backtest lineups."
+                                f"Generated {bt_lu_df['lineup_index'].nunique()} backtest lineups."
                             )
                         except Exception as e:
                             st.error(f"Backtest error: {e}")
 
-                # Display results (persisted across re-renders)
-                if st.session_state["lab_lineups_df"] is not None:
-                    bt_lineups_df = st.session_state["lab_lineups_df"]
+                if st.session_state.get("lab_lineups_df") is not None:
+                    bt_lu_df = st.session_state["lab_lineups_df"]
                     metrics = st.session_state["lab_metrics"]
-                    used_contest_type = st.session_state["lab_contest_type"]
+                    used_dk_contest = st.session_state["lab_contest_type"]
 
                     st.markdown("#### Backtest Results")
-
                     if metrics is not None:
                         ll = metrics["lineup_level"]
-
-                        kpi_cols_bt = st.columns(4)
-                        kpi_cols_bt[0].metric("Lineups", len(ll["df"]))
-                        kpi_cols_bt[1].metric(
-                            "Avg Projected", f"{ll['avg_proj']:.1f}"
-                        )
-                        kpi_cols_bt[2].metric(
-                            "Avg Actual", f"{ll['avg_actual']:.1f}"
-                        )
-                        kpi_cols_bt[3].metric(
-                            "Avg Error", f"{ll['avg_error']:+.1f}"
-                        )
+                        kpi_bt = st.columns(4)
+                        kpi_bt[0].metric("Lineups", len(ll["df"]))
+                        kpi_bt[1].metric("Avg Projected", f"{ll['avg_proj']:.1f}")
+                        kpi_bt[2].metric("Avg Actual", f"{ll['avg_actual']:.1f}")
+                        kpi_bt[3].metric("Avg Error", f"{ll['avg_error']:+.1f}")
 
                         col_m1, col_m2, col_m3 = st.columns(3)
                         col_m1.metric("MAE", f"{ll['mae']:.2f}")
@@ -742,61 +886,280 @@ with tab_lab:
 
                         st.caption(
                             "⚠️ Actuals only cover players in historical contest entries. "
-                            "Players not in those lineups are scored as 0, which will "
-                            "deflate the avg actual."
+                            "Players not in those lineups are scored as 0."
                         )
 
                         with st.expander("Lineup-by-Lineup Results", expanded=True):
-                            st.dataframe(
-                                ll["df"], use_container_width=True, height=300
-                            )
+                            st.dataframe(ll["df"], use_container_width=True, height=300)
 
-                        insights = identify_calibration_gaps(
-                            metrics, used_contest_type
-                        )
+                        internal_used = DK_CONTEST_TYPE_MAP.get(used_dk_contest, "GPP")
+                        insights = identify_calibration_gaps(metrics, internal_used)
                         if insights["findings"]:
                             st.markdown("##### Calibration Insights")
                             for finding in insights["findings"]:
                                 st.markdown(f"- {finding}")
 
-                        with st.expander(
-                            "Player Accuracy (generated lineups)", expanded=False
-                        ):
-                            st.dataframe(
-                                metrics["player_level"]["df"],
-                                use_container_width=True,
-                                height=400,
-                            )
+                        with st.expander("Player Accuracy", expanded=False):
+                            st.dataframe(metrics["player_level"]["df"], use_container_width=True, height=400)
 
                         if "position_level" in metrics:
                             with st.expander("By Position", expanded=False):
-                                st.dataframe(
-                                    metrics["position_level"]["df"],
-                                    use_container_width=True,
-                                )
+                                st.dataframe(metrics["position_level"]["df"], use_container_width=True)
 
                         with st.expander("By Salary Bracket", expanded=False):
-                            st.dataframe(
-                                metrics["salary_bracket"]["df"],
-                                use_container_width=True,
-                            )
-
-                        if "ownership_level" in metrics:
-                            with st.expander("By Ownership Tier", expanded=False):
-                                st.dataframe(
-                                    metrics["ownership_level"]["df"],
-                                    use_container_width=True,
-                                )
+                            st.dataframe(metrics["salary_bracket"]["df"], use_container_width=True)
 
                     st.download_button(
-                        label="Download backtest lineups CSV",
-                        data=to_csv_bytes(bt_lineups_df),
+                        "Download backtest lineups CSV",
+                        data=to_csv_bytes(bt_lu_df),
                         file_name=f"yakos_backtest_{selected_date}.csv",
                         mime="text/csv",
                         key="bt_download",
                     )
 
-        st.markdown("---")
-        st.caption("YakOS Calibration Lab v0.1 -- data-driven lineup refinement.")
+    # ---- Section C: Archetype Config Knobs ----
+    st.markdown("---")
+    st.markdown("### C. 🎛️ Archetype Config Knobs")
 
+    with st.expander("Tune DFS Archetype Configurations", expanded=False):
+        st.markdown(
+            "Adjust the projection weights for each archetype. "
+            "Changes take effect for the next optimizer run."
+        )
+        arch_sel_knobs = st.selectbox(
+            "Archetype to tune",
+            list(DFS_ARCHETYPES.keys()),
+            key="knobs_arch_sel",
+        )
+        arch_cfg = DFS_ARCHETYPES[arch_sel_knobs]
+
+        k1, k2 = st.columns(2)
+        with k1:
+            new_ceil_w = st.slider(
+                "Ceiling weight", 0.0, 1.0, float(arch_cfg["ceil_weight"]), step=0.05,
+                key="knob_ceil_w",
+            )
+            new_floor_w = st.slider(
+                "Floor weight", 0.0, 1.0, float(arch_cfg["floor_weight"]), step=0.05,
+                key="knob_floor_w",
+            )
+            new_proj_boost = st.slider(
+                "Proj boost %", -0.20, 0.20, float(arch_cfg["proj_boost"]), step=0.01,
+                key="knob_proj_boost",
+            )
+        with k2:
+            new_own_fade = st.slider(
+                "Ownership fade threshold (%)", 0.0, 50.0,
+                float(arch_cfg["own_fade_threshold"]), step=1.0,
+                key="knob_own_fade",
+            )
+            new_stack_bonus = st.slider(
+                "Stack bonus (FP)", -5.0, 10.0, float(arch_cfg["stack_bonus"]), step=0.5,
+                key="knob_stack_bonus",
+            )
+            new_value_thr = st.slider(
+                "Min value threshold (FP/$1K)", 0.0, 7.0,
+                float(arch_cfg["value_threshold"]), step=0.1,
+                key="knob_value_thr",
+            )
+
+        if st.button("Apply knob changes to archetype", key="knobs_apply"):
+            DFS_ARCHETYPES[arch_sel_knobs].update({
+                "ceil_weight": new_ceil_w,
+                "floor_weight": new_floor_w,
+                "proj_boost": new_proj_boost,
+                "own_fade_threshold": new_own_fade,
+                "stack_bonus": new_stack_bonus,
+                "value_threshold": new_value_thr,
+            })
+            st.success(f"Archetype '{arch_sel_knobs}' updated for this session.")
+
+    # ---- Section D: Sim Module ----
+    st.markdown("---")
+    st.markdown("### D. 🎲 Sim Module — Live Player Pool")
+    st.markdown(
+        "Run Monte Carlo sims on the live player pool. "
+        "Apply news / injury updates, then promote high-confidence lineups to Ricky's Slate Room."
+    )
+
+    pool_for_sim = st.session_state.get("pool_df")
+    if pool_for_sim is None:
+        st.info("Upload a projection CSV in **🏀 Ricky's Slate Room** to enable sims.")
+    else:
+        # News / lineup updates
+        with st.expander("📰 Live News & Lineup Updates", expanded=False):
+            st.markdown(
+                "Paste player update lines (one per row) in the format:\n\n"
+                "`PlayerName | STATUS | proj_adj | minutes_change`\n\n"
+                "Example: `Zion Williamson | OUT | | ` or `Jayson Tatum | UPGRADED | | +4`"
+            )
+            news_text = st.text_area(
+                "News updates",
+                placeholder="Zion Williamson | OUT | |\nJayson Tatum | UPGRADED | | 4",
+                height=120,
+                key="sim_news_text",
+            )
+
+            news_updates = []
+            if news_text.strip():
+                for line in news_text.strip().splitlines():
+                    parts = [p.strip() for p in line.split("|")]
+                    if not parts[0]:
+                        continue
+                    update = {"player_name": parts[0]}
+                    if len(parts) > 1 and parts[1]:
+                        update["status"] = parts[1]
+                    if len(parts) > 2 and parts[2]:
+                        try:
+                            update["proj_adj"] = float(parts[2])
+                        except ValueError:
+                            pass
+                    if len(parts) > 3 and parts[3]:
+                        try:
+                            update["minutes_change"] = float(parts[3])
+                        except ValueError:
+                            pass
+                    news_updates.append(update)
+
+                if news_updates:
+                    sim_pool = simulate_live_updates(pool_for_sim, news_updates)
+                    st.session_state["sim_pool_df"] = sim_pool
+                    st.info(f"Applied {len(news_updates)} update(s) to player pool.")
+                    changed = []
+                    for u in news_updates:
+                        orig = pool_for_sim[pool_for_sim["player_name"] == u["player_name"]]
+                        upd = sim_pool[sim_pool["player_name"] == u["player_name"]]
+                        if not orig.empty and not upd.empty:
+                            orig_p = orig["proj"].iloc[0]
+                            upd_p = upd["proj"].iloc[0]
+                            changed.append(f"{u['player_name']}: {orig_p:.1f} → {upd_p:.1f}")
+                    if changed:
+                        st.write("**Projection changes:**")
+                        for c in changed:
+                            st.markdown(f"- {c}")
+
+        # Sim controls
+        sim_col_l, sim_col_r = st.columns(2)
+        with sim_col_l:
+            sim_n_lu = st.slider("Lineups to sim", 1, 150, 20, key="sim_n_lu")
+            sim_vol = st.selectbox("Volatility mode", ["standard", "low", "high"], key="sim_vol")
+            sim_n_sims = st.slider("Sim iterations", 100, 2000, 500, step=100, key="sim_n_sims")
+        with sim_col_r:
+            sim_archetype = st.selectbox(
+                "DFS Archetype", list(DFS_ARCHETYPES.keys()), key="sim_archetype"
+            )
+            sim_dk_contest = st.selectbox(
+                "DraftKings Contest Type", DK_CONTEST_TYPES, key="sim_dk_contest"
+            )
+            sim_min_sal = st.number_input("Min salary", 0, 50000, 46500, step=500, key="sim_min_sal")
+
+        active_sim_pool = st.session_state.get("sim_pool_df") or pool_for_sim
+
+        if st.button("🎲 Run Sims", type="primary", key="sim_run_btn"):
+            with st.spinner("Building lineups + running Monte Carlo sims..."):
+                try:
+                    sim_lu_df, _ = run_optimizer(
+                        active_sim_pool,
+                        num_lineups=sim_n_lu,
+                        max_exposure=0.4,
+                        min_salary_used=sim_min_sal,
+                        proj_col="proj",
+                        archetype=sim_archetype,
+                    )
+                    if sim_lu_df is not None and not sim_lu_df.empty:
+                        sim_res = run_monte_carlo_for_lineups(
+                            sim_lu_df, n_sims=sim_n_sims, volatility_mode=sim_vol
+                        )
+                        # Annotate with Ricky confidence
+                        annotated_sim = ricky_annotate(sim_lu_df, sim_res)
+                        st.session_state["sim_lineups_df"] = annotated_sim
+                        st.session_state["sim_results_df"] = sim_res
+                        st.success(
+                            f"Sims complete — {sim_n_lu} lineups × {sim_n_sims} iterations."
+                        )
+                    else:
+                        st.error("Optimizer returned no lineups. Check pool and settings.")
+                except Exception as e:
+                    st.error(f"Sim error: {e}")
+
+        sim_lu_df = st.session_state.get("sim_lineups_df")
+        sim_res = st.session_state.get("sim_results_df")
+
+        if sim_lu_df is not None and not sim_lu_df.empty and sim_res is not None and not sim_res.empty:
+            st.markdown("#### Sim Results")
+            sim_kpi = st.columns(4)
+            sim_kpi[0].metric("Lineups", len(sim_res))
+            sim_kpi[1].metric("Avg sim score", f"{sim_res['sim_mean'].mean():.1f}")
+            sim_kpi[2].metric("Avg smash prob", f"{sim_res['smash_prob'].mean():.1%}")
+            sim_kpi[3].metric("Avg bust prob", f"{sim_res['bust_prob'].mean():.1%}")
+
+            with st.expander("Lineup-level sim metrics", expanded=True):
+                st.dataframe(sim_res.sort_values("smash_prob", ascending=False), use_container_width=True, height=300)
+
+            # Apply learnings: boost projection of high-sim players for next run
+            st.markdown("#### Apply Learnings to Live Slate Logic")
+            if st.button("⚡ Apply sim learnings (boost high-smash players' projections)", key="sim_apply_btn"):
+                # Players in high-smash lineups (smash_prob > 0.1) get a +5% boost
+                top_lu_ids = sim_res[sim_res["smash_prob"] > 0.10]["lineup_index"].tolist()
+                if top_lu_ids:
+                    top_players = (
+                        sim_lu_df[sim_lu_df["lineup_index"].isin(top_lu_ids)]
+                        ["player_name"].value_counts()
+                    )
+                    boost_names = top_players[top_players >= 2].index.tolist()
+                    if boost_names:
+                        updated_pool = active_sim_pool.copy()
+                        mask = updated_pool["player_name"].isin(boost_names)
+                        updated_pool.loc[mask, "proj"] = updated_pool.loc[mask, "proj"] * (1.0 + _SIM_LEARNING_BOOST)
+                        st.session_state["sim_pool_df"] = updated_pool
+                        st.success(
+                            f"Boosted projections (+{_SIM_LEARNING_BOOST:.0%}) for {len(boost_names)} high-smash "
+                            f"players: {', '.join(boost_names[:5])}"
+                            + (" ..." if len(boost_names) > 5 else "")
+                        )
+                    else:
+                        st.info("No players appeared in 2+ high-smash lineups; no boosts applied.")
+                else:
+                    st.info("No lineups with smash_prob > 10%. Lower threshold or run more lineups.")
+
+            # Post to Ricky's Slate Room
+            st.markdown("#### 📤 Post to Ricky's Slate Room")
+            conf_threshold = st.slider(
+                "Minimum confidence to promote", 40.0, 95.0, 65.0, step=5.0, key="sim_conf_thr"
+            )
+            if st.button("Post high-confidence lineups → Ricky's Slate Room", type="primary", key="sim_post_btn"):
+                if "confidence" in sim_lu_df.columns:
+                    high_conf_ids = (
+                        sim_lu_df.groupby("lineup_index")["confidence"]
+                        .first()
+                        .loc[lambda s: s >= conf_threshold]
+                        .index.tolist()
+                    )
+                    promoted_df = sim_lu_df[sim_lu_df["lineup_index"].isin(high_conf_ids)].copy()
+                else:
+                    # Fall back to top-N by smash_prob
+                    top_ids = sim_res.nlargest(5, "smash_prob")["lineup_index"].tolist()
+                    promoted_df = sim_lu_df[sim_lu_df["lineup_index"].isin(top_ids)].copy()
+                    high_conf_ids = top_ids
+
+                if not promoted_df.empty:
+                    entry = {
+                        "label": f"Sims {sim_dk_contest} / {sim_archetype}",
+                        "lineups_df": promoted_df,
+                        "metadata": {
+                            "contest_type": sim_dk_contest,
+                            "archetype": sim_archetype,
+                            "n_lineups": len(high_conf_ids),
+                        },
+                    }
+                    st.session_state["promoted_lineups"].append(entry)
+                    st.success(
+                        f"Promoted {len(high_conf_ids)} high-confidence lineup(s) "
+                        "to 🏀 Ricky's Slate Room!"
+                    )
+                else:
+                    st.warning("No lineups met the confidence threshold.")
+
+    st.markdown("---")
+    st.caption("YakOS Calibration Lab — data-driven lineup refinement.")
 

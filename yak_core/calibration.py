@@ -2,15 +2,18 @@
 
 This module provides:
 - Contest-type specific projection adjustment (GPP/50-50/etc)
+- DFS archetype configs (Ceiling Hunter, Floor Lock, Balanced, Contrarian, Stacker)
 - Lineup generation and backtesting
 - Calibration metrics computation
 - Gap identification and suggested adjustments
 - Calibration configuration management
+- Calibration queue for prior-day lineup review
 """
 
 import json
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
 import pandas as pd
 
@@ -85,6 +88,166 @@ DEFAULT_CALIBRATION_CONFIG = {
         },
     },
 }
+
+# ============================================================
+# DFS ARCHETYPE CONFIGS
+# ============================================================
+# Each archetype describes a play style and maps to modifier knobs
+# that override or layer on top of the contest-type calibration.
+
+DFS_ARCHETYPES: Dict[str, Dict[str, Any]] = {
+    "Balanced": {
+        "description": "Standard approach — blend of ceiling and floor targeting.",
+        "proj_boost": 0.0,
+        "ceil_weight": 0.5,
+        "floor_weight": 0.5,
+        "own_fade_threshold": 0.0,    # 0 = no fade
+        "stack_bonus": 0.0,
+        "value_threshold": 3.5,       # min FP/$1K to be in pool
+    },
+    "Ceiling Hunter": {
+        "description": "Max upside — GPP mode, chase best-case outcomes.",
+        "proj_boost": 0.05,
+        "ceil_weight": 0.85,
+        "floor_weight": 0.15,
+        "own_fade_threshold": 0.0,
+        "stack_bonus": 2.0,           # bonus FP added to proj for stacking teammates
+        "value_threshold": 2.5,
+    },
+    "Floor Lock": {
+        "description": "Cash-game mode — minimize variance, high-floor plays only.",
+        "proj_boost": 0.0,
+        "ceil_weight": 0.15,
+        "floor_weight": 0.85,
+        "own_fade_threshold": 0.0,
+        "stack_bonus": -1.0,          # slight penalty for stacking (correlation risk)
+        "value_threshold": 4.0,
+    },
+    "Contrarian": {
+        "description": "Low-ownership leverage plays — fade chalk, seek differentiation.",
+        "proj_boost": 0.0,
+        "ceil_weight": 0.6,
+        "floor_weight": 0.4,
+        "own_fade_threshold": 20.0,   # fade players above 20% ownership
+        "stack_bonus": 0.0,
+        "value_threshold": 3.0,
+    },
+    "Stacker": {
+        "description": "Correlated team stacks — emphasize same-game correlation.",
+        "proj_boost": 0.0,
+        "ceil_weight": 0.6,
+        "floor_weight": 0.4,
+        "own_fade_threshold": 0.0,
+        "stack_bonus": 3.5,
+        "value_threshold": 3.0,
+    },
+}
+
+DK_CONTEST_TYPES: List[str] = [
+    "Tournament (GPP)",
+    "Double Up (50/50)",
+    "Multiplier (3x)",
+    "Multiplier (5x)",
+    "Headliner",
+    "Single Entry",
+    "3-Max",
+    "5-Max",
+    "20-Max (MME)",
+    "Showdown Captain",
+    "Satellite",
+    "Leagues (Private)",
+]
+
+# Map from DK lobby labels → internal calibration keys
+DK_CONTEST_TYPE_MAP: Dict[str, str] = {
+    "Tournament (GPP)": "GPP",
+    "Double Up (50/50)": "50/50",
+    "Multiplier (3x)": "50/50",
+    "Multiplier (5x)": "GPP",
+    "Headliner": "50/50",
+    "Single Entry": "Single Entry",
+    "3-Max": "GPP",
+    "5-Max": "GPP",
+    "20-Max (MME)": "MME",
+    "Showdown Captain": "Captain",
+    "Satellite": "GPP",
+    "Leagues (Private)": "Single Entry",
+}
+
+
+def apply_archetype(
+    pool: pd.DataFrame,
+    archetype: str,
+) -> pd.DataFrame:
+    """Adjust player projections based on the selected DFS archetype.
+
+    Applies ceiling/floor weighting, ownership fade, and stack bonuses
+    on top of the base ``proj`` column.
+
+    Parameters
+    ----------
+    pool : pd.DataFrame
+        Player pool with ``proj`` and optionally ``ceil``, ``floor``,
+        ``ownership``, ``team`` columns.
+    archetype : str
+        One of the keys in ``DFS_ARCHETYPES``.
+
+    Returns
+    -------
+    pd.DataFrame
+        Copy with updated ``proj`` column.
+    """
+    if archetype not in DFS_ARCHETYPES:
+        return pool.copy()
+
+    cfg = DFS_ARCHETYPES[archetype]
+    out = pool.copy()
+
+    ceil_w = cfg["ceil_weight"]
+    floor_w = cfg["floor_weight"]
+
+    has_ceil = "ceil" in out.columns
+    has_floor = "floor" in out.columns
+
+    if has_ceil and has_floor:
+        # Weighted blend: weights must sum to ≤ 1; remainder goes to base proj
+        base_proj = out["proj"]
+        ceil_vals = pd.to_numeric(out["ceil"], errors="coerce").fillna(base_proj)
+        floor_vals = pd.to_numeric(out["floor"], errors="coerce").fillna(base_proj)
+        base_w = max(0.0, 1.0 - ceil_w - floor_w)
+        out["proj"] = (
+            base_proj * base_w
+            + ceil_vals * ceil_w
+            + floor_vals * floor_w
+        )
+    elif has_ceil:
+        ceil_vals = pd.to_numeric(out["ceil"], errors="coerce").fillna(out["proj"])
+        out["proj"] = out["proj"] * (1.0 - ceil_w) + ceil_vals * ceil_w
+
+    # Global proj boost
+    if cfg["proj_boost"] != 0.0:
+        out["proj"] = out["proj"] * (1.0 + cfg["proj_boost"])
+
+    # Ownership fade: penalise high-ownership players in contrarian modes
+    fade = float(cfg["own_fade_threshold"])
+    if fade > 0 and "ownership" in out.columns:
+        own = pd.to_numeric(out["ownership"], errors="coerce").fillna(0)
+        penalty = (own > fade).astype(float) * out["proj"] * 0.10
+        out["proj"] = out["proj"] - penalty
+
+    # Stack bonus: add bonus to top projected teammate
+    stack_bonus = float(cfg["stack_bonus"])
+    if stack_bonus != 0.0 and "team" in out.columns:
+        team_rank = (
+            out.groupby("team")["proj"]
+            .rank(method="first", ascending=False)
+        )
+        top2_mask = team_rank <= 2
+        out.loc[top2_mask, "proj"] = out.loc[top2_mask, "proj"] + stack_bonus
+
+    out["proj"] = out["proj"].clip(lower=0)
+    return out
+
 
 def load_calibration_config(config_path: str = None) -> Dict[str, Any]:
     """Load calibration config from JSON file, or return defaults.
@@ -442,3 +605,143 @@ def save_calibration_history(
     Path(history_path).parent.mkdir(parents=True, exist_ok=True)
     with open(history_path, "w") as f:
         json.dump(history, f, indent=2)
+
+# ============================================================
+# CALIBRATION QUEUE
+# ============================================================
+
+
+def get_calibration_queue(
+    hist_df: pd.DataFrame,
+    prior_dates: Optional[int] = 3,
+) -> pd.DataFrame:
+    """Return prior-day lineups that are pending calibration review.
+
+    Selects the most recent ``prior_dates`` slate dates from the
+    historical lineups DataFrame and tags them as pending.
+
+    Parameters
+    ----------
+    hist_df : pd.DataFrame
+        Historical lineups with at least ``slate_date`` and ``lineup_id``
+        columns.  Expected columns mirror ``data/historical_lineups.csv``.
+    prior_dates : int, optional
+        How many unique slate dates to include (most recent first).
+
+    Returns
+    -------
+    pd.DataFrame
+        Subset of *hist_df* for the selected dates, with an added
+        ``queue_status`` column set to ``"pending"``.
+    """
+    if hist_df.empty:
+        return pd.DataFrame()
+
+    dates = sorted(hist_df["slate_date"].unique(), reverse=True)[:prior_dates]
+    queue = hist_df[hist_df["slate_date"].isin(dates)].copy()
+    queue["queue_status"] = "pending"
+    return queue.reset_index(drop=True)
+
+
+def action_queue_items(
+    queue_df: pd.DataFrame,
+    lineup_ids: List[int],
+    action: str,
+) -> pd.DataFrame:
+    """Apply an action to selected lineup IDs in the calibration queue.
+
+    Parameters
+    ----------
+    queue_df : pd.DataFrame
+        Queue DataFrame (output of ``get_calibration_queue``).
+    lineup_ids : list of int
+        ``lineup_id`` values to update.
+    action : str
+        ``"reviewed"``, ``"apply_config"``, or ``"dismissed"``.
+
+    Returns
+    -------
+    pd.DataFrame
+        Updated queue with ``queue_status`` set for the targeted rows.
+    """
+    valid_actions = {"reviewed", "apply_config", "dismissed"}
+    if action not in valid_actions:
+        raise ValueError(f"action must be one of {valid_actions}")
+
+    out = queue_df.copy()
+    mask = out["lineup_id"].isin(lineup_ids)
+    out.loc[mask, "queue_status"] = action
+    return out
+
+
+def suggest_config_from_queue(
+    queue_df: pd.DataFrame,
+    current_config: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Derive calibration config suggestions from queued lineup results.
+
+    Analyses actuals vs ownership in reviewed queue items and returns a
+    *copy* of ``current_config`` with suggested adjustments to
+    ``high_own_adjustment`` and ``ceiling_boost`` / ``floor_reduction``
+    for each contest type found in the queue.
+
+    Parameters
+    ----------
+    queue_df : pd.DataFrame
+        Queue DataFrame with ``actual``, ``own``, ``contest_name`` columns.
+    current_config : dict
+        Existing calibration config to base suggestions on.
+
+    Returns
+    -------
+    dict
+        Updated calibration config with suggestions applied.
+    """
+    import copy
+
+    suggested = copy.deepcopy(current_config)
+
+    reviewed = queue_df[queue_df.get("queue_status", pd.Series()) == "apply_config"] \
+        if "queue_status" in queue_df.columns else queue_df
+
+    if reviewed.empty or "actual" not in reviewed.columns:
+        return suggested
+
+    # Map contest names to internal keys (simple heuristic)
+    def _map_contest(name: str) -> str:
+        n = str(name).upper()
+        if "SHOW" in n:
+            return "Captain"
+        if "50/50" in n or "DOUBLE" in n or "ZONE" in n:
+            return "50/50"
+        if "SINGLE" in n:
+            return "Single Entry"
+        if "MME" in n or "MAX" in n:
+            return "MME"
+        return "GPP"
+
+    if "contest_name" in reviewed.columns:
+        reviewed = reviewed.copy()
+        reviewed["_ctype"] = reviewed["contest_name"].apply(_map_contest)
+    else:
+        reviewed = reviewed.copy()
+        reviewed["_ctype"] = "GPP"
+
+    for ctype, grp in reviewed.groupby("_ctype"):
+        if ctype not in suggested:
+            continue
+        avg_actual = grp["actual"].mean() if "actual" in grp else 0
+        avg_own = grp["own"].mean() if "own" in grp else 0
+
+        # If average actual is meaningfully above projected ownership threshold,
+        # tighten high-own fade; below = loosen.
+        if avg_actual > 35 and avg_own > 20:
+            suggested[ctype]["high_own_adjustment"] = max(
+                suggested[ctype]["high_own_adjustment"] - 0.01, -0.15
+            )
+        elif avg_actual < 25 and avg_own > 20:
+            suggested[ctype]["high_own_adjustment"] = min(
+                suggested[ctype]["high_own_adjustment"] + 0.01, 0.15
+            )
+
+    return suggested
