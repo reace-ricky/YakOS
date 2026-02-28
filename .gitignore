@@ -1,0 +1,8 @@
+*.parquet
+*.csv
+*.ipynb_checkpoints/
+__pycache__/
+.DS_Store
+*.pyc
+yakos/
+.ipynb_checkpoints/
