@@ -37,6 +37,10 @@ from yak_core.sims import (  # type: ignore
     run_monte_carlo_for_lineups,
     simulate_live_updates,
 )
+from yak_core.live import (  # type: ignore
+    fetch_live_opt_pool,
+    fetch_injury_updates,
+)
 
 
 # -----------------------------
@@ -203,6 +207,8 @@ def ensure_session_state():
         st.session_state["sim_lineups_df"] = None
     if "sim_results_df" not in st.session_state:
         st.session_state["sim_results_df"] = None
+    if "rapidapi_key" not in st.session_state:
+        st.session_state["rapidapi_key"] = os.environ.get("RAPIDAPI_KEY", "")
 
 
 def run_optimizer(
@@ -351,6 +357,22 @@ with st.sidebar:
         ),
     )
 
+    st.markdown("---")
+    st.subheader("🔑 API Settings")
+    rapidapi_key_input = st.text_input(
+        "Tank01 RapidAPI Key",
+        value=st.session_state.get("rapidapi_key", ""),
+        type="password",
+        help=(
+            "Required for 'Fetch from API' and live injury updates. "
+            "Get a key at rapidapi.com/Tank01/api/tank01-fantasy-stats."
+        ),
+        key="sidebar_rapidapi_key",
+    )
+    if rapidapi_key_input:
+        st.session_state["rapidapi_key"] = rapidapi_key_input
+        os.environ["RAPIDAPI_KEY"] = rapidapi_key_input
+
 tab_slate, tab_optimizer, tab_lab = st.tabs([
     "🏀 Ricky's Slate Room",
     "⚡ Optimizer",
@@ -365,26 +387,63 @@ with tab_slate:
     st.subheader("🏀 Ricky's Slate Room")
 
     # --- Pool upload ---
-    st.markdown("### 1. Upload Today's Projection CSV")
+    st.markdown("### 1. Load Today's Player Pool")
 
     if sport == "PGA":
         st.info("PGA support is coming soon. Please select NBA for now.")
     else:
-        uploaded_file = st.file_uploader(
-            "Upload RotoGrinders (or combined) NBA CSV",
-            type=["csv"],
-            help="Start with an RG export. Internal YakOS projections will sit on top of this.",
-            key="front_rg_upload",
-        )
+        load_col_l, load_col_r = st.columns([2, 1])
+
+        with load_col_l:
+            uploaded_file = st.file_uploader(
+                "Upload RotoGrinders (or combined) NBA CSV  *(optional)*",
+                type=["csv"],
+                help=(
+                    "RG projections are optional — upload to calibrate projections. "
+                    "If not uploaded, use 'Fetch from API' or internal YakOS projections."
+                ),
+                key="front_rg_upload",
+            )
+
+        with load_col_r:
+            st.markdown("**— or —**")
+            fetch_date_input = st.date_input(
+                "Slate date (for API fetch)",
+                value=pd.Timestamp.today().date(),
+                key="slate_fetch_date",
+            )
+            if st.button(
+                "🌐 Fetch Pool from API",
+                key="fetch_api_btn",
+                help="Requires Tank01 RapidAPI key set in the sidebar.",
+            ):
+                api_key = st.session_state.get("rapidapi_key", "")
+                if not api_key:
+                    st.error("Set your Tank01 RapidAPI key in the sidebar first.")
+                else:
+                    with st.spinner("Fetching live DK pool from Tank01…"):
+                        try:
+                            live_pool = fetch_live_opt_pool(
+                                str(fetch_date_input),
+                                {"RAPIDAPI_KEY": api_key},
+                            )
+                            # Rename to YakOS schema if needed
+                            if "player_name" not in live_pool.columns and "name" in live_pool.columns:
+                                live_pool = live_pool.rename(columns={"name": "player_name"})
+                            st.session_state["pool_df"] = live_pool
+                            st.success(f"Loaded {len(live_pool)} players from API.")
+                        except Exception as _e:
+                            st.error(f"API fetch failed: {_e}")
 
         if uploaded_file is not None:
             raw_df = pd.read_csv(uploaded_file)
             pool_df = rename_rg_columns_to_yakos(raw_df)
             st.session_state["pool_df"] = pool_df
-        else:
-            st.info("Upload a RotoGrinders NBA CSV to begin.")
-            st.session_state["pool_df"] = None
-            pool_df = None
+        elif st.session_state.get("pool_df") is None:
+            st.info(
+                "Upload a RotoGrinders NBA CSV **or** click **Fetch Pool from API** to begin. "
+                "RG projections are optional — they are used to calibrate when available."
+            )
 
         pool_df = st.session_state.get("pool_df")
 
@@ -447,14 +506,51 @@ with tab_slate:
                     st.info("No stand-out value plays identified.")
 
                 st.markdown("#### 📋 Quick Notes")
-                st.write(
-                    "- **High-paced games**: prioritise correlation; stack teammates from high-total games.\n"
-                    "- **Stack alerts**: same-team 2-man and 3-man stacks outperform in GPPs.\n"
-                    "- **Value plays**: cheap differentiators with strong minutes projections.\n"
-                    "- **Ownership leverage**: contrarian plays reduce correlation with the field."
+                # Dynamic notes based on detected pool data
+                quick_notes = []
+
+                if stack_alerts:
+                    quick_notes.append(
+                        f"**Stack alerts**: {len(stack_alerts)} team stack(s) detected — "
+                        "prioritise 2-man / 3-man stacks in GPPs for ceiling."
+                    )
+                else:
+                    quick_notes.append(
+                        "**Stack alerts**: No dominant team stacks detected — "
+                        "spread exposure across multiple games."
+                    )
+
+                if pace_notes:
+                    quick_notes.append(
+                        f"**High-paced game**: {len(pace_notes)} high-total game(s) on slate — "
+                        "stack teammates from high-total matchups."
+                    )
+                else:
+                    quick_notes.append(
+                        "**Pace environment**: Game-total data not available — "
+                        "upload a pool with opponent data for environment analysis."
+                    )
+
+                if value_plays:
+                    quick_notes.append(
+                        f"**Value plays**: {len(value_plays)} stand-out value play(s) identified — "
+                        "use as cheap differentiators to free up salary for studs."
+                    )
+                else:
+                    quick_notes.append(
+                        "**Value plays**: No stand-out values detected — "
+                        "consider lowering min projection threshold."
+                    )
+
+                quick_notes.append(
+                    "**Ownership leverage**: In GPPs, fade chalk (>30% own) and target "
+                    "low-own upside plays to differentiate from the field."
                 )
-                st.info(
-                    "These notes auto-update based on the uploaded pool. "
+
+                for qn in quick_notes:
+                    st.markdown(f"- {qn}")
+                st.caption(
+                    "Quick notes update automatically based on the loaded pool. "
                     "Sims and calibration learnings will sharpen the signals."
                 )
 
@@ -514,7 +610,10 @@ with tab_optimizer:
     else:
         pool_df_opt = st.session_state.get("pool_df")
         if pool_df_opt is None:
-            st.warning("Upload a projection CSV in **🏀 Ricky's Slate Room** first.")
+            st.warning(
+                "Load a player pool in **🏀 Ricky's Slate Room** first — "
+                "upload an RG CSV or use **Fetch Pool from API**."
+            )
         else:
             # --- Contest & slate controls ---
             st.markdown("### 1. Contest & Slate Context")
@@ -995,21 +1094,74 @@ with tab_lab:
 
     pool_for_sim = st.session_state.get("pool_df")
     if pool_for_sim is None:
-        st.info("Upload a projection CSV in **🏀 Ricky's Slate Room** to enable sims.")
+        st.info(
+            "Load a player pool in **🏀 Ricky's Slate Room** to enable sims. "
+            "You can upload an RG CSV or fetch the pool from the Tank01 API."
+        )
     else:
         # News / lineup updates
         with st.expander("📰 Live News & Lineup Updates", expanded=False):
-            st.markdown(
-                "Paste player update lines (one per row) in the format:\n\n"
-                "`PlayerName | STATUS | proj_adj | minutes_change`\n\n"
-                "Example: `Zion Williamson | OUT | | ` or `Jayson Tatum | UPGRADED | | +4`"
-            )
-            news_text = st.text_area(
-                "News updates",
-                placeholder="Zion Williamson | OUT | |\nJayson Tatum | UPGRADED | | 4",
-                height=120,
-                key="sim_news_text",
-            )
+            # --- API fetch ---
+            api_news_col, manual_news_col = st.columns([1, 2])
+            with api_news_col:
+                st.markdown("**🌐 Fetch from API**")
+                news_slate_date = st.date_input(
+                    "Slate date",
+                    value=pd.Timestamp.today().date(),
+                    key="sim_news_date",
+                )
+                if st.button(
+                    "Fetch Live Injury Updates",
+                    key="sim_fetch_injuries_btn",
+                    help="Pulls today's injury/status list from Tank01 API.",
+                ):
+                    api_key = st.session_state.get("rapidapi_key", "")
+                    if not api_key:
+                        st.error("Set your Tank01 RapidAPI key in the sidebar first.")
+                    else:
+                        with st.spinner("Fetching injury updates…"):
+                            try:
+                                api_updates = fetch_injury_updates(
+                                    news_slate_date.strftime("%Y%m%d"),
+                                    {"RAPIDAPI_KEY": api_key},
+                                )
+                                if api_updates:
+                                    sim_pool_api = simulate_live_updates(
+                                        pool_for_sim, api_updates
+                                    )
+                                    st.session_state["sim_pool_df"] = sim_pool_api
+                                    st.success(
+                                        f"Applied {len(api_updates)} injury update(s) "
+                                        "from API."
+                                    )
+                                    out_players = [
+                                        u["player_name"]
+                                        for u in api_updates
+                                        if u.get("status") == "OUT"
+                                    ]
+                                    if out_players:
+                                        st.warning(
+                                            "**OUT**: "
+                                            + ", ".join(out_players[:10])
+                                            + (" …" if len(out_players) > 10 else "")
+                                        )
+                                else:
+                                    st.info("No injury updates found for this date.")
+                            except Exception as _e:
+                                st.error(f"Injury API error: {_e}")
+
+            with manual_news_col:
+                st.markdown("**✏️ Manual Updates**")
+                st.markdown(
+                    "One per row: `PlayerName | STATUS | proj_adj | minutes_change`\n\n"
+                    "Example: `Zion Williamson | OUT | | ` or `Jayson Tatum | UPGRADED | | +4`"
+                )
+                news_text = st.text_area(
+                    "News updates",
+                    placeholder="Zion Williamson | OUT | |\nJayson Tatum | UPGRADED | | 4",
+                    height=120,
+                    key="sim_news_text",
+                )
 
             news_updates = []
             if news_text.strip():
