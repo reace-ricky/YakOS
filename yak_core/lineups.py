@@ -182,12 +182,14 @@ def _eligible_slots(pos_str: str) -> Tuple[str, ...]:
 def build_multiple_lineups_with_exposure(
     player_pool: pd.DataFrame,
     cfg: Dict[str, Any],
+    progress_callback=None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     num_lineups = int(cfg.get("NUM_LINEUPS", 20))
     salary_cap = int(cfg.get("SALARY_CAP", 50000))
     max_exposure = float(cfg.get("MAX_EXPOSURE", 0.35))
     min_salary = int(cfg.get("MIN_SALARY_USED", 46000))
     own_weight = float(cfg.get("OWN_WEIGHT", 0.0))
+    solver_time_limit = int(cfg.get("SOLVER_TIME_LIMIT", 30))
     max_appearances = max(1, int(num_lineups * max_exposure))
     pos_caps = cfg.get("POS_CAPS", {})
     lock_names = [n.strip() for n in cfg.get("LOCK", [])]
@@ -290,8 +292,10 @@ def build_multiple_lineups_with_exposure(
                 for s in DK_POS_SLOTS:
                     prob += x[(i, s)] == 0
 
-        prob.solve(pulp.PULP_CBC_CMD(msg=0))
+        prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=solver_time_limit))
         if prob.status != 1:
+            if progress_callback is not None:
+                progress_callback(lu_num + 1, num_lineups)
             continue
 
         for i in range(n):
@@ -302,6 +306,9 @@ def build_multiple_lineups_with_exposure(
                     row["lineup_index"] = lu_num
                     all_lineups.append(row)
                     appearance_count[i] += 1
+
+        if progress_callback is not None:
+            progress_callback(lu_num + 1, num_lineups)
 
     if not all_lineups:
         raise RuntimeError(

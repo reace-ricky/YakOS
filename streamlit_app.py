@@ -234,14 +234,25 @@ def run_optimizer(
         "MIN_SALARY_USED": min_salary_used,
         "MAX_EXPOSURE": max_exposure,
         "PROJ_COL": "proj",
+        "SOLVER_TIME_LIMIT": 30,
     }
 
+    progress_bar = st.progress(0, text="Optimizing lineups…")
+
+    def _update_progress(done: int, total: int) -> None:
+        pct = int(done / total * 100) if total > 0 else 0
+        progress_bar.progress(pct, text=f"Solving lineup {done} of {total}…")
+
     try:
-        lineups_df, exposures_df = build_multiple_lineups_with_exposure(opt_pool, cfg)
+        lineups_df, exposures_df = build_multiple_lineups_with_exposure(
+            opt_pool, cfg, progress_callback=_update_progress
+        )
     except Exception as e:
+        progress_bar.empty()
         st.error(f"Optimizer error: {e}")
         return None, None
 
+    progress_bar.empty()
     return lineups_df, exposures_df
 
 
