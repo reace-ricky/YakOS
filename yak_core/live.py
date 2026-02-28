@@ -81,3 +81,83 @@ def fetch_live_opt_pool(slate_date, cfg):
         df["player_id"] = df["player_name"].str.lower().str.replace(" ", "_")
     print("[fetch_live_opt_pool] Live pool: " + str(len(df)) + " players for " + slate_date)
     return df
+
+
+def fetch_injury_updates(date_key: str, cfg: dict) -> list:
+    """Fetch player injury/news updates from Tank01 API for a given date.
+
+    Calls the ``getNBAInjuryList`` endpoint and maps status codes to the
+    format expected by :func:`yak_core.sims.simulate_live_updates`.
+
+    Parameters
+    ----------
+    date_key : str
+        Date string in ``YYYYMMDD`` or ``YYYY-MM-DD`` format.
+    cfg : dict
+        Must contain ``RAPIDAPI_KEY`` or the ``RAPIDAPI_KEY`` env var must be set.
+
+    Returns
+    -------
+    list of dict
+        Each dict has ``player_name`` and optionally ``status``.
+        Empty list if no injuries are reported.
+
+    Raises
+    ------
+    RuntimeError
+        If the API call fails.
+    """
+    api_key = _get_rapidapi_key(cfg)
+    url = "https://" + _TANK01_HOST + "/getNBAInjuryList"
+    try:
+        resp = requests.get(url, headers=_headers(api_key), timeout=20)
+        resp.raise_for_status()
+        data = resp.json()
+        body = data.get("body", data) if isinstance(data, dict) else data
+        if not body:
+            return []
+
+        _status_map = {
+            "OUT": "OUT",
+            "QUESTIONABLE": "QUESTIONABLE",
+            "Q": "QUESTIONABLE",
+            "GTD": "GTD",
+            "GAME TIME DECISION": "GTD",
+            "DAY-TO-DAY": "GTD",
+            "IN": "IN",
+            "ACTIVE": "IN",
+        }
+
+        updates = []
+        for entry in body:
+            if not isinstance(entry, dict):
+                continue
+            name = (
+                entry.get("playerName")
+                or entry.get("longName")
+                or entry.get("player")
+                or ""
+            )
+            if not name:
+                continue
+            raw_status = str(
+                entry.get("injuryStatus", entry.get("status", ""))
+            ).strip().upper()
+
+            # Exact match first; then check if full raw_status starts with a key
+            # (avoids "NOT OUT" matching "OUT" via substring)
+            mapped = _status_map.get(raw_status)
+            if mapped is None:
+                for key, val in _status_map.items():
+                    if raw_status == key or raw_status.startswith(key + " "):
+                        mapped = val
+                        break
+
+            if mapped:
+                updates.append({"player_name": name, "status": mapped})
+
+        print(f"[fetch_injury_updates] {len(updates)} injury updates for {date_key}")
+        return updates
+
+    except Exception as exc:
+        raise RuntimeError(f"Tank01 injury API error: {exc}") from exc
