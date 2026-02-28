@@ -1,6 +1,5 @@
 """YakOS DFS Optimizer – RotoGrinders CSV Frontend."""
 
-import io
 import sys
 from typing import Dict, Any, Tuple
 
@@ -8,12 +7,10 @@ import pandas as pd
 import streamlit as st
 
 # Make yak_core importable if this file lives at repo root
-# (adjust if your layout is different)
 if "yak_core" not in sys.modules:
     try:
         import yak_core  # noqa: F401
     except ImportError:
-        # Assume yak_core is a package in the repo (editable install on Streamlit Cloud)
         pass
 
 from yak_core.lineups import build_multiple_lineups_with_exposure
@@ -22,16 +19,6 @@ from yak_core.lineups import build_multiple_lineups_with_exposure
 # -----------------------------
 # Helpers
 # -----------------------------
-REQUIRED_RG_COLUMNS = [
-    "PLAYERID",
-    "PLAYER",
-    "SALARY",
-    "POS",
-    "TEAM",
-    "OPP",
-    "FPTS",
-]
-
 RG_RENAME_MAP = {
     "PLAYERID": "player_id",
     "PLAYER": "player_name",
@@ -49,17 +36,19 @@ RG_RENAME_MAP = {
 
 def load_and_clean_rg_csv(file) -> pd.DataFrame:
     df = pd.read_csv(file)
-    # Rename to YakOS-friendly columns
     df = df.rename(columns=RG_RENAME_MAP)
+
     # Drop rows missing salary or projection
     drop_subset = [c for c in ["salary", "proj"] if c in df.columns]
     if drop_subset:
         df = df.dropna(subset=drop_subset)
-    # Ensure salary is numeric
+
+    # Ensure salary numeric
     if "salary" in df.columns:
         df["salary"] = pd.to_numeric(df["salary"], errors="coerce")
         df = df.dropna(subset=["salary"])
         df["salary"] = df["salary"].astype(int)
+
     return df
 
 
@@ -69,6 +58,8 @@ def build_cfg(
     min_salary_used: int,
     proj_col: str,
     sport: str,
+    slate_type: str,
+    game_key: str | None,
 ) -> Dict[str, Any]:
     cfg: Dict[str, Any] = {}
     cfg["NUM_LINEUPS"] = int(num_lineups)
@@ -76,23 +67,30 @@ def build_cfg(
     cfg["MIN_SALARY_USED"] = int(min_salary_used)
     cfg["PROJ_COL"] = proj_col
     cfg["SPORT"] = sport
+    cfg["SLATE_TYPE"] = slate_type
+    if game_key is not None:
+        cfg["GAME_KEY"] = game_key
     return cfg
 
 
 def run_optimizer(pool_df: pd.DataFrame, cfg: Dict[str, Any]) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Wrap yak_core.lineups.build_multiple_lineups_with_exposure.
-
-    Expected return shape (by your existing code):
-    - lineups_df: one row per lineup (with players embedded or flattened)
-    - exposures_df: player-level exposures across the built lineups
-    """
     lineups_df, exposures_df = build_multiple_lineups_with_exposure(pool_df, cfg)
     return lineups_df, exposures_df
 
 
 def to_csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
+
+
+def build_game_keys(df: pd.DataFrame) -> pd.Series:
+    """
+    Build strings like 'CLE @ DET' from team/opponent columns.
+    """
+    if "team" not in df.columns or "opponent" not in df.columns:
+        return pd.Series(dtype=str)
+
+    game_keys = df["team"].astype(str).str.upper() + " @ " + df["opponent"].astype(str).str.upper()
+    return game_keys
 
 
 # -----------------------------
@@ -128,10 +126,38 @@ with tab_optimizer:
     else:
         pool_df = None
 
+    # ---- Slate + Game selection ----
+    slate_type = st.sidebar.selectbox(
+        "Slate Type",
+        ["Classic", "Showdown Captain"],
+        index=0,
+    )
+
     if pool_df is not None:
         st.success(f"Loaded pool with {len(pool_df)} players.")
         with st.expander("Show player pool (first 100 rows)"):
             st.dataframe(pool_df.head(100), use_container_width=True)
+
+        # Build game keys from team/opponent
+        game_keys_series = build_game_keys(pool_df)
+        unique_games = sorted(game_keys_series.dropna().unique().tolist())
+
+        game_key: str | None = None
+        if slate_type == "Showdown Captain":
+            if unique_games:
+                game_key = st.sidebar.selectbox("Game (for Showdown)", unique_games)
+                # Filter pool to chosen game
+                mask = game_keys_series == game_key
+                filtered_df = pool_df[mask].copy()
+                if filtered_df.empty:
+                    st.warning(f"No players found for game {game_key}.")
+                else:
+                    pool_df = filtered_df
+                    st.info(f"Filtered to game {game_key}: {len(pool_df)} players.")
+            else:
+                st.sidebar.warning("No team/opponent info to derive games. Showdown filter disabled.")
+    else:
+        game_key = None
 
     st.markdown("#### 2. Optimizer Settings")
 
@@ -162,7 +188,6 @@ with tab_optimizer:
             step=500,
         )
 
-        # Projection column dropdown
         proj_cols = [c for c in ["proj", "floor", "ceil", "sim85"] if c in (pool_df.columns if pool_df is not None else [])]
         if not proj_cols:
             proj_cols = ["proj"]
@@ -185,6 +210,8 @@ with tab_optimizer:
                     min_salary_used=min_salary_used,
                     proj_col=proj_col,
                     sport=sport,
+                    slate_type=slate_type,
+                    game_key=game_key,
                 )
 
                 try:
@@ -196,15 +223,12 @@ with tab_optimizer:
             if lineups_df is not None and exposures_df is not None:
                 st.success(f"Built {len(lineups_df)} lineups.")
 
-                # Lineups summary
                 st.markdown("### Lineups")
                 st.dataframe(lineups_df, use_container_width=True, height=400)
 
-                # Exposures summary
                 st.markdown("### Player Exposures")
                 st.dataframe(exposures_df, use_container_width=True, height=400)
 
-                # Downloads
                 st.markdown("### Download Results")
                 col1, col2 = st.columns(2)
 
