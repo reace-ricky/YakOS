@@ -111,9 +111,6 @@ def rename_rg_columns_to_yakos(df: pd.DataFrame) -> pd.DataFrame:
     out = out.dropna(subset=["salary", "proj"])
     out = out[out["salary"] > 0]
 
-    # Handle multi-position: take first position for optimizer
-    out["pos"] = out["pos"].astype(str).str.split("/").str[0]
-
     return out
 
 
