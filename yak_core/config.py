@@ -35,6 +35,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "PROJ_BLEND_WEIGHT": 0.7,    # parquet weight in blend mode
     # Per-position caps: max players of each natural position in a single lineup
     "POS_CAPS": {"PG": 3, "SG": 3, "SF": 3, "PF": 3, "C": 2},
+    # Solver time limit (seconds) per LP – prevents individual solves from hanging
+    "SOLVER_TIME_LIMIT": 30,
     # User-facing optimizer controls
     "LOCK": [],            # player names forced into every lineup
     "EXCLUDE": [],         # player names removed from pool
