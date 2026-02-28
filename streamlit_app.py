@@ -173,11 +173,12 @@ with tab_optimizer:
         )
 
         max_exposure = st.slider(
-            "MAX_EXPOSURE (fraction)",
+            "Max exposure per player",
             min_value=0.05,
             max_value=1.0,
             value=0.35,
             step=0.05,
+            help="Cap on how often any one player can appear across all lineups.",
         )
 
         min_salary_used = st.number_input(
@@ -192,10 +193,23 @@ with tab_optimizer:
         if not proj_cols:
             proj_cols = ["proj"]
         proj_col = st.selectbox(
-            "PROJ_COL (projection column)",
+            "Projection style",
             proj_cols,
             index=0,
+            help="Which projection column to optimize: proj=median, floor=safer, ceil/higher percentiles=more aggressive.",
         )
+3) Are projection options tied to contest types?
+Right now, no — they are just different columns in your CSV:
+
+proj: median projection (good general default).
+
+floor: safer, lower‑variance.
+
+ceil / sim85: more aggressive, good for GPPs if you want ceiling‑hunting.
+
+We can later add a Contest Type dropdown (Cash / GPP) and auto‑set a default Projection style (e.g., Cash → floor / proj, GPP → ceil / sim85), but currently it’s manual.
+
+
 
     if pool_df is None:
         st.info("Upload a RotoGrinders CSV to enable the optimizer.")
