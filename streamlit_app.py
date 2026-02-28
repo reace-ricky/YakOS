@@ -383,5 +383,141 @@ with tab_front:
             step=500,
         )
     with col_knobs_right:
-        max_
+                max_exposure_user = st.slider(
+            "Max exposure",
+            min_value=0.05,
+            max_value=1.0,
+            value=0.35,
+            step=0.05,
+        )
 
+    if pool_for_opt is not None and not pool_for_opt.empty:
+        if st.button("Generate Lineups", type="primary"):
+            with st.spinner("Running optimizer..."):
+                lineups_df, exposures_df = run_optimizer(
+                    pool_for_opt,
+                    num_lineups=num_lineups_user,
+                    max_exposure=max_exposure_user,
+                    min_salary_used=min_salary_used_user,
+                )
+                st.session_state["lineups_df"] = lineups_df
+                st.session_state["exposures_df"] = exposures_df
+                st.session_state["current_lineup_index"] = 0
+
+        lineups_df = st.session_state["lineups_df"]
+        exposures_df = st.session_state["exposures_df"]
+
+        if lineups_df is not None and not lineups_df.empty:
+            unique_lineups = sorted(lineups_df["lineup_id"].unique())
+            num_total = len(unique_lineups)
+            st.success(f"Generated {num_total} lineups.")
+
+            lineup_idx = st.number_input(
+                "Lineup #",
+                min_value=1,
+                max_value=num_total,
+                value=1,
+                step=1,
+            )
+            current_id = unique_lineups[lineup_idx - 1]
+            rows = lineups_df[lineups_df["lineup_id"] == current_id].copy()
+            total_salary = rows["salary"].sum()
+            total_proj = rows["proj"].sum()
+            st.markdown(
+                f"**Lineup {lineup_idx}** -- Salary: {int(total_salary):,} | Proj: {total_proj:.2f}"
+            )
+            display_cols = ["name", "team", "pos", "salary", "proj"]
+            lineup_display = rows[display_cols].copy()
+            lineup_display["team"] = lineup_display["team"].fillna("")
+            lineup_display["pos"] = lineup_display["pos"].fillna("")
+            lineup_display["salary"] = lineup_display["salary"].astype(int)
+            st.dataframe(lineup_display, use_container_width=True, height=260)
+
+            # Exposure table
+            if exposures_df is not None and not exposures_df.empty:
+                with st.expander("Player Exposures", expanded=False):
+                    st.dataframe(exposures_df, use_container_width=True, height=400)
+
+            # Download
+            st.download_button(
+                label="Download lineups CSV",
+                data=to_csv_bytes(lineups_df),
+                file_name="yakos_lineups.csv",
+                mime="text/csv",
+            )
+    else:
+        st.info("Upload a pool above to build lineups.")
+
+# ============================================================
+# Tab 2: Calibration + Sims (Lab)
+# ============================================================
+with tab_lab:
+    st.subheader("Calibration + Sims (Lab)")
+    st.markdown(
+        "Compare past optimizer output against actual DFS results. "
+        "Select a historical slate to review projections vs actuals."
+    )
+
+    # Load historical data
+    hist_df = load_historical_lineups()
+
+    if hist_df.empty:
+        st.warning(
+            "No historical data found. Add `data/historical_lineups.csv` to the repo "
+            "with columns: slate_date, lineup_id, name, pos, team, opp, salary, proj, actual, own."
+        )
+    else:
+        available_dates = sorted(hist_df["slate_date"].unique(), reverse=True)
+        selected_date = st.selectbox("Slate date", available_dates)
+
+        slate_data = hist_df[hist_df["slate_date"] == selected_date].copy()
+
+        # KPIs for the slate
+        st.markdown("##### Slate Summary")
+        kpi_cols_lab = st.columns(4)
+        num_lineups_hist = slate_data["lineup_id"].nunique()
+        avg_proj = slate_data.groupby("lineup_id")["proj"].sum().mean()
+        avg_actual = slate_data.groupby("lineup_id")["actual"].sum().mean() if "actual" in slate_data.columns else 0
+        proj_error = avg_actual - avg_proj if avg_actual else 0
+
+        kpi_cols_lab[0].metric("Lineups", f"{num_lineups_hist}")
+        kpi_cols_lab[1].metric("Avg Projected", f"{avg_proj:.1f}")
+        kpi_cols_lab[2].metric("Avg Actual", f"{avg_actual:.1f}")
+        kpi_cols_lab[3].metric("Avg Error", f"{proj_error:+.1f}")
+
+        # Player-level accuracy
+        st.markdown("##### Player Projection Accuracy")
+        if "actual" in slate_data.columns:
+            player_agg = (
+                slate_data.groupby("name")
+                .agg({"proj": "mean", "actual": "mean", "salary": "first", "own": "mean"})
+                .reset_index()
+            )
+            player_agg["error"] = player_agg["actual"] - player_agg["proj"]
+            player_agg["abs_error"] = player_agg["error"].abs()
+            player_agg = player_agg.sort_values("abs_error", ascending=False)
+            st.dataframe(player_agg, use_container_width=True, height=400)
+        else:
+            st.info("Add an 'actual' column to historical data to see accuracy metrics.")
+
+        # RG pool comparison
+        rg_file = RG_POOL_FILES.get(str(selected_date))
+        if rg_file:
+            st.markdown("##### RG Pool vs Actuals")
+            rg_pool = load_rg_pool(rg_file)
+            if not rg_pool.empty and "actual" in slate_data.columns:
+                merged = rg_pool.merge(
+                    slate_data[["name", "actual"]].drop_duplicates(),
+                    on="name",
+                    how="left",
+                )
+                merged["error"] = merged["actual"] - merged["proj"]
+                st.dataframe(
+                    merged[["name", "pos", "team", "salary", "proj", "actual", "error", "own"]]
+                    .sort_values("error", ascending=False),
+                    use_container_width=True,
+                    height=400,
+                )
+
+    st.markdown("---")
+    st.caption("YakOS Calibration Lab v0.1 -- data-driven lineup refinement.")
