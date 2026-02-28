@@ -231,7 +231,7 @@ with tab_optimizer:
     lineups_df = st.session_state.get("lineups_df")
     exposures_df = st.session_state.get("exposures_df")
 
-        if lineups_df is not None and exposures_df is not None:
+       if lineups_df is not None and exposures_df is not None:
                 num_unique = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else len(lineups_df)
                 st.success(f"Built {num_unique} lineups.")
 
