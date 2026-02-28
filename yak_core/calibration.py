@@ -312,12 +312,12 @@ def compute_calibration_metrics(
         labels=["<5K", "5-6.5K", "6.5-8K", ">8K"],
     )
     
-    sal_summary = merged.groupby("salary_bracket").agg({
+    sal_summary = merged.groupby("salary_bracket", observed=False).agg({
         "proj": "mean",
         "actual": "mean",
     }).reset_index()
     sal_summary["error"] = sal_summary["actual"] - sal_summary["proj"]
-    sal_summary["count"] = merged.groupby("salary_bracket").size().values
+    sal_summary["count"] = merged.groupby("salary_bracket", observed=False).size().values
     
     metrics["salary_bracket"] = {"df": sal_summary}
     
@@ -329,12 +329,12 @@ def compute_calibration_metrics(
             bins=[0, 5, 10, 20, 100],
             labels=["0-5%", "5-10%", "10-20%", ">20%"],
         )
-        own_summary = merged.groupby("own_bucket").agg({
+        own_summary = merged.groupby("own_bucket", observed=False).agg({
             "proj": "mean",
             "actual": "mean",
         }).reset_index()
         own_summary["error"] = own_summary["actual"] - own_summary["proj"]
-        own_summary["count"] = merged.groupby("own_bucket").size().values
+        own_summary["count"] = merged.groupby("own_bucket", observed=False).size().values
         
         metrics["ownership_level"] = {"df": own_summary}
     
