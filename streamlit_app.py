@@ -159,7 +159,7 @@ with tab_optimizer:
     else:
         game_key = None
 
-    st.markdown("#### 2. Optimizer Settings")
+        st.markdown("#### 2. Optimizer Settings")
 
     with st.sidebar:
         st.markdown("### Optimizer Settings")
@@ -172,11 +172,13 @@ with tab_optimizer:
             step=1,
         )
 
-        proj_col = st.selectbox(
-            "Projection style",
-            proj_cols,
-            index=0,
-            help="Which projection column to optimize: proj=median, floor=safer, ceil/higher percentiles=more aggressive.",
+        max_exposure = st.slider(
+            "Max exposure per player",
+            min_value=0.05,
+            max_value=1.0,
+            value=0.35,
+            step=0.05,
+            help="Cap on how often any one player can appear across all lineups.",
         )
 
         min_salary_used = st.number_input(
@@ -194,18 +196,8 @@ with tab_optimizer:
             "Projection style",
             proj_cols,
             index=0,
-            help="Which projection column to optimize: proj=median, floor=safer, ceil/higher percentiles=more aggressive.",
+            help="Which projection column to optimize: proj=median, floor=safer, ceil/sim85=more aggressive.",
         )
-3) Are projection options tied to contest types?
-Right now, no — they are just different columns in your CSV:
-
-proj: median projection (good general default).
-
-floor: safer, lower‑variance.
-
-ceil / sim85: more aggressive, good for GPPs if you want ceiling‑hunting.
-
-We can later add a Contest Type dropdown (Cash / GPP) and auto‑set a default Projection style (e.g., Cash → floor / proj, GPP → ceil / sim85), but currently it’s manual.
 
 
 
