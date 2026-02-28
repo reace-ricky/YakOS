@@ -461,7 +461,7 @@ with tab_lab:
     # Load historical data
     hist_df = load_historical_lineups()
 
-        if hist_df.empty:
+    if hist_df.empty:
         st.warning(
             "No historical data found. Add `data/historical_lineups.csv` to the repo "
             "with columns: slate_date, lineup_id, name, pos, team, opp, salary, proj, actual, own."
@@ -498,8 +498,6 @@ with tab_lab:
 
         # Player-level accuracy
         st.markdown("##### Player Projection Accuracy")
-        ...
-
         if "actual" in slate_data.columns:
             player_agg = (
                 slate_data.groupby("name")
