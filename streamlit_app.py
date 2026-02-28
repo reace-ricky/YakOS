@@ -201,7 +201,7 @@ with tab_optimizer:
 
 
 
-    if pool_df is None:
+        if pool_df is None:
         st.info("Upload a RotoGrinders CSV to enable the optimizer.")
     else:
         build_btn = st.button("Build Lineups", type="primary")
@@ -227,68 +227,68 @@ with tab_optimizer:
                     st.session_state["lineups_df"] = None
                     st.session_state["exposures_df"] = None
 
-    # Outside the button block, for display:
+    # --- Use cached results for viewing (persists across reruns) ---
     lineups_df = st.session_state.get("lineups_df")
     exposures_df = st.session_state.get("exposures_df")
 
-       if lineups_df is not None and exposures_df is not None:
-                num_unique = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else len(lineups_df)
-                st.success(f"Built {num_unique} lineups.")
+    if lineups_df is not None and exposures_df is not None:
+        num_unique = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else len(lineups_df)
+        st.success(f"Built {num_unique} lineups.")
 
-                # Lineup viewer (one lineup at a time)
-                st.markdown("### Lineup viewer")
+        # Lineup viewer (one lineup at a time)
+        st.markdown("### Lineup viewer")
 
-                if "lineup_index" in lineups_df.columns:
-                    lineup_ids = sorted(lineups_df["lineup_index"].unique().tolist())
-                    selected_lu = st.number_input(
-                        "Lineup #",
-                        min_value=min(lineup_ids),
-                        max_value=max(lineup_ids),
-                        value=min(lineup_ids),
-                        step=1,
-                    )
+        if "lineup_index" in lineups_df.columns:
+            lineup_ids = sorted(lineups_df["lineup_index"].unique().tolist())
+            selected_lu = st.number_input(
+                "Lineup #",
+                min_value=min(lineup_ids),
+                max_value=max(lineup_ids),
+                value=min(lineup_ids),
+                step=1,
+            )
 
-                    lu = lineups_df[lineups_df["lineup_index"] == selected_lu].copy()
-                else:
-                    selected_lu = 0
-                    lu = lineups_df.copy()
-                    lu["lineup_index"] = 0
+            lu = lineups_df[lineups_df["lineup_index"] == selected_lu].copy()
+        else:
+            selected_lu = 0
+            lu = lineups_df.copy()
+            lu["lineup_index"] = 0
 
-                if "slot" in lu.columns:
-                    lu = lu.sort_values("slot")
+        if "slot" in lu.columns:
+            lu = lu.sort_values("slot")
 
-                display_cols = [c for c in ["slot", "team", "player_name", "salary", "proj"] if c in lu.columns]
-                st.dataframe(lu[display_cols], use_container_width=True)
+        display_cols = [c for c in ["slot", "team", "player_name", "salary", "proj"] if c in lu.columns]
+        st.dataframe(lu[display_cols], use_container_width=True)
 
-                total_salary = lu["salary"].sum() if "salary" in lu.columns else None
-                total_proj = lu["proj"].sum() if "proj" in lu.columns else None
-                if total_salary is not None and total_proj is not None:
-                    st.markdown(f"**Total salary:** {total_salary} &nbsp;&nbsp; **Total proj:** {total_proj:.2f}")
+        total_salary = lu["salary"].sum() if "salary" in lu.columns else None
+        total_proj = lu["proj"].sum() if "proj" in lu.columns else None
+        if total_salary is not None and total_proj is not None:
+            st.markdown(f"**Total salary:** {total_salary} &nbsp;&nbsp; **Total proj:** {total_proj:.2f}")
 
-                # Exposures summary
-                st.markdown("### Player Exposures")
-                st.dataframe(exposures_df, use_container_width=True, height=400)
+        # Exposures summary
+        st.markdown("### Player Exposures")
+        st.dataframe(exposures_df, use_container_width=True, height=400)
 
-                # Downloads
-                st.markdown("### Download Results")
-                col1, col2 = st.columns(2)
+        # Downloads
+        st.markdown("### Download Results")
+        col1, col2 = st.columns(2)
 
-                with col1:
-                    st.download_button(
-                        label="Download Lineups CSV",
-                        data=to_csv_bytes(lineups_df),
-                        file_name="yakos_lineups.csv",
-                        mime="text/csv",
-                    )
-                with col2:
-                    st.download_button(
-                        label="Download Exposures CSV",
-                        data=to_csv_bytes(exposures_df),
-                        file_name="yakos_exposures.csv",
-                        mime="text/csv",
-                    )
-            else:
-                st.warning("No lineups returned. Check logs/config for details.")
+        with col1:
+            st.download_button(
+                label="Download Lineups CSV",
+                data=to_csv_bytes(lineups_df),
+                file_name="yakos_lineups.csv",
+                mime="text/csv",
+            )
+        with col2:
+            st.download_button(
+                label="Download Exposures CSV",
+                data=to_csv_bytes(exposures_df),
+                file_name="yakos_exposures.csv",
+                mime="text/csv",
+            )
+    else:
+        st.warning("No lineups returned. Check logs/config for details.")
 
 with tab_calibration:
     st.subheader("Calibration (Coming Soon)")
