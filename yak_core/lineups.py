@@ -299,7 +299,7 @@ def build_multiple_lineups_with_exposure(
                 if pulp.value(x[(i, s)]) and pulp.value(x[(i, s)]) > 0.5:
                     row = dict(players[i])
                     row["slot"] = s
-                    row["lineup_id"] = lu_num
+                    row["lineup_index"] = lu_num
                     all_lineups.append(row)
                     appearance_count[i] += 1
 
@@ -314,10 +314,10 @@ def build_multiple_lineups_with_exposure(
         lineups_df.drop(columns=["_idx", "_slots"], inplace=True, errors="ignore")
 
     exposures_df = (
-        lineups_df.groupby("player_id")["lineup_id"]
+        lineups_df.groupby("player_id")["lineup_index"]
         .nunique()
         .reset_index()
-        .rename(columns={"lineup_id": "num_lineups"})
+        .rename(columns={"lineup_index": "num_lineups"})
     )
     exposures_df["exposure"] = exposures_df["num_lineups"] / float(num_lineups)
 
@@ -428,8 +428,8 @@ def run_lineups_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     salary_cap = int(merged.get("SALARY_CAP", 50000))
     lineup_size = DK_LINEUP_SIZE
     validation_errors = []
-    for lu_idx in lineups_df["lineup_id"].unique():
-        lu = lineups_df[lineups_df["lineup_id"] == lu_idx]
+    for lu_idx in lineups_df["lineup_index"].unique():
+        lu = lineups_df[lineups_df["lineup_index"] == lu_idx]
         if len(lu) != lineup_size:
             validation_errors.append(
                 "Lineup %d: expected %d players, got %d"

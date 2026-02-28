@@ -232,16 +232,16 @@ def compute_calibration_metrics(
     """Compare generated lineups to actual outcomes and compute metrics.
     
     Args:
-        generated_lineups: DataFrame with [lineup_id, name, pos, salary, proj, team]
-        actual_outcomes: DataFrame with [name, actual]
+        generated_lineups: DataFrame with [lineup_index, player_name, pos, salary, proj, team]
+        actual_outcomes: DataFrame with [player_name, actual]
     
     Returns:
         Dictionary with metrics at lineup/player/position/salary/ownership levels
     """
     # Merge lineups with actuals
     merged = generated_lineups.merge(
-        actual_outcomes[["name", "actual"]].drop_duplicates(),
-        on="name",
+        actual_outcomes[["player_name", "actual"]].drop_duplicates(),
+        on="player_name",
         how="left",
     )
     
@@ -251,7 +251,7 @@ def compute_calibration_metrics(
     metrics = {}
     
     # === LINEUP-LEVEL METRICS ===
-    lineup_summary = merged.groupby("lineup_id").agg({
+    lineup_summary = merged.groupby("lineup_index").agg({
         "proj": "sum",
         "actual": "sum",
         "salary": "sum",
@@ -276,7 +276,7 @@ def compute_calibration_metrics(
     }
     
     # === PLAYER-LEVEL METRICS ===
-    player_summary = merged.groupby("name").agg({
+    player_summary = merged.groupby("player_name").agg({
         "proj": "mean",
         "actual": "mean",
         "salary": "first",
