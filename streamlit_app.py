@@ -168,8 +168,8 @@ with tab_optimizer:
             "NUM_LINEUPS",
             min_value=1,
             max_value=300,
-            value=20,
-            step=10,
+            value=5,
+            step=1,
         )
 
         max_exposure = st.slider(
@@ -184,7 +184,7 @@ with tab_optimizer:
             "MIN_SALARY_USED",
             min_value=0,
             max_value=60000,
-            value=49000,
+            value=46500,
             step=500,
         )
 
