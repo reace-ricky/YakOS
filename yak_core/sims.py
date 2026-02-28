@@ -1,5 +1,12 @@
-"""Monte Carlo simulation stub for YakOS DFS optimizer."""
+"""Monte Carlo simulation for YakOS DFS optimizer."""
+from typing import Any, Dict, List
+
+import numpy as np
 import pandas as pd
+
+# DK NBA scoring thresholds (classic 8-man roster)
+_SMASH_THRESHOLD = 300.0  # strong GPP score
+_BUST_THRESHOLD = 230.0   # likely cash-game miss
 
 
 def run_monte_carlo_for_lineups(
@@ -9,22 +16,128 @@ def run_monte_carlo_for_lineups(
 ) -> pd.DataFrame:
     """Run Monte Carlo simulations on lineup projections.
 
+    For each lineup, simulates ``n_sims`` outcomes by sampling from
+    per-player normal distributions (mean=proj, std derived from
+    ceil/floor when available).
+
     Parameters
     ----------
     lineups_df : pd.DataFrame
-        DataFrame of lineups with at least a ``proj`` column.
+        Long-format lineup table with ``lineup_index`` and ``proj`` columns.
+        Optional: ``ceil``, ``floor`` columns improve variance estimates.
     n_sims : int, optional
-        Number of simulation iterations (default 500).
+        Number of simulation iterations per lineup (default 500).
     volatility_mode : str, optional
-        Volatility profile to use (default "standard").
-        Reserved for future use.
+        ``"low"`` / ``"standard"`` / ``"high"`` — scales default variance when
+        ceil/floor are unavailable.
 
     Returns
     -------
     pd.DataFrame
-        Copy of *lineups_df* with added ``sim_mean`` and ``sim_std`` columns.
+        Per-lineup summary with columns:
+        ``lineup_index``, ``sim_mean``, ``sim_std``,
+        ``smash_prob``, ``bust_prob``, ``median_points``,
+        ``sim_p85``, ``sim_p15``.
     """
-    result = lineups_df.copy()
-    result["sim_mean"] = result["proj"]
-    result["sim_std"] = 0.0
-    return result
+    if lineups_df.empty or "lineup_index" not in lineups_df.columns:
+        return pd.DataFrame()
+
+    vol_map = {"low": 0.10, "standard": 0.18, "high": 0.28}
+    default_vol = vol_map.get(volatility_mode, 0.18)
+
+    rng = np.random.RandomState(42)
+    results = []
+
+    for lu_id, grp in lineups_df.groupby("lineup_index"):
+        projs = grp["proj"].fillna(0).values.astype(float)
+
+        # Derive per-player std from ceil/floor when available
+        if "ceil" in grp.columns and "floor" in grp.columns:
+            ceil_series = pd.to_numeric(grp["ceil"], errors="coerce")
+            floor_series = pd.to_numeric(grp["floor"], errors="coerce")
+            ceil_v = ceil_series.where(ceil_series.notna(), other=pd.Series(projs * 1.3, index=grp.index)).values.astype(float)
+            floor_v = floor_series.where(floor_series.notna(), other=pd.Series(projs * 0.7, index=grp.index)).values.astype(float)
+            stds = (ceil_v - floor_v) / 4.0
+            stds = np.clip(stds, projs * 0.05, projs * 0.6)
+        else:
+            stds = projs * default_vol
+
+        # (n_sims × n_players) outcome matrix
+        sim_matrix = rng.normal(
+            loc=projs[None, :],
+            scale=stds[None, :],
+            size=(n_sims, len(projs)),
+        )
+        sim_matrix = np.clip(sim_matrix, 0, None)
+        totals = sim_matrix.sum(axis=1)
+
+        results.append({
+            "lineup_index": lu_id,
+            "sim_mean": round(float(totals.mean()), 2),
+            "sim_std": round(float(totals.std()), 2),
+            "smash_prob": round(float((totals >= _SMASH_THRESHOLD).mean()), 3),
+            "bust_prob": round(float((totals <= _BUST_THRESHOLD).mean()), 3),
+            "median_points": round(float(np.median(totals)), 2),
+            "sim_p85": round(float(np.percentile(totals, 85)), 2),
+            "sim_p15": round(float(np.percentile(totals, 15)), 2),
+        })
+
+    return pd.DataFrame(results)
+
+
+def simulate_live_updates(
+    pool_df: pd.DataFrame,
+    news_updates: List[Dict[str, Any]],
+) -> pd.DataFrame:
+    """Apply live news / injury / lineup-change updates to the player pool.
+
+    Parameters
+    ----------
+    pool_df : pd.DataFrame
+        Current player pool with ``player_name`` and ``proj`` columns.
+    news_updates : list of dict
+        Each dict may contain:
+
+        * ``player_name`` (str) — required
+        * ``status`` (str) — ``"OUT"``, ``"QUESTIONABLE"``, ``"GTD"``, ``"IN"``,
+          ``"UPGRADED"``
+        * ``proj_adj`` (float) — direct fantasy-point adjustment (takes priority)
+        * ``minutes_change`` (float) — minutes delta; converted via ~1.5 FP/min
+
+    Returns
+    -------
+    pd.DataFrame
+        Updated pool with adjusted projections.
+    """
+    updated = pool_df.copy()
+
+    status_multipliers: Dict[str, float] = {
+        "OUT": 0.0,
+        "QUESTIONABLE": 0.35,
+        "GTD": 0.65,
+        "IN": 1.0,
+        "UPGRADED": 1.25,
+    }
+    fp_per_min = 1.5  # rough DK NBA approximation
+
+    for update in news_updates:
+        pname = update.get("player_name", "")
+        mask = updated["player_name"] == pname
+        if not mask.any():
+            continue
+
+        if update.get("proj_adj") is not None:
+            updated.loc[mask, "proj"] = (
+                updated.loc[mask, "proj"] + float(update["proj_adj"])
+            ).clip(lower=0)
+        elif update.get("status"):
+            mult = status_multipliers.get(update["status"].upper(), 1.0)
+            updated.loc[mask, "proj"] = (updated.loc[mask, "proj"] * mult).clip(lower=0)
+
+        if update.get("minutes_change") is not None:
+            fp_adj = float(update["minutes_change"]) * fp_per_min
+            updated.loc[mask, "proj"] = (
+                updated.loc[mask, "proj"] + fp_adj
+            ).clip(lower=0)
+
+    return updated
