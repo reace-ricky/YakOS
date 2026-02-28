@@ -471,71 +471,89 @@ with tab_lab:
         selected_date = st.selectbox("Slate date", available_dates)
 
         slate_data = hist_df[hist_df["slate_date"] == selected_date].copy()
-        # Attach YakOS model projections for this slate
-        yak_file = Path(__file__).parent
 
-        else:
-            st.warning(f"No YakOS projections for {selected_date}. Add data/yakos_projections_{selected_date}.csv")
+# Attach YakOS model projections for this slate
+yak_file = Path(__file__).parent  # <-- adjust to full logic you had before
 
+# KPIs for the slate
+st.markdown("#### Slate Summary")
+kpi_cols_lab = st.columns(4)
 
-        # KPIs for the slate
-        st.markdown("#### Slate Summary")
-        kpi_cols_lab = st.columns(4)
+num_lineups_hist = slate_data["lineup_id"].nunique()
 
-        num_lineups_hist = slate_data["lineup_id"].nunique()
+if "proj" in slate_data.columns:
+    avg_proj = (
+        slate_data.groupby("lineup_id")["proj"]
+        .sum()
+        .mean()
+    )
+else:
+    avg_proj = 0  # or None / st.warning
 
-        if "proj" in slate_data.columns:
-            avg_proj = slate_data.groupby("lineup_id")["proj"].sum().mean()
-        else:
-            avg_proj = 0  # or None / st.warning
+avg_actual = (
+    slate_data.groupby("lineup_id")["actual"]
+    .sum()
+    .mean()
+    if "actual" in slate_data.columns
+    else 0
+)
 
-        avg_actual = (
-            slate_data.groupby("lineup_id")["actual"].sum().mean()
-            if "actual" in slate_data.columns
-            else 0
+proj_error = avg_actual - avg_proj if avg_actual else 0
+
+kpi_cols_lab[0].metric("Lineups", f"{num_lineups_hist}")
+kpi_cols_lab[1].metric("Avg Projected", f"{avg_proj:.1f}")
+kpi_cols_lab[2].metric("Avg Actual", f"{avg_actual:.1f}")
+kpi_cols_lab[3].metric("Avg Error", f"{proj_error:+.1f}")
+
+# Player-level accuracy
+st.markdown("##### Player Projection Accuracy")
+if "actual" in slate_data.columns:
+    player_agg = (
+        slate_data.groupby("name")
+        .agg({
+            "proj": "mean",
+            "actual": "mean",
+            "salary": "first",
+            "own": "mean",
+        })
+        .reset_index()
+    )
+    player_agg["error"] = player_agg["actual"] - player_agg["proj"]
+    player_agg["abs_error"] = player_agg["error"].abs()
+    player_agg = player_agg.sort_values("abs_error", ascending=False)
+    st.dataframe(player_agg, use_container_width=True, height=400)
+else:
+    st.info("Add an 'actual' column to historical data to see accuracy metrics.")
+
+# RG pool comparison
+rg_file = RG_POOL_FILES.get(str(selected_date))
+if rg_file:
+    st.markdown("##### RG Pool vs Actuals")
+    rg_pool = load_rg_pool(rg_file)
+    if (not rg_pool.empty) and ("actual" in slate_data.columns):
+        merged = rg_pool.merge(
+            slate_data[["name", "actual"]].drop_duplicates(),
+            on="name",
+            how="left",
+        )
+        merged["error"] = merged["actual"] - merged["proj"]
+        st.dataframe(
+            merged[
+                [
+                    "name",
+                    "pos",
+                    "team",
+                    "salary",
+                    "proj",
+                    "actual",
+                    "error",
+                    "own",
+                ]
+            ].sort_values("error", ascending=False),
+            use_container_width=True,
+            height=400,
         )
 
-        proj_error = avg_actual - avg_proj if avg_actual else 0
+st.markdown("---")
+st.caption("YakOS Calibration Lab v0.1 -- data-driven lineup refinement.")
 
-        kpi_cols_lab[0].metric("Lineups", f"{num_lineups_hist}")
-        kpi_cols_lab[1].metric("Avg Projected", f"{avg_proj:.1f}")
-        kpi_cols_lab[2].metric("Avg Actual", f"{avg_actual:.1f}")
-        kpi_cols_lab[3].metric("Avg Error", f"{proj_error:+.1f}")
-
-        # Player-level accuracy
-        st.markdown("##### Player Projection Accuracy")
-        if "actual" in slate_data.columns:
-            player_agg = (
-                slate_data.groupby("name")
-                .agg({"proj": "mean", "actual": "mean", "salary": "first", "own": "mean"})
-                .reset_index()
-            )
-            player_agg["error"] = player_agg["actual"] - player_agg["proj"]
-            player_agg["abs_error"] = player_agg["error"].abs()
-            player_agg = player_agg.sort_values("abs_error", ascending=False)
-            st.dataframe(player_agg, use_container_width=True, height=400)
-        else:
-            st.info("Add an 'actual' column to historical data to see accuracy metrics.")
-
-        # RG pool comparison
-        rg_file = RG_POOL_FILES.get(str(selected_date))
-        if rg_file:
-            st.markdown("##### RG Pool vs Actuals")
-            rg_pool = load_rg_pool(rg_file)
-            if not rg_pool.empty and "actual" in slate_data.columns:
-                merged = rg_pool.merge(
-                    slate_data[["name", "actual"]].drop_duplicates(),
-                    on="name",
-                    how="left",
-                )
-                merged["error"] = merged["actual"] - merged["proj"]
-                st.dataframe(
-                    merged[
-                        ["name", "pos", "team", "salary", "proj", "actual", "error", "own"]
-                    ].sort_values("error", ascending=False),
-                    use_container_width=True,
-                    height=400,
-                )
-
-    st.markdown("---")
-    st.caption("YakOS Calibration Lab v0.1 -- data-driven lineup refinement.")
