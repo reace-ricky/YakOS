@@ -220,11 +220,18 @@ with tab_optimizer:
 
                 try:
                     lineups_df, exposures_df = run_optimizer(pool_df, cfg)
+                    st.session_state["lineups_df"] = lineups_df
+                    st.session_state["exposures_df"] = exposures_df
                 except Exception as e:
                     st.error(f"Optimizer error: {e}")
-                    lineups_df, exposures_df = None, None
+                    st.session_state["lineups_df"] = None
+                    st.session_state["exposures_df"] = None
 
-            if lineups_df is not None and exposures_df is not None:
+    # Outside the button block, for display:
+    lineups_df = st.session_state.get("lineups_df")
+    exposures_df = st.session_state.get("exposures_df")
+
+        if lineups_df is not None and exposures_df is not None:
                 num_unique = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else len(lineups_df)
                 st.success(f"Built {num_unique} lineups.")
 
