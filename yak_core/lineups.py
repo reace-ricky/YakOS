@@ -146,6 +146,9 @@ def build_player_pool(opt_pool: pd.DataFrame,
     if exclude_list:
         before = len(df)
         df = df[~df["player_name"].isin(exclude_list)].reset_index(drop=True)
+        removed = before - len(df)
+        if removed:
+            print(f"[build_player_pool] Excluded {removed} player(s) by name: {exclude_list}")
 
     # --- BUMP: multiply projections by user factor ---
     bump_map = cfg.get("BUMP", {})
@@ -207,6 +210,7 @@ def build_multiple_lineups_with_exposure(
 
     appearance_count = [0] * n
     all_lineups = []
+    cancel_reasons: list[tuple[int, str]] = []
 
     for lu_num in range(num_lineups):
         prob = pulp.LpProblem(f"lineup_{lu_num}", pulp.LpMaximize)
@@ -294,6 +298,9 @@ def build_multiple_lineups_with_exposure(
 
         prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=solver_time_limit))
         if prob.status != 1:
+            reason = pulp.LpStatus.get(prob.status, f"status={prob.status}")
+            cancel_reasons.append((lu_num, reason))
+            print(f"[optimizer] Lineup {lu_num} cancelled: {reason}")
             if progress_callback is not None:
                 progress_callback(lu_num + 1, num_lineups)
             continue
@@ -311,9 +318,23 @@ def build_multiple_lineups_with_exposure(
             progress_callback(lu_num + 1, num_lineups)
 
     if not all_lineups:
+        cancellation_summary = (
+            "; ".join(f"lineup {lu}: {r}" for lu, r in cancel_reasons)
+            if cancel_reasons
+            else "unknown"
+        )
         raise RuntimeError(
             f"Optimizer produced 0 feasible lineups out of {num_lineups} requested. "
-            f"Pool had {n} players."
+            f"Pool had {n} players. Cancellation reasons: {cancellation_summary}"
+        )
+
+    if cancel_reasons:
+        reason_counts: dict[str, int] = {}
+        for _, r in cancel_reasons:
+            reason_counts[r] = reason_counts.get(r, 0) + 1
+        summary = ", ".join(f"{r} ×{c}" for r, c in reason_counts.items())
+        print(
+            f"[optimizer] {len(cancel_reasons)} of {num_lineups} lineup(s) cancelled — {summary}"
         )
 
     lineups_df = pd.DataFrame(all_lineups)
