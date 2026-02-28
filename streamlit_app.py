@@ -433,8 +433,8 @@ with tab_lab:
     # Filters
     st.markdown("### 1. Filters")
 
-    col_filt_left, col_filt_right = st.columns(2)
-    with col_filt_left:
+col_filt_left, col_filt_right = st.columns(2)
+with col_filt_left:
     lab_date = st.date_input("Slate date", key="lab_slate_date")
     lab_slate_type = st.selectbox(
         "Slate Type",
