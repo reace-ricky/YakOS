@@ -473,12 +473,24 @@ with tab_lab:
         slate_data = hist_df[hist_df["slate_date"] == selected_date].copy()
 
         # KPIs for the slate
-        st.markdown("##### Slate Summary")
+        st.markdown("#### Slate Summary")
         kpi_cols_lab = st.columns(4)
+
         num_lineups_hist = slate_data["lineup_id"].nunique()
-        avg_proj = slate_data.groupby("lineup_id")["proj"].sum().mean()
-        avg_actual = slate_data.groupby("lineup_id")["actual"].sum().mean() if "actual" in slate_data.columns else 0
-        proj_error = avg_actual - avg_proj if avg_actual else 0
+
+        if "proj" in slate_data.columns:
+            avg_proj = slate_data.groupby("lineup_id")["proj"].sum().mean()
+        else:
+            avg_proj = 0  # or None / st.warning
+
+        avg_actual = (
+            slate_data.groupby("lineup_id")["actual"].sum().mean()
+            if "actual" in slate_data.columns
+            else 0
+        )
+
+proj_error = avg_actual - avg_proj if avg_actual else 0
+
 
         kpi_cols_lab[0].metric("Lineups", f"{num_lineups_hist}")
         kpi_cols_lab[1].metric("Avg Projected", f"{avg_proj:.1f}")
