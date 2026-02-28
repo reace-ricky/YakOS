@@ -1,117 +1,99 @@
-"""yak_core.calibration -- Contest-type specific calibration and backtesting.
+"""YakOS Calibration System - Contest-type specific projection tuning.
 
-Integrates with existing yak_core modules (projections, scoring, ownership) to:
-- Apply contest-type specific projection adjustments (GPP vs 50/50 vs MME, etc.)
-- Run backtests on historical lineups
-- Identify calibration gaps by position, salary bracket, ownership
-- Track calibration iterations
+Provides tools to:
+1. Apply contest-type specific calibration to projections (GPP, 50/50, etc.)
+2. Generate backtest lineups from historical pools
+3. Compare generated lineups to actual outcomes
+4. Identify calibration gaps and suggest adjustments
+5. Track calibration iterations over time
 """
 
 import json
-import os
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, List
 import pandas as pd
 import numpy as np
 
-DEFAULT_CONTEST_CALIBRATION = {
+from .projections import projection_quality_report
+from .scoring import score_lineups, backtest_summary
+from .lineups import build_player_pool, build_multiple_lineups_with_exposure
+
+
+# ============================================================
+# DEFAULT CALIBRATION CONFIGS
+# ============================================================
+
+DEFAULT_CALIBRATION_CONFIG: Dict[str, Any] = {
     "GPP": {
         "proj_multiplier": 1.0,
         "ceiling_boost": 0.15,
         "floor_reduction": -0.10,
         "high_own_adjustment": 0.05,
-        "position_adjustments": {
-            "PG": 0.0, "SG": 0.0, "SF": 0.0, "PF": 0.0, "C": 0.0,
-        },
-        "salary_bracket_adjustments": {
-            "<5K": 0.0, "5-6.5K": 0.0, "6.5-8K": 0.0, ">8K": 0.0,
-        },
+        "position_adjustments": {"PG": 0.0, "SG": 0.0, "SF": 0.0, "PF": 0.0, "C": 0.0},
+        "salary_bracket_adjustments": {"<5K": 0.0, "5-6.5K": 0.0, "6.5-8K": 0.0, ">8K": 0.0},
     },
     "50/50": {
         "proj_multiplier": 1.0,
         "ceiling_boost": -0.05,
         "floor_reduction": 0.10,
         "high_own_adjustment": -0.05,
-        "position_adjustments": {
-            "PG": 0.0, "SG": 0.0, "SF": 0.0, "PF": 0.0, "C": 0.0,
-        },
-        "salary_bracket_adjustments": {
-            "<5K": 0.0, "5-6.5K": 0.0, "6.5-8K": 0.0, ">8K": 0.0,
-        },
+        "position_adjustments": {"PG": 0.0, "SG": 0.0, "SF": 0.0, "PF": 0.0, "C": 0.0},
+        "salary_bracket_adjustments": {"<5K": 0.0, "5-6.5K": 0.0, "6.5-8K": 0.0, ">8K": 0.0},
     },
     "Single Entry": {
         "proj_multiplier": 1.0,
         "ceiling_boost": 0.05,
         "floor_reduction": 0.0,
         "high_own_adjustment": 0.0,
-        "position_adjustments": {
-            "PG": 0.0, "SG": 0.0, "SF": 0.0, "PF": 0.0, "C": 0.0,
-        },
-        "salary_bracket_adjustments": {
-            "<5K": 0.0, "5-6.5K": 0.0, "6.5-8K": 0.0, ">8K": 0.0,
-        },
+        "position_adjustments": {"PG": 0.0, "SG": 0.0, "SF": 0.0, "PF": 0.0, "C": 0.0},
+        "salary_bracket_adjustments": {"<5K": 0.0, "5-6.5K": 0.0, "6.5-8K": 0.0, ">8K": 0.0},
     },
     "MME": {
         "proj_multiplier": 1.0,
         "ceiling_boost": 0.10,
         "floor_reduction": -0.05,
         "high_own_adjustment": 0.02,
-        "position_adjustments": {
-            "PG": 0.0, "SG": 0.0, "SF": 0.0, "PF": 0.0, "C": 0.0,
-        },
-        "salary_bracket_adjustments": {
-            "<5K": 0.0, "5-6.5K": 0.0, "6.5-8K": 0.0, ">8K": 0.0,
-        },
+        "position_adjustments": {"PG": 0.0, "SG": 0.0, "SF": 0.0, "PF": 0.0, "C": 0.0},
+        "salary_bracket_adjustments": {"<5K": 0.0, "5-6.5K": 0.0, "6.5-8K": 0.0, ">8K": 0.0},
     },
     "Captain": {
         "proj_multiplier": 1.0,
         "ceiling_boost": 0.20,
         "floor_reduction": -0.15,
         "high_own_adjustment": 0.10,
-        "position_adjustments": {
-            "PG": 0.0, "SG": 0.0, "SF": 0.0, "PF": 0.0, "C": 0.0,
-        },
-        "salary_bracket_adjustments": {
-            "<5K": 0.0, "5-6.5K": 0.0, "6.5-8K": 0.0, ">8K": 0.0,
-        },
+        "position_adjustments": {"PG": 0.0, "SG": 0.0, "SF": 0.0, "PF": 0.0, "C": 0.0},
+        "salary_bracket_adjustments": {"<5K": 0.0, "5-6.5K": 0.0, "6.5-8K": 0.0, ">8K": 0.0},
     },
 }
 
-def load_calibration_config(config_path: str = None) -> Dict[str, Any]:
-    """Load calibration config from JSON file, or return defaults.
-    
-    Args:
-        config_path: Path to calibration.json (defaults to ./config/calibration.json)
-    
-    Returns:
-        Dict with contest-type configs
-    """
+
+# ============================================================
+# CONFIG MANAGEMENT
+# ============================================================
+
+def load_calibration_config(config_path: Path = None) -> Dict[str, Any]:
+    """Load calibration config from JSON file, or return defaults."""
     if config_path is None:
         config_path = Path.cwd() / "config" / "calibration.json"
-    else:
-        config_path = Path(config_path)
     
     if config_path.exists():
         with open(config_path, "r") as f:
             return json.load(f)
-    
-    return DEFAULT_CONTEST_CALIBRATION
+    return DEFAULT_CALIBRATION_CONFIG.copy()
 
-def save_calibration_config(config: Dict[str, Any], config_path: str = None) -> None:
-    """Save calibration config to JSON file.
-    
-    Args:
-        config: Calibration config dict
-        config_path: Path to write (defaults to ./config/calibration.json)
-    """
+def save_calibration_config(config: Dict[str, Any], config_path: Path = None) -> None:
+    """Save calibration config to JSON file."""
     if config_path is None:
         config_path = Path.cwd() / "config" / "calibration.json"
-    else:
-        config_path = Path(config_path)
     
     config_path.parent.mkdir(exist_ok=True, parents=True)
     with open(config_path, "w") as f:
         json.dump(config, f, indent=2)
+
+
+# ============================================================
+# CALIBRATION APPLICATION
+# ============================================================
 
 def apply_contest_calibration(
     pool: pd.DataFrame,
@@ -131,13 +113,14 @@ def apply_contest_calibration(
     out = pool.copy()
     
     if contest_type not in config:
-        print(f"[calibration] Unknown contest type '{contest_type}', skipping calibration")
+        print(f"[calibration] Unknown contest type '{contest_type}', returning pool as-is")
         return out
     
     cal = config[contest_type]
     
     # Base multiplier
-    out["proj"] = out["proj"] * cal["proj_multiplier"]
+    if cal["proj_multiplier"] != 1.0:
+        out["proj"] = out["proj"] * cal["proj_multiplier"]
     
     # Ceiling/floor adjustments (if available)
     if "ceil" in out.columns and cal["ceiling_boost"] != 0:
@@ -171,25 +154,26 @@ def apply_contest_calibration(
                 out.loc[mask, "proj"] = out.loc[mask, "proj"] + adj
         
         out = out.drop(columns=["salary_bracket"])
+    
     return out
+
+
+# ============================================================
+# BACKTESTING & CALIBRATION METRICS
+# ============================================================
 
 def compute_calibration_metrics(
     generated_lineups: pd.DataFrame,
     actual_outcomes: pd.DataFrame,
 ) -> Dict[str, Any]:
-    """Compare generated lineups to actual outcomes and compute metrics.
+    """Compare generated lineups to actual outcomes.
     
     Args:
-        generated_lineups: DataFrame with lineup_id, name, pos, salary, proj, team
-        actual_outcomes: DataFrame with name, actual columns
+        generated_lineups: DataFrame with columns [lineup_id, name, pos, salary, proj, team]
+        actual_outcomes: DataFrame with columns [name, actual]
     
     Returns:
-        Dictionary with metrics at multiple levels:
-        - lineup_level: Aggregate lineup accuracy
-        - player_level: Individual player accuracy
-        - position_level: Accuracy by position
-        - salary_bracket: Accuracy by salary tier
-        - ownership_level: Accuracy by ownership cohort
+        Dictionary with calibration metrics at multiple levels
     """
     # Merge lineups with actuals
     merged = generated_lineups.merge(
@@ -223,9 +207,7 @@ def compute_calibration_metrics(
         "avg_error": lineup_summary["error"].mean(),
         "mae": lineup_summary["error"].abs().mean(),
         "rmse": np.sqrt((lineup_summary["error"] ** 2).mean()),
-        "r_squared": _compute_r_squared(
-            lineup_summary["proj"], lineup_summary["actual"]
-        ),
+        "r_squared": _compute_r_squared(lineup_summary["proj"], lineup_summary["actual"]),
     }
     
     # === PLAYER-LEVEL METRICS ===
@@ -256,9 +238,7 @@ def compute_calibration_metrics(
         pos_summary["error"] = pos_summary["actual"] - pos_summary["proj"]
         pos_summary["count"] = merged.groupby("pos").size().values
         
-        metrics["position_level"] = {
-            "df": pos_summary,
-        }
+        metrics["position_level"] = {"df": pos_summary}
     
     # === SALARY BRACKET METRICS ===
     merged["salary_bracket"] = pd.cut(
@@ -274,9 +254,7 @@ def compute_calibration_metrics(
     sal_summary["error"] = sal_summary["actual"] - sal_summary["proj"]
     sal_summary["count"] = merged.groupby("salary_bracket").size().values
     
-    metrics["salary_bracket"] = {
-        "df": sal_summary,
-    }
+    metrics["salary_bracket"] = {"df": sal_summary}
     
     # === OWNERSHIP-ADJUSTED METRICS ===
     if "own" in merged.columns:
@@ -293,18 +271,9 @@ def compute_calibration_metrics(
         own_summary["error"] = own_summary["actual"] - own_summary["proj"]
         own_summary["count"] = merged.groupby("own_bucket").size().values
         
-        metrics["ownership_level"] = {
-            "df": own_summary,
-        }
+        metrics["ownership_level"] = {"df": own_summary}
     
     return metrics
-
-
-def _compute_r_squared(y_true, y_pred) -> float:
-    """Compute R² metric between actual and predicted."""
-    ss_res = ((y_true - y_pred) ** 2).sum()
-    ss_tot = ((y_true - y_true.mean()) ** 2).sum()
-    return 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
 
 
 def identify_calibration_gaps(
@@ -313,10 +282,7 @@ def identify_calibration_gaps(
 ) -> Dict[str, Any]:
     """Analyze metrics to identify where projections need adjustment.
     
-    Returns actionable insights like:
-    - "Overestimating high-salary players by 2.5 points"
-    - "Underestimating ownership in GPP by 15%"
-    - "Point guard projections +3.1 vs actuals"
+    Returns actionable calibration insights and suggested adjustments.
     """
     insights = {
         "contest_type": contest_type,
@@ -334,7 +300,7 @@ def identify_calibration_gaps(
                 direction = "over" if error > 0 else "under"
                 insights["findings"].append(
                     f"**{pos}**: {direction}estimating by {abs(error):.1f} pts "
-                    f"({int(row['count'])} appearances)"
+                    f"({row['count']} appearances)"
                 )
                 insights["adjustments_suggested"][pos] = error * 0.5
     
@@ -348,7 +314,7 @@ def identify_calibration_gaps(
                 direction = "over" if error > 0 else "under"
                 insights["findings"].append(
                     f"**Salary {bracket}**: {direction}estimating by {abs(error):.1f} pts "
-                    f"({int(row['count'])} players)"
+                    f"({row['count']} players)"
                 )
     
     # Ownership gaps
@@ -377,26 +343,23 @@ def identify_calibration_gaps(
     return insights
 
 
+def _compute_r_squared(y_true, y_pred):
+    """Compute R² metric between actual and predicted."""
+    ss_res = ((y_true - y_pred) ** 2).sum()
+    ss_tot = ((y_true - y_true.mean()) ** 2).sum()
+    return 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
+
+
 def save_calibration_history(
     slate_date,
     contest_type: str,
     metrics: Dict[str, Any],
     config: Dict[str, Any],
-    history_path: str = None,
+    history_path: Path = None,
 ) -> None:
-    """Save calibration run to history for tracking.
-    
-    Args:
-        slate_date: Date of the slate
-        contest_type: Contest type (GPP, 50/50, etc.)
-        metrics: Calibration metrics from compute_calibration_metrics
-        config: Calibration config dict
-        history_path: Path to calibration_history.json (defaults to ./config/)
-    """
+    """Save calibration run to history for tracking."""
     if history_path is None:
         history_path = Path.cwd() / "config" / "calibration_history.json"
-    else:
-        history_path = Path(history_path)
     
     history_path.parent.mkdir(exist_ok=True, parents=True)
     
