@@ -83,9 +83,7 @@ def to_csv_bytes(df: pd.DataFrame) -> bytes:
 
 
 def build_game_keys(df: pd.DataFrame) -> pd.Series:
-    """
-    Build strings like 'CLE @ DET' from team/opponent columns.
-    """
+    """Build strings like 'CLE @ DET' from team/opponent columns."""
     if "team" not in df.columns or "opponent" not in df.columns:
         return pd.Series(dtype=str)
 
@@ -159,7 +157,7 @@ with tab_optimizer:
     else:
         game_key = None
 
-        st.markdown("#### 2. Optimizer Settings")
+    st.markdown("#### 2. Optimizer Settings")
 
     with st.sidebar:
         st.markdown("### Optimizer Settings")
@@ -199,9 +197,7 @@ with tab_optimizer:
             help="Which projection column to optimize: proj=median, floor=safer, ceil/sim85=more aggressive.",
         )
 
-
-
-        if pool_df is None:
+    if pool_df is None:
         st.info("Upload a RotoGrinders CSV to enable the optimizer.")
     else:
         build_btn = st.button("Build Lineups", type="primary")
