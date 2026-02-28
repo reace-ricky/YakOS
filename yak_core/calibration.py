@@ -1,21 +1,26 @@
-"""yak_core.calibration -- Contest-type specific calibration for DFS projections.
+"""yak_core.calibration -- Contest-type specific calibration and backtesting.
 
-This module handles:
-- Contest-type specific projection adjustments (GPP, 50/50, Single Entry, MME, Captain)
-- Backtesting lineups against actual outcomes
-- Calibration metrics computation (MAE, RMSE, position/salary gaps)
+This module provides:
+- Contest-type specific projection adjustment (GPP/50-50/etc)
+- Lineup generation and backtesting
+- Calibration metrics computation
 - Gap identification and suggested adjustments
-- Calibration history tracking
+- Calibration configuration management
 """
+
 import json
 from pathlib import Path
-from typing import Dict, Any, Tuple, List
-import pandas as pd
+from typing import Dict, Any, Tuple
 import numpy as np
+import pandas as pd
+
+from .lineups import build_multiple_lineups_with_exposure
+from .projections import apply_projections, projection_quality_report
+from .scoring import score_lineups, backtest_summary
 
 
 # ============================================================
-# DEFAULT CALIBRATION CONFIGS
+# CALIBRATION CONFIG TEMPLATES
 # ============================================================
 
 DEFAULT_CALIBRATION_CONFIG = {
@@ -81,41 +86,30 @@ DEFAULT_CALIBRATION_CONFIG = {
     },
 }
 
-def load_calibration_config(config_path: Path = None) -> Dict[str, Any]:
+def load_calibration_config(config_path: str = None) -> Dict[str, Any]:
     """Load calibration config from JSON file, or return defaults.
     
     Args:
-        config_path: Path to calibration.json. If None, uses default location.
+        config_path: Path to calibration.json. If None, uses default.
     
     Returns:
-        Dictionary with contest-type specific calibration parameters.
+        Calibration config dict
     """
-    if config_path is None:
-        config_path = Path(__file__).parent.parent / "config" / "calibration.json"
-    
-    if config_path.exists():
+    if config_path and Path(config_path).exists():
         with open(config_path, "r") as f:
             return json.load(f)
-    
-    return DEFAULT_CALIBRATION_CONFIG.copy()
+    return DEFAULT_CALIBRATION_CONFIG
 
-def save_calibration_config(config: Dict[str, Any], config_path: Path = None) -> None:
-    """Save calibration config to JSON file.
-    
-    Args:
-        config: Configuration dictionary to save.
-        config_path: Path to save to. If None, uses default location.
-    """
-    if config_path is None:
-        config_path = Path(__file__).parent.parent / "config" / "calibration.json"
-    
-    config_path.parent.mkdir(exist_ok=True, parents=True)
+
+def save_calibration_config(config: Dict[str, Any], config_path: str) -> None:
+    """Save calibration config to JSON file."""
+    Path(config_path).parent.mkdir(parents=True, exist_ok=True)
     with open(config_path, "w") as f:
         json.dump(config, f, indent=2)
 
 
 # ============================================================
-# PROJECTION CALIBRATION
+# CALIBRATION APPLICATION
 # ============================================================
 
 def apply_contest_calibration(
@@ -125,12 +119,12 @@ def apply_contest_calibration(
 ) -> pd.DataFrame:
     """Apply contest-type specific calibration to projections.
     
-    Adjusts projections based on:
-    - Base projection multiplier
-    - Ceiling/floor emphasis (GPP wants ceiling, 50/50 wants floor)
-    - Ownership adjustments (fade chalk or play it)
-    - Position-specific tweaks
-    - Salary bracket tweaks
+    Adjusts proj column based on:
+    - Base multiplier (scale all)
+    - Ceiling/floor boosts (upside/downside emphasis)
+    - Ownership adjustments (fade/play chalk)
+    - Position adjustments (pos-specific tweaks)
+    - Salary bracket adjustments (cheap/expensive adjustments)
     
     Args:
         pool: DataFrame with name, pos, salary, proj, ceil, floor, own columns
@@ -150,7 +144,7 @@ def apply_contest_calibration(
     # Base multiplier
     out["proj"] = out["proj"] * cal["proj_multiplier"]
     
-    # Ceiling/floor adjustments (if available)
+    # Ceiling/floor adjustments
     if "ceil" in out.columns and cal["ceiling_boost"] != 0:
         out["proj"] = out["proj"] + (out["ceil"] * cal["ceiling_boost"])
     
@@ -187,8 +181,49 @@ def apply_contest_calibration(
 
 
 # ============================================================
-# BACKTESTING & METRICS
+# BACKTESTING & CALIBRATION ANALYSIS
 # ============================================================
+
+def run_backtest_lineups(
+    pool: pd.DataFrame,
+    num_lineups: int,
+    max_exposure: float,
+    min_salary_used: int,
+    contest_type: str,
+    config: Dict[str, Any],
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Generate backtest lineups with contest-type calibration applied.
+    
+    Args:
+        pool: Player pool with proj, salary, pos columns
+        num_lineups: Number of lineups to generate
+        max_exposure: Max exposure per player
+        min_salary_used: Minimum salary to use
+        contest_type: Contest type (GPP, 50/50, etc)
+        config: Calibration config dict
+    
+    Returns:
+        (lineups_df, exposures_df) or (None, None) if error
+    """
+    # Apply contest-type calibration
+    pool_calibrated = apply_contest_calibration(pool, contest_type, config)
+    
+    # Generate lineups
+    lineups_df, exposures_df = build_multiple_lineups_with_exposure(
+        pool_calibrated,
+        {
+            "SITE": "dk",
+            "SPORT": "nba",
+            "SLATE_TYPE": "classic",
+            "NUM_LINEUPS": num_lineups,
+            "MIN_SALARY_USED": min_salary_used,
+            "MAX_EXPOSURE": max_exposure,
+            "PROJ_COL": "proj",
+        },
+    )
+    
+    return lineups_df, exposures_df
+
 
 def compute_calibration_metrics(
     generated_lineups: pd.DataFrame,
@@ -197,16 +232,11 @@ def compute_calibration_metrics(
     """Compare generated lineups to actual outcomes and compute metrics.
     
     Args:
-        generated_lineups: DataFrame with columns [lineup_id, name, pos, salary, proj, team]
-        actual_outcomes: DataFrame with columns [name, actual]
+        generated_lineups: DataFrame with [lineup_id, name, pos, salary, proj, team]
+        actual_outcomes: DataFrame with [name, actual]
     
     Returns:
-        Dictionary with metrics at multiple levels:
-        - lineup_level: Aggregate metrics
-        - player_level: Per-player accuracy
-        - position_level: Position-wise gaps
-        - salary_bracket: Salary tier gaps
-        - ownership_level: Ownership-based gaps
+        Dictionary with metrics at lineup/player/position/salary/ownership levels
     """
     # Merge lineups with actuals
     merged = generated_lineups.merge(
@@ -215,7 +245,7 @@ def compute_calibration_metrics(
         how="left",
     )
     
-    # Handle missing actuals (players without scores)
+    # Handle missing actuals
     merged["actual"] = merged["actual"].fillna(0)
     
     metrics = {}
@@ -235,11 +265,11 @@ def compute_calibration_metrics(
     
     metrics["lineup_level"] = {
         "df": lineup_summary,
-        "avg_proj": lineup_summary["proj"].mean(),
-        "avg_actual": lineup_summary["actual"].mean(),
-        "avg_error": lineup_summary["error"].mean(),
-        "mae": lineup_summary["error"].abs().mean(),
-        "rmse": np.sqrt((lineup_summary["error"] ** 2).mean()),
+        "avg_proj": float(lineup_summary["proj"].mean()),
+        "avg_actual": float(lineup_summary["actual"].mean()),
+        "avg_error": float(lineup_summary["error"].mean()),
+        "mae": float(lineup_summary["error"].abs().mean()),
+        "rmse": float(np.sqrt((lineup_summary["error"] ** 2).mean())),
         "r_squared": _compute_r_squared(
             lineup_summary["proj"], lineup_summary["actual"]
         ),
@@ -258,10 +288,10 @@ def compute_calibration_metrics(
     
     metrics["player_level"] = {
         "df": player_summary.sort_values("abs_error", ascending=False),
-        "avg_proj": player_summary["proj"].mean(),
-        "avg_actual": player_summary["actual"].mean(),
-        "avg_error": player_summary["error"].mean(),
-        "mae": player_summary["abs_error"].mean(),
+        "avg_proj": float(player_summary["proj"].mean()),
+        "avg_actual": float(player_summary["actual"].mean()),
+        "avg_error": float(player_summary["error"].mean()),
+        "mae": float(player_summary["abs_error"].mean()),
     }
     
     # === POSITION-LEVEL METRICS ===
@@ -273,9 +303,7 @@ def compute_calibration_metrics(
         pos_summary["error"] = pos_summary["actual"] - pos_summary["proj"]
         pos_summary["count"] = merged.groupby("pos").size().values
         
-        metrics["position_level"] = {
-            "df": pos_summary,
-        }
+        metrics["position_level"] = {"df": pos_summary}
     
     # === SALARY BRACKET METRICS ===
     merged["salary_bracket"] = pd.cut(
@@ -291,9 +319,7 @@ def compute_calibration_metrics(
     sal_summary["error"] = sal_summary["actual"] - sal_summary["proj"]
     sal_summary["count"] = merged.groupby("salary_bracket").size().values
     
-    metrics["salary_bracket"] = {
-        "df": sal_summary,
-    }
+    metrics["salary_bracket"] = {"df": sal_summary}
     
     # === OWNERSHIP-ADJUSTED METRICS ===
     if "own" in merged.columns:
@@ -310,32 +336,26 @@ def compute_calibration_metrics(
         own_summary["error"] = own_summary["actual"] - own_summary["proj"]
         own_summary["count"] = merged.groupby("own_bucket").size().values
         
-        metrics["ownership_level"] = {
-            "df": own_summary,
-        }
+        metrics["ownership_level"] = {"df": own_summary}
     
     return metrics
 
 
 def _compute_r_squared(y_true, y_pred):
-    """Compute R² metric between actual and predicted."""
+    """Compute R² metric."""
     ss_res = ((y_true - y_pred) ** 2).sum()
     ss_tot = ((y_true - y_true.mean()) ** 2).sum()
-    return 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
+    return float(1 - (ss_res / ss_tot)) if ss_tot != 0 else 0.0
 
 
 def identify_calibration_gaps(
     metrics: Dict[str, Any],
     contest_type: str,
 ) -> Dict[str, Any]:
-    """Analyze metrics to identify calibration gaps and suggest adjustments.
-    
-    Args:
-        metrics: Output from compute_calibration_metrics()
-        contest_type: Contest type being analyzed
+    """Analyze metrics to identify projection calibration gaps.
     
     Returns:
-        Dictionary with findings and suggested adjustments by position/bracket.
+        Dict with findings and suggested adjustments
     """
     insights = {
         "contest_type": contest_type,
@@ -355,7 +375,7 @@ def identify_calibration_gaps(
                     f"**{pos}**: {direction}estimating by {abs(error):.1f} pts "
                     f"({row['count']} appearances)"
                 )
-                insights["adjustments_suggested"][pos] = error * 0.5  # 50% of error
+                insights["adjustments_suggested"][pos] = float(error * 0.5)
     
     # Salary bracket gaps
     if "salary_bracket" in metrics:
@@ -401,24 +421,11 @@ def save_calibration_history(
     contest_type: str,
     metrics: Dict[str, Any],
     config: Dict[str, Any],
-    history_path: Path = None,
+    history_path: str,
 ) -> None:
-    """Save calibration run to history for tracking.
-    
-    Args:
-        slate_date: Date of the slate
-        contest_type: Contest type
-        metrics: Metrics from compute_calibration_metrics()
-        config: Current calibration config
-        history_path: Path to history JSON file
-    """
-    if history_path is None:
-        history_path = Path(__file__).parent.parent / "config" / "calibration_history.json"
-    
-    history_path.parent.mkdir(exist_ok=True, parents=True)
-    
+    """Save calibration run to history for tracking."""
     history = {}
-    if history_path.exists():
+    if Path(history_path).exists():
         with open(history_path, "r") as f:
             history = json.load(f)
     
@@ -432,5 +439,6 @@ def save_calibration_history(
         "config": config[contest_type],
     }
     
+    Path(history_path).parent.mkdir(parents=True, exist_ok=True)
     with open(history_path, "w") as f:
         json.dump(history, f, indent=2)
