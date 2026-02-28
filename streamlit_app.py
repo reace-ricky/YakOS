@@ -435,23 +435,26 @@ with tab_lab:
 
     col_filt_left, col_filt_right = st.columns(2)
     with col_filt_left:
-        lab_date = st.date_input("Slate date")
-        lab_slate_type = st.selectbox(
-            "Slate Type",
-            ["Classic", "Showdown Captain"],
-            index=0,
-        )
-    with col_filt_right:
-        lab_contest_type = st.selectbox(
-            "Contest Type",
-            ["GPP", "50/50", "Single Entry", "MME", "Captain"],
-            index=0,
-        )
-        lab_profile = st.selectbox(
-            "Ricky Profile",
-            ["Default", "Ricky_GPP", "Ricky_Cash", "Ricky_SE", "Ricky_Captain"],
-            index=0,
-        )
+    lab_date = st.date_input("Slate date", key="lab_slate_date")
+    lab_slate_type = st.selectbox(
+        "Slate Type",
+        ["Classic", "Showdown Captain"],
+        index=0,
+        key="lab_slate_type",
+    )
+with col_filt_right:
+    lab_contest_type = st.selectbox(
+        "Contest Type",
+        ["GPP", "50/50", "Single Entry", "MME", "Captain"],
+        index=0,
+        key="lab_contest_type",
+    )
+    lab_profile = st.selectbox(
+        "Ricky Profile",
+        ["Default", "Ricky_GPP", "Ricky_Cash", "Ricky_SE", "Ricky_Captain"],
+        index=0,
+        key="lab_profile",
+    )
 
     st.markdown("---")
 
