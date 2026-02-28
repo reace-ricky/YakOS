@@ -536,10 +536,20 @@ with tab_lab:
         )
 
         detail_cols = ["pos", "player", "team", "salary", "field_pct", "actual_points"]
+        # Add totals row
+        totals_row = pd.DataFrame([{
+            "pos": "TOTAL",
+            "player": "",
+            "team": "",
+            "salary": lu_detail["salary"].sum(),
+            "field_pct": lu_detail["field_pct"].mean(),
+            "actual_points": lu_detail["actual_points"].sum(),
+        }])
+        lu_with_totals = pd.concat([lu_detail[detail_cols], totals_row], ignore_index=True)
         st.dataframe(
-            lu_detail[detail_cols],
+            lu_with_totals,
             use_container_width=True,
-            height=280,
+            height=320,
         )
 
     st.markdown("---")
