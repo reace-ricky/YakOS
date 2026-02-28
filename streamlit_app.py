@@ -162,6 +162,27 @@ def to_csv_bytes(df: pd.DataFrame) -> bytes:
 # to a single sim run.
 _SIM_LEARNING_BOOST = 0.05
 
+# Ordered list of projection style options used in the Optimizer selectbox.
+_PROJ_STYLE_OPTIONS = ["proj", "floor", "ceil", "sim85"]
+
+# Map internal contest type → suggested default projection style.
+# Internal types come from DK_CONTEST_TYPE_MAP in yak_core/calibration.py, e.g.:
+#   "Double Up (50/50)" → "50/50" → "floor"  (cash/variance-minimizing)
+#   "Tournament (GPP)"  → "GPP"   → "ceil"   (upside/ceiling-chasing)
+# Any unlisted internal type falls back to "proj".
+_CONTEST_PROJ_DEFAULTS: dict[str, str] = {
+    "50/50": "floor",       # cash game — minimize variance
+    "GPP": "ceil",          # tournament — maximize ceiling
+    "MME": "ceil",          # multi-entry max — ceiling-driven
+    "Captain": "ceil",      # showdown captain — high-upside picks
+    "Single Entry": "proj", # single entry — balanced default
+}
+
+
+def _default_proj_style_for_contest(internal_contest: str) -> str:
+    """Return the suggested default projection style for the given internal contest type."""
+    return _CONTEST_PROJ_DEFAULTS.get(internal_contest, "proj")
+
 
 def _slate_value_leader(pool_df: pd.DataFrame) -> str:
     """Return a formatted string naming the top value play (FP per $1K) in the pool."""
@@ -201,6 +222,8 @@ def ensure_session_state():
         st.session_state["archetype"] = "Balanced"
     if "dk_contest_type" not in st.session_state:
         st.session_state["dk_contest_type"] = "Tournament (GPP)"
+    if "prev_dk_contest_type" not in st.session_state:
+        st.session_state["prev_dk_contest_type"] = st.session_state["dk_contest_type"]
     if "sim_pool_df" not in st.session_state:
         st.session_state["sim_pool_df"] = None
     if "sim_lineups_df" not in st.session_state:
@@ -677,10 +700,18 @@ with tab_optimizer:
             with ctrl_c3:
                 min_sal_opt = st.number_input("Min salary used", 0, 50000, min_salary_used_user, step=500, key="opt_sal")
 
+            # Auto-set projection style when contest type changes
+            if dk_contest_sel != st.session_state.get("prev_dk_contest_type"):
+                st.session_state["opt_proj_style"] = _default_proj_style_for_contest(internal_contest)
+                st.session_state["prev_dk_contest_type"] = dk_contest_sel
+
+            _cur_proj_style = st.session_state.get("opt_proj_style", "proj")
+            if _cur_proj_style not in _PROJ_STYLE_OPTIONS:
+                _cur_proj_style = "proj"
             proj_style_opt = st.selectbox(
                 "Projection style (ceiling/floor driver)",
-                ["proj", "floor", "ceil", "sim85"],
-                index=0,
+                _PROJ_STYLE_OPTIONS,
+                index=_PROJ_STYLE_OPTIONS.index(_cur_proj_style),
                 key="opt_proj_style",
                 help=(
                     "proj = base projection | floor = conservative / cash-game | "
