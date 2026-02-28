@@ -299,6 +299,77 @@ def build_multiple_lineups_with_exposure(
         prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=solver_time_limit))
         if prob.status != 1:
             reason = pulp.LpStatus.get(prob.status, f"status={prob.status}")
+            # Fallback: retry without exposure caps to diagnose / recover from
+            # cap-exhaustion infeasibility (tight MAX_EXPOSURE settings).
+            capped_player_indices = [i for i in range(n) if appearance_count[i] >= max_appearances]
+            if capped_player_indices:
+                prob2 = pulp.LpProblem(f"lineup_{lu_num}_fallback", pulp.LpMaximize)
+                x2 = {}
+                for i in range(n):
+                    for s in DK_POS_SLOTS:
+                        x2[(i, s)] = pulp.LpVariable(f"x2_{i}_{s}_{lu_num}", cat="Binary")
+                if own_weight > 0 and any("leverage" in p for p in players):
+                    prob2 += pulp.lpSum(
+                        (
+                            (1 - own_weight) * players[i]["proj"]
+                            + own_weight * players[i]["proj"] * players[i].get("leverage", 0.5)
+                        )
+                        * x2[(i, s)]
+                        for i in range(n)
+                        for s in DK_POS_SLOTS
+                    )
+                else:
+                    prob2 += pulp.lpSum(
+                        players[i]["proj"] * x2[(i, s)]
+                        for i in range(n)
+                        for s in DK_POS_SLOTS
+                    )
+                for s in DK_POS_SLOTS:
+                    prob2 += pulp.lpSum(x2[(i, s)] for i in range(n)) == 1
+                for i in range(n):
+                    prob2 += pulp.lpSum(x2[(i, s)] for s in DK_POS_SLOTS) <= 1
+                for i in range(n):
+                    for s in DK_POS_SLOTS:
+                        if s not in players[i]["_slots"]:
+                            prob2 += x2[(i, s)] == 0
+                salary_sum2 = pulp.lpSum(
+                    players[i]["salary"] * x2[(i, s)]
+                    for i in range(n)
+                    for s in DK_POS_SLOTS
+                )
+                prob2 += salary_sum2 <= salary_cap
+                prob2 += salary_sum2 >= min_salary
+                if pos_caps:
+                    for nat_pos, cap_val in pos_caps.items():
+                        eligible_players = [
+                            j for j in range(n)
+                            if nat_pos in players[j].get("pos", "").upper().split("/")
+                        ]
+                        if eligible_players:
+                            prob2 += pulp.lpSum(
+                                x2[(j, s)] for j in eligible_players for s in DK_POS_SLOTS
+                            ) <= cap_val
+                if lock_names:
+                    for j in range(n):
+                        if players[j].get("player_name", "") in lock_names:
+                            prob2 += pulp.lpSum(x2[(j, s)] for s in DK_POS_SLOTS) == 1
+                prob2.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=solver_time_limit))
+                if prob2.status == 1:
+                    print(
+                        f"[optimizer] Lineup {lu_num}: exposure cap relaxed for "
+                        f"{len(capped_player_indices)} player(s) — consider raising MAX_EXPOSURE"
+                    )
+                    for i in range(n):
+                        for s in DK_POS_SLOTS:
+                            if pulp.value(x2[(i, s)]) and pulp.value(x2[(i, s)]) > 0.5:
+                                row = dict(players[i])
+                                row["slot"] = s
+                                row["lineup_index"] = lu_num
+                                all_lineups.append(row)
+                                appearance_count[i] += 1
+                    if progress_callback is not None:
+                        progress_callback(lu_num + 1, num_lineups)
+                    continue
             cancel_reasons.append((lu_num, reason))
             print(f"[optimizer] Lineup {lu_num} cancelled: {reason}")
             if progress_callback is not None:
