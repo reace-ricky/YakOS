@@ -1,7 +1,9 @@
 """YakOS DFS Optimizer – Ricky's Slate Room + Calibration Lab."""
 
 import sys
+import os
 from typing import Dict, Any, Tuple
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -124,6 +126,17 @@ def run_optimizer(
     return lineups_df, exposures_df
 
 
+@st.cache_data
+def load_historical_lineups() -> pd.DataFrame:
+    """Load historical lineups CSV from repo data/ folder."""
+    csv_path = Path(__file__).parent / "data" / "historical_lineups.csv"
+    if csv_path.exists():
+        df = pd.read_csv(csv_path)
+        df["slate_date"] = pd.to_datetime(df["slate_date"]).dt.date
+        return df
+    return pd.DataFrame()
+
+
 # -----------------------------
 # Streamlit App Layout
 # -----------------------------
@@ -208,7 +221,7 @@ with tab_front:
                 st.warning("No games detected in pool for Showdown. Upload a valid CSV.")
                 showdown_game = None
 
-    # Contest type selector (drives presets later; today it is just context)
+    # Contest type selector
     contest_type = st.selectbox(
         "Contest Type",
         ["GPP", "50/50", "Single Entry", "MME", "Captain"],
@@ -258,7 +271,6 @@ with tab_front:
         )
 
     if pool_for_opt is not None and not pool_for_opt.empty:
-        # Hard-coded small preset: 5 lineups, 0.35 max exposure, 46,500 min salary
         preset_lineups_df, _ = run_optimizer(
             pool_for_opt,
             num_lineups=5,
@@ -268,7 +280,6 @@ with tab_front:
 
         if preset_lineups_df is not None and not preset_lineups_df.empty:
             st.success("Ricky generated 5 featured lineups for this context.")
-            # Show them one by one in a simple viewer
             unique_lineups_preset = sorted(preset_lineups_df["lineup_id"].unique())
             num_preset = len(unique_lineups_preset)
             preset_idx = st.number_input(
@@ -283,7 +294,7 @@ with tab_front:
             total_salary = rows["salary"].sum()
             total_proj = rows["proj"].sum()
             st.markdown(
-                f"**Featured Lineup {preset_idx}** — Salary: {int(total_salary):,} | Proj: {total_proj:.2f}"
+                f"**Featured Lineup {preset_idx}** -- Salary: {int(total_salary):,} | Proj: {total_proj:.2f}"
             )
 
             display_cols = ["name", "team", "pos", "salary", "proj"]
@@ -376,7 +387,7 @@ with tab_front:
 
         with col_view_right:
             st.markdown(
-                f"**Lineup {lineup_number}** — Salary: {int(total_salary):,} | Proj: {total_proj:.2f}"
+                f"**Lineup {lineup_number}** -- Salary: {int(total_salary):,} | Proj: {total_proj:.2f}"
             )
 
         display_cols = ["name", "team", "pos", "salary", "proj"]
@@ -430,67 +441,138 @@ with tab_lab:
 
     st.success("Admin access granted. Welcome to the lab.")
 
-    # Filters
+    # --- Load historical data from repo ---
+    hist_df = load_historical_lineups()
+
+    if hist_df.empty:
+        st.error("No historical lineups found in data/historical_lineups.csv.")
+        st.stop()
+
+    # --- Filters ---
     st.markdown("### 1. Filters")
 
-col_filt_left, col_filt_right = st.columns(2)
-with col_filt_left:
-    lab_date = st.date_input("Slate date", key="lab_slate_date")
-    lab_slate_type = st.selectbox(
-        "Slate Type",
-        ["Classic", "Showdown Captain"],
-        index=0,
-        key="lab_slate_type",
-    )
-with col_filt_right:
-    lab_contest_type = st.selectbox(
-        "Contest Type",
-        ["GPP", "50/50", "Single Entry", "MME", "Captain"],
-        index=0,
-        key="lab_contest_type",
-    )
-    lab_profile = st.selectbox(
-        "Ricky Profile",
-        ["Default", "Ricky_GPP", "Ricky_Cash", "Ricky_SE", "Ricky_Captain"],
-        index=0,
-        key="lab_profile",
-    )
+    available_dates = sorted(hist_df["slate_date"].unique())
+    available_contests = sorted(hist_df["contest_name"].unique())
 
-    st.markdown("---")
-
-    # Panel A: Projection vs Actuals
-    st.markdown("### 2. Projection vs Actuals")
-
-    st.write(
-        "Upload historical lineups and outcomes to compare YakOS vs external projection sources."
-    )
-
-    hist_file = st.file_uploader(
-        "Upload historical lineups CSV",
-        type=["csv"],
-        help=(
-            "Expected columns (example): slate_date, contest_type, lineup_id, player_name, salary, "
-            "yak_proj, rg_proj, fp_proj, actual_points."
-        ),
-        key="lab_hist_upload",
-    )
-
-    if hist_file is not None:
-        hist_df = pd.read_csv(hist_file)
-        st.write("Preview of historical data (first 200 rows):")
-        st.dataframe(hist_df.head(200), use_container_width=True, height=250)
-
-        st.info(
-            "Next step: filter by the controls above and compute error metrics and calibration charts "
-            "for YakOS vs RG vs FantasyPros."
+    col_filt_left, col_filt_right = st.columns(2)
+    with col_filt_left:
+        lab_date = st.selectbox(
+            "Slate date",
+            options=available_dates,
+            index=0,
+            key="lab_slate_date",
         )
-    else:
-        st.info("Upload a historical CSV to start calibration work.")
+    with col_filt_right:
+        # Filter contests to selected date
+        contests_for_date = sorted(
+            hist_df[hist_df["slate_date"] == lab_date]["contest_name"].unique()
+        )
+        lab_contest = st.selectbox(
+            "Contest",
+            options=["All"] + contests_for_date,
+            index=0,
+            key="lab_contest_name",
+        )
+
+    # Apply filters
+    filtered_df = hist_df[hist_df["slate_date"] == lab_date].copy()
+    if lab_contest != "All":
+        filtered_df = filtered_df[filtered_df["contest_name"] == lab_contest].copy()
 
     st.markdown("---")
 
-    # Panel B: Sims
-    st.markdown("### 3. Contest Sims (Placeholder)")
+    # --- Panel A: Lineup Viewer + Actuals ---
+    st.markdown("### 2. Historical Lineups & Actuals")
+
+    lineup_ids = sorted(filtered_df["lineup_id"].unique())
+    n_lineups = len(lineup_ids)
+
+    if n_lineups == 0:
+        st.warning("No lineups found for the selected filters.")
+    else:
+        # Lineup summary table
+        lineup_summaries = []
+        for lid in lineup_ids:
+            lu = filtered_df[filtered_df["lineup_id"] == lid]
+            lineup_summaries.append({
+                "lineup_id": lid,
+                "total_salary": int(lu["salary"].sum()),
+                "total_actual_pts": lu["actual_points"].sum(),
+                "avg_field_pct": lu["field_pct"].mean(),
+                "players": len(lu),
+            })
+
+        summary_df = pd.DataFrame(lineup_summaries)
+        st.dataframe(summary_df, use_container_width=True, height=200)
+
+        # KPIs across all filtered lineups
+        col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
+        col_kpi1.metric("Lineups", f"{n_lineups}")
+        col_kpi2.metric("Best lineup pts", f"{summary_df['total_actual_pts'].max():.1f}")
+        col_kpi3.metric("Avg lineup pts", f"{summary_df['total_actual_pts'].mean():.1f}")
+        col_kpi4.metric("Avg field %", f"{summary_df['avg_field_pct'].mean():.1f}%")
+
+        # Individual lineup viewer
+        st.markdown("#### Lineup Detail")
+
+        lab_lineup_idx = st.number_input(
+            "Lineup #",
+            min_value=1,
+            max_value=n_lineups,
+            value=1,
+            step=1,
+            key="lab_lineup_idx",
+        )
+        selected_lid = lineup_ids[lab_lineup_idx - 1]
+        lu_detail = filtered_df[filtered_df["lineup_id"] == selected_lid].copy()
+
+        total_sal = int(lu_detail["salary"].sum())
+        total_pts = lu_detail["actual_points"].sum()
+        avg_field = lu_detail["field_pct"].mean()
+
+        st.markdown(
+            f"**Lineup {lab_lineup_idx}** -- Salary: {total_sal:,} | "
+            f"Actual pts: {total_pts:.1f} | Avg field: {avg_field:.1f}%"
+        )
+
+        detail_cols = ["pos", "player", "team", "salary", "field_pct", "actual_points"]
+        st.dataframe(
+            lu_detail[detail_cols],
+            use_container_width=True,
+            height=280,
+        )
+
+    st.markdown("---")
+
+    # --- Panel B: Player-level actuals across all filtered lineups ---
+    st.markdown("### 3. Player Performance (Actuals)")
+
+    if not filtered_df.empty:
+        player_stats = (
+            filtered_df.groupby(["player", "team", "salary"])
+            .agg(
+                appearances=("lineup_id", "nunique"),
+                avg_actual_pts=("actual_points", "mean"),
+                avg_field_pct=("field_pct", "mean"),
+            )
+            .reset_index()
+            .sort_values("avg_actual_pts", ascending=False)
+        )
+        player_stats["pts_per_1k"] = (
+            player_stats["avg_actual_pts"] / (player_stats["salary"] / 1000)
+        ).round(2)
+
+        st.dataframe(player_stats, use_container_width=True, height=350)
+
+        # Value highlights
+        st.markdown("#### Top Value Plays (pts per $1K salary)")
+        top_value = player_stats.nlargest(5, "pts_per_1k")
+        st.dataframe(top_value, use_container_width=True, height=200)
+
+    st.markdown("---")
+
+    # --- Panel C: Contest Sims (Placeholder) ---
+    st.markdown("### 4. Contest Sims (Placeholder)")
 
     st.write(
         "This section will run game and contest simulations for the selected slate and contest type, "
@@ -505,12 +587,19 @@ with col_filt_right:
 
     st.markdown("---")
 
-    # Panel C: Ricky Profile Editor
-    st.markdown("### 4. Ricky Profile Editor (Placeholder)")
+    # --- Panel D: Ricky Profile Editor ---
+    st.markdown("### 5. Ricky Profile Editor (Placeholder)")
 
     st.write(
         "Adjust how Ricky balances projection, ceiling, ownership, and correlation for each contest type. "
         "Today these sliders are placeholders; later they will write to real config files."
+    )
+
+    lab_profile = st.selectbox(
+        "Ricky Profile",
+        ["Default", "Ricky_GPP", "Ricky_Cash", "Ricky_SE", "Ricky_Captain"],
+        index=0,
+        key="lab_profile",
     )
 
     col_prof_left, col_prof_right = st.columns(2)
@@ -535,7 +624,7 @@ with col_filt_right:
             min_value=0.0,
             max_value=1.0,
             value=0.5,
-           step=0.05,
+            step=0.05,
         )
         stack_priority = st.slider(
             "Stack priority",
@@ -548,7 +637,7 @@ with col_filt_right:
     if st.button("Save Ricky Profile (placeholder)"):
         st.success(
             f"Saved profile '{lab_profile}' in memory "
-            "(placeholder – will later write to config and affect public lineups)."
+            "(placeholder -- will later write to config and affect public lineups)."
         )
 
     st.caption("YakOS v0.9 | Ricky's Slate Room + Calibration Lab")
