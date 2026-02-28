@@ -471,6 +471,20 @@ with tab_lab:
         selected_date = st.selectbox("Slate date", available_dates)
 
         slate_data = hist_df[hist_df["slate_date"] == selected_date].copy()
+                # Attach YakOS model projections for this slate
+        yak_file = Path(__file__).parent / "data" / f"yakos_projections_{selected_date}.csv"
+        if yak_file.exists():
+            yak = pd.read_csv(yak_file)
+            if "player" in yak.columns:
+                yak = yak.rename(columns={"player": "name"})
+            slate_data = slate_data.merge(
+                yak[["name", "proj"]],
+                on="name",
+                how="left",
+            )
+        else:
+            st.warning(f"No YakOS projections for {selected_date}. Add data/yakos_projections_{selected_date}.csv")
+
 
         # KPIs for the slate
         st.markdown("#### Slate Summary")
