@@ -13,6 +13,12 @@ if "yak_core" not in sys.modules:
     pass
 
 from yak_core.lineups import build_multiple_lineups_with_exposure  # type: ignore
+from yak_core.calibration import (  # type: ignore
+    run_backtest_lineups,
+    compute_calibration_metrics,
+    identify_calibration_gaps,
+    load_calibration_config,
+)
 
 
 # -----------------------------
@@ -64,6 +70,8 @@ def rename_rg_raw_to_yakos(df: pd.DataFrame) -> pd.DataFrame:
         "SALARY": "salary",
         "FPTS": "proj",
         "POWN": "own",
+        "CEIL": "ceil",
+        "FLOOR": "floor",
     }
     out = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
 
@@ -73,19 +81,27 @@ def rename_rg_raw_to_yakos(df: pd.DataFrame) -> pd.DataFrame:
             out[col] = 0
 
     out["salary"] = pd.to_numeric(out["salary"], errors="coerce")
-    for c in ["proj", "own"]:
+
+    # Clean ownership: strip % if present, then convert to float
+    if "own" in out.columns:
+        out["own"] = (
+            out["own"].astype(str).str.replace("%", "", regex=False).pipe(
+                pd.to_numeric, errors="coerce"
+            )
+        )
+
+    for c in ["proj", "ceil", "floor"]:
         if c in out.columns:
             out[c] = pd.to_numeric(out[c], errors="coerce")
-
-    # Clean ownership: strip % if present, convert to float
-    if "own" in out.columns:
-        out["own"] = out["own"].astype(str).str.replace("%", "").astype(float)
 
     out = out.dropna(subset=["name", "salary", "proj"])
     out = out[out["salary"] > 0]
 
     # Handle multi-position: take first position for optimizer
     out["pos"] = out["pos"].astype(str).str.split("/").str[0]
+
+    # Ensure player_id for optimizer compatibility
+    out["player_id"] = out["name"]
 
     return out
 
@@ -134,6 +150,12 @@ def ensure_session_state():
         st.session_state["current_lineup_index"] = 0
     if "pool_df" not in st.session_state:
         st.session_state["pool_df"] = None
+    if "lab_lineups_df" not in st.session_state:
+        st.session_state["lab_lineups_df"] = None
+    if "lab_metrics" not in st.session_state:
+        st.session_state["lab_metrics"] = None
+    if "lab_contest_type" not in st.session_state:
+        st.session_state["lab_contest_type"] = "GPP"
 
 
 def run_optimizer(
@@ -473,7 +495,7 @@ with tab_lab:
         slate_data = hist_df[hist_df["slate_date"] == selected_date].copy()
 
         # KPIs for the slate
-        st.markdown("#### Slate Summary")
+        st.markdown("#### Slate Summary (Historical Entries)")
         kpi_cols_lab = st.columns(4)
 
         num_lineups_hist = slate_data["lineup_id"].nunique()
@@ -503,22 +525,23 @@ with tab_lab:
         kpi_cols_lab[3].metric("Avg Error", f"{proj_error:+.1f}")
 
         # Player-level accuracy
-        st.markdown("##### Player Projection Accuracy")
+        st.markdown("##### Player Projection Accuracy (Historical Entries)")
         if "actual" in slate_data.columns:
+            agg_cols = {"actual": "mean", "salary": "first", "own": "mean"}
+            if "proj" in slate_data.columns:
+                agg_cols["proj"] = "mean"
             player_agg = (
                 slate_data.groupby("name")
-                .agg({
-                    "proj": "mean",
-                    "actual": "mean",
-                    "salary": "first",
-                    "own": "mean",
-                })
+                .agg(agg_cols)
                 .reset_index()
             )
-            player_agg["error"] = player_agg["actual"] - player_agg["proj"]
-            player_agg["abs_error"] = player_agg["error"].abs()
-            player_agg = player_agg.sort_values("abs_error", ascending=False)
-            st.dataframe(player_agg, use_container_width=True, height=400)
+            if "proj" in player_agg.columns:
+                player_agg["error"] = player_agg["actual"] - player_agg["proj"]
+                player_agg["abs_error"] = player_agg["error"].abs()
+                player_agg = player_agg.sort_values("abs_error", ascending=False)
+            else:
+                player_agg = player_agg.sort_values("actual", ascending=False)
+            st.dataframe(player_agg, use_container_width=True, height=300)
         else:
             st.info("Add an 'actual' column to historical data to see accuracy metrics.")
 
@@ -550,6 +573,180 @@ with tab_lab:
                     use_container_width=True,
                     height=400,
                 )
+
+        # ----------------------------------------------------------------
+        # Backtest Optimizer: generate lineups from RG pool + compare
+        # ----------------------------------------------------------------
+        st.markdown("---")
+        st.markdown("### Generate & Compare Backtest Lineups")
+        st.markdown(
+            "Run the YakOS optimizer on the RG pool for this slate date, "
+            "then compare those generated lineups against actual DFS scores."
+        )
+
+        rg_file_bt = RG_POOL_FILES.get(str(selected_date))
+        if not rg_file_bt:
+            st.info(
+                f"No RG pool file configured for {selected_date}. "
+                "Add an entry to `RG_POOL_FILES` to enable backtest generation."
+            )
+        else:
+            rg_pool_bt = load_rg_pool(rg_file_bt)
+            if rg_pool_bt.empty:
+                st.warning("RG pool file loaded but contains no valid players.")
+            else:
+                col_bt_l, col_bt_r = st.columns(2)
+                with col_bt_l:
+                    bt_num_lineups = st.slider(
+                        "Backtest lineups",
+                        min_value=1,
+                        max_value=150,
+                        value=20,
+                        step=1,
+                        key="bt_num_lineups",
+                    )
+                    bt_min_salary = st.number_input(
+                        "Min salary used",
+                        min_value=0,
+                        max_value=50000,
+                        value=46500,
+                        step=500,
+                        key="bt_min_salary",
+                    )
+                with col_bt_r:
+                    bt_max_exposure = st.slider(
+                        "Max exposure",
+                        min_value=0.05,
+                        max_value=1.0,
+                        value=0.35,
+                        step=0.05,
+                        key="bt_max_exposure",
+                    )
+                    bt_contest_type = st.selectbox(
+                        "Contest type",
+                        ["GPP", "50/50", "Single Entry", "MME", "Captain"],
+                        key="bt_contest_type_sel",
+                    )
+
+                if st.button("Run Backtest", type="primary", key="lab_backtest_btn"):
+                    with st.spinner("Running backtest optimizer..."):
+                        cal_config = load_calibration_config()
+                        try:
+                            bt_lineups_df, _ = run_backtest_lineups(
+                                pool=rg_pool_bt,
+                                num_lineups=bt_num_lineups,
+                                max_exposure=bt_max_exposure,
+                                min_salary_used=bt_min_salary,
+                                contest_type=bt_contest_type,
+                                config=cal_config,
+                            )
+                            if "actual" in slate_data.columns:
+                                actuals_lookup = (
+                                    slate_data[["name", "actual"]]
+                                    .drop_duplicates("name")
+                                )
+                                metrics = compute_calibration_metrics(
+                                    bt_lineups_df, actuals_lookup
+                                )
+                            else:
+                                metrics = None
+                                st.warning(
+                                    "Historical data has no 'actual' column — "
+                                    "lineups generated but comparison unavailable."
+                                )
+                            st.session_state["lab_lineups_df"] = bt_lineups_df
+                            st.session_state["lab_metrics"] = metrics
+                            st.session_state["lab_contest_type"] = bt_contest_type
+                            st.success(
+                                f"Generated {bt_lineups_df['lineup_id'].nunique()} "
+                                "backtest lineups."
+                            )
+                        except Exception as e:
+                            st.error(f"Backtest error: {e}")
+
+                # Display results (persisted across re-renders)
+                if st.session_state["lab_lineups_df"] is not None:
+                    bt_lineups_df = st.session_state["lab_lineups_df"]
+                    metrics = st.session_state["lab_metrics"]
+                    used_contest_type = st.session_state["lab_contest_type"]
+
+                    st.markdown("#### Backtest Results")
+
+                    if metrics is not None:
+                        ll = metrics["lineup_level"]
+
+                        kpi_cols_bt = st.columns(4)
+                        kpi_cols_bt[0].metric("Lineups", len(ll["df"]))
+                        kpi_cols_bt[1].metric(
+                            "Avg Projected", f"{ll['avg_proj']:.1f}"
+                        )
+                        kpi_cols_bt[2].metric(
+                            "Avg Actual", f"{ll['avg_actual']:.1f}"
+                        )
+                        kpi_cols_bt[3].metric(
+                            "Avg Error", f"{ll['avg_error']:+.1f}"
+                        )
+
+                        col_m1, col_m2, col_m3 = st.columns(3)
+                        col_m1.metric("MAE", f"{ll['mae']:.2f}")
+                        col_m2.metric("RMSE", f"{ll['rmse']:.2f}")
+                        col_m3.metric("R²", f"{ll['r_squared']:.3f}")
+
+                        st.caption(
+                            "⚠️ Actuals only cover players in historical contest entries. "
+                            "Players not in those lineups are scored as 0, which will "
+                            "deflate the avg actual."
+                        )
+
+                        with st.expander("Lineup-by-Lineup Results", expanded=True):
+                            st.dataframe(
+                                ll["df"], use_container_width=True, height=300
+                            )
+
+                        insights = identify_calibration_gaps(
+                            metrics, used_contest_type
+                        )
+                        if insights["findings"]:
+                            st.markdown("##### Calibration Insights")
+                            for finding in insights["findings"]:
+                                st.markdown(f"- {finding}")
+
+                        with st.expander(
+                            "Player Accuracy (generated lineups)", expanded=False
+                        ):
+                            st.dataframe(
+                                metrics["player_level"]["df"],
+                                use_container_width=True,
+                                height=400,
+                            )
+
+                        if "position_level" in metrics:
+                            with st.expander("By Position", expanded=False):
+                                st.dataframe(
+                                    metrics["position_level"]["df"],
+                                    use_container_width=True,
+                                )
+
+                        with st.expander("By Salary Bracket", expanded=False):
+                            st.dataframe(
+                                metrics["salary_bracket"]["df"],
+                                use_container_width=True,
+                            )
+
+                        if "ownership_level" in metrics:
+                            with st.expander("By Ownership Tier", expanded=False):
+                                st.dataframe(
+                                    metrics["ownership_level"]["df"],
+                                    use_container_width=True,
+                                )
+
+                    st.download_button(
+                        label="Download backtest lineups CSV",
+                        data=to_csv_bytes(bt_lineups_df),
+                        file_name=f"yakos_backtest_{selected_date}.csv",
+                        mime="text/csv",
+                        key="bt_download",
+                    )
 
         st.markdown("---")
         st.caption("YakOS Calibration Lab v0.1 -- data-driven lineup refinement.")
