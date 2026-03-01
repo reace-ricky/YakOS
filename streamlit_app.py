@@ -1057,31 +1057,52 @@ with tab_lab:
             kq_cols[4].metric("Avg ownership", f"{avg_own:.1f}%")
             kq_cols[5].metric("Reviewed", n_reviewed)
 
+            # Merge current pool projections (floor, ceil, proj_own) into display
+            _cal_pool = st.session_state.get("pool_df")
+            _queue_display = date_queue.copy()
+            if _cal_pool is not None and not _cal_pool.empty:
+                _pool_extra_cols = [
+                    c for c in ["floor", "ceil"]
+                    if c in _cal_pool.columns and c not in _queue_display.columns
+                ]
+                if "proj_own" not in _queue_display.columns and "ownership" in _cal_pool.columns:
+                    _pool_extra_cols.append("ownership")
+                if _pool_extra_cols:
+                    _pool_merge = (
+                        _cal_pool[["player_name"] + _pool_extra_cols]
+                        .rename(columns={"player_name": "name", "ownership": "proj_own"})
+                        .groupby("name", as_index=False)
+                        .first()
+                    )
+                    _queue_display = _queue_display.merge(_pool_merge, on="name", how="left")
+
             # Build display columns: exclude lineup_id, contest_name, contest_entry,
             # contest_entries (noise); focus on pts / own % / mins
             _queue_hide = {"lineup_id", "contest_name", "contest_entry", "contest_entries"}
             _queue_prefer = [
                 "slate_date", "pos", "team", "name", "salary",
-                "proj", "actual", "proj_own", "own",
+                "proj", "floor", "ceil", "actual", "proj_own", "own",
                 "proj_minutes", "actual_minutes",
                 "queue_status",
             ]
             _queue_display_cols = [
-                c for c in _queue_prefer if c in date_queue.columns
+                c for c in _queue_prefer if c in _queue_display.columns
             ] + [
-                c for c in date_queue.columns
+                c for c in _queue_display.columns
                 if c not in _queue_prefer and c not in _queue_hide
             ]
 
             # ── Review & Action — check rows, pick a bubble, hit Apply ──
             st.markdown("#### Review & Action")
-            queue_edit_df = date_queue[_queue_display_cols].copy()
+            queue_edit_df = _queue_display[_queue_display_cols].copy()
             queue_edit_df.insert(0, "✓", False)
             edited_queue = st.data_editor(
                 queue_edit_df,
                 column_config={
                     "✓": st.column_config.CheckboxColumn("✓", default=False, width="small"),
                     "proj": st.column_config.NumberColumn("Proj Pts", format="%.1f"),
+                    "floor": st.column_config.NumberColumn("Floor", format="%.1f"),
+                    "ceil": st.column_config.NumberColumn("Ceil", format="%.1f"),
                     "actual": st.column_config.NumberColumn("Act Pts", format="%.1f"),
                     "proj_own": st.column_config.NumberColumn("Proj Own %", format="%.1f"),
                     "own": st.column_config.NumberColumn("Act Own %", format="%.1f"),
@@ -1151,23 +1172,6 @@ with tab_lab:
                         st.rerun()
                 else:
                     st.info("No 'Other' root causes logged yet.")
-
-            _cal_pool = st.session_state.get("pool_df")
-            if _cal_pool is not None and not _cal_pool.empty:
-                with st.expander("📊 Player Projections", expanded=True):
-                    _cal_proj_cols = [
-                        c for c in ["player_name", "pos", "team", "salary", "proj", "floor", "ceil", "ownership"]
-                        if c in _cal_pool.columns
-                    ]
-                    _cal_sort_col = "proj" if "proj" in _cal_proj_cols else (_cal_proj_cols[0] if _cal_proj_cols else None)
-                    _cal_proj_display = _cal_pool[_cal_proj_cols].reset_index(drop=True)
-                    if _cal_sort_col:
-                        _cal_proj_display = _cal_proj_display.sort_values(_cal_sort_col, ascending=False).reset_index(drop=True)
-                    st.dataframe(
-                        _cal_proj_display,
-                        use_container_width=True,
-                        hide_index=True,
-                    )
 
     # ---- Stack Hit Log ----
     st.markdown("---")
