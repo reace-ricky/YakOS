@@ -83,12 +83,181 @@ def fetch_live_opt_pool(slate_date, cfg):
     return df
 
 
+def _calc_dk_nba_fp(stats: dict) -> float:
+    """Calculate DraftKings NBA classic fantasy points from raw box score stats.
+
+    Scoring: PTS +1, 3PM +0.5, REB +1.25, AST +1.5, STL +2, BLK +2, TOV -0.5,
+    double-double bonus +1.5, triple-double bonus +3.
+    """
+
+    def _f(*keys: str) -> float:
+        for k in keys:
+            v = stats.get(k)
+            if v is not None:
+                try:
+                    return float(v)
+                except (ValueError, TypeError):
+                    pass
+        return 0.0
+
+    pts = _f("pts", "points", "PTS")
+    reb = _f("reb", "rebounds", "REB", "totalReb")
+    ast = _f("ast", "assists", "AST")
+    stl = _f("stl", "steals", "STL")
+    blk = _f("blk", "blocks", "BLK")
+    tov = _f("TOV", "to", "turnovers", "tov")
+    fg3m = _f("fg3m", "threePM", "three_made", "3PM", "tpm")
+
+    fp = (
+        pts
+        + (fg3m * 0.5)
+        + (reb * 1.25)
+        + (ast * 1.5)
+        + (stl * 2.0)
+        + (blk * 2.0)
+        - (tov * 0.5)
+    )
+
+    # Double-double (+1.5) / triple-double (+3) bonuses
+    cats = sum(1 for c in [pts, reb, ast, stl, blk] if c >= 10)
+    if cats >= 3:
+        fp += 3.0
+    elif cats >= 2:
+        fp += 1.5
+
+    return round(fp, 2)
+
+
+def _fetch_actuals_from_box_scores(date_key: str, cfg: dict) -> pd.DataFrame:
+    """Fetch actual DK fantasy points via ``getNBAGamesForDate`` + ``getNBABoxScore``.
+
+    This is the reliable fallback for *historical* dates where the
+    ``getNBADFS`` endpoint may not return player data.  It fetches every game
+    played on the requested date, pulls each game's box score, and either uses
+    the pre-calculated ``fantasyPoints.DraftKings`` value or computes DK FP
+    from raw stats via :func:`_calc_dk_nba_fp`.
+
+    Parameters
+    ----------
+    date_key : str
+        Date in ``YYYYMMDD`` or ``YYYY-MM-DD`` format.
+    cfg : dict
+        Must contain ``RAPIDAPI_KEY``.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: ``player_name``, ``actual_fp``.
+    """
+    api_key = _get_rapidapi_key(cfg)
+    clean = date_key.replace("-", "")
+    formatted = f"{clean[:4]}-{clean[4:6]}-{clean[6:8]}"
+
+    # Step 1: retrieve game IDs for the date
+    games_resp = requests.get(
+        "https://" + _TANK01_HOST + "/getNBAGamesForDate",
+        headers=_headers(api_key),
+        params={"gameDate": formatted},
+        timeout=30,
+    )
+    games_resp.raise_for_status()
+    games_data = games_resp.json()
+    games_body = games_data.get("body", games_data) if isinstance(games_data, dict) else games_data
+
+    if isinstance(games_body, dict):
+        games_list = games_body.get("games", [])
+        if not isinstance(games_list, list):
+            # Some API versions nest the game list under the first list-typed value
+            games_list = next((v for v in games_body.values() if isinstance(v, list)), [])
+    elif isinstance(games_body, list):
+        games_list = games_body
+    else:
+        games_list = []
+
+    if not games_list:
+        raise ValueError(f"No games found for {date_key}")
+
+    all_players: list = []
+
+    # Step 2: fetch box score for each game
+    for game in games_list:
+        if not isinstance(game, dict):
+            continue
+        game_id = (
+            game.get("gameID") or game.get("gameId") or game.get("game_id") or ""
+        )
+        if not game_id:
+            continue
+
+        box_resp = requests.get(
+            "https://" + _TANK01_HOST + "/getNBABoxScore",
+            headers=_headers(api_key),
+            params={"gameID": str(game_id)},
+            timeout=30,
+        )
+        box_resp.raise_for_status()
+        box_data = box_resp.json()
+        box_body = box_data.get("body", box_data) if isinstance(box_data, dict) else box_data
+
+        if isinstance(box_body, dict):
+            player_stats = box_body.get("playerStats", box_body.get("players", []))
+            if not isinstance(player_stats, list):
+                player_stats = []
+        elif isinstance(box_body, list):
+            player_stats = box_body
+        else:
+            player_stats = []
+
+        for p in player_stats:
+            if not isinstance(p, dict):
+                continue
+            name = (
+                p.get("displayName")
+                or p.get("longName")
+                or p.get("playerName")
+                or p.get("player")
+                or ""
+            )
+            if not name:
+                continue
+
+            # Prefer pre-calculated DK FP; fall back to computing from raw stats
+            fp_raw = None
+            fp_nested = p.get("fantasyPoints")
+            if isinstance(fp_nested, dict):
+                fp_raw = (
+                    fp_nested.get("DraftKings")
+                    or fp_nested.get("dkPoints")
+                    or fp_nested.get("dk")
+                    or fp_nested.get("DK")
+                )
+            elif fp_nested is not None:
+                fp_raw = fp_nested
+
+            try:
+                fp = float(fp_raw) if fp_raw is not None else _calc_dk_nba_fp(p)
+            except (ValueError, TypeError):
+                fp = _calc_dk_nba_fp(p)
+
+            all_players.append({"player_name": str(name), "actual_fp": fp})
+
+    if not all_players:
+        raise ValueError(f"No player actuals parsed from box scores for {date_key}")
+
+    df = pd.DataFrame(all_players)
+    print(f"[_fetch_actuals_from_box_scores] {len(df)} player actuals from box scores for {date_key}")
+    return df.reset_index(drop=True)
+
+
 def fetch_actuals_from_api(date_key: str, cfg: dict) -> pd.DataFrame:
     """Fetch actual DraftKings fantasy points for a completed slate from Tank01.
 
-    Calls the ``getNBADFS`` endpoint for a *past* date.  For completed games,
-    Tank01 returns the real DK fantasy points scored in the ``fantasyPoints``
-    field, which this function exposes as ``actual_fp``.
+    First attempts the ``getNBADFS`` endpoint (works when Tank01 has already
+    back-filled final fantasy points into the ``fantasyPoints`` field for the
+    requested date).  If that endpoint returns no usable player rows the
+    function falls back to :func:`_fetch_actuals_from_box_scores`, which calls
+    ``getNBAGamesForDate`` + ``getNBABoxScore`` — a more reliable path for
+    *historical* dates.
 
     Parameters
     ----------
@@ -107,25 +276,31 @@ def fetch_actuals_from_api(date_key: str, cfg: dict) -> pd.DataFrame:
 
     Raises
     ------
-    ValueError
-        If the API returns an empty payload or no player rows can be parsed.
     RuntimeError
-        If the HTTP request itself fails.
+        If both the DFS endpoint and the box-score fallback fail.
     """
     date_key_clean = date_key.replace("-", "")
+
+    # Try the DFS endpoint first (works for current/recent slates where
+    # Tank01 has back-filled actual fantasy points into "fantasyPoints")
     try:
         dfs_df = fetch_live_dfs(date_key_clean, cfg)
+        if not dfs_df.empty:
+            result = dfs_df[["player_name", "proj"]].copy()
+            result = result.rename(columns={"proj": "actual_fp"})
+            result["actual_fp"] = pd.to_numeric(result["actual_fp"], errors="coerce").fillna(0.0)
+            print(f"[fetch_actuals_from_api] {len(result)} player actuals via DFS endpoint for {date_key}")
+            return result.reset_index(drop=True)
+    except Exception:
+        pass  # fall through to box-score approach
+
+    # Fallback: box scores are always available for completed games
+    try:
+        df = _fetch_actuals_from_box_scores(date_key_clean, cfg)
+        print(f"[fetch_actuals_from_api] {len(df)} player actuals via box scores for {date_key}")
+        return df
     except Exception as exc:
         raise RuntimeError(f"Tank01 actuals API error for {date_key}: {exc}") from exc
-
-    if dfs_df.empty:
-        raise ValueError(f"No actuals returned from Tank01 for {date_key}")
-
-    result = dfs_df[["player_name", "proj"]].copy()
-    result = result.rename(columns={"proj": "actual_fp"})
-    result["actual_fp"] = pd.to_numeric(result["actual_fp"], errors="coerce").fillna(0.0)
-    print(f"[fetch_actuals_from_api] {len(result)} player actuals for {date_key}")
-    return result.reset_index(drop=True)
 
 
 def fetch_injury_updates(date_key: str, cfg: dict) -> list:

@@ -76,6 +76,7 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 49 | **Sim Module player accuracy table** — `build_sim_player_accuracy_table()` in `yak_core/sims.py` compares per-player sim projections to real actuals (MAE, RMSE, bias, hit rate ±10 FP, R²); actuals CSV uploader added to Sim Module section C in the Calibration Lab; player table sorted by abs error, with download button; 23 new unit tests in `tests/test_sim_player_accuracy.py` | `yak_core/sims.py`, `streamlit_app.py`, `tests/test_sim_player_accuracy.py` | latest |
 | 50 | **Sim Module redesign** — Section C in Calibration Lab rebuilt from scratch: mode toggle at top (🔴 Live / 📅 Historical Date); historical mode pre-fills actuals date picker with selected date; Custom Lineup Builder (DK Classic slot selectors from sim pool with salary+proj summary); Sim vs Custom Lineup Comparison (side-by-side best-sim lineup vs custom, actual scores, "What the Sim Missed" miss-analysis table with download) | `streamlit_app.py` | latest |
 | 51 | **Fix Custom Lineup Builder multi-position filtering** — `_players_for_slot` now splits position strings on "/" before matching eligible slots, so dual-eligibility players (e.g. "SG/SF", "PF/C", "PG/SG", "SF/PF") appear in all correct slot dropdowns; also added `.fillna("")` guard for null position values | `streamlit_app.py` | latest |
+| 52 | **Fix Tank01 actuals fetch for historical dates** — `fetch_actuals_from_api` now tries `getNBADFS` first and falls back to `getNBAGamesForDate` + `getNBABoxScore`; added `_calc_dk_nba_fp()` for DK FP calculation from raw box scores; 23 new unit tests in `tests/test_live_actuals.py` | `yak_core/live.py`, `tests/test_live_actuals.py` | latest |
 
 ---
 
@@ -149,7 +150,8 @@ YakOS/
 │   ├── test_backtest_engine.py          (19 tests)
 │   ├── test_slate_room_features.py      (40 tests)
 │   ├── test_sim_backtest.py             (19 tests)
-│   └── test_sim_player_accuracy.py      (23 tests)
+│   ├── test_sim_player_accuracy.py      (23 tests)
+│   └── test_live_actuals.py             (23 tests)
 └── requirements.txt
 ```
 
