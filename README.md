@@ -8,6 +8,8 @@ Right Angle Ricky DFS Optimizer — an NBA DraftKings lineup optimizer with a St
   - **Lock players** into every lineup
   - **Exclude players** from the pool
   - **Bump projections** up or down by a custom multiplier
+  - **Lineup diversity** — set *Max pair appearances* to prevent any two players from teaming up more than N times across all lineups
+  - **Showdown Captain mode** — full CPT + 5 FLEX optimizer with correct 1.5× captain salary and scoring; exports DK Showdown bulk-upload CSV
 - **🔬 Calibration Lab**
   - Calibration Queue — review prior-day lineups and action them (reviewed / apply_config / dismissed)
   - Ad Hoc Historical Lineup Builder — backtest against real actuals and inspect projection accuracy by player, position, and salary bracket
@@ -25,6 +27,15 @@ streamlit run streamlit_app.py
 ```
 
 The app will open at **http://localhost:8501**.
+
+### Docker (one-click)
+
+```bash
+docker compose up
+```
+
+The app will be available at **http://localhost:8501**.  
+Pass your Tank01 key via environment variable: `RAPIDAPI_KEY=your_key docker compose up`.
 
 ### Streamlit Community Cloud (free web deployment)
 

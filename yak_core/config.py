@@ -11,10 +11,15 @@ YAKOS_ROOT: str = os.environ.get(
     str(Path(__file__).resolve().parent.parent),
 )
 
-# ----- DK NBA roster shape -----
+# ----- DK NBA roster shape (Classic) -----
 DK_LINEUP_SIZE = 8
 DK_POS_SLOTS = ["PG", "SG", "SF", "PF", "C", "G", "F", "UTIL"]
 SALARY_CAP = 50000
+
+# ----- DK NBA roster shape (Showdown Captain) -----
+DK_SHOWDOWN_LINEUP_SIZE = 6
+DK_SHOWDOWN_SLOTS = ["CPT", "FLEX", "FLEX", "FLEX", "FLEX", "FLEX"]
+DK_SHOWDOWN_CAPTAIN_MULTIPLIER = 1.5  # Captain 1.5× salary AND 1.5× fantasy points
 
 # ----- Default config for historical NBA DK GPP -----
 DEFAULT_CONFIG: Dict[str, Any] = {
@@ -45,6 +50,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "LOCK": [],            # player names forced into every lineup
     "EXCLUDE": [],         # player names removed from pool
     "BUMP": {},            # {player_name: multiplier} e.g. {"LeBron": 1.2}
+    # Lineup diversity controls
+    "MAX_PAIR_APPEARANCES": 0,   # 0 = disabled; N = max times any two players can share a lineup
     # Model projection tuning
     "MODEL_HIST_WEIGHT": 0.6,   # weight on historical avg vs salary-implied
     "MODEL_POS_REGRESS": 0.2,   # regress toward position-level mean
