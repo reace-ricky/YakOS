@@ -65,6 +65,7 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 38 | **Auto-load sample pool on startup** — `NBADK20260227.csv` is loaded at first run so the dashboard immediately shows projections without manual upload; fixed NaN ownership KPI display | `streamlit_app.py` | latest |
 | 39 | **Player Projections table in Calibration Lab Review & Action** — same sorted projections expander (expanded by default) shown under Review & Action in Section A | `streamlit_app.py` | latest |
 | 40 | **Merge player projections into Review & Action table** — `floor`, `ceil` (and `proj_own` if missing) from pool joined into the Review & Action data editor; proj pts before act pts, proj own % before act own %; standalone expander removed | `streamlit_app.py` | latest |
+| 41 | **Calibration KPI Dashboard** — `📊 Calibration KPI Dashboard` section at top of Calibration Lab: strategy KPIs (total lineups, hit rate, avg score), points accuracy (mean error, std, MAE, RMSE, R²) at lineup and player level, proj vs actual scatter chart, salary-bracket error table, ownership bucket calibration, and conditional minutes accuracy metrics | `yak_core/scoring.py`, `streamlit_app.py` | latest |
 
 ---
 
