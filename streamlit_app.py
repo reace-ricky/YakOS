@@ -70,6 +70,8 @@ def rename_rg_columns_to_yakos(df: pd.DataFrame) -> pd.DataFrame:
         "OPP": "opponent",
         "FPTS": "proj",
         "OWNERSHIP": "ownership",
+        "POWN": "proj_own",
+        "MINUTES": "minutes",
         "FLOOR": "floor",
         "CEIL": "ceil",
         "SIM85TH": "sim85",
@@ -103,7 +105,7 @@ def rename_rg_columns_to_yakos(df: pd.DataFrame) -> pd.DataFrame:
 
     # Standardize numeric dtypes
     out["salary"] = pd.to_numeric(out["salary"], errors="coerce")
-    for c in ["proj", "ceil", "floor", "sim85", "ownership"]:
+    for c in ["proj", "ceil", "floor", "sim85", "ownership", "minutes"]:
         if c in out.columns:
             out[c] = pd.to_numeric(out[c], errors="coerce")
 
@@ -111,6 +113,12 @@ def rename_rg_columns_to_yakos(df: pd.DataFrame) -> pd.DataFrame:
     if "ownership" in out.columns:
         out["ownership"] = (
             out["ownership"].astype(str).str.replace("%", "", regex=False).pipe(pd.to_numeric, errors="coerce")
+        )
+
+    # Clean proj_own: strip trailing % (RG exports as "1.64%") then convert to float
+    if "proj_own" in out.columns:
+        out["proj_own"] = (
+            out["proj_own"].astype(str).str.replace("%", "", regex=False).pipe(pd.to_numeric, errors="coerce")
         )
 
     # Drop rows with missing salary or projection
@@ -1125,6 +1133,66 @@ with tab_lab:
                     used_dk_contest = st.session_state["lab_contest_type"]
 
                     st.markdown("#### Backtest Results")
+
+                    with st.expander("📋 Lineup Tickets", expanded=True):
+                        _lineup_ids = sorted(bt_lu_df["lineup_index"].unique())
+                        _sel_lu = st.selectbox(
+                            "Select lineup",
+                            _lineup_ids,
+                            format_func=lambda x: f"Lineup #{x + 1}",
+                            key="bt_ticket_lineup_sel",
+                        )
+                        _lu_rows = bt_lu_df[bt_lu_df["lineup_index"] == _sel_lu].copy()
+
+                        # Merge actual FP and actual ownership from slate_data
+                        if not slate_data.empty:
+                            _actuals = (
+                                slate_data[
+                                    [c for c in ["name", "actual", "own"] if c in slate_data.columns]
+                                ]
+                                .drop_duplicates("name")
+                                .rename(columns={"name": "player_name", "actual": "actual_fp", "own": "actual_own"})
+                            )
+                            _lu_rows = _lu_rows.merge(_actuals, on="player_name", how="left")
+
+                        # Build ordered ticket columns
+                        _ticket_cols = [c for c in ["slot", "player_name", "pos", "salary", "proj"] if c in _lu_rows.columns]
+                        if "proj_own" in _lu_rows.columns:
+                            _ticket_cols.append("proj_own")
+                        if "actual_own" in _lu_rows.columns:
+                            _ticket_cols.append("actual_own")
+                        if "minutes" in _lu_rows.columns:
+                            _ticket_cols.append("minutes")
+                        if "actual_fp" in _lu_rows.columns:
+                            _ticket_cols.append("actual_fp")
+
+                        _col_labels = {
+                            "slot": "Slot",
+                            "player_name": "Player",
+                            "pos": "Position",
+                            "salary": "Salary",
+                            "proj": "Proj FP",
+                            "proj_own": "Proj Own%",
+                            "actual_own": "Actual Own%",
+                            "minutes": "Proj Mins",
+                            "actual_fp": "Actual FP",
+                        }
+                        _ticket_df = (
+                            _lu_rows[_ticket_cols]
+                            .rename(columns=_col_labels)
+                            .reset_index(drop=True)
+                        )
+                        st.dataframe(_ticket_df, use_container_width=True)
+
+                        _tot_cols = st.columns(3)
+                        _tot_cols[0].metric("Total Salary", f"${_lu_rows['salary'].sum():,.0f}")
+                        _tot_cols[1].metric("Total Proj FP", f"{_lu_rows['proj'].sum():.1f}")
+                        if "actual_fp" in _lu_rows.columns:
+                            _missing = _lu_rows["actual_fp"].isna().sum()
+                            _actual_total = _lu_rows["actual_fp"].fillna(0).sum()
+                            _label = "Total Actual FP" if _missing == 0 else f"Total Actual FP ({_missing} missing→0)"
+                            _tot_cols[2].metric(_label, f"{_actual_total:.1f}")
+
                     if metrics is not None:
                         ll = metrics["lineup_level"]
                         kpi_bt = st.columns(4)
