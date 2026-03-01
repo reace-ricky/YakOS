@@ -77,6 +77,7 @@ from yak_core.sims import (  # type: ignore
     run_monte_carlo_for_lineups,
     simulate_live_updates,
     build_sim_player_accuracy_table,
+    compute_player_anomaly_table,
     SMASH_THRESHOLD as _SIM_SMASH_THRESHOLD,
     BUST_THRESHOLD as _SIM_BUST_THRESHOLD,
 )
@@ -488,6 +489,8 @@ def ensure_session_state():
         st.session_state["sim_hist_date"] = None
     if "sim_custom_lineup" not in st.session_state:
         st.session_state["sim_custom_lineup"] = []
+    if "sim_anomaly_df" not in st.session_state:
+        st.session_state["sim_anomaly_df"] = None
     if "ms_result" not in st.session_state:
         st.session_state["ms_result"] = None
     if "rapidapi_key" not in st.session_state:
@@ -1763,6 +1766,44 @@ with tab_lab:
                 help="Spread (pts) at which blowout minutes reduction kicks in (default 15).",
             )
 
+        st.markdown("**🎯 Sim Calibration Knobs**")
+        st.markdown("These knobs tune how the Monte Carlo sim classifies player outcomes (smash / bust) and scales upside / downside distributions.")
+        _sk1, _sk2 = st.columns(2)
+        with _sk1:
+            _ceiling_boost = st.slider(
+                "Ceiling boost (ceiling_boost)",
+                0.5, 2.0,
+                float(_cal_knobs.get("ceiling_boost", 1.0)),
+                step=0.05,
+                key="knob_ceiling_boost",
+                help="Multiplier on upside outcomes above projection (>1 = more boom variance; default 1.0).",
+            )
+            _floor_dampen = st.slider(
+                "Floor dampen (floor_dampen)",
+                0.0, 1.5,
+                float(_cal_knobs.get("floor_dampen", 1.0)),
+                step=0.05,
+                key="knob_floor_dampen",
+                help="Multiplier on downside outcomes below projection (<1 = tighter floor; default 1.0).",
+            )
+        with _sk2:
+            _smash_threshold = st.slider(
+                "Smash threshold (smash_threshold)",
+                1.0, 2.0,
+                float(_cal_knobs.get("smash_threshold", 1.3)),
+                step=0.05,
+                key="knob_smash_threshold",
+                help="Player smashes when outcome ≥ this × projection (default 1.3 = 30% over proj).",
+            )
+            _bust_threshold = st.slider(
+                "Bust threshold (bust_threshold)",
+                0.1, 0.9,
+                float(_cal_knobs.get("bust_threshold", 0.5)),
+                step=0.05,
+                key="knob_bust_threshold",
+                help="Player busts when outcome ≤ this × projection (default 0.5 = 50% of proj).",
+            )
+
         if st.button("Save projection knobs", key="knobs_proj_save"):
             st.session_state["cal_knobs"] = {
                 "ensemble_w_yakos": _ens_w_yakos,
@@ -1770,6 +1811,10 @@ with tab_lab:
                 "ensemble_w_rg": _ens_w_rg,
                 "b2b_discount": _b2b_discount,
                 "blowout_threshold": _blowout_threshold,
+                "ceiling_boost": _ceiling_boost,
+                "floor_dampen": _floor_dampen,
+                "smash_threshold": _smash_threshold,
+                "bust_threshold": _bust_threshold,
             }
             st.success("Projection knobs saved to session.")
 
@@ -2067,6 +2112,7 @@ with tab_lab:
                         archetype=sim_archetype,
                     )
                     if sim_lu_df is not None and not sim_lu_df.empty:
+                        _sim_cal_knobs = st.session_state.get("cal_knobs", {})
                         sim_res = run_monte_carlo_for_lineups(
                             sim_lu_df, n_sims=sim_n_sims, volatility_mode=sim_vol
                         )
@@ -2074,6 +2120,14 @@ with tab_lab:
                         annotated_sim = ricky_annotate(sim_lu_df, sim_res)
                         st.session_state["sim_lineups_df"] = annotated_sim
                         st.session_state["sim_results_df"] = sim_res
+                        # Compute per-player anomaly table using cal_knobs
+                        _anomaly_df = compute_player_anomaly_table(
+                            active_sim_pool,
+                            sim_lu_df,
+                            n_sims=sim_n_sims,
+                            cal_knobs=_sim_cal_knobs,
+                        )
+                        st.session_state["sim_anomaly_df"] = _anomaly_df
                         # Clear any previous custom lineup when sims are re-run
                         st.session_state["sim_custom_lineup"] = []
                         st.success(
@@ -2121,6 +2175,36 @@ with tab_lab:
                     "sim_p15": "P15 (Floor)",
                 })
                 st.dataframe(_sim_display, use_container_width=True, height=300)
+
+            # ── Sim Anomaly Detection ─────────────────────────────────────────
+            _sim_anomaly = st.session_state.get("sim_anomaly_df")
+            if _sim_anomaly is not None and not _sim_anomaly.empty:
+                _high_lev = _sim_anomaly[_sim_anomaly["Flag"] == "🔥 HIGH LEVERAGE"]
+                _val_traps = _sim_anomaly[_sim_anomaly["Value Trap"]]
+                _top_play = _sim_anomaly.iloc[0] if len(_sim_anomaly) > 0 else None
+                _summary_parts = [
+                    f"Sim ran **{sim_n_sims}** iterations across **{sim_n_lu}** lineups.",
+                    f"Found **{len(_high_lev)}** high-leverage player(s) (smash rate > own%).",
+                    f"Found **{len(_val_traps)}** value trap(s) (bust rate > 40% despite high salary).",
+                ]
+                if _top_play is not None:
+                    _summary_parts.append(
+                        f"Top leverage play: **{_top_play['Player']}** "
+                        f"({_top_play['Smash%']:.1f}% smash, {_top_play['Own%']:.1f}% owned)."
+                    )
+                st.info("  \n".join(_summary_parts))
+
+                st.markdown("#### 🔍 Sim Anomalies — Leverage Spots")
+                st.caption(
+                    "Per-player simulation breakdown. "
+                    "Leverage Score = Smash% / Own% — higher means more upside relative to expected ownership. "
+                    "🔥 HIGH LEVERAGE = score > 3.0. ⚠️ Value Trap = busts frequently despite high salary."
+                )
+                _anomaly_display = _sim_anomaly.copy()
+                _anomaly_display["Value Trap"] = _anomaly_display["Value Trap"].apply(
+                    lambda x: "⚠️ VALUE TRAP" if x else ""
+                )
+                st.dataframe(_anomaly_display, use_container_width=True, height=350)
 
             # ── Custom Lineup Builder ─────────────────────────────────────────
             st.markdown("---")
@@ -2562,7 +2646,9 @@ with tab_lab:
                         "| **Actual FP** | Real DraftKings fantasy points scored |\n"
                         "| **Error** | Proj − Actual (positive = over-projected) |\n"
                         "| **Abs Error** | |Error| — magnitude of miss |\n"
-                        "| **Err %** | Error as % of actual score |"
+                        "| **Err %** | Error as % of actual score |\n"
+                        "| **Error%** | abs(Proj − Actual) / Proj × 100 |\n"
+                        "| **Outlier** | ✅ when Error% > 30% — biggest projection misses |"
                     )
                     _acc_display = _acc["player_df"].rename(columns={
                         "name": "Name",
@@ -2571,12 +2657,23 @@ with tab_lab:
                         "error": "Error",
                         "abs_error": "Abs Error",
                         "pct_error": "Err %",
-                    }).sort_values("Abs Error", ascending=False)
+                    })
                     _acc_display["Proj FP"] = _acc_display["Proj FP"].round(1)
                     _acc_display["Actual FP"] = _acc_display["Actual FP"].round(1)
                     _acc_display["Error"] = _acc_display["Error"].round(1)
                     _acc_display["Abs Error"] = _acc_display["Abs Error"].round(1)
                     _acc_display["Err %"] = _acc_display["Err %"].round(1)
+                    # Error% = abs(proj - actual) / proj * 100 (projection-relative)
+                    _acc_display["Error%"] = (
+                        _acc_display["Abs Error"] / _acc_display["Proj FP"].replace(0, float("nan")) * 100.0
+                    ).round(1)
+                    _acc_display["Outlier"] = _acc_display["Error%"].apply(
+                        lambda x: "✅" if pd.notna(x) and float(x) > 30.0 else ""
+                    )
+                    # Sort outliers to the top, then by Abs Error descending
+                    _acc_display = _acc_display.sort_values(
+                        ["Outlier", "Abs Error"], ascending=[False, False]
+                    )
                     st.dataframe(
                         _acc_display,
                         use_container_width=True,
