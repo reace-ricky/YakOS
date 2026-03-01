@@ -62,6 +62,7 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 35 | **Dashboard API fetch + projection fallback** — fetch pool from API directly on Ricky's Slate Room; salary-implied fallback when API returns 0 proj | `streamlit_app.py` | latest |
 | 36 | **Player Projections table on dashboard** — expanded by default, sorted by proj desc, clean columns, auto-sized | `streamlit_app.py` | latest |
 | 37 | **Remove contest_entry / contest_entries from Calibration Queue display** — also removed fixed height for auto-sizing | `streamlit_app.py` | latest |
+| 38 | **Auto-load sample pool on startup** — `NBADK20260227.csv` is loaded at first run so the dashboard immediately shows projections without manual upload; fixed NaN ownership KPI display | `streamlit_app.py` | latest |
 
 ---
 
