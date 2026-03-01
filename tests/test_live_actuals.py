@@ -1,5 +1,5 @@
 """Tests for Tank01 actuals fetching: _calc_dk_nba_fp,
-_fetch_actuals_from_box_scores, and fetch_actuals_from_api."""
+_fetch_actuals_from_box_scores, fetch_actuals_from_api, and fetch_live_dfs."""
 import pytest
 import pandas as pd
 from unittest.mock import patch, MagicMock
@@ -8,6 +8,7 @@ from yak_core.live import (
     _calc_dk_nba_fp,
     _fetch_actuals_from_box_scores,
     fetch_actuals_from_api,
+    fetch_live_dfs,
 )
 
 # ---------------------------------------------------------------------------
@@ -252,3 +253,78 @@ class TestFetchActualsFromApi:
         # box scores called with clean YYYYMMDD key
         mock_box.assert_called_once_with("20260227", self.CFG)
         assert not df.empty
+
+
+# ---------------------------------------------------------------------------
+# fetch_live_dfs — body dict unwrapping
+# ---------------------------------------------------------------------------
+
+def _make_dfs_response(json_body, status=200):
+    m = MagicMock()
+    m.status_code = status
+    m.json.return_value = json_body
+    m.raise_for_status = MagicMock()
+    return m
+
+
+_SAMPLE_PLAYERS = [
+    {"playerID": "1", "longName": "Alice", "teamAbv": "BOS", "pos": "SF",
+     "salary": "7500", "fantasyPoints": "35.0"},
+    {"playerID": "2", "longName": "Bob", "teamAbv": "LAL", "pos": "PG",
+     "salary": "8000", "fantasyPoints": "40.0"},
+]
+
+
+class TestFetchLiveDfsBodyParsing:
+    """Tests for fetch_live_dfs body dict unwrapping (Tank01 API fix)."""
+
+    CFG = {"RAPIDAPI_KEY": "test-key"}
+    DATE = "20260227"
+
+    @patch("yak_core.live.requests.get")
+    def test_body_as_list(self, mock_get):
+        """Plain list body is handled correctly."""
+        mock_get.return_value = _make_dfs_response(
+            {"statusCode": 200, "body": _SAMPLE_PLAYERS}
+        )
+        df = fetch_live_dfs(self.DATE, self.CFG)
+        assert len(df) == 2
+        assert set(df["player_name"]) == {"Alice", "Bob"}
+
+    @patch("yak_core.live.requests.get")
+    def test_body_as_draftkings_dict(self, mock_get):
+        """body = {'DraftKings': [...]} is unwrapped correctly."""
+        mock_get.return_value = _make_dfs_response(
+            {"statusCode": 200, "body": {"DraftKings": _SAMPLE_PLAYERS}}
+        )
+        df = fetch_live_dfs(self.DATE, self.CFG)
+        assert len(df) == 2
+        assert "Alice" in df["player_name"].values
+
+    @patch("yak_core.live.requests.get")
+    def test_body_as_dk_dict(self, mock_get):
+        """body = {'DK': [...]} variant is unwrapped correctly."""
+        mock_get.return_value = _make_dfs_response(
+            {"statusCode": 200, "body": {"DK": _SAMPLE_PLAYERS}}
+        )
+        df = fetch_live_dfs(self.DATE, self.CFG)
+        assert len(df) == 2
+
+    @patch("yak_core.live.requests.get")
+    def test_body_dict_fallback_to_longest_list(self, mock_get):
+        """Dict body with unknown key falls back to longest list value."""
+        mock_get.return_value = _make_dfs_response(
+            {"statusCode": 200, "body": {"unknownSite": _SAMPLE_PLAYERS, "meta": []}}
+        )
+        df = fetch_live_dfs(self.DATE, self.CFG)
+        assert len(df) == 2
+
+    @patch("yak_core.live.requests.get")
+    def test_salary_as_string_is_parsed(self, mock_get):
+        """Salary strings (e.g. '7500') are converted to int."""
+        mock_get.return_value = _make_dfs_response(
+            {"statusCode": 200, "body": _SAMPLE_PLAYERS}
+        )
+        df = fetch_live_dfs(self.DATE, self.CFG)
+        assert df["salary"].dtype in (int, "int64", "int32")
+        assert df["salary"].iloc[0] == 7500
