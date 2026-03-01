@@ -405,6 +405,14 @@ st.set_page_config(
 
 ensure_session_state()
 
+# ── Auto-load sample pool on first run so the dashboard shows projections ──
+if st.session_state.get("pool_df") is None:
+    _latest_sample = sorted(RG_POOL_FILES.keys())[-1] if RG_POOL_FILES else None
+    if _latest_sample:
+        _sample_df = load_rg_pool(RG_POOL_FILES[_latest_sample])
+        if not _sample_df.empty:
+            st.session_state["pool_df"] = _apply_proj_fallback(_sample_df)
+
 st.title("YakOS DFS Optimizer")
 
 # ============================================================
@@ -542,8 +550,9 @@ with tab_slate:
             avg_salary = pool_df["salary"].mean()
             median_proj = pool_df["proj"].median()
             top_proj = pool_df["proj"].max()
-            max_own = pool_df["ownership"].max() if "ownership" in pool_df.columns else None
-            avg_own = pool_df["ownership"].mean() if "ownership" in pool_df.columns else None
+            _own_series = pool_df["ownership"].dropna() if "ownership" in pool_df.columns else pd.Series(dtype=float)
+            max_own = _own_series.max() if not _own_series.empty else None
+            avg_own = _own_series.mean() if not _own_series.empty else None
 
             kpi_c1, kpi_c2, kpi_c3, kpi_c4, kpi_c5 = st.columns(5)
             kpi_c1.metric("Players", f"{n_players}")
