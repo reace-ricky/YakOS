@@ -966,7 +966,7 @@ with tab_lab:
         st.warning(
             "No historical data found. Add `data/historical_lineups.csv` to the repo "
             "with columns: slate_date, contest_name, pos, team, name, "
-            "salary, own, actual."
+            "salary, proj, proj_own, own, actual."
         )
     else:
         queue_df = get_calibration_queue(hist_df, prior_dates=3)

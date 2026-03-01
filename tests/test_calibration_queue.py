@@ -11,13 +11,17 @@ from yak_core.calibration import (
 def _make_hist_df() -> pd.DataFrame:
     rows = [
         {"slate_date": "2026-02-25", "contest_name": "GPP", "lineup_id": 1,
-         "pos": "PG", "team": "CLE", "name": "Alice", "salary": 7000, "own": 20.0, "actual": 35.0},
+         "pos": "PG", "team": "CLE", "name": "Alice", "salary": 7000,
+         "proj": 30.0, "proj_own": 18.0, "own": 20.0, "actual": 35.0},
         {"slate_date": "2026-02-25", "contest_name": "GPP", "lineup_id": 1,
-         "pos": "SG", "team": "HOU", "name": "Bob", "salary": 5500, "own": 15.0, "actual": 28.0},
+         "pos": "SG", "team": "HOU", "name": "Bob", "salary": 5500,
+         "proj": 22.0, "proj_own": 14.0, "own": 15.0, "actual": 28.0},
         {"slate_date": "2026-02-25", "contest_name": "GPP", "lineup_id": 2,
-         "pos": "PG", "team": "LAL", "name": "Carol", "salary": 6200, "own": 25.0, "actual": 42.0},
+         "pos": "PG", "team": "LAL", "name": "Carol", "salary": 6200,
+         "proj": 28.0, "proj_own": 22.0, "own": 25.0, "actual": 42.0},
         {"slate_date": "2026-02-24", "contest_name": "50/50", "lineup_id": 3,
-         "pos": "C", "team": "BOS", "name": "Dan", "salary": 8000, "own": 30.0, "actual": 50.0},
+         "pos": "C", "team": "BOS", "name": "Dan", "salary": 8000,
+         "proj": 38.0, "proj_own": 28.0, "own": 30.0, "actual": 50.0},
     ]
     return pd.DataFrame(rows)
 
@@ -36,6 +40,14 @@ class TestGetCalibrationQueue:
     def test_empty_input_returns_empty(self):
         queue = get_calibration_queue(pd.DataFrame())
         assert queue.empty
+
+    def test_proj_and_proj_own_preserved(self):
+        hist = _make_hist_df()
+        queue = get_calibration_queue(hist, prior_dates=1)
+        assert "proj" in queue.columns, "proj column must be present in calibration queue"
+        assert "proj_own" in queue.columns, "proj_own column must be present in calibration queue"
+        assert (queue["proj"] > 0).all()
+        assert (queue["proj_own"] > 0).all()
 
 
 class TestActionQueueItemsByName:

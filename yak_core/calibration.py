@@ -640,7 +640,8 @@ def get_calibration_queue(
     ----------
     hist_df : pd.DataFrame
         Historical lineups with at least ``slate_date`` and ``lineup_id``
-        columns.  Expected columns mirror ``data/historical_lineups.csv``.
+        columns.  Expected columns mirror ``data/historical_lineups.csv``
+        (including ``proj``, ``proj_own``, ``own``, and ``actual``).
     prior_dates : int, optional
         How many unique slate dates to include (most recent first).
 
