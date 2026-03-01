@@ -59,6 +59,9 @@ from yak_core.calibration import (  # type: ignore
     get_calibration_queue,
     action_queue_items,
     suggest_config_from_queue,
+    build_approved_lineups,
+    get_approved_lineups_by_archetype,
+    compute_slate_kpis,
     BACKTEST_ARCHETYPES,
     run_archetype_backtest,
 )
@@ -67,6 +70,8 @@ from yak_core.right_angle import (  # type: ignore
     detect_stack_alerts,
     detect_pace_environment,
     detect_high_value_plays,
+    compute_stack_scores,
+    compute_value_scores,
 )
 from yak_core.sims import (  # type: ignore
     run_monte_carlo_for_lineups,
@@ -272,6 +277,11 @@ def ensure_session_state():
     if "promoted_lineups" not in st.session_state:
         # list of dicts: {label, lineups_df, metadata}
         st.session_state["promoted_lineups"] = []
+    if "approved_lineups" not in st.session_state:
+        # list of ApprovedLineup objects (set by Calibration Lab)
+        st.session_state["approved_lineups"] = []
+    if "last_calibration_ts" not in st.session_state:
+        st.session_state["last_calibration_ts"] = None
     if "cal_queue_df" not in st.session_state:
         st.session_state["cal_queue_df"] = None
     if "archetype" not in st.session_state:
@@ -349,6 +359,16 @@ def run_optimizer(
 
     # Apply DFS archetype adjustments
     opt_pool = apply_archetype(opt_pool, archetype)
+
+    # Inject Edge Analysis scores so the LP objective can use them
+    _ss_df = compute_stack_scores(opt_pool, top_n=len(opt_pool))
+    if not _ss_df.empty:
+        _team_score_map = _ss_df.set_index("team")["stack_score"].to_dict()
+        opt_pool["stack_score"] = opt_pool["team"].map(_team_score_map).fillna(50.0)
+    _vs_df = compute_value_scores(opt_pool, top_n=len(opt_pool), min_proj=0.0)
+    if not _vs_df.empty and "player_name" in _vs_df.columns:
+        _player_vscore_map = _vs_df.set_index("player_name")["value_score"].to_dict()
+        opt_pool["value_score"] = opt_pool["player_name"].map(_player_vscore_map).fillna(50.0)
 
     cfg: Dict[str, Any] = {
         "SITE": "dk",
@@ -561,6 +581,8 @@ with tab_slate:
                                 st.error(f"API fetch failed: {_e}")
 
         pool_df = st.session_state.get("pool_df")
+        approved_lineups = st.session_state.get("approved_lineups", [])
+        last_cal_ts = st.session_state.get("last_calibration_ts")
 
         if pool_df is None or pool_df.empty:
             st.info(
@@ -569,54 +591,94 @@ with tab_slate:
             )
 
         else:
-            # ── KPIs (top) ──────────────────────────────────────────────
-            n_players = len(pool_df)
-            avg_salary = pool_df["salary"].mean()
-            median_proj = pool_df["proj"].median()
-            top_proj = pool_df["proj"].max()
-            _own_series = pool_df["ownership"].dropna() if "ownership" in pool_df.columns else pd.Series(dtype=float)
-            max_own = _own_series.max() if not _own_series.empty else None
-            avg_own = _own_series.mean() if not _own_series.empty else None
+            # ════════════════════════════════════════════════════════════
+            # LAYER 1 — KPI Strip (slate-level, driven by approved lineups)
+            # ════════════════════════════════════════════════════════════
+            slate_kpis = compute_slate_kpis(approved_lineups, last_calibration_ts=last_cal_ts)
 
-            kpi_c1, kpi_c2, kpi_c3, kpi_c4, kpi_c5 = st.columns(5)
-            kpi_c1.metric("Players", f"{n_players}")
-            kpi_c2.metric("Avg Salary", f"${avg_salary:,.0f}")
-            kpi_c3.metric("Median Proj", f"{median_proj:.1f}")
-            kpi_c4.metric("Top Proj", f"{top_proj:.1f}")
-            if max_own is not None:
-                kpi_c5.metric("Max Ownership", f"{max_own:.1f}%")
+            _kpi_color_map = {"green": "#1b4332", "yellow": "#3b3b00", "red": "#4a0000"}
+            _kpi_border_map = {"green": "#2d6a4f", "yellow": "#b5a300", "red": "#c0392b"}
+            _kpi_text_map = {"green": "#52b788", "yellow": "#ffe66d", "red": "#e74c3c"}
+            _kpi_c = slate_kpis["color"]
+            _kpi_bg = _kpi_color_map.get(_kpi_c, "#1e1e1e")
+            _kpi_border = _kpi_border_map.get(_kpi_c, "#555")
+            _kpi_text = _kpi_text_map.get(_kpi_c, "#ccc")
 
-            if avg_own is not None:
-                value_leader = _slate_value_leader(pool_df)
-                st.caption(
-                    f"Avg ownership: {avg_own:.1f}% | Slate value leader: {value_leader}"
-                )
+            archetype_str = " · ".join(
+                f"{k}: {v}" for k, v in slate_kpis["archetype_counts"].items()
+            ) or "—"
 
-            with st.expander("📊 Player Projections", expanded=True):
-                _proj_cols = [c for c in ["player_name", "pos", "team", "salary", "proj", "floor", "ceil", "ownership"] if c in pool_df.columns]
-                _sort_col = "proj" if "proj" in _proj_cols else (_proj_cols[0] if _proj_cols else None)
-                _proj_display = pool_df[_proj_cols].reset_index(drop=True)
-                if _sort_col:
-                    _proj_display = _proj_display.sort_values(_sort_col, ascending=False).reset_index(drop=True)
-                st.dataframe(
-                    _proj_display,
-                    use_container_width=True,
-                    hide_index=True,
-                )
+            st.markdown(
+                f"""
+                <div style="
+                    display:flex; gap:12px; flex-wrap:wrap; padding:10px 0 14px 0;
+                    border-bottom: 1px solid #333; margin-bottom:14px;
+                ">
+                  <div style="background:{_kpi_bg};border:1px solid {_kpi_border};border-radius:8px;
+                              padding:10px 18px;min-width:120px;text-align:center;">
+                    <div style="font-size:11px;color:#aaa;letter-spacing:.5px;">SLATE EV (Ricky pool)</div>
+                    <div style="font-size:20px;font-weight:700;color:{_kpi_text};">
+                      {slate_kpis['slate_ev']:+.2f}
+                    </div>
+                  </div>
+                  <div style="background:{_kpi_bg};border:1px solid {_kpi_border};border-radius:8px;
+                              padding:10px 18px;min-width:140px;text-align:center;">
+                    <div style="font-size:11px;color:#aaa;letter-spacing:.5px;">APPROVED LINEUPS</div>
+                    <div style="font-size:20px;font-weight:700;color:{_kpi_text};">
+                      {slate_kpis['approved_count']}
+                    </div>
+                    <div style="font-size:11px;color:#888;">{archetype_str}</div>
+                  </div>
+                  <div style="background:{_kpi_bg};border:1px solid {_kpi_border};border-radius:8px;
+                              padding:10px 18px;min-width:130px;text-align:center;">
+                    <div style="font-size:11px;color:#aaa;letter-spacing:.5px;">EXPOSURE RISK</div>
+                    <div style="font-size:20px;font-weight:700;color:{_kpi_text};">
+                      {slate_kpis['max_exposure']:.0%}
+                    </div>
+                    <div style="font-size:11px;color:#888;">max player exposure</div>
+                  </div>
+                  <div style="background:{_kpi_bg};border:1px solid {_kpi_border};border-radius:8px;
+                              padding:10px 18px;min-width:130px;text-align:center;">
+                    <div style="font-size:11px;color:#aaa;letter-spacing:.5px;">SIMMED HIT RATE</div>
+                    <div style="font-size:20px;font-weight:700;color:{_kpi_text};">
+                      {slate_kpis['simmed_hit_rate']:.0%}
+                    </div>
+                  </div>
+                  <div style="background:#1e1e1e;border:1px solid #333;border-radius:8px;
+                              padding:10px 18px;min-width:160px;text-align:center;">
+                    <div style="font-size:11px;color:#aaa;letter-spacing:.5px;">LAST CALIBRATION</div>
+                    <div style="font-size:13px;font-weight:600;color:#ccc;">
+                      {slate_kpis['last_updated']}
+                    </div>
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
-            st.markdown("---")
-
-            # ── Edge Analysis (middle) ───────────────────────────────────
+            # ════════════════════════════════════════════════════════════
+            # LAYER 2 — Right Angle Ricky: Edge Analysis (data-driven)
+            # ════════════════════════════════════════════════════════════
             st.markdown("### 📐 Right Angle Ricky — Edge Analysis")
+
+            # Compute scored edge inputs (drive both UI and optimizer)
+            _stack_scores_df = compute_stack_scores(pool_df, top_n=5)
+            _value_scores_df = compute_value_scores(pool_df, top_n=8)
 
             col_edge_l, col_edge_r = st.columns(2)
 
             with col_edge_l:
                 st.markdown("#### 🔥 Stack Alerts")
-                stack_alerts = detect_stack_alerts(pool_df)
-                if stack_alerts:
-                    for s_idx, alert in enumerate(stack_alerts):
-                        st.markdown(f"- {alert}")
+                if not _stack_scores_df.empty:
+                    for _, _sr in _stack_scores_df.iterrows():
+                        _lev_emoji = {"Low-owned CEIL": "🔵", "Moderate": "🟡", "Chalk": "🔴"}.get(
+                            _sr["leverage_tag"], "⚪"
+                        )
+                        st.markdown(
+                            f"- {_lev_emoji} **{_sr['team']}** — score {_sr['stack_score']:.0f} | "
+                            f"proj {_sr['top_proj']:.1f} | ceil {_sr['top_ceil']:.1f} | "
+                            f"{_sr['leverage_tag']} · {_sr['key_players']}"
+                        )
                     st.markdown("")
                     with st.expander("📝 Log stack outcome", expanded=False):
                         log_slate_date = st.date_input(
@@ -624,9 +686,10 @@ with tab_slate:
                             value=_today_est(),
                             key="stack_log_date",
                         )
+                        _stack_opts = _stack_scores_df["team"].tolist()
                         log_stack_sel = st.selectbox(
                             "Which stack?",
-                            stack_alerts,
+                            _stack_opts,
                             key="stack_log_sel",
                         )
                         log_note = st.text_input(
@@ -659,28 +722,76 @@ with tab_slate:
                 st.markdown("#### ⚡ Pace / Game Environment")
                 pace_notes = detect_pace_environment(pool_df)
                 if pace_notes:
-                    for note in pace_notes:
-                        st.markdown(f"- {note}")
+                    for _pn in pace_notes:
+                        st.markdown(f"- {_pn}")
                 else:
                     st.info("Upload a pool with opponent data for game environment analysis.")
 
             with col_edge_r:
                 st.markdown("#### 💎 High-Value Plays")
-                value_plays = detect_high_value_plays(pool_df)
-                if value_plays:
-                    for play in value_plays:
-                        st.markdown(f"- {play}")
+                if not _value_scores_df.empty:
+                    for _, _vr in _value_scores_df.iterrows():
+                        _own_emoji = {"Sneaky": "🟣", "Leverage": "🟡", "Chalk": "🔴"}.get(
+                            _vr.get("ownership_tag", ""), "⚪"
+                        )
+                        st.markdown(
+                            f"- {_own_emoji} **{_vr['player_name']}** ({_vr.get('team', '?')}) — "
+                            f"${int(_vr['salary']):,} | proj {_vr['proj']:.1f} | "
+                            f"value {_vr['value_eff']:.2f}x | {_vr.get('ownership_tag', '')}"
+                        )
                 else:
                     st.info("No stand-out value plays identified.")
 
             st.markdown("---")
 
-            # ── Approved Lineups from Calibration (bottom) ──────────────
-            st.markdown("### 📥 Approved Lineups from Calibration")
+            # ════════════════════════════════════════════════════════════
+            # LAYER 3 — Ricky's Approved Lineups (read-only from Cal Lab)
+            # ════════════════════════════════════════════════════════════
+            st.markdown("### 📥 Ricky's Approved Lineups")
+            st.caption(
+                "These lineups come from Ricky's Calibration Lab after sims and backtests. "
+                "Rerun Calibration to refresh."
+            )
 
-            promoted = st.session_state.get("promoted_lineups", [])
-            if promoted:
-                for i, entry in enumerate(promoted):
+            _all_approved = st.session_state.get("approved_lineups", [])
+
+            # Fall back to legacy promoted_lineups so existing workflows still show
+            _legacy_promoted = st.session_state.get("promoted_lineups", [])
+
+            if _all_approved:
+                _by_arch = get_approved_lineups_by_archetype(_all_approved)
+                _arch_order = ["GPP", "SE", "3-MAX", "50/50", "Showdown"]
+                _arch_tabs_labels = [a for a in _arch_order if a in _by_arch] + [
+                    a for a in _by_arch if a not in _arch_order
+                ]
+
+                if _arch_tabs_labels:
+                    _arch_tab_widgets = st.tabs(_arch_tabs_labels)
+                    for _atab, _alabel in zip(_arch_tab_widgets, _arch_tabs_labels):
+                        with _atab:
+                            _lu_list = _by_arch[_alabel]
+                            for _idx, _alu in enumerate(_lu_list):
+                                _late_badge = " 🕐 Late-swap set" if _alu.late_swap_window else ""
+                                _hdr = (
+                                    f"**#{_idx + 1}** · {_alu.site} · {_alu.slate} | "
+                                    f"ROI {_alu.sim_roi:.1%} · p90 {_alu.sim_p90:.1f} · "
+                                    f"proj {_alu.proj_points:.1f}{_late_badge}"
+                                )
+                                with st.expander(_hdr, expanded=(_idx == 0)):
+                                    if _alu.late_swap_window:
+                                        st.info(f"🕐 Late-swap window: {_alu.late_swap_window}")
+                                    _p_df = pd.DataFrame(_alu.players)
+                                    if not _p_df.empty:
+                                        st.dataframe(
+                                            _p_df,
+                                            use_container_width=True,
+                                            hide_index=True,
+                                        )
+                                    else:
+                                        st.info("No player data.")
+            elif _legacy_promoted:
+                # Legacy display for lineups promoted via the old "Post to Slate Room" flow
+                for i, entry in enumerate(_legacy_promoted):
                     label = entry.get("label", f"Promoted Set {i + 1}")
                     lu_df = entry.get("lineups_df")
                     meta = entry.get("metadata", {})
@@ -2065,6 +2176,32 @@ with tab_lab:
                         },
                     }
                     st.session_state["promoted_lineups"].append(entry)
+
+                    # Also write structured ApprovedLineup objects for the new Slate Room KPI strip
+                    _sim_slate_label = getattr(
+                        st.session_state.get("pool_df", pd.DataFrame()),
+                        "attrs", {}
+                    ).get("slate", f"NBA {_today_est()}")
+                    _arch_label = {
+                        "Tournament (GPP)": "GPP",
+                        "Single Entry": "SE",
+                        "Max Entry (MME)": "3-MAX",
+                        "50/50": "50/50",
+                        "Double Up": "50/50",
+                        "Showdown Captain": "Showdown",
+                    }.get(sim_dk_contest, sim_dk_contest)
+                    _new_approved = build_approved_lineups(
+                        lineups_df=promoted_df,
+                        sim_results=sim_res,
+                        contest_archetype=_arch_label,
+                        site="DK",
+                        slate=_sim_slate_label,
+                    )
+                    st.session_state["approved_lineups"].extend(_new_approved)
+                    st.session_state["last_calibration_ts"] = pd.Timestamp.now(
+                        tz=ZoneInfo("America/New_York")
+                    ).strftime("%Y-%m-%d %H:%M ET")
+
                     st.success(
                         f"Promoted {len(high_conf_ids)} high-confidence lineup(s) "
                         "to 🏀 Ricky's Slate Room!"

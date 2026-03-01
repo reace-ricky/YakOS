@@ -69,6 +69,7 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 41 | **Calibration KPI Dashboard** — `📊 Calibration KPI Dashboard` section at top of Calibration Lab: strategy KPIs (total lineups, hit rate, avg score), points accuracy (mean error, std, MAE, RMSE, R²) at lineup and player level, proj vs actual scatter chart, salary-bracket error table, ownership bucket calibration, and conditional minutes accuracy metrics | `yak_core/scoring.py`, `streamlit_app.py` | latest |
 | 43 | **Calibration KPI Dashboard cleanup** — removed RAG status badges, `st.metric` circles, bold headers, and caption text from the 4 top-level KPI cards; replaced with clean bordered HTML boxes (label + value); removed `calibration_rag` import; expander titles cleaned of RAG emojis | `streamlit_app.py` | latest |
 | 45 | **Calibration page redesign** — thin 4-KPI strip (Pts MAE player, Min MAE player, Own MAE player, Hit rate) with color-coded cards via `quality_color()`; advanced stats collapsed under "Advanced breakdown"; queue table shows focused columns (Player, Salary, Proj/Act FP, Error, Proj/Act Mins, Min Error, Proj/Act Own%, Own Error, Flag) | `yak_core/scoring.py`, `streamlit_app.py` | latest |
+| 47 | **Slate Room 3-layer redesign** — Layer 1: color-coded KPI strip (Slate EV, Approved count by archetype, Exposure risk, Simmed hit rate, Last updated); Layer 2: data-driven Edge Analysis via `compute_stack_scores()` + `compute_value_scores()` (stack score, leverage tag, value index, ownership tag); Layer 3: Approved Lineups with archetype tabs, expandable compact lineup cards, late-swap badge, calibration note. Added `ApprovedLineup` dataclass + `build_approved_lineups()` / `get_approved_lineups_by_archetype()` / `compute_slate_kpis()` to `calibration.py`. Optimizer now injects stack/value scores into LP objective via `STACK_WEIGHT` / `VALUE_WEIGHT` config. 40 new unit tests. | `yak_core/right_angle.py`, `yak_core/calibration.py`, `yak_core/lineups.py`, `yak_core/config.py`, `streamlit_app.py`, `tests/test_slate_room_features.py` | latest |
 | 46 | **Ricky's Calibration Lab (BacktestIQ-style)** — new 4th tab with backtest controls (sport, date range, site, contest-archetype multi-select, build config override, # lineups, Run Backtest), global KPI strip (ROI / cash rate / avg finish %ile / best finish with green/yellow/red coloring), archetype summary table (sorted worst ROI first, row coloring), slate-level drilldown, and Player Calibration Queue integration; `BACKTEST_ARCHETYPES` config + `run_archetype_backtest()` engine + `_reconstruct_pool_from_slate()` helper added to `yak_core/calibration.py`; 19 new unit tests in `tests/test_backtest_engine.py` | `yak_core/calibration.py`, `streamlit_app.py`, `tests/test_backtest_engine.py` | latest |
 
 ---
@@ -140,6 +141,8 @@ YakOS/
 │   ├── test_right_angle.py              (28 tests)
 │   ├── test_diversity_and_showdown.py   (25 tests)
 │   ├── test_calibration_queue.py        (12 tests)
+│   ├── test_backtest_engine.py          (19 tests)
+│   └── test_slate_room_features.py      (40 tests)
 │   └── test_backtest_engine.py          (19 tests)
 └── requirements.txt
 ```

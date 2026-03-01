@@ -235,3 +235,212 @@ def detect_high_value_plays(pool_df: pd.DataFrame, min_proj: float = 8.0) -> lis
         )
 
     return plays
+
+
+# ============================================================
+# SCORED EDGE ANALYSIS (data-driven, feeds the optimizer)
+# ============================================================
+
+
+def compute_stack_scores(pool_df: pd.DataFrame, top_n: int = 5) -> pd.DataFrame:
+    """Compute a 'Ricky stack score' per team that blends projection, leverage,
+    and simulated ceiling.
+
+    The score is used both for UI display *and* as an optimizer input weight so
+    that high-scoring stacks receive extra priority during lineup construction.
+
+    Score formula (0–100 scale):
+        proj_component  = top-3 player proj sum, normalised to the slate max
+        ceil_component  = top-3 player ceil sum (falls back to 1.25 × proj)
+        leverage_component = inverse of average ownership of top-3 players
+                             (low-owned stacks get a leverage bonus)
+
+        raw = 0.45 * proj_norm + 0.35 * ceil_norm + 0.20 * leverage_norm
+        score = round(raw * 100, 1)
+
+    Parameters
+    ----------
+    pool_df : pd.DataFrame
+        Player pool with ``team``, ``proj`` columns.
+        Optional: ``ceil``, ``ownership``.
+    top_n : int
+        Number of top stacks to return (default 5).
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: ``team``, ``stack_score``, ``top_proj``, ``top_ceil``,
+        ``leverage_tag``, ``key_players``.
+        Sorted descending by ``stack_score``.
+    """
+    if pool_df.empty or "team" not in pool_df.columns or "proj" not in pool_df.columns:
+        return pd.DataFrame(columns=["team", "stack_score", "top_proj", "top_ceil", "leverage_tag", "key_players"])
+
+    df = pool_df.copy()
+    df["proj"] = pd.to_numeric(df["proj"], errors="coerce").fillna(0)
+    df["salary"] = pd.to_numeric(df.get("salary", 0), errors="coerce").fillna(0) if "salary" in df.columns else 0
+
+    has_ceil = "ceil" in df.columns
+    has_own = "ownership" in df.columns
+    if has_ceil:
+        df["ceil"] = pd.to_numeric(df["ceil"], errors="coerce")
+    if has_own:
+        df["ownership"] = pd.to_numeric(df["ownership"], errors="coerce")
+
+    rows = []
+    for team, grp in df.groupby("team"):
+        top3 = grp.nlargest(3, "proj")
+        top_proj = round(float(top3["proj"].sum()), 2)
+
+        if has_ceil:
+            ceil_vals = top3["ceil"].where(top3["ceil"].notna(), other=top3["proj"] * 1.25)
+            top_ceil = round(float(ceil_vals.sum()), 2)
+        else:
+            top_ceil = round(top_proj * 1.25, 2)
+
+        if has_own and not top3["ownership"].isna().all():
+            avg_own = float(top3["ownership"].mean())
+        else:
+            avg_own = 15.0  # assume moderate ownership when unknown
+
+        key_players = ", ".join(
+            top3["player_name"].tolist()[:2]
+        ) if "player_name" in top3.columns else "—"
+
+        rows.append({
+            "team": team,
+            "top_proj": top_proj,
+            "top_ceil": top_ceil,
+            "avg_own": avg_own,
+            "key_players": key_players,
+        })
+
+    if not rows:
+        return pd.DataFrame(columns=["team", "stack_score", "top_proj", "top_ceil", "leverage_tag", "key_players"])
+
+    result = pd.DataFrame(rows)
+
+    # Normalise each component 0–1 across the slate
+    def _norm(s: pd.Series) -> pd.Series:
+        lo, hi = s.min(), s.max()
+        if hi == lo:
+            return pd.Series([0.5] * len(s), index=s.index)
+        return (s - lo) / (hi - lo)
+
+    proj_norm = _norm(result["top_proj"])
+    ceil_norm = _norm(result["top_ceil"])
+    # Leverage: lower ownership → higher score, so invert
+    leverage_norm = _norm(-result["avg_own"])
+
+    result["stack_score"] = (
+        0.45 * proj_norm + 0.35 * ceil_norm + 0.20 * leverage_norm
+    ).mul(100).round(1)
+
+    # Human-readable leverage tag
+    def _lev_tag(own: float) -> str:
+        if own < 10:
+            return "Low-owned CEIL"
+        if own < 20:
+            return "Moderate"
+        return "Chalk"
+
+    result["leverage_tag"] = result["avg_own"].apply(_lev_tag)
+
+    return (
+        result[["team", "stack_score", "top_proj", "top_ceil", "leverage_tag", "key_players"]]
+        .sort_values("stack_score", ascending=False)
+        .head(top_n)
+        .reset_index(drop=True)
+    )
+
+
+def compute_value_scores(pool_df: pd.DataFrame, top_n: int = 10, min_proj: float = 8.0) -> pd.DataFrame:
+    """Compute a per-player value index used by the Edge Analysis UI and
+    by the optimizer as an additional weighting signal.
+
+    Value index formula (0–100 scale):
+        value_eff  = proj / (salary / 1000)   — FP per $1K
+        leverage   = inverse of ownership (low-owned players score higher)
+        ceil_bonus = ceil / proj ratio if available
+
+        raw = 0.50 * value_norm + 0.30 * leverage_norm + 0.20 * ceil_norm
+        score = round(raw * 100, 1)
+
+    Parameters
+    ----------
+    pool_df : pd.DataFrame
+        Player pool with ``player_name``, ``team``, ``salary``, ``proj``.
+        Optional: ``ownership``, ``ceil``, ``pos``.
+    top_n : int
+        Number of top players to return (default 10).
+    min_proj : float
+        Minimum projection threshold (default 8.0).
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: ``player_name``, ``team``, ``pos``, ``salary``, ``proj``,
+        ``value_score``, ``value_eff``, ``ownership_tag``.
+        Sorted descending by ``value_score``.
+    """
+    if pool_df.empty or "proj" not in pool_df.columns or "salary" not in pool_df.columns:
+        return pd.DataFrame(
+            columns=["player_name", "team", "pos", "salary", "proj", "value_score", "value_eff", "ownership_tag"]
+        )
+
+    df = pool_df.copy()
+    df["proj"] = pd.to_numeric(df["proj"], errors="coerce").fillna(0)
+    df["salary"] = pd.to_numeric(df["salary"], errors="coerce").fillna(0)
+    df = df[(df["proj"] >= min_proj) & (df["salary"] > 0)].copy()
+
+    if df.empty:
+        return pd.DataFrame(
+            columns=["player_name", "team", "pos", "salary", "proj", "value_score", "value_eff", "ownership_tag"]
+        )
+
+    has_own = "ownership" in df.columns
+    has_ceil = "ceil" in df.columns
+
+    df["value_eff"] = df["proj"] / (df["salary"] / 1000.0)
+
+    if has_own:
+        df["ownership"] = pd.to_numeric(df["ownership"], errors="coerce").fillna(15.0)
+    else:
+        df["ownership"] = 15.0
+
+    if has_ceil:
+        df["ceil"] = pd.to_numeric(df["ceil"], errors="coerce")
+        df["ceil_ratio"] = (df["ceil"] / df["proj"].replace(0, np.nan)).fillna(1.25)
+    else:
+        df["ceil_ratio"] = 1.25
+
+    def _norm(s: pd.Series) -> pd.Series:
+        lo, hi = s.min(), s.max()
+        if hi == lo:
+            return pd.Series([0.5] * len(s), index=s.index)
+        return (s - lo) / (hi - lo)
+
+    value_norm = _norm(df["value_eff"])
+    leverage_norm = _norm(-df["ownership"])
+    ceil_norm = _norm(df["ceil_ratio"])
+
+    df["value_score"] = (
+        0.50 * value_norm + 0.30 * leverage_norm + 0.20 * ceil_norm
+    ).mul(100).round(1)
+
+    def _own_tag(own: float) -> str:
+        if own < 10:
+            return "Sneaky"
+        if own < 20:
+            return "Leverage"
+        return "Chalk"
+
+    df["ownership_tag"] = df["ownership"].apply(_own_tag)
+
+    keep_cols = [c for c in ["player_name", "team", "pos", "salary", "proj", "value_score", "value_eff", "ownership_tag"] if c in df.columns]
+    return (
+        df[keep_cols]
+        .sort_values("value_score", ascending=False)
+        .head(top_n)
+        .reset_index(drop=True)
+    )
