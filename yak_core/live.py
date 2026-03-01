@@ -6,6 +6,8 @@ from typing import Dict, Any
 from .config import YAKOS_ROOT
 
 _TANK01_HOST = "tank01-fantasy-stats.p.rapidapi.com"
+# Known keys under which Tank01 getNBADFS may nest the player list in its body dict.
+_TANK01_DFS_PLAYER_KEYS = ("DraftKings", "DK", "dk", "draftkings", "players", "playerList")
 
 
 def _get_rapidapi_key(cfg):
@@ -30,6 +32,18 @@ def fetch_live_dfs(date_key, cfg):
     body = data.get("body", data) if isinstance(data, dict) else data
     if not body:
         raise ValueError("Empty DFS response for " + date_key)
+    # Tank01 getNBADFS may return body as {"DraftKings": [...]} or {"DK": [...]}
+    # rather than a plain list — unwrap to the player list.
+    if isinstance(body, dict):
+        for key in _TANK01_DFS_PLAYER_KEYS:
+            if key in body and isinstance(body[key], list):
+                body = body[key]
+                break
+        else:
+            # Fallback: pick the longest list value in the dict
+            list_vals = [v for v in body.values() if isinstance(v, list)]
+            if list_vals:
+                body = max(list_vals, key=len)
     rows = []
     for entry in body:
         if not isinstance(entry, dict):
