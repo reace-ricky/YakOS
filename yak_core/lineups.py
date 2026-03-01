@@ -240,11 +240,11 @@ def build_multiple_lineups_with_exposure(
                 base = (1 - own_weight) * base + own_weight * base * p.get("leverage", 0.5)
             # Stack score bonus
             if stack_weight > 0 and has_stack_scores:
-                ss = float(p.get("stack_score", 50.0) or 50.0) / 100.0  # normalise 0–1
+                ss = float(p.get("stack_score", 50.0) or 50.0) / 100.0  # normalise 0–1; None/0 → neutral
                 base = base * (1 + stack_weight * (ss - 0.5))
             # Value score bonus
             if value_weight > 0 and has_value_scores:
-                vs = float(p.get("value_score", 50.0) or 50.0) / 100.0  # normalise 0–1
+                vs = float(p.get("value_score", 50.0) or 50.0) / 100.0  # normalise 0–1; None/0 → neutral
                 base = base * (1 + value_weight * (vs - 0.5))
             return base
 

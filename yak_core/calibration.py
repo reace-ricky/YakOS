@@ -808,7 +808,11 @@ class ApprovedLineup:
     sim_p90 : float
         90th-percentile simulated score.
     sim_roi : float
-        Estimated ROI from sims (e.g. 0.12 = 12%).
+        Estimated ROI / upside proxy from sims.  When actual contest-entry
+        fees are unavailable, this is populated with ``smash_prob`` (probability
+        of hitting a high-score threshold) as a proxy.  Downstream consumers
+        should treat this as a relative ranking signal rather than a precise
+        dollar-ROI figure.
     players : list of dict
         Each entry: {"name", "team", "pos", "salary", "ownership"}.
     late_swap_window : str or None
@@ -924,7 +928,7 @@ def build_approved_lineups(
             })
 
         approved.append(ApprovedLineup(
-            id=f"{contest_archetype.lower().replace('/', '')}-{i}",
+            id=f"{contest_archetype.lower().replace('/', '')}-{lu_id}-{i}",
             contest_archetype=contest_archetype,
             site=site,
             slate=slate,
