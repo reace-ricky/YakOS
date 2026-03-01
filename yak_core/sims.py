@@ -145,3 +145,108 @@ def simulate_live_updates(
             ).clip(lower=0)
 
     return updated
+
+
+def backtest_sim(
+    hist_df: pd.DataFrame,
+    n_sims: int = 500,
+    volatility_mode: str = "standard",
+) -> Dict[str, Any]:
+    """Backtest the Monte Carlo sim against historical actual scores.
+
+    Runs :func:`run_monte_carlo_for_lineups` on each historical lineup using
+    the pre-game projections recorded in *hist_df*, then compares the
+    simulation's predicted distribution to the actual DraftKings score that
+    each lineup achieved.
+
+    Parameters
+    ----------
+    hist_df : pd.DataFrame
+        Historical lineup data.  Required columns: ``lineup_id``, ``proj``,
+        ``actual``.  Optional: ``ceil``, ``floor`` (improve variance estimates).
+        Each row represents one player in one lineup.
+    n_sims : int, optional
+        Monte Carlo iterations per lineup (default 500).
+    volatility_mode : str, optional
+        ``"low"`` / ``"standard"`` / ``"high"`` — scales default variance when
+        ceil/floor are unavailable.
+
+    Returns
+    -------
+    dict
+        ``lineup_df``        — per-lineup DataFrame with columns
+                               ``lineup_id``, ``sim_mean``, ``sim_std``,
+                               ``sim_p15``, ``sim_p85``, ``actual``,
+                               ``error``, ``within_range``.
+
+        ``sim_mae``          — Mean Absolute Error: |sim_mean − actual|.
+
+        ``sim_rmse``         — Root Mean Squared Error.
+
+        ``sim_bias``         — Average (sim_mean − actual);
+                               positive = sim over-projects.
+
+        ``within_range_pct`` — Percentage of lineups where the actual score
+                               falls within [sim_p15, sim_p85].
+
+        ``n_lineups``        — Number of lineups evaluated.
+    """
+    required = {"lineup_id", "proj", "actual"}
+    if hist_df.empty or not required.issubset(hist_df.columns):
+        return {
+            "lineup_df": pd.DataFrame(),
+            "sim_mae": 0.0,
+            "sim_rmse": 0.0,
+            "sim_bias": 0.0,
+            "within_range_pct": 0.0,
+            "n_lineups": 0,
+        }
+
+    # Rename lineup_id → lineup_index for run_monte_carlo_for_lineups
+    sim_input = hist_df.rename(columns={"lineup_id": "lineup_index"})
+
+    sim_results = run_monte_carlo_for_lineups(
+        sim_input, n_sims=n_sims, volatility_mode=volatility_mode
+    )
+
+    if sim_results.empty:
+        return {
+            "lineup_df": pd.DataFrame(),
+            "sim_mae": 0.0,
+            "sim_rmse": 0.0,
+            "sim_bias": 0.0,
+            "within_range_pct": 0.0,
+            "n_lineups": 0,
+        }
+
+    # Compute actual score per lineup
+    actual_scores = (
+        hist_df.groupby("lineup_id")["actual"]
+        .sum()
+        .reset_index()
+        .rename(columns={"lineup_id": "lineup_index"})
+    )
+
+    merged = sim_results.merge(actual_scores, on="lineup_index", how="inner")
+    merged = merged.rename(columns={"lineup_index": "lineup_id"})
+    merged["error"] = merged["sim_mean"] - merged["actual"]
+    merged["within_range"] = (
+        (merged["actual"] >= merged["sim_p15"])
+        & (merged["actual"] <= merged["sim_p85"])
+    )
+
+    errors = merged["error"]
+    n = len(merged)
+    sim_mae = float(errors.abs().mean()) if n > 0 else 0.0
+    sim_rmse = float(np.sqrt((errors ** 2).mean())) if n > 0 else 0.0
+    sim_bias = float(errors.mean()) if n > 0 else 0.0
+    within_range_pct = float(merged["within_range"].mean() * 100) if n > 0 else 0.0
+
+    return {
+        "lineup_df": merged.reset_index(drop=True),
+        "sim_mae": round(sim_mae, 2),
+        "sim_rmse": round(sim_rmse, 2),
+        "sim_bias": round(sim_bias, 2),
+        "within_range_pct": round(within_range_pct, 1),
+        "n_lineups": n,
+    }
