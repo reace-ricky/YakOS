@@ -249,6 +249,46 @@ def calibration_kpi_summary(hist_df: pd.DataFrame) -> Dict[str, Any]:
     return result
 
 
+def quality_color(metric: str, value: float) -> str:
+    """Return 'good', 'warn', or 'bad' for a KPI value.
+
+    Metrics and thresholds:
+      pts  — Pts MAE (player): good ≤ 6 FP, warn 6–10, bad > 10
+      mins — Min MAE (player): good ≤ 3 min, warn 3–6, bad > 6
+      own  — Ownership MAE (player): good ≤ 3 pp, warn 3–6, bad > 6
+      hit  — Hit rate: good ≥ 70%, warn 50–70%, bad < 50%
+    """
+    if metric == "pts":
+        if value <= 6:
+            return "good"
+        elif value <= 10:
+            return "warn"
+        return "bad"
+    elif metric == "mins":
+        if value <= 3:
+            return "good"
+        elif value <= 6:
+            return "warn"
+        return "bad"
+    elif metric == "own":
+        if value <= 3:
+            return "good"
+        elif value <= 6:
+            return "warn"
+        return "bad"
+    elif metric == "hit":
+        if value >= 0.70:
+            return "good"
+        elif value >= 0.50:
+            return "warn"
+        return "bad"
+    return "warn"
+
+
+_QUALITY_BG = {"good": "#1a3d2b", "warn": "#3d3300", "bad": "#3d1a1a"}
+_QUALITY_TEXT = {"good": "#4caf82", "warn": "#f5c542", "bad": "#e05c5c"}
+
+
 def rag_status(
     value: float,
     green_thresh: float,

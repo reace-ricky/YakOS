@@ -81,7 +81,7 @@ from yak_core.multislate import (  # type: ignore
     compare_slates,
 )
 from yak_core.projections import salary_implied_proj, noisy_proj  # type: ignore
-from yak_core.scoring import calibration_kpi_summary  # type: ignore
+from yak_core.scoring import calibration_kpi_summary, quality_color, _QUALITY_BG, _QUALITY_TEXT  # type: ignore
 
 
 # -----------------------------
@@ -1034,9 +1034,7 @@ with tab_lab:
     # Load historical data
     hist_df = load_historical_lineups()
 
-    # ── Calibration KPI Dashboard ────────────────────────────────────────────
-    st.markdown("### 📊 Calibration KPI Dashboard")
-
+    # ── Calibration KPI Strip ────────────────────────────────────────────────
     _kpis = calibration_kpi_summary(hist_df) if not hist_df.empty else {}
 
     if not _kpis:
@@ -1045,100 +1043,89 @@ with tab_lab:
         )
     else:
         _strat = _kpis["strategy"]
-        _ptsl = _kpis["points_lineup"]
         _ptsp = _kpis["points_player"]
+        _mins_mae = _kpis["minutes"]["mae"] if "minutes" in _kpis else None
+        _own_mae = _kpis["ownership"]["mae"] if "ownership" in _kpis else None
+        _hit_rate = _strat["hit_rate"]
 
-        # ── 4 high-level KPI boxes ───────────────────────────────────────────
-        kc1, kc2, kc3, kc4 = st.columns(4)
+        def _kpi_card(label: str, value_str: str, metric_key: str, raw_value: float) -> str:
+            qc = quality_color(metric_key, raw_value)
+            bg = _QUALITY_BG[qc]
+            color = _QUALITY_TEXT[qc]
+            return (
+                f'<div style="border:1px solid #3a3a3a;border-radius:6px;'
+                f'padding:10px 8px;text-align:center;background:{bg};">'
+                f'<div style="font-size:0.72rem;text-transform:uppercase;'
+                f'letter-spacing:0.06em;color:#aaa;margin-bottom:4px;">{label}</div>'
+                f'<div style="font-size:1.5rem;font-weight:700;color:{color};">{value_str}</div>'
+                f'</div>'
+            )
 
-        _card = (
-            '<div style="border:1px solid #3a3a3a;border-radius:8px;'
-            'padding:18px 12px;text-align:center;background:#1a1a1a;">'
-            '<div style="font-size:0.78rem;text-transform:uppercase;'
-            'letter-spacing:0.06em;color:#888;margin-bottom:8px;">{label}</div>'
-            '<div style="font-size:2rem;font-weight:700;color:#f0f0f0;">{value}</div>'
-            '</div>'
+        ks1, ks2, ks3, ks4 = st.columns(4)
+        with ks1:
+            st.markdown(
+                _kpi_card(
+                    "Pts MAE (player)",
+                    f"{_ptsp['mae']:.2f} pts",
+                    "pts",
+                    _ptsp["mae"],
+                ),
+                unsafe_allow_html=True,
+            )
+        with ks2:
+            if _mins_mae is not None:
+                st.markdown(
+                    _kpi_card("Min MAE (player)", f"{_mins_mae:.2f} min", "mins", _mins_mae),
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    _kpi_card("Min MAE (player)", "N/A", "mins", 0.0),
+                    unsafe_allow_html=True,
+                )
+        with ks3:
+            if _own_mae is not None:
+                st.markdown(
+                    _kpi_card("Own MAE (player)", f"{_own_mae:.2f}%", "own", _own_mae),
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    _kpi_card("Own MAE (player)", "N/A", "own", 0.0),
+                    unsafe_allow_html=True,
+                )
+        with ks4:
+            st.markdown(
+                _kpi_card("Hit rate", f"{_hit_rate:.0%}", "hit", _hit_rate),
+                unsafe_allow_html=True,
+            )
+
+        st.caption(
+            "Lower MAE is better; higher hit rate is better.  "
+            "Colored cards: green = in line; yellow = borderline; red = needs calibration."
         )
 
-        with kc1:
-            st.markdown(
-                _card.format(label="Points MAE (lineup)", value=f"{_ptsl['mae']:.2f} pts"),
-                unsafe_allow_html=True,
-            )
-
-        with kc2:
-            if "minutes" in _kpis:
-                _mins = _kpis["minutes"]
-                st.markdown(
-                    _card.format(label="Minutes MAE", value=f"{_mins['mae']:.2f} min"),
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.markdown(
-                    _card.format(label="Minutes MAE", value="N/A"),
-                    unsafe_allow_html=True,
-                )
-
-        with kc3:
-            if "ownership" in _kpis:
-                _own = _kpis["ownership"]
-                st.markdown(
-                    _card.format(label="Ownership MAE", value=f"{_own['mae']:.2f}%"),
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.markdown(
-                    _card.format(label="Ownership MAE", value="N/A"),
-                    unsafe_allow_html=True,
-                )
-
-        with kc4:
-            st.markdown(
-                _card.format(label="Hit Rate", value=f"{_strat['hit_rate']:.0%}"),
-                unsafe_allow_html=True,
-            )
-
-        # ── Detail expanders ─────────────────────────────────────────────────
-        with st.expander(
-            "📈 Points Detail — Projected vs Actual", expanded=False
-        ):
+        # ── Advanced breakdown (collapsed) ───────────────────────────────────
+        with st.expander("🔬 Advanced breakdown", expanded=False):
+            _ptsl = _kpis["points_lineup"]
+            st.markdown("**Points — lineup level**")
             _dc1, _dc2, _dc3, _dc4 = st.columns(4)
-            _dc1.metric(
-                "Mean Error (pts)",
-                f"{_ptsl['mean_error']:+.2f}",
-                help="avg(actual − proj) per lineup; + = under-projected",
-            )
+            _dc1.metric("Mean Error (pts)", f"{_ptsl['mean_error']:+.2f}", help="avg(actual − proj) per lineup")
             _dc2.metric("Std Dev (pts)", f"{_ptsl['std_error']:.2f}")
             _dc3.metric("RMSE (pts)", f"{_ptsl['rmse']:.2f}")
-            _dc4.metric(
-                "R² (lineup)",
-                f"{_ptsl['r_squared']:.3f}",
-                help="Correlation between proj and actual lineup scores",
-            )
-
-            _lu_df = _ptsl["df"][["lineup_id", "proj", "actual", "error"]].copy()
-            _lu_df = _lu_df.rename(columns={"proj": "Projected", "actual": "Actual"})
-            st.scatter_chart(_lu_df, x="Projected", y="Actual", height=280)
             _r2_val = _ptsl["r_squared"]
             _r_val = (_r2_val ** 0.5) if _r2_val >= 0 else float("nan")
-            st.caption(
-                f"Each point = one lineup.  r = {_r_val:.3f}  R² = {_r2_val:.3f}  "
-                "Diagonal = perfect calibration."
-            )
+            _dc4.metric("R² (lineup)", f"{_r2_val:.3f}", help="Correlation between proj and actual lineup scores")
+            _lu_df = _ptsl["df"][["lineup_id", "proj", "actual", "error"]].copy()
+            _lu_df = _lu_df.rename(columns={"proj": "Projected", "actual": "Actual"})
+            st.scatter_chart(_lu_df, x="Projected", y="Actual", height=240)
+            st.caption(f"r = {_r_val:.3f}  R² = {_r2_val:.3f}  — diagonal = perfect calibration.")
 
-            st.markdown("**Player-level accuracy**")
+            st.markdown("**Points — player level**")
             _pc1, _pc2, _pc3, _pc4 = st.columns(4)
-            _pc1.metric(
-                "Mean Error (player)",
-                f"{_ptsp['mean_error']:+.2f}",
-                help="avg(actual − proj) per player",
-            )
-            _pc2.metric("MAE (player)", f"{_ptsp['mae']:.2f}", help="Mean absolute player-level error")
-            _pc3.metric(
-                "R² (player)",
-                f"{_ptsp['r_squared']:.3f}",
-                help="Player-level projection correlation",
-            )
+            _pc1.metric("Mean Error (player)", f"{_ptsp['mean_error']:+.2f}")
+            _pc2.metric("MAE (player)", f"{_ptsp['mae']:.2f}")
+            _pc3.metric("R² (player)", f"{_ptsp['r_squared']:.3f}")
             _pc4.metric("Avg Actual (player)", f"{_ptsp['df']['actual'].mean():.1f}")
 
             if "points_salary" in _kpis:
@@ -1156,51 +1143,22 @@ with tab_lab:
                     }),
                     use_container_width=True,
                 )
-                st.caption("Positive Mean Error = players in this bracket were under-projected on average.")
 
-        if "minutes" in _kpis:
-            with st.expander(
-                "⏱ Minutes Detail — Projected vs Actual", expanded=False
-            ):
+            if "minutes" in _kpis:
+                st.markdown("**Minutes accuracy**")
                 _mins = _kpis["minutes"]
                 _mc1, _mc2, _mc3, _mc4 = st.columns(4)
-                _mc1.metric(
-                    "Mean Error (mins)",
-                    f"{_mins['mean_error']:+.2f}",
-                    help="avg(actual_min − proj_min); + = played more than projected",
-                )
+                _mc1.metric("Mean Error (mins)", f"{_mins['mean_error']:+.2f}")
                 _mc2.metric("MAE (mins)", f"{_mins['mae']:.2f}")
-                _mc3.metric(
-                    "Pts err (>5 min miss)",
-                    f"{_mins['avg_pts_err_large_min_miss']:+.2f}",
-                    help="Avg points error when minutes miss > 5 min",
-                )
-                _mc4.metric(
-                    "Pts err (≤5 min miss)",
-                    f"{_mins['avg_pts_err_small_min_miss']:+.2f}",
-                    help="Avg points error when minutes miss ≤ 5 min",
-                )
-                st.caption(
-                    "Large minutes misses drive larger points errors — "
-                    "use this to tune the projection model."
-                )
+                _mc3.metric("Pts err (>5 min miss)", f"{_mins['avg_pts_err_large_min_miss']:+.2f}")
+                _mc4.metric("Pts err (≤5 min miss)", f"{_mins['avg_pts_err_small_min_miss']:+.2f}")
 
-        if "ownership" in _kpis:
-            with st.expander(
-                "👥 Ownership Detail — Projected vs Actual", expanded=False
-            ):
+            if "ownership" in _kpis:
+                st.markdown("**Ownership accuracy**")
                 _own = _kpis["ownership"]
                 _oc1, _oc2, _oc3 = st.columns(3)
-                _oc1.metric(
-                    "Mean Error (own %)",
-                    f"{_own['mean_error']:+.2f}%",
-                    help="avg(actual_own − proj_own); + = under-estimated chalk",
-                )
-                _oc2.metric(
-                    "MAE (own %)",
-                    f"{_own['mae']:.2f}%",
-                    help="Mean absolute ownership error per player",
-                )
+                _oc1.metric("Mean Error (own %)", f"{_own['mean_error']:+.2f}%")
+                _oc2.metric("MAE (own %)", f"{_own['mae']:.2f}%")
                 _oc3.metric("Players Tracked", f"{int(_kpis['ownership']['bucket_df']['count'].sum())}")
                 _bkt = _kpis["ownership"]["bucket_df"].copy()
                 st.dataframe(
@@ -1213,10 +1171,6 @@ with tab_lab:
                         "count": "Players",
                     }),
                     use_container_width=True,
-                )
-                st.caption(
-                    "Positive Mean Error = actual ownership was higher than projected "
-                    "(you under-estimated chalk / punts)."
                 )
 
     st.markdown("---")
@@ -1257,7 +1211,7 @@ with tab_lab:
             kq_cols[4].metric("Avg ownership", f"{avg_own:.1f}%")
             kq_cols[5].metric("Reviewed", n_reviewed)
 
-            # Merge current pool projections (floor, ceil, proj_own) into display
+            # Merge current pool projections into display
             _cal_pool = st.session_state.get("pool_df")
             _queue_display = date_queue.copy()
             if _cal_pool is not None and not _cal_pool.empty:
@@ -1276,38 +1230,68 @@ with tab_lab:
                     )
                     _queue_display = _queue_display.merge(_pool_merge, on="name", how="left")
 
-            # Build display columns: exclude lineup_id, contest_name, contest_entry,
-            # contest_entries (noise); focus on pts / own % / mins
-            _queue_hide = {"lineup_id", "contest_name", "contest_entry", "contest_entries"}
-            _queue_prefer = [
-                "slate_date", "pos", "team", "name", "salary",
-                "proj", "floor", "ceil", "actual", "proj_own", "own",
-                "proj_minutes", "actual_minutes",
-                "queue_status",
-            ]
-            _queue_display_cols = [
-                c for c in _queue_prefer if c in _queue_display.columns
-            ] + [
-                c for c in _queue_display.columns
-                if c not in _queue_prefer and c not in _queue_hide
-            ]
+            # Compute error columns
+            def _safe_col(df: pd.DataFrame, col: str) -> pd.Series:
+                return pd.to_numeric(df[col], errors="coerce").fillna(0) if col in df.columns else pd.Series(0.0, index=df.index)
+
+            _qd = _queue_display.copy()
+            _qd["pts_error"] = _safe_col(_qd, "actual") - _safe_col(_qd, "proj")
+            _qd["min_error"] = _safe_col(_qd, "actual_minutes") - _safe_col(_qd, "proj_minutes")
+            _qd["own_error"] = _safe_col(_qd, "own") - _safe_col(_qd, "proj_own")
+            # Flag: any error exceeds KPI thresholds (pts >6, mins >3, own >3)
+            _qd["Flag"] = (
+                _qd["pts_error"].abs().gt(6)
+                | _qd["min_error"].abs().gt(3)
+                | _qd["own_error"].abs().gt(3)
+            )
+
+            # Build player label combining team + pos
+            _player_col = []
+            for _, _r in _qd.iterrows():
+                parts = [str(_r.get("name", ""))]
+                tp = " / ".join(filter(None, [str(_r.get("team", "")), str(_r.get("pos", ""))]))
+                if tp:
+                    parts.append(f"({tp})")
+                _player_col.append(" ".join(parts))
+            _qd["Player"] = _player_col
+
+            # Focused visible columns only
+            _focused_cols_map = {
+                "Player": "Player",
+                "salary": "Salary",
+                "proj": "Proj FP",
+                "actual": "Act FP",
+                "pts_error": "Error (pts)",
+                "proj_minutes": "Proj Mins",
+                "actual_minutes": "Act Mins",
+                "min_error": "Min Error",
+                "proj_own": "Proj Own %",
+                "own": "Act Own %",
+                "own_error": "Own Error",
+                "Flag": "Flag",
+            }
+            _focused_avail = [c for c in _focused_cols_map if c in _qd.columns or c == "Player"]
+            _queue_focused = _qd[_focused_avail].rename(columns=_focused_cols_map)
 
             # ── Review & Action — check rows, pick a bubble, hit Apply ──
             st.markdown("#### Review & Action")
-            queue_edit_df = _queue_display[_queue_display_cols].copy()
+            queue_edit_df = _queue_focused.copy()
             queue_edit_df.insert(0, "✓", False)
             edited_queue = st.data_editor(
                 queue_edit_df,
                 column_config={
                     "✓": st.column_config.CheckboxColumn("✓", default=False, width="small"),
-                    "proj": st.column_config.NumberColumn("Proj Pts", format="%.1f"),
-                    "floor": st.column_config.NumberColumn("Floor", format="%.1f"),
-                    "ceil": st.column_config.NumberColumn("Ceil", format="%.1f"),
-                    "actual": st.column_config.NumberColumn("Act Pts", format="%.1f"),
-                    "proj_own": st.column_config.NumberColumn("Proj Own %", format="%.1f"),
-                    "own": st.column_config.NumberColumn("Act Own %", format="%.1f"),
-                    "proj_minutes": st.column_config.NumberColumn("Proj Mins", format="%.1f"),
-                    "actual_minutes": st.column_config.NumberColumn("Act Mins", format="%.1f"),
+                    "Salary": st.column_config.NumberColumn("Salary", format="$%d"),
+                    "Proj FP": st.column_config.NumberColumn("Proj FP", format="%.1f"),
+                    "Act FP": st.column_config.NumberColumn("Act FP", format="%.1f"),
+                    "Error (pts)": st.column_config.NumberColumn("Error (pts)", format="%+.1f"),
+                    "Proj Mins": st.column_config.NumberColumn("Proj Mins", format="%.1f"),
+                    "Act Mins": st.column_config.NumberColumn("Act Mins", format="%.1f"),
+                    "Min Error": st.column_config.NumberColumn("Min Error", format="%+.1f"),
+                    "Proj Own %": st.column_config.NumberColumn("Proj Own %", format="%.1f"),
+                    "Act Own %": st.column_config.NumberColumn("Act Own %", format="%.1f"),
+                    "Own Error": st.column_config.NumberColumn("Own Error", format="%+.1f"),
+                    "Flag": st.column_config.CheckboxColumn("Flag", disabled=True),
                 },
                 disabled=[c for c in queue_edit_df.columns if c != "✓"],
                 use_container_width=True,
