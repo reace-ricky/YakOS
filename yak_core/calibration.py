@@ -687,7 +687,7 @@ def action_queue_items(
     pd.DataFrame
         Updated queue with ``queue_status`` set for the targeted rows.
     """
-    valid_actions = {"reviewed", "apply_config", "dismissed", "questioned"}
+    valid_actions = {"reviewed", "apply_config", "dismissed", "questioned", "pass", "review"}
     if action not in valid_actions:
         raise ValueError(f"action must be one of {valid_actions}")
 
