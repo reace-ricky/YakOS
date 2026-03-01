@@ -304,6 +304,12 @@ def ensure_session_state():
         st.session_state["sim_results_df"] = None
     if "sim_actuals_df" not in st.session_state:
         st.session_state["sim_actuals_df"] = None
+    if "sim_mode" not in st.session_state:
+        st.session_state["sim_mode"] = "Live"
+    if "sim_hist_date" not in st.session_state:
+        st.session_state["sim_hist_date"] = None
+    if "sim_custom_lineup" not in st.session_state:
+        st.session_state["sim_custom_lineup"] = []
     if "ms_result" not in st.session_state:
         st.session_state["ms_result"] = None
     if "rapidapi_key" not in st.session_state:
@@ -1948,11 +1954,36 @@ with tab_lab:
 
     # ---- Section C: Sim Module ----
     st.markdown("---")
-    st.markdown("### C. 🎲 Sim Module — Live Player Pool")
-    st.markdown(
-        "Run Monte Carlo sims on the live player pool. "
-        "Apply news / injury updates, then promote high-confidence lineups to Ricky's Slate Room."
+    st.markdown("### C. 🎲 Sim Module")
+
+    # ── Mode selector ────────────────────────────────────────────────────────
+    _sim_mode_opts = ["🔴 Live — Current Day Slate", "📅 Historical Date"]
+    _sim_mode_sel = st.radio(
+        "Slate mode",
+        _sim_mode_opts,
+        horizontal=True,
+        key="sim_mode_radio",
+        help="Live: runs sims on today's loaded pool. Historical: pick a past date and compare against real outcomes.",
     )
+    _sim_is_historical = _sim_mode_sel.startswith("📅")
+
+    if _sim_is_historical:
+        _sim_hist_date = st.date_input(
+            "Select historical slate date",
+            value=st.session_state.get("sim_hist_date") or _today_est(),
+            max_value=_today_est(),
+            key="sim_hist_date_input",
+            help="Choose a past slate date.  Load the matching pool above, then run sims and load actuals to compare.",
+        )
+        st.session_state["sim_hist_date"] = _sim_hist_date
+        st.info(
+            f"📅 Historical mode — slate date **{_sim_hist_date}**.  "
+            "Make sure the player pool loaded above matches this date, then run sims below.  "
+            "Load actuals in the **📊 Load Actuals** expander to compare sim predictions against real outcomes."
+        )
+    else:
+        st.session_state["sim_hist_date"] = None
+        st.caption("🔴 Live mode — using today's loaded player pool.")
 
     pool_for_sim = st.session_state.get("pool_df")
     if pool_for_sim is None:
@@ -1966,9 +1997,10 @@ with tab_lab:
             api_news_col, manual_news_col = st.columns([1, 2])
             with api_news_col:
                 st.markdown("**🌐 Fetch from API**")
+                _news_default_date = st.session_state["sim_hist_date"] if _sim_is_historical else _today_est()
                 news_slate_date = st.date_input(
                     "Slate date",
-                    value=_today_est(),
+                    value=_news_default_date,
                     key="sim_news_date",
                 )
                 if st.button(
@@ -2080,7 +2112,7 @@ with tab_lab:
             sim_min_sal = st.number_input("Min salary", 0, 50000, 46500, step=500, key="sim_min_sal")
 
         # Actuals upload — for historical slate calibration
-        with st.expander("📊 Load Actuals (Historical Slate Calibration)", expanded=False):
+        with st.expander("📊 Load Actuals (Historical Slate Calibration)", expanded=_sim_is_historical):
             st.markdown(
                 "Load actual DraftKings fantasy points to compare sim projections against real "
                 "outcomes.  Choose **API** (fastest — pulls directly from Tank01) or **CSV** "
@@ -2093,9 +2125,10 @@ with tab_lab:
                     "Fetch actual player DK scores for a completed slate directly from the "
                     "Tank01 API.  Requires your RapidAPI key set in the sidebar."
                 )
+                _api_acts_default = st.session_state["sim_hist_date"] if _sim_is_historical else _today_est()
                 _api_acts_date = st.date_input(
                     "Slate date (past game day)",
-                    value=_today_est(),
+                    value=_api_acts_default,
                     key="sim_actuals_api_date",
                     help="Choose the game day you want actuals for.",
                 )
@@ -2194,6 +2227,8 @@ with tab_lab:
                         annotated_sim = ricky_annotate(sim_lu_df, sim_res)
                         st.session_state["sim_lineups_df"] = annotated_sim
                         st.session_state["sim_results_df"] = sim_res
+                        # Clear any previous custom lineup when sims are re-run
+                        st.session_state["sim_custom_lineup"] = []
                         st.success(
                             f"Sims complete — {sim_n_lu} lineups × {sim_n_sims} iterations."
                         )
@@ -2240,7 +2275,291 @@ with tab_lab:
                 })
                 st.dataframe(_sim_display, use_container_width=True, height=300)
 
+            # ── Custom Lineup Builder ─────────────────────────────────────────
+            st.markdown("---")
+            st.markdown("#### 🏗️ Custom Lineup Builder")
+            st.markdown(
+                "Build your own lineup from the **same player pool** the sim used.  "
+                "Select one player per DraftKings roster slot, then save your lineup "
+                "to compare it against the sim's recommendations."
+            )
+
+            _builder_pool = active_sim_pool.copy()
+            # Build player label → row lookup
+            _bp_name_col = "player_name" if "player_name" in _builder_pool.columns else (
+                "name" if "name" in _builder_pool.columns else None
+            )
+            _bp_pos_col = "pos" if "pos" in _builder_pool.columns else None
+
+            if _bp_name_col is None:
+                st.warning("Player pool is missing a name column — cannot build lineup.")
+            else:
+                _bp_pool = _builder_pool.copy()
+                _bp_pool["_label"] = _bp_pool[_bp_name_col].astype(str)
+                if _bp_pos_col:
+                    _bp_pool["_label"] = (
+                        _bp_pool[_bp_name_col].astype(str)
+                        + " ("
+                        + _bp_pool[_bp_pos_col].astype(str)
+                        + ", $"
+                        + _bp_pool["salary"].astype(int).astype(str)
+                        + ")"
+                    )
+                else:
+                    _bp_pool["_label"] = (
+                        _bp_pool[_bp_name_col].astype(str)
+                        + " ($"
+                        + _bp_pool["salary"].astype(int).astype(str)
+                        + ")"
+                    )
+
+                # DK Classic slot → eligible positions
+                _DK_SLOT_POS: dict = {
+                    "PG": ["PG"],
+                    "SG": ["SG"],
+                    "SF": ["SF"],
+                    "PF": ["PF"],
+                    "C":  ["C"],
+                    "G":  ["PG", "SG"],
+                    "F":  ["SF", "PF"],
+                    "UTIL": ["PG", "SG", "SF", "PF", "C"],
+                }
+
+                def _players_for_slot(slot: str) -> list:
+                    """Return sorted player labels eligible for a DK Classic slot."""
+                    eligible_pos = _DK_SLOT_POS.get(slot, [])
+                    if _bp_pos_col and eligible_pos:
+                        mask = _bp_pool[_bp_pos_col].str.upper().isin(
+                            [p.upper() for p in eligible_pos]
+                        )
+                        sub = _bp_pool[mask]
+                    else:
+                        sub = _bp_pool
+                    return sorted(sub["_label"].tolist())
+
+                # Render two columns of 4 slots each
+                _slots = ["PG", "SG", "SF", "PF", "C", "G", "F", "UTIL"]
+                _slot_cols = st.columns(2)
+                _custom_selections: dict = {}
+
+                # Helper: extract player name from a label like "Name (PG, $7800)"
+                def _label_to_name(label: str | None) -> str | None:
+                    if not label:
+                        return None
+                    return label.split(" (")[0]
+
+                for _si, _slot in enumerate(_slots):
+                    _col_idx = _si % 2
+                    with _slot_cols[_col_idx]:
+                        _opts = ["— select —"] + _players_for_slot(_slot)
+                        # Pre-fill from saved custom lineup if available
+                        _saved = st.session_state.get("sim_custom_lineup", [])
+                        _default_idx = 0
+                        if len(_saved) > _si and _saved[_si]:
+                            # Find label matching saved name
+                            _saved_name = _saved[_si]
+                            for _oi, _o in enumerate(_opts):
+                                if _label_to_name(_o) == _saved_name:
+                                    _default_idx = _oi
+                                    break
+                        _sel = st.selectbox(
+                            f"**{_slot}**",
+                            options=_opts,
+                            index=_default_idx,
+                            key=f"sim_custom_slot_{_slot}",
+                        )
+                        _custom_selections[_slot] = _sel if _sel != "— select —" else None
+
+                # Extract player names from selections
+                _custom_names = [_label_to_name(_custom_selections[s]) for s in _slots]
+                _filled = [n for n in _custom_names if n]
+
+                # Salary + proj summary
+                if _filled:
+                    _custom_rows = []
+                    for _n in _filled:
+                        _row = _bp_pool[_bp_pool[_bp_name_col] == _n]
+                        if not _row.empty:
+                            _custom_rows.append(_row.iloc[0])
+                    if _custom_rows:
+                        _cdf = pd.DataFrame(_custom_rows)
+                        _custom_sal = int(_cdf["salary"].sum()) if "salary" in _cdf.columns else 0
+                        _custom_proj = float(_cdf["proj"].sum()) if "proj" in _cdf.columns else 0.0
+                        _sal_color = "green" if _custom_sal <= 50000 else "red"
+                        st.markdown(
+                            f"💰 **Salary used:** <span style='color:{_sal_color}'>"
+                            f"${_custom_sal:,} / $50,000</span>  &nbsp;&nbsp; "
+                            f"📈 **Projected total:** **{_custom_proj:.1f} FP**",
+                            unsafe_allow_html=True,
+                        )
+
+                _save_col, _clear_col = st.columns([1, 1])
+                with _save_col:
+                    if st.button("💾 Save Custom Lineup", key="sim_save_custom_btn"):
+                        _missing = [_slots[i] for i, n in enumerate(_custom_names) if not n]
+                        if _missing:
+                            st.error(f"Please fill all 8 slots before saving. Missing: {', '.join(_missing)}")
+                        else:
+                            st.session_state["sim_custom_lineup"] = _custom_names
+                            st.success("Custom lineup saved! See comparison below.")
+                with _clear_col:
+                    if st.button("🗑️ Clear Custom Lineup", key="sim_clear_custom_btn"):
+                        st.session_state["sim_custom_lineup"] = []
+
+            # ── Sim vs Custom Lineup Comparison ──────────────────────────────
+            _saved_custom = st.session_state.get("sim_custom_lineup", [])
+            if _saved_custom and len(_saved_custom) == 8:
+                st.markdown("---")
+                st.markdown("#### 📊 Sim vs Custom Lineup — Comparison")
+                st.markdown(
+                    "Side-by-side: the sim's **best lineup** (highest avg sim score) vs "
+                    "**your custom lineup**.  Load actuals above to see real outcomes."
+                )
+
+                # Best sim lineup by sim_mean
+                _best_sim_row = sim_res.sort_values("sim_mean", ascending=False).iloc[0]
+                _best_sim_id = _best_sim_row["lineup_index"]
+                _best_sim_mean = float(_best_sim_row["sim_mean"])
+                _best_sim_players = sim_lu_df[sim_lu_df["lineup_index"] == _best_sim_id].copy()
+
+                # Build custom lineup DataFrame from pool
+                _cmp_custom_rows = []
+                for _slot, _pname in zip(_slots, _saved_custom):
+                    if _pname and _bp_name_col:
+                        _row = active_sim_pool[active_sim_pool[_bp_name_col] == _pname]
+                        if not _row.empty:
+                            _r = _row.iloc[0].to_dict()
+                            _r["slot"] = _slot
+                            _cmp_custom_rows.append(_r)
+                _cmp_custom_df = pd.DataFrame(_cmp_custom_rows) if _cmp_custom_rows else pd.DataFrame()
+
+                # Actuals lookup helper
+                _cmp_actuals = st.session_state.get("sim_actuals_df")
+
+                def _lookup_actual(name: str) -> float | None:
+                    if _cmp_actuals is None or _cmp_actuals.empty:
+                        return None
+                    _acts_name_col = "player_name" if "player_name" in _cmp_actuals.columns else "name"
+                    _acts_fp_col = "actual_fp" if "actual_fp" in _cmp_actuals.columns else "actual"
+                    _match = _cmp_actuals[_cmp_actuals[_acts_name_col] == name]
+                    if not _match.empty and _acts_fp_col in _match.columns:
+                        return float(_match.iloc[0][_acts_fp_col])
+                    return None
+
+                # Build display rows for sim lineup
+                def _build_cmp_rows(players_df: pd.DataFrame, name_col: str) -> list:
+                    rows = []
+                    for _, r in players_df.iterrows():
+                        pname = str(r.get(name_col, ""))
+                        proj = float(r.get("proj", 0))
+                        sal = int(r.get("salary", 0))
+                        pos = str(r.get("pos", ""))
+                        actual = _lookup_actual(pname)
+                        rows.append({
+                            "Player": pname,
+                            "Pos": pos,
+                            "Salary": sal,
+                            "Proj FP": round(proj, 1),
+                            "Actual FP": round(actual, 1) if actual is not None else "—",
+                        })
+                    return rows
+
+                _cmp_col_sim, _cmp_col_custom = st.columns(2)
+
+                with _cmp_col_sim:
+                    st.markdown(
+                        f"**🤖 Sim's Best Lineup** &nbsp; *(Lineup #{_best_sim_id}, "
+                        f"avg {_best_sim_mean:.1f} FP)*"
+                    )
+                    if not _best_sim_players.empty:
+                        _sim_name_col = "player_name" if "player_name" in _best_sim_players.columns else "name"
+                        _sim_rows = _build_cmp_rows(_best_sim_players, _sim_name_col)
+                        _sim_cmp_df = pd.DataFrame(_sim_rows)
+                        _sim_proj_total = _sim_cmp_df["Proj FP"].sum()
+                        _sim_actual_total: float | str = "—"
+                        if _cmp_actuals is not None:
+                            _sim_act_vals = [r["Actual FP"] for r in _sim_rows if r["Actual FP"] != "—"]
+                            if _sim_act_vals:
+                                _sim_actual_total = round(sum(_sim_act_vals), 1)
+                        st.dataframe(_sim_cmp_df, use_container_width=True, hide_index=True)
+                        st.markdown(
+                            f"**Proj total:** {_sim_proj_total:.1f} FP  |  "
+                            f"**Actual total:** {_sim_actual_total}"
+                        )
+                    else:
+                        st.info("Sim lineup data unavailable.")
+
+                with _cmp_col_custom:
+                    st.markdown("**🧑 Your Custom Lineup**")
+                    if not _cmp_custom_df.empty:
+                        _custom_name_col = _bp_name_col or "player_name"
+                        _cust_rows = _build_cmp_rows(_cmp_custom_df, _custom_name_col)
+                        _cust_cmp_df = pd.DataFrame(_cust_rows)
+                        _cust_proj_total = _cust_cmp_df["Proj FP"].sum()
+                        _cust_actual_total: float | str = "—"
+                        if _cmp_actuals is not None:
+                            _cust_act_vals = [r["Actual FP"] for r in _cust_rows if r["Actual FP"] != "—"]
+                            if _cust_act_vals:
+                                _cust_actual_total = round(sum(_cust_act_vals), 1)
+                        st.dataframe(_cust_cmp_df, use_container_width=True, hide_index=True)
+                        st.markdown(
+                            f"**Proj total:** {_cust_proj_total:.1f} FP  |  "
+                            f"**Actual total:** {_cust_actual_total}"
+                        )
+                    else:
+                        st.info("Custom lineup data unavailable.")
+
+                # ── What the sim missed ───────────────────────────────────────
+                if _cmp_actuals is not None and not _cmp_actuals.empty:
+                    st.markdown("##### 🔍 What the Sim Missed")
+                    st.caption(
+                        "Players in the sim's best lineup compared to your custom lineup — "
+                        "sorted by biggest projection error (|Proj − Actual|)."
+                    )
+                    _acc_result = build_sim_player_accuracy_table(active_sim_pool, _cmp_actuals)
+                    if _acc_result["n_players"] > 0:
+                        _acc_df = _acc_result["player_df"].copy()
+                        # Tag which lineup each player appeared in
+                        _sim_player_set = set(
+                            _best_sim_players[
+                                "player_name" if "player_name" in _best_sim_players.columns else "name"
+                            ].tolist()
+                        )
+                        _custom_player_set = set(_saved_custom)
+                        _acc_df["In Sim Lineup"] = _acc_df["name"].isin(_sim_player_set).map(
+                            {True: "✅", False: ""}
+                        )
+                        _acc_df["In Custom Lineup"] = _acc_df["name"].isin(_custom_player_set).map(
+                            {True: "✅", False: ""}
+                        )
+                        _miss_display = _acc_df.rename(columns={
+                            "name": "Player",
+                            "proj": "Proj FP",
+                            "actual": "Actual FP",
+                            "error": "Error (Proj−Act)",
+                            "abs_error": "Abs Error",
+                            "pct_error": "Err %",
+                        }).sort_values("Abs Error", ascending=False)
+                        for _c in ["Proj FP", "Actual FP", "Error (Proj−Act)", "Abs Error", "Err %"]:
+                            if _c in _miss_display.columns:
+                                _miss_display[_c] = _miss_display[_c].round(1)
+                        st.dataframe(_miss_display, use_container_width=True, height=350)
+                        st.download_button(
+                            "📥 Download miss analysis CSV",
+                            data=to_csv_bytes(_miss_display),
+                            file_name="yakos_sim_miss_analysis.csv",
+                            mime="text/csv",
+                            key="sim_miss_dl",
+                        )
+                    else:
+                        st.info("No player names matched between pool and actuals for miss analysis.")
+                else:
+                    st.info(
+                        "Load actuals in the **📊 Load Actuals** expander above to see what the sim missed."
+                    )
+
             # Apply learnings: boost projection of high-sim players for next run
+            st.markdown("---")
             st.markdown("#### Apply Learnings to Live Slate Logic")
             if st.button("⚡ Apply sim learnings (boost high-smash players' projections)", key="sim_apply_btn"):
                 # Players in high-smash lineups (smash_prob > 0.1) get a +5% boost
