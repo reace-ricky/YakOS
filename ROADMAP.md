@@ -78,6 +78,10 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 51 | **Fix Custom Lineup Builder multi-position filtering** — `_players_for_slot` now splits position strings on "/" before matching eligible slots, so dual-eligibility players (e.g. "SG/SF", "PF/C", "PG/SG", "SF/PF") appear in all correct slot dropdowns; also added `.fillna("")` guard for null position values | `streamlit_app.py` | latest |
 | 53 | **Calibration Lab page cleanup** — removed caption text under KPI cards; added tiny target indicator inside each bubble (≤ 6 pts, ≤ 3 min, ≤ 3%, ≥ 70%); removed Advanced breakdown expander, Stack Hit Log section, Build Best Lineup for a Slate expander, and Compare vs Contest type expander | `streamlit_app.py` | latest |
 | 54 | **Tank01 API dict-body fix** — `fetch_live_dfs` now unwraps `body` dict (e.g., `{"DraftKings": [...]}`) via `_TANK01_DFS_PLAYER_KEYS` constant + longest-list fallback; 5 new tests added | `yak_core/live.py`, `tests/test_live_actuals.py` | latest |
+| 55 | **YakOS Projection Engine functions** — `yakos_fp_projection`, `yakos_minutes_projection`, `yakos_ownership_projection`, `yakos_ensemble` added to `projections.py`; auto-load trained pickles from `models/` if present, formula fallback otherwise; 27 new tests | `yak_core/projections.py`, `tests/test_projections.py` | latest |
+| 56 | **Fix `fetch_actuals_from_api` actuals bug** — function no longer returns Tank01 projections as actuals; always uses box scores (`getNBAGamesForDate` + `getNBABoxScore`); tests updated | `yak_core/live.py`, `tests/test_live_actuals.py` | latest |
+| 57 | **`fetch_live_opt_pool` projection provenance** — adds `tank01_proj` (original Tank01 proj) and `proj_source = 'tank01'` columns | `yak_core/live.py` | latest |
+| 58 | **Colab Build Plan notebooks** (NB1–NB7) — data collection, feature engineering, FP model (Ridge + LightGBM + ensemble), minutes model, ownership model, backtesting/calibration loop, integration demo | `notebooks/` | latest |
 
 ---
 
@@ -106,7 +110,7 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 |---|---------|-------|
 | ~~R8~~ | ~~**Docker / one-click deploy**~~ | ✅ Done — `Dockerfile` + `docker-compose.yml` added. Run `docker compose up` to spin up the Streamlit app at http://localhost:8501. |
 | ~~R11~~ | ~~**Dark mode / UI polish**~~ | ✅ Done — `.streamlit/config.toml` updated with dark base theme, orange primary colour, and clean dark background palette. |
-| R9 | **Historical projection model training** | `proj_model()` exists in `yak_core/projections.py` but relies on parquet files at `YAKOS_ROOT`. Could export training data from `data/historical_lineups.csv` and train inline. |
+| R9 | **Historical projection model training** | `proj_model()` exists in `yak_core/projections.py` but relies on parquet files at `YAKOS_ROOT`. Use Notebook 1→3 workflow to collect data and train. Run `notebooks/03_fp_projection_model.ipynb` and copy `models/yakos_fp_model.pkl` to `YAKOS_ROOT/models/`. |
 | R10 | **Export / share lineups via URL** | Streamlit `st.query_params` could encode a shareable lineup state. |
 
 ---
@@ -121,10 +125,18 @@ YakOS/
 ├── Dockerfile                    # Docker image for one-click deploy
 ├── docker-compose.yml            # docker compose up → app at :8501
 ├── streamlit_app.py          # Streamlit UI — imports from yak_core
+├── notebooks/
+│   ├── 01_data_collection.ipynb         # Tank01 API data collection → yakos_historical_master.parquet
+│   ├── 02_feature_engineering.ipynb     # Rolling FP/min, DvP, pace, trend → yakos_features.parquet
+│   ├── 03_fp_projection_model.ipynb     # Ridge + LightGBM + ensemble FP model → yakos_fp_model.pkl
+│   ├── 04_minutes_projection_model.ipynb # Minutes model → yakos_minutes_model.pkl
+│   ├── 05_ownership_projection_model.ipynb # GPP ownership model → yakos_ownership_model.pkl
+│   ├── 06_backtesting_calibration.ipynb  # Historical backtest + calibration report
+│   └── 07_integration.ipynb             # Integration demo — apply YakOS projections to live pool
 ├── yak_core/
 │   ├── config.py             # DEFAULT_CONFIG, merge_config, DK constants (Classic + Showdown), YAKOS_ROOT
 │   ├── lineups.py            # LP optimizer, exposure control, pair-fade diversity, Showdown optimizer, DK upload formats
-│   ├── projections.py        # salary_implied, regression, blend, proj_model
+│   ├── projections.py        # salary_implied, regression, blend, proj_model, yakos_fp_projection, yakos_minutes_projection, yakos_ownership_projection, yakos_ensemble
 │   ├── calibration.py        # archetypes, queue, backtest, config knobs, persistent calibration_config.json
 │   ├── right_angle.py        # stack/pace/value edge analysis + lineup tagging
 │   ├── sims.py               # Monte Carlo, live update, promote logic, player accuracy table

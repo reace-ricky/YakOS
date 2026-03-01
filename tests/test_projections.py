@@ -199,3 +199,159 @@ class TestProjectionQualityReport:
         pool["actual_fp"] = np.nan
         report = projection_quality_report(pool)
         assert "error" in report
+
+
+# ---------------------------------------------------------------------------
+# yakos_fp_projection
+# ---------------------------------------------------------------------------
+
+from yak_core.projections import (
+    yakos_fp_projection,
+    yakos_minutes_projection,
+    yakos_ownership_projection,
+    yakos_ensemble,
+)
+
+
+class TestYakosFpProjection:
+    def test_returns_proj_floor_ceil_keys(self):
+        result = yakos_fp_projection({"salary": 8000})
+        assert set(result.keys()) == {"proj", "floor", "ceil"}
+
+    def test_proj_is_positive(self):
+        result = yakos_fp_projection({"salary": 6000})
+        assert result["proj"] > 0
+
+    def test_floor_less_than_proj(self):
+        result = yakos_fp_projection({"salary": 7500})
+        assert result["floor"] < result["proj"]
+
+    def test_ceil_greater_than_proj(self):
+        result = yakos_fp_projection({"salary": 7500})
+        assert result["ceil"] > result["proj"]
+
+    def test_uses_rolling_averages_when_provided(self):
+        # Rolling avg 40 should push proj above a 5000-salary baseline (20 FP)
+        result = yakos_fp_projection({"salary": 5000, "rolling_fp_5": 40.0})
+        assert result["proj"] > 25.0
+
+    def test_blends_tank01_and_rg_proj(self):
+        result_both = yakos_fp_projection({"salary": 7000, "tank01_proj": 35.0, "rg_proj": 37.0})
+        result_sal = yakos_fp_projection({"salary": 7000})
+        assert result_both["proj"] != result_sal["proj"]
+
+    def test_no_negative_proj(self):
+        result = yakos_fp_projection({"salary": 0})
+        assert result["proj"] >= 0.0
+        assert result["floor"] >= 0.0
+
+    def test_zero_salary_returns_zeros(self):
+        result = yakos_fp_projection({"salary": 0})
+        assert result["proj"] == 0.0
+
+    def test_unknown_keys_ignored(self):
+        # Extra keys should not raise
+        result = yakos_fp_projection({"salary": 8000, "unknown_key": "foo"})
+        assert "proj" in result
+
+
+# ---------------------------------------------------------------------------
+# yakos_minutes_projection
+# ---------------------------------------------------------------------------
+
+class TestYakosMinutesProjection:
+    def test_returns_proj_minutes_key(self):
+        result = yakos_minutes_projection({"rolling_min_5": 30.0})
+        assert "proj_minutes" in result
+
+    def test_rolling_average_used(self):
+        result = yakos_minutes_projection({"rolling_min_5": 32.0, "rolling_min_10": 30.0})
+        # Weighted towards rolling_min_5 (weight 0.50)
+        assert result["proj_minutes"] == pytest.approx(31.2, abs=0.5)
+
+    def test_b2b_discount_applied(self):
+        r_normal = yakos_minutes_projection({"rolling_min_5": 34.0, "b2b": False})
+        r_b2b = yakos_minutes_projection({"rolling_min_5": 34.0, "b2b": True})
+        assert r_b2b["proj_minutes"] < r_normal["proj_minutes"]
+
+    def test_large_spread_reduces_minutes(self):
+        r_normal = yakos_minutes_projection({"rolling_min_5": 34.0, "spread": 2.0})
+        r_blowout = yakos_minutes_projection({"rolling_min_5": 34.0, "spread": 20.0})
+        assert r_blowout["proj_minutes"] < r_normal["proj_minutes"]
+
+    def test_no_negative_minutes(self):
+        result = yakos_minutes_projection({"salary": 3500, "b2b": True, "spread": 25.0})
+        assert result["proj_minutes"] >= 0.0
+
+    def test_salary_fallback_when_no_rolling(self):
+        # No rolling mins → salary-based estimate
+        result = yakos_minutes_projection({"salary": 9000})
+        assert result["proj_minutes"] > 0.0
+
+
+# ---------------------------------------------------------------------------
+# yakos_ownership_projection
+# ---------------------------------------------------------------------------
+
+class TestYakosOwnershipProjection:
+    def test_returns_proj_own_key(self):
+        result = yakos_ownership_projection({"salary": 7000, "proj": 35.0})
+        assert "proj_own" in result
+
+    def test_ownership_in_valid_range(self):
+        result = yakos_ownership_projection({"salary": 7000, "proj": 35.0})
+        assert 0.0 <= result["proj_own"] <= 100.0
+
+    def test_higher_value_score_higher_ownership(self):
+        r_high = yakos_ownership_projection({"salary": 5000, "proj": 35.0})   # 7x value
+        r_low = yakos_ownership_projection({"salary": 8000, "proj": 20.0})    # 2.5x value
+        assert r_high["proj_own"] > r_low["proj_own"]
+
+    def test_rg_ownership_blended_in(self):
+        r_no_rg = yakos_ownership_projection({"salary": 7000, "proj": 35.0})
+        r_with_rg = yakos_ownership_projection({"salary": 7000, "proj": 35.0, "rg_ownership": 30.0})
+        assert r_with_rg["proj_own"] != r_no_rg["proj_own"]
+
+    def test_zero_salary_returns_zero(self):
+        result = yakos_ownership_projection({"salary": 0, "proj": 0.0})
+        assert result["proj_own"] == 0.0
+
+    def test_no_negative_ownership(self):
+        # Low-value player should not get negative ownership
+        result = yakos_ownership_projection({"salary": 10000, "proj": 5.0})
+        assert result["proj_own"] >= 0.0
+
+
+# ---------------------------------------------------------------------------
+# yakos_ensemble
+# ---------------------------------------------------------------------------
+
+class TestYakosEnsemble:
+    def test_default_blend(self):
+        # 0.40*38 + 0.30*36 + 0.30*40 = 15.2+10.8+12 = 38.0
+        result = yakos_ensemble(38.0, 36.0, 40.0)
+        assert result == pytest.approx(38.0)
+
+    def test_custom_weights(self):
+        weights = {"yakos": 1.0, "tank01": 0.0, "rg": 0.0}
+        result = yakos_ensemble(30.0, 50.0, 50.0, weights=weights)
+        assert result == pytest.approx(30.0)
+
+    def test_none_proj_redistributes_weight(self):
+        # Only yakos and rg provided → split between them
+        result = yakos_ensemble(40.0, None, 30.0)
+        assert result == pytest.approx((40.0 * 0.40 + 30.0 * 0.30) / 0.70, abs=0.1)
+
+    def test_all_none_returns_zero(self):
+        result = yakos_ensemble(None, None, None)
+        assert result == 0.0
+
+    def test_nan_proj_treated_as_missing(self):
+        result = yakos_ensemble(40.0, float("nan"), 30.0)
+        # nan tank01 is excluded; remaining weight shared
+        assert result > 0.0
+
+    def test_returns_float(self):
+        result = yakos_ensemble(35.0, 38.0, 40.0)
+        assert isinstance(result, float)
+
