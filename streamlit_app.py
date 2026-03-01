@@ -62,6 +62,8 @@ from yak_core.calibration import (  # type: ignore
     build_approved_lineups,
     get_approved_lineups_by_archetype,
     compute_slate_kpis,
+    BACKTEST_ARCHETYPES,
+    run_archetype_backtest,
 )
 from yak_core.right_angle import (  # type: ignore
     ricky_annotate,
@@ -322,6 +324,14 @@ def ensure_session_state():
         st.session_state["bl_contest_type"] = None
     if "cmp_dk_df" not in st.session_state:
         st.session_state["cmp_dk_df"] = None
+    if "calib_backtest_results" not in st.session_state:
+        st.session_state["calib_backtest_results"] = None
+    if "calib_drilldown_arch" not in st.session_state:
+        st.session_state["calib_drilldown_arch"] = None
+    if "calib_queue_arch" not in st.session_state:
+        st.session_state["calib_queue_arch"] = None
+    if "calib_queue_slate" not in st.session_state:
+        st.session_state["calib_queue_slate"] = None
 
 
 def run_optimizer(
@@ -520,10 +530,11 @@ with st.sidebar:
         st.session_state["rapidapi_key"] = rapidapi_key_input
         os.environ["RAPIDAPI_KEY"] = rapidapi_key_input
 
-tab_slate, tab_optimizer, tab_lab = st.tabs([
+tab_slate, tab_optimizer, tab_lab, tab_calib = st.tabs([
     "🏀 Ricky's Slate Room",
     "⚡ Optimizer",
     "🔬 Calibration Lab",
+    "📡 Ricky's Calibration Lab",
 ])
 
 
@@ -2312,4 +2323,421 @@ with tab_lab:
 
     st.markdown("---")
     st.caption("YakOS Calibration Lab — data-driven lineup refinement.")
+
+
+# ============================================================
+# Tab 4: 📡 Ricky's Calibration Lab
+# ============================================================
+with tab_calib:
+    st.markdown("## 📡 Ricky's Calibration Lab – Backtesting & Calibration")
+    st.markdown(
+        "Backtest any DFS build against past contests and see which contest archetypes "
+        "need retuning — mirroring the BacktestIQ approach."
+    )
+
+    # Load historical data once for the whole tab
+    _hist_df_bc = load_historical_lineups()
+
+    st.markdown("---")
+
+    # ── Backtest Controls ─────────────────────────────────────────────────────
+    st.markdown("### Backtest Controls")
+
+    _bc_col1, _bc_col2 = st.columns([1, 2])
+    with _bc_col1:
+        _bc_sport = st.selectbox(
+            "Sport",
+            ["NBA", "PGA"],
+            key="bc_sport",
+            help="PGA support is coming soon.",
+        )
+        _bc_site = st.selectbox(
+            "Site",
+            ["DraftKings (DK)", "FanDuel (FD)"],
+            key="bc_site",
+            help="FanDuel support is coming soon.",
+        )
+
+    with _bc_col2:
+        if not _hist_df_bc.empty:
+            _bc_min_date = min(_hist_df_bc["slate_date"])
+            _bc_max_date = max(_hist_df_bc["slate_date"])
+        else:
+            _bc_min_date = _bc_max_date = _today_est()
+
+        _bc_date_range = st.date_input(
+            "Historical date range",
+            value=(_bc_min_date, _bc_max_date),
+            key="bc_date_range",
+            help="Select the range of historical slates to backtest against.",
+        )
+
+    _bc_arch_options = list(BACKTEST_ARCHETYPES.keys())
+    _bc_archetypes = st.multiselect(
+        "Contest archetypes to test",
+        _bc_arch_options,
+        default=_bc_arch_options,
+        key="bc_archetypes",
+        help=(
+            "Select which Ricky contest archetypes to backtest. "
+            "Each maps to a specific contest type and default build config."
+        ),
+    )
+
+    _bc_build_override = st.selectbox(
+        "Build config (optimizer archetype)",
+        ["— use archetype default —"] + list(DFS_ARCHETYPES.keys()),
+        key="bc_build_override",
+        help="Override the default DFS build config for all selected contest archetypes.",
+    )
+    _bc_build_config = (
+        None if _bc_build_override == "— use archetype default —" else _bc_build_override
+    )
+
+    _bc_num_lineups = st.slider(
+        "Lineups per contest",
+        min_value=1,
+        max_value=20,
+        value=5,
+        key="bc_num_lineups",
+        help="Number of lineups to generate per (archetype, slate) pair.",
+    )
+
+    _bc_entry_fee = st.number_input(
+        "Entry fee ($)",
+        min_value=0.25,
+        max_value=100.0,
+        value=4.0,
+        step=0.25,
+        key="bc_entry_fee",
+    )
+
+    if st.button("▶ Run Backtest", type="primary", key="bc_run_btn"):
+        if not _bc_archetypes:
+            st.warning("Select at least one contest archetype.")
+        elif _hist_df_bc.empty:
+            st.warning(
+                "No historical data found. Add `data/historical_lineups.csv` to enable backtesting."
+            )
+        else:
+            # Filter by date range
+            _start, _end = (
+                (_bc_date_range[0], _bc_date_range[1])
+                if isinstance(_bc_date_range, (tuple, list)) and len(_bc_date_range) == 2
+                else (_bc_min_date, _bc_max_date)
+            )
+            _filtered_hist = _hist_df_bc[
+                (_hist_df_bc["slate_date"] >= _start)
+                & (_hist_df_bc["slate_date"] <= _end)
+            ]
+            if _filtered_hist.empty:
+                st.warning("No historical data found in the selected date range.")
+            else:
+                with st.spinner(
+                    f"Running backtest across {len(_bc_archetypes)} archetype(s) "
+                    f"and {_filtered_hist['slate_date'].nunique()} slate(s)…"
+                ):
+                    try:
+                        _bt_results = run_archetype_backtest(
+                            hist_df=_filtered_hist,
+                            archetypes=_bc_archetypes,
+                            num_lineups=_bc_num_lineups,
+                            entry_fee=_bc_entry_fee,
+                            build_config_override=_bc_build_config,
+                        )
+                        st.session_state["calib_backtest_results"] = _bt_results
+                        st.session_state["calib_drilldown_arch"] = None
+                        st.session_state["calib_queue_arch"] = None
+                        st.session_state["calib_queue_slate"] = None
+                        _n_tested = _bt_results.get("global", {}).get("n_lineups", 0)
+                        if _n_tested > 0:
+                            st.success(
+                                f"Backtest complete — {_n_tested} lineups tested across "
+                                f"{_bt_results['global']['n_contests']} contest(s)."
+                            )
+                        else:
+                            st.warning(
+                                "Backtest ran but produced no results. "
+                                "The historical data may not have enough players per slate "
+                                "to run the optimizer (need ≥ 8 unique players)."
+                            )
+                    except Exception as _bt_err:
+                        st.error(f"Backtest error: {_bt_err}")
+
+    # ── Backtest Results ──────────────────────────────────────────────────────
+    _bt = st.session_state.get("calib_backtest_results")
+    if _bt and _bt.get("global") and _bt["global"].get("n_lineups", 0) > 0:
+        st.markdown("---")
+        st.markdown("### Backtest Results")
+
+        # ── Global KPI strip ────────────────────────────────────────────────
+        _g = _bt["global"]
+
+        def _bt_roi_color(roi: float) -> str:
+            if roi >= 10:
+                return "good"
+            elif roi >= 0:
+                return "warn"
+            return "bad"
+
+        def _bt_cash_color(cash_rate: float) -> str:
+            if cash_rate >= 60:
+                return "good"
+            elif cash_rate >= 45:
+                return "warn"
+            return "bad"
+
+        def _bt_pct_color(avg_pct: float) -> str:
+            if avg_pct <= 40:
+                return "good"
+            elif avg_pct <= 55:
+                return "warn"
+            return "bad"
+
+        def _bt_kpi_card(label: str, value_str: str, color_key: str) -> str:
+            bg = _QUALITY_BG[color_key]
+            color = _QUALITY_TEXT[color_key]
+            return (
+                f'<div style="border:1px solid #3a3a3a;border-radius:6px;'
+                f'padding:10px 8px;text-align:center;background:{bg};">'
+                f'<div style="font-size:0.72rem;text-transform:uppercase;'
+                f'letter-spacing:0.06em;color:#aaa;margin-bottom:4px;">{label}</div>'
+                f'<div style="font-size:1.5rem;font-weight:700;color:{color};">{value_str}</div>'
+                f'</div>'
+            )
+
+        st.markdown(
+            "**Global KPIs — all archetypes combined**  "
+            f"({_g['n_lineups']} lineups · {_g['n_contests']} contest(s))"
+        )
+        _gk1, _gk2, _gk3, _gk4 = st.columns(4)
+        with _gk1:
+            st.markdown(
+                _bt_kpi_card("Backtest ROI", f"{_g['roi']:+.1f}%", _bt_roi_color(_g["roi"])),
+                unsafe_allow_html=True,
+            )
+        with _gk2:
+            st.markdown(
+                _bt_kpi_card("Cash Rate", f"{_g['cash_rate']:.1f}%", _bt_cash_color(_g["cash_rate"])),
+                unsafe_allow_html=True,
+            )
+        with _gk3:
+            st.markdown(
+                _bt_kpi_card(
+                    "Avg Finish %ile",
+                    f"{_g['avg_percentile']:.1f}",
+                    _bt_pct_color(_g["avg_percentile"]),
+                ),
+                unsafe_allow_html=True,
+            )
+        with _gk4:
+            st.markdown(
+                _bt_kpi_card("Best Finish %ile", f"{_g['best_finish']:.1f}", "good"),
+                unsafe_allow_html=True,
+            )
+        st.caption(
+            "ROI: green ≥ 10%, yellow 0–10%, red < 0.  "
+            "Cash rate: green ≥ 60%, yellow 45–60%, red < 45%.  "
+            "Avg %ile: green ≤ 40, yellow 40–55, red > 55 (lower = better finish)."
+        )
+
+        # ── Archetype summary table ──────────────────────────────────────────
+        st.markdown("---")
+        st.markdown("### Archetype Summary")
+        st.caption("Sorted by worst ROI first — problem archetypes float to the top.")
+
+        _arch_rows = _bt.get("by_archetype", [])
+        if _arch_rows:
+            _arch_df = pd.DataFrame([
+                {
+                    "Archetype": r["archetype"],
+                    "ROI (%)": r["roi"],
+                    "Cash Rate (%)": r["cash_rate"],
+                    "Avg Finish %ile": r["avg_percentile"],
+                    "Best Finish %ile": r["best_finish"],
+                    "Contests": r["n_contests"],
+                    "Lineups": r["n_lineups"],
+                }
+                for r in _arch_rows
+            ]).sort_values("ROI (%)", ascending=True)  # worst first
+
+            # Row coloring: apply background via HTML table
+            def _row_style(row: pd.Series) -> list:
+                roi_c = _bt_roi_color(float(row["ROI (%)"]))
+                cash_c = _bt_cash_color(float(row["Cash Rate (%)"]))
+                # Use the worse of ROI vs cash_rate to pick row color
+                _priority = {"bad": 0, "warn": 1, "good": 2}
+                worst = min(roi_c, cash_c, key=lambda c: _priority[c])
+                bg = _QUALITY_BG[worst]
+                return [f"background-color:{bg}" for _ in row.index]
+
+            _styled = _arch_df.style.apply(_row_style, axis=1).format({
+                "ROI (%)": "{:+.1f}",
+                "Cash Rate (%)": "{:.1f}",
+                "Avg Finish %ile": "{:.1f}",
+                "Best Finish %ile": "{:.1f}",
+            })
+            st.dataframe(_styled, use_container_width=True, hide_index=True)
+
+            # Drilldown selector
+            st.markdown("#### Drilldown by Archetype")
+            _drill_options = ["— select to drill down —"] + [r["archetype"] for r in _arch_rows]
+            _drill_sel = st.selectbox(
+                "Select archetype to drill into",
+                _drill_options,
+                key="bc_drilldown_sel",
+            )
+            if _drill_sel != "— select to drill down —":
+                st.session_state["calib_drilldown_arch"] = _drill_sel
+
+            _drill_arch = st.session_state.get("calib_drilldown_arch")
+            if _drill_arch and _drill_arch in [r["archetype"] for r in _arch_rows]:
+                _drill_data = next(
+                    (r for r in _arch_rows if r["archetype"] == _drill_arch), None
+                )
+                if _drill_data:
+                    st.markdown(f"##### {_drill_arch} — Slate-Level Results")
+                    _slate_rows = _drill_data.get("slate_results", [])
+                    if _slate_rows:
+                        _slate_df = pd.DataFrame(_slate_rows).rename(columns={
+                            "slate_date": "Slate Date",
+                            "contest": "Contest",
+                            "roi": "ROI (%)",
+                            "cash_rate": "Cash Rate (%)",
+                            "avg_percentile": "Avg Finish %ile",
+                            "best_finish": "Best Finish %ile",
+                            "n_lineups": "Lineups",
+                        })
+                        st.dataframe(
+                            _slate_df.style.format({
+                                "ROI (%)": "{:+.1f}",
+                                "Cash Rate (%)": "{:.1f}",
+                                "Avg Finish %ile": "{:.1f}",
+                                "Best Finish %ile": "{:.1f}",
+                            }),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
+                        # Link to Player Calibration Queue
+                        st.markdown("**Open Player Calibration Queue for this archetype:**")
+                        _slate_sel_options = [r["Slate Date"] for _, r in _slate_df.iterrows()]
+                        _pq_slate_sel = st.selectbox(
+                            "Select slate",
+                            ["— pick a slate —"] + _slate_sel_options,
+                            key="bc_pq_slate_sel",
+                        )
+                        if _pq_slate_sel != "— pick a slate —":
+                            if st.button(
+                                f"Open Player Queue: {_drill_arch} / {_pq_slate_sel}",
+                                key="bc_open_pq_btn",
+                            ):
+                                st.session_state["calib_queue_arch"] = _drill_arch
+                                st.session_state["calib_queue_slate"] = _pq_slate_sel
+                    else:
+                        st.info("No slate-level results for this archetype.")
+
+        # ── Player Calibration Queue ─────────────────────────────────────────
+        _pq_arch = st.session_state.get("calib_queue_arch")
+        _pq_slate = st.session_state.get("calib_queue_slate")
+
+        if _pq_arch and _pq_slate and not _hist_df_bc.empty:
+            st.markdown("---")
+            st.markdown(f"### Player Calibration Queue — {_pq_arch} / {_pq_slate}")
+            st.caption(
+                "Players from the selected archetype's builds on this slate, "
+                "showing projection vs actual errors to guide recalibration."
+            )
+
+            # Filter historical data to this slate
+            _pq_data = _hist_df_bc[_hist_df_bc["slate_date"].astype(str) == str(_pq_slate)].copy()
+
+            if _pq_data.empty:
+                st.info(f"No historical data found for slate {_pq_slate}.")
+            else:
+                _pq_qd = _pq_data.copy()
+                _pq_qd["pts_error"] = (
+                    pd.to_numeric(_pq_qd.get("actual", 0), errors="coerce").fillna(0)
+                    - pd.to_numeric(_pq_qd.get("proj", 0), errors="coerce").fillna(0)
+                )
+                if "actual_minutes" in _pq_qd.columns and "proj_minutes" in _pq_qd.columns:
+                    _pq_qd["min_error"] = (
+                        pd.to_numeric(_pq_qd["actual_minutes"], errors="coerce").fillna(0)
+                        - pd.to_numeric(_pq_qd["proj_minutes"], errors="coerce").fillna(0)
+                    )
+                else:
+                    _pq_qd["min_error"] = 0.0
+                if "own" in _pq_qd.columns and "proj_own" in _pq_qd.columns:
+                    _pq_qd["own_error"] = (
+                        pd.to_numeric(_pq_qd["own"], errors="coerce").fillna(0)
+                        - pd.to_numeric(_pq_qd["proj_own"], errors="coerce").fillna(0)
+                    )
+                else:
+                    _pq_qd["own_error"] = 0.0
+
+                _pq_qd["Flag"] = (
+                    _pq_qd["pts_error"].abs().gt(6)
+                    | _pq_qd["min_error"].abs().gt(3)
+                    | _pq_qd["own_error"].abs().gt(3)
+                )
+
+                _pq_player_col = []
+                for _, _r in _pq_qd.iterrows():
+                    _tp = " / ".join(filter(None, [str(_r.get("team", "")), str(_r.get("pos", ""))]))
+                    _pq_player_col.append(
+                        f"{_r.get('name', '')} ({_tp})" if _tp else str(_r.get("name", ""))
+                    )
+                _pq_qd["Player"] = _pq_player_col
+
+                _pq_cols_map = {
+                    "Player": "Player",
+                    "salary": "Salary",
+                    "proj": "Proj FP",
+                    "actual": "Act FP",
+                    "pts_error": "Error (pts)",
+                    "proj_minutes": "Proj Mins",
+                    "actual_minutes": "Act Mins",
+                    "min_error": "Min Error",
+                    "proj_own": "Proj Own %",
+                    "own": "Act Own %",
+                    "own_error": "Own Error",
+                    "Flag": "Flag",
+                }
+                _pq_avail = [c for c in _pq_cols_map if c in _pq_qd.columns or c == "Player"]
+                _pq_display = _pq_qd[_pq_avail].rename(columns=_pq_cols_map)
+
+                st.dataframe(
+                    _pq_display,
+                    column_config={
+                        "Salary": st.column_config.NumberColumn("Salary", format="$%d"),
+                        "Proj FP": st.column_config.NumberColumn("Proj FP", format="%.1f"),
+                        "Act FP": st.column_config.NumberColumn("Act FP", format="%.1f"),
+                        "Error (pts)": st.column_config.NumberColumn("Error (pts)", format="%+.1f"),
+                        "Proj Mins": st.column_config.NumberColumn("Proj Mins", format="%.1f"),
+                        "Act Mins": st.column_config.NumberColumn("Act Mins", format="%.1f"),
+                        "Min Error": st.column_config.NumberColumn("Min Error", format="%+.1f"),
+                        "Proj Own %": st.column_config.NumberColumn("Proj Own %", format="%.1f"),
+                        "Act Own %": st.column_config.NumberColumn("Act Own %", format="%.1f"),
+                        "Own Error": st.column_config.NumberColumn("Own Error", format="%+.1f"),
+                        "Flag": st.column_config.CheckboxColumn("Flag", disabled=True),
+                    },
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                _pq_n_flagged = int(_pq_qd["Flag"].sum())
+                if _pq_n_flagged > 0:
+                    st.warning(
+                        f"⚠️ {_pq_n_flagged} player(s) flagged with large projection errors. "
+                        "Consider adjusting archetype config weights."
+                    )
+
+    elif _bt is not None and _bt.get("global") and _bt["global"].get("n_lineups", 0) == 0:
+        st.info(
+            "Backtest ran but no lineups were generated. "
+            "Ensure `data/historical_lineups.csv` has at least 8 unique players per slate date."
+        )
+
+    st.markdown("---")
+    st.caption("Ricky's Calibration Lab — BacktestIQ-style strategy calibration.")
 

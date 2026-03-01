@@ -701,6 +701,294 @@ def action_queue_items(
     return out
 
 
+# ============================================================
+# BACKTEST ENGINE – Ricky's Calibration Lab
+# ============================================================
+
+# Predefined "contest archetypes" that map a named Ricky strategy to a
+# DraftKings contest type and a default DFS build archetype.
+BACKTEST_ARCHETYPES: Dict[str, Dict[str, Any]] = {
+    "Ricky Cash": {
+        "dk_contest": "Double Up (50/50)",
+        "dfs_archetype": "Floor Lock",
+        "cash_threshold_pct": 0.50,  # top 50% cash
+    },
+    "Ricky SE": {
+        "dk_contest": "Single Entry",
+        "dfs_archetype": "Balanced",
+        "cash_threshold_pct": 0.25,
+    },
+    "Ricky 3-Max": {
+        "dk_contest": "3-Max",
+        "dfs_archetype": "Ceiling Hunter",
+        "cash_threshold_pct": 0.20,
+    },
+    "Ricky MME": {
+        "dk_contest": "20-Max (MME)",
+        "dfs_archetype": "Stacker",
+        "cash_threshold_pct": 0.20,
+    },
+    "Ricky GPP": {
+        "dk_contest": "Tournament (GPP)",
+        "dfs_archetype": "Contrarian",
+        "cash_threshold_pct": 0.20,
+    },
+}
+
+
+def _reconstruct_pool_from_slate(slate_data: pd.DataFrame) -> pd.DataFrame:
+    """Reconstruct a player pool DataFrame from historical lineup data for one slate.
+
+    Parameters
+    ----------
+    slate_data : pd.DataFrame
+        Rows from historical_lineups.csv for a single slate date.
+
+    Returns
+    -------
+    pd.DataFrame
+        Unique-player pool with ``player_name``, ``pos``, ``team``,
+        ``salary``, ``proj``, and optionally ``own``/``proj_own`` columns.
+    """
+    if slate_data.empty:
+        return pd.DataFrame()
+
+    keep_cols = [c for c in ["name", "pos", "team", "salary", "proj", "own", "proj_own"]
+                 if c in slate_data.columns]
+    pool = slate_data[keep_cols].drop_duplicates("name").copy()
+
+    if "name" in pool.columns:
+        pool = pool.rename(columns={"name": "player_name"})
+
+    for col, default in [("pos", ""), ("team", ""), ("salary", 5000), ("proj", 0.0)]:
+        if col not in pool.columns:
+            pool[col] = default
+
+    pool["salary"] = pd.to_numeric(pool["salary"], errors="coerce")
+    pool["proj"] = pd.to_numeric(pool["proj"], errors="coerce")
+    pool = pool.dropna(subset=["salary", "proj"])
+    pool["salary"] = pool["salary"].fillna(0)
+    pool["proj"] = pool["proj"].fillna(0)
+    pool = pool[pool["salary"] > 0]
+    return pool.reset_index(drop=True)
+
+
+def run_archetype_backtest(
+    hist_df: pd.DataFrame,
+    archetypes: Optional[List[str]] = None,
+    num_lineups: int = 10,
+    entry_fee: float = 4.0,
+    cash_payout_multiplier: float = 2.0,
+    build_config_override: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Backtest one or more Ricky contest archetypes against historical slate data.
+
+    For each ``(archetype, slate_date)`` pair the function:
+    1. Reconstructs the player pool from *hist_df* for that date.
+    2. Applies the archetype's DFS build-config (optionally overridden by
+       *build_config_override*) to the pool projections.
+    3. Generates *num_lineups* lineups via the LP optimizer.
+    4. Scores the lineups using the ``actual`` column from *hist_df*.
+    5. Ranks the lineup scores against the field score distribution
+       (derived from the historical lineups for that slate).
+    6. Computes ROI, cash rate, avg finish percentile, and best finish.
+
+    Parameters
+    ----------
+    hist_df : pd.DataFrame
+        Historical lineup data.  Must contain at least: ``slate_date``,
+        ``lineup_id``, ``name``, ``pos``, ``team``, ``salary``, ``proj``,
+        ``actual``.
+    archetypes : list of str, optional
+        Contest-archetype keys from ``BACKTEST_ARCHETYPES`` to test.
+        Defaults to all five.
+    num_lineups : int
+        Lineups to generate per (archetype, slate) pair.
+    entry_fee : float
+        Entry fee per lineup in dollars.
+    cash_payout_multiplier : float
+        Payout multiplier for a cashing lineup (default 2× = breakeven at 50 %).
+    build_config_override : str, optional
+        Override the default DFS archetype for every contest archetype.
+        Must be a key in ``DFS_ARCHETYPES`` (e.g. ``"Ceiling Hunter"``).
+
+    Returns
+    -------
+    dict
+        ``{"global": {...}, "by_archetype": [{...}, ...]}``
+    """
+    if archetypes is None:
+        archetypes = list(BACKTEST_ARCHETYPES.keys())
+
+    if hist_df.empty:
+        return {"global": {}, "by_archetype": []}
+
+    slate_dates = sorted(hist_df["slate_date"].unique())
+
+    # Pre-compute actual field scores per slate (for percentile ranking)
+    field_scores_by_slate: Dict[Any, np.ndarray] = {}
+    for sd in slate_dates:
+        sd_data = hist_df[hist_df["slate_date"] == sd]
+        if "lineup_id" in sd_data.columns and "actual" in sd_data.columns:
+            lu_scores = sd_data.groupby("lineup_id")["actual"].sum().values
+            field_scores_by_slate[sd] = lu_scores if len(lu_scores) > 0 else np.array([0.0])
+        else:
+            field_scores_by_slate[sd] = np.array([0.0])
+
+    archetype_results: List[Dict[str, Any]] = []
+
+    for arch_name in archetypes:
+        arch_cfg = BACKTEST_ARCHETYPES.get(arch_name, {})
+        dfs_archetype = build_config_override or arch_cfg.get("dfs_archetype", "Balanced")
+        cash_threshold_pct = float(arch_cfg.get("cash_threshold_pct", 0.50))
+
+        slate_results: List[Dict[str, Any]] = []
+        arch_total_fees = 0.0
+        arch_total_payout = 0.0
+        arch_cash_count = 0
+        arch_lu_count = 0
+        arch_percentiles: List[float] = []
+        arch_best_finish = 100.0
+
+        for sd in slate_dates:
+            sd_data = hist_df[hist_df["slate_date"] == sd]
+            field_scores = field_scores_by_slate.get(sd, np.array([0.0]))
+
+            pool = _reconstruct_pool_from_slate(sd_data)
+            if pool.empty or len(pool) < 8:
+                continue
+
+            arch_pool = apply_archetype(pool, dfs_archetype)
+
+            # Compute a safe min_salary_used (avoid infeasibility for small pools)
+            sal_sum = int(arch_pool["salary"].sum())
+            min_sal = min(46500, max(0, sal_sum - 20000))
+
+            try:
+                lu_df, _ = build_multiple_lineups_with_exposure(
+                    arch_pool,
+                    {
+                        "SITE": "dk",
+                        "SPORT": "nba",
+                        "SLATE_TYPE": "classic",
+                        "NUM_LINEUPS": num_lineups,
+                        "MIN_SALARY_USED": min_sal,
+                        "MAX_EXPOSURE": 0.40,
+                        "PROJ_COL": "proj",
+                        "SOLVER_TIME_LIMIT": 10,
+                    },
+                )
+            except Exception:
+                continue
+
+            if lu_df is None or lu_df.empty:
+                continue
+
+            actuals_map = dict(
+                zip(
+                    sd_data["name"].astype(str),
+                    pd.to_numeric(sd_data["actual"], errors="coerce").fillna(0),
+                )
+            )
+
+            lu_scores_list: List[float] = []
+            for lu_idx in lu_df["lineup_index"].unique():
+                players_in_lu = lu_df[lu_df["lineup_index"] == lu_idx]["player_name"].tolist()
+                score = sum(actuals_map.get(p, 0.0) for p in players_in_lu)
+                lu_scores_list.append(score)
+
+            if not lu_scores_list:
+                continue
+
+            # Cash line: percentile of field at (1 - cash_threshold_pct) × 100
+            cash_line = float(
+                np.percentile(field_scores, (1.0 - cash_threshold_pct) * 100.0)
+            )
+
+            n_lu = len(lu_scores_list)
+            n_cash = sum(1 for s in lu_scores_list if s >= cash_line)
+            total_fees = entry_fee * n_lu
+            total_payout = n_cash * entry_fee * cash_payout_multiplier
+            roi = (total_payout - total_fees) / total_fees * 100.0 if total_fees > 0 else 0.0
+            cash_rate = n_cash / n_lu * 100.0 if n_lu > 0 else 0.0
+
+            lu_percentiles = []
+            for s in lu_scores_list:
+                beat = float((field_scores < s).sum()) / max(len(field_scores), 1)
+                finish_pct = (1.0 - beat) * 100.0  # 0 = first, 100 = last
+                lu_percentiles.append(finish_pct)
+
+            avg_pct = float(np.mean(lu_percentiles)) if lu_percentiles else 50.0
+            best_finish = float(min(lu_percentiles)) if lu_percentiles else 50.0
+
+            slate_results.append({
+                "slate_date": str(sd),
+                "contest": arch_cfg.get("dk_contest", ""),
+                "roi": round(roi, 1),
+                "cash_rate": round(cash_rate, 1),
+                "avg_percentile": round(avg_pct, 1),
+                "best_finish": round(best_finish, 1),
+                "n_lineups": n_lu,
+            })
+
+            arch_total_fees += total_fees
+            arch_total_payout += total_payout
+            arch_cash_count += n_cash
+            arch_lu_count += n_lu
+            arch_percentiles.extend(lu_percentiles)
+            if best_finish < arch_best_finish:
+                arch_best_finish = best_finish
+
+        arch_roi = (
+            (arch_total_payout - arch_total_fees) / arch_total_fees * 100.0
+            if arch_total_fees > 0 else 0.0
+        )
+        arch_cash_rate = arch_cash_count / arch_lu_count * 100.0 if arch_lu_count > 0 else 0.0
+        arch_avg_pct = float(np.mean(arch_percentiles)) if arch_percentiles else 50.0
+
+        archetype_results.append({
+            "archetype": arch_name,
+            "roi": round(arch_roi, 1),
+            "cash_rate": round(arch_cash_rate, 1),
+            "avg_percentile": round(arch_avg_pct, 1),
+            "best_finish": round(arch_best_finish if slate_results else 50.0, 1),
+            "n_contests": len(slate_results),
+            "n_lineups": arch_lu_count,
+            "slate_results": slate_results,
+        })
+
+    if not archetype_results:
+        return {"global": {}, "by_archetype": []}
+
+    total_lu = sum(r["n_lineups"] for r in archetype_results)
+    if total_lu > 0:
+        global_roi = sum(r["roi"] * r["n_lineups"] for r in archetype_results) / total_lu
+        global_cash_rate = (
+            sum(r["cash_rate"] * r["n_lineups"] for r in archetype_results) / total_lu
+        )
+        global_avg_pct = (
+            sum(r["avg_percentile"] * r["n_lineups"] for r in archetype_results) / total_lu
+        )
+    else:
+        global_roi = global_cash_rate = global_avg_pct = 0.0
+
+    global_best = min(
+        (r["best_finish"] for r in archetype_results if r["n_lineups"] > 0), default=50.0
+    )
+
+    return {
+        "global": {
+            "roi": round(global_roi, 1),
+            "cash_rate": round(global_cash_rate, 1),
+            "avg_percentile": round(global_avg_pct, 1),
+            "best_finish": round(global_best, 1),
+            "n_lineups": total_lu,
+            "n_contests": sum(r["n_contests"] for r in archetype_results),
+        },
+        "by_archetype": archetype_results,
+    }
+
+
 def suggest_config_from_queue(
     queue_df: pd.DataFrame,
     current_config: Dict[str, Any],
