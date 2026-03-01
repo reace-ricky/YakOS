@@ -83,6 +83,7 @@ from yak_core.sims import (  # type: ignore
 from yak_core.live import (  # type: ignore
     fetch_live_opt_pool,
     fetch_injury_updates,
+    fetch_actuals_from_api,
 )
 from yak_core.multislate import (  # type: ignore
     parse_dk_contest_csv,
@@ -2081,52 +2082,90 @@ with tab_lab:
         # Actuals upload — for historical slate calibration
         with st.expander("📊 Load Actuals (Historical Slate Calibration)", expanded=False):
             st.markdown(
-                "Upload an actuals file to compare sim projections against real outcomes. "
-                "Accepts the RotoGrinders contest-results CSV (has `FPTS` / `PLAYER` columns) "
-                "or any CSV with `name`/`player_name` and `actual`/`actual_fp` columns."
+                "Load actual DraftKings fantasy points to compare sim projections against real "
+                "outcomes.  Choose **API** (fastest — pulls directly from Tank01) or **CSV** "
+                "(manual upload of a RotoGrinders export)."
             )
-            _actuals_upload = st.file_uploader(
-                "Upload actuals CSV",
-                type=["csv"],
-                key="sim_actuals_upload",
-                help="RotoGrinders contest export or any CSV with player names and actual FP scored.",
-            )
-            if _actuals_upload is not None:
-                try:
-                    _acts_raw = pd.read_csv(_actuals_upload)
-                    # Normalise column names — apply only the first match found so
-                    # we don't create duplicate target columns when, e.g., both
-                    # "PLAYER" and "Player" happen to be present.
-                    _col_renames: dict = {}
-                    for _src in ("PLAYER", "Player"):
-                        if _src in _acts_raw.columns and "player_name" not in _acts_raw.columns:
-                            _col_renames[_src] = "player_name"
-                            break
-                    for _src in ("FPTS", "fpts"):
-                        if _src in _acts_raw.columns and "actual_fp" not in _acts_raw.columns:
-                            _col_renames[_src] = "actual_fp"
-                            break
-                    _acts_norm = _acts_raw.rename(columns=_col_renames)
-                    # Accept 'actual' column directly too
-                    if "actual" in _acts_norm.columns and "actual_fp" not in _acts_norm.columns:
-                        _acts_norm = _acts_norm.rename(columns={"actual": "actual_fp"})
-                    if "name" in _acts_norm.columns and "player_name" not in _acts_norm.columns:
-                        _acts_norm = _acts_norm.rename(columns={"name": "player_name"})
-                    _name_col = "player_name" if "player_name" in _acts_norm.columns else None
-                    _fp_col = "actual_fp" if "actual_fp" in _acts_norm.columns else None
-                    if _name_col and _fp_col:
-                        _acts_clean = _acts_norm[[_name_col, _fp_col]].copy()
-                        _acts_clean[_fp_col] = pd.to_numeric(_acts_clean[_fp_col], errors="coerce")
-                        _acts_clean = _acts_clean.dropna(subset=[_fp_col])
-                        st.session_state["sim_actuals_df"] = _acts_clean
-                        st.success(f"✅ Loaded actuals for {len(_acts_clean)} players.")
+            _acts_tab_api, _acts_tab_csv = st.tabs(["🌐 Fetch from API", "📂 Upload CSV"])
+
+            with _acts_tab_api:
+                st.markdown(
+                    "Fetch actual player DK scores for a completed slate directly from the "
+                    "Tank01 API.  Requires your RapidAPI key set in the sidebar."
+                )
+                _api_acts_date = st.date_input(
+                    "Slate date (past game day)",
+                    value=_today_est(),
+                    key="sim_actuals_api_date",
+                    help="Choose the game day you want actuals for.",
+                )
+                if st.button("Fetch Actuals from API", key="sim_fetch_actuals_btn"):
+                    _api_key = st.session_state.get("rapidapi_key", "")
+                    if not _api_key:
+                        st.error("Set your Tank01 RapidAPI key in the sidebar first.")
                     else:
-                        st.error(
-                            "Could not find required columns. Expected `PLAYER`/`name`/`player_name` "
-                            "and `FPTS`/`actual`/`actual_fp`."
-                        )
-                except Exception as _e:
-                    st.error(f"Error reading actuals file: {_e}")
+                        with st.spinner("Fetching actuals from Tank01…"):
+                            try:
+                                _api_acts_df = fetch_actuals_from_api(
+                                    _api_acts_date.strftime("%Y%m%d"),
+                                    {"RAPIDAPI_KEY": _api_key},
+                                )
+                                st.session_state["sim_actuals_df"] = _api_acts_df
+                                st.success(
+                                    f"✅ Loaded actuals for {len(_api_acts_df)} players "
+                                    f"({_api_acts_date})."
+                                )
+                            except Exception as _api_err:
+                                st.error(f"API actuals fetch failed: {_api_err}")
+
+            with _acts_tab_csv:
+                st.markdown(
+                    "Upload an actuals CSV — RotoGrinders contest export (`FPTS` / `PLAYER` "
+                    "columns) or any CSV with `name`/`player_name` and `actual`/`actual_fp`."
+                )
+                _actuals_upload = st.file_uploader(
+                    "Upload actuals CSV",
+                    type=["csv"],
+                    key="sim_actuals_upload",
+                    help="RotoGrinders contest export or any CSV with player names and actual FP scored.",
+                )
+                if _actuals_upload is not None:
+                    try:
+                        _acts_raw = pd.read_csv(_actuals_upload)
+                        # Normalise column names — apply only the first match found so
+                        # we don't create duplicate target columns when, e.g., both
+                        # "PLAYER" and "Player" happen to be present.
+                        _col_renames: dict = {}
+                        for _src in ("PLAYER", "Player"):
+                            if _src in _acts_raw.columns and "player_name" not in _acts_raw.columns:
+                                _col_renames[_src] = "player_name"
+                                break
+                        for _src in ("FPTS", "fpts"):
+                            if _src in _acts_raw.columns and "actual_fp" not in _acts_raw.columns:
+                                _col_renames[_src] = "actual_fp"
+                                break
+                        _acts_norm = _acts_raw.rename(columns=_col_renames)
+                        # Accept 'actual' column directly too
+                        if "actual" in _acts_norm.columns and "actual_fp" not in _acts_norm.columns:
+                            _acts_norm = _acts_norm.rename(columns={"actual": "actual_fp"})
+                        if "name" in _acts_norm.columns and "player_name" not in _acts_norm.columns:
+                            _acts_norm = _acts_norm.rename(columns={"name": "player_name"})
+                        _name_col = "player_name" if "player_name" in _acts_norm.columns else None
+                        _fp_col = "actual_fp" if "actual_fp" in _acts_norm.columns else None
+                        if _name_col and _fp_col:
+                            _acts_clean = _acts_norm[[_name_col, _fp_col]].copy()
+                            _acts_clean[_fp_col] = pd.to_numeric(_acts_clean[_fp_col], errors="coerce")
+                            _acts_clean = _acts_clean.dropna(subset=[_fp_col])
+                            st.session_state["sim_actuals_df"] = _acts_clean
+                            st.success(f"✅ Loaded actuals for {len(_acts_clean)} players.")
+                        else:
+                            st.error(
+                                "Could not find required columns. Expected `PLAYER`/`name`/`player_name` "
+                                "and `FPTS`/`actual`/`actual_fp`."
+                            )
+                    except Exception as _e:
+                        st.error(f"Error reading actuals file: {_e}")
+
             _loaded_actuals = st.session_state.get("sim_actuals_df")
             if _loaded_actuals is not None and not _loaded_actuals.empty:
                 st.caption(f"Actuals loaded: **{len(_loaded_actuals)} players**")
