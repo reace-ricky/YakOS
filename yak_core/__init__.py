@@ -14,6 +14,7 @@ from .lineups import (
     build_player_pool,
     build_multiple_lineups_with_exposure,
     run_lineups_from_config,
+    to_dk_upload_format,
 )
 
 from .validation import validate_lineup
@@ -57,6 +58,7 @@ __all__ = [
     "build_player_pool",
     "build_multiple_lineups_with_exposure",
     "run_lineups_from_config",
+    "to_dk_upload_format",
     # validation
     "validate_lineup",
     # projections

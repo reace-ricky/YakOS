@@ -424,6 +424,55 @@ def build_multiple_lineups_with_exposure(
 
 
 # --------------------------------------------------------------------
+# DraftKings upload format export
+# --------------------------------------------------------------------
+
+def to_dk_upload_format(lineups_df: pd.DataFrame) -> pd.DataFrame:
+    """Convert long-format lineups to DraftKings bulk upload format.
+
+    DraftKings expects one row per lineup in their bulk-entry upload CSV.
+    Each roster slot occupies its own column with the player formatted as
+    ``"Name (TEAM)"``.  The four header columns (Entry ID, Contest Name,
+    Contest ID, Entry Fee) are left blank so the user can fill them in
+    before uploading.
+
+    Parameters
+    ----------
+    lineups_df : pd.DataFrame
+        Long-format DataFrame produced by
+        ``build_multiple_lineups_with_exposure``, containing at minimum
+        ``lineup_index``, ``slot``, ``player_name``, and ``team`` columns.
+
+    Returns
+    -------
+    pd.DataFrame
+        Wide-format DataFrame with one row per lineup and columns:
+        ``Entry ID``, ``Contest Name``, ``Contest ID``, ``Entry Fee``,
+        ``PG``, ``SG``, ``SF``, ``PF``, ``C``, ``G``, ``F``, ``UTIL``.
+    """
+    meta_cols = ["Entry ID", "Contest Name", "Contest ID", "Entry Fee"]
+    all_cols = meta_cols + list(DK_POS_SLOTS)
+
+    if lineups_df.empty or "lineup_index" not in lineups_df.columns:
+        return pd.DataFrame(columns=all_cols)
+
+    rows = []
+    for lu_id in sorted(lineups_df["lineup_index"].unique()):
+        lu = lineups_df[lineups_df["lineup_index"] == lu_id]
+        row: Dict[str, Any] = {c: "" for c in all_cols}
+        for slot in DK_POS_SLOTS:
+            slot_players = lu[lu["slot"] == slot]
+            if not slot_players.empty:
+                p = slot_players.iloc[0]
+                name = str(p.get("player_name", ""))
+                team = str(p.get("team", ""))
+                row[slot] = f"{name} ({team})" if team and team != "nan" else name
+        rows.append(row)
+
+    return pd.DataFrame(rows, columns=all_cols)
+
+
+# --------------------------------------------------------------------
 # Public engine entrypoint
 # --------------------------------------------------------------------
 def run_lineups_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
