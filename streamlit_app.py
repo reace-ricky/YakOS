@@ -12,7 +12,7 @@ import streamlit as st
 if "yak_core" not in sys.modules:
     pass
 
-from yak_core.lineups import build_multiple_lineups_with_exposure  # type: ignore
+from yak_core.lineups import build_multiple_lineups_with_exposure, to_dk_upload_format  # type: ignore
 from yak_core.calibration import (  # type: ignore
     run_backtest_lineups,
     compute_calibration_metrics,
@@ -819,7 +819,7 @@ with tab_optimizer:
                     with st.expander("Player Exposures", expanded=False):
                         st.dataframe(exposures_df, use_container_width=True, height=400)
 
-                dl1, dl2 = st.columns(2)
+                dl1, dl2, dl3 = st.columns(3)
                 with dl1:
                     st.download_button(
                         "Download lineups CSV",
@@ -837,6 +837,20 @@ with tab_optimizer:
                             mime="text/csv",
                             key="opt_dl_exp",
                         )
+                with dl3:
+                    dk_upload_df = to_dk_upload_format(lineups_df)
+                    st.download_button(
+                        "📥 Download DK upload CSV",
+                        data=to_csv_bytes(dk_upload_df),
+                        file_name="yakos_dk_upload.csv",
+                        mime="text/csv",
+                        key="opt_dl_dk",
+                        help=(
+                            "DraftKings bulk entry format: one row per lineup with "
+                            "slot columns PG/SG/SF/PF/C/G/F/UTIL. "
+                            "Fill in Entry ID and Contest info before uploading."
+                        ),
+                    )
 
 
 # ============================================================
@@ -1459,6 +1473,32 @@ with tab_lab:
                     )
                 else:
                     st.warning("No lineups met the confidence threshold.")
+
+            # Download sim lineups in DK upload format
+            st.markdown("#### 💾 Export Sim Lineups")
+            sim_dl1, sim_dl2 = st.columns(2)
+            with sim_dl1:
+                st.download_button(
+                    "Download sim lineups CSV",
+                    data=to_csv_bytes(sim_lu_df),
+                    file_name="yakos_sim_lineups.csv",
+                    mime="text/csv",
+                    key="sim_dl_lu",
+                )
+            with sim_dl2:
+                sim_dk_upload_df = to_dk_upload_format(sim_lu_df)
+                st.download_button(
+                    "📥 Download DK upload CSV",
+                    data=to_csv_bytes(sim_dk_upload_df),
+                    file_name="yakos_sim_dk_upload.csv",
+                    mime="text/csv",
+                    key="sim_dl_dk",
+                    help=(
+                        "DraftKings bulk entry format: one row per lineup with "
+                        "slot columns PG/SG/SF/PF/C/G/F/UTIL. "
+                        "Fill in Entry ID and Contest info before uploading."
+                    ),
+                )
 
     st.markdown("---")
     st.caption("YakOS Calibration Lab — data-driven lineup refinement.")
