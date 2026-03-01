@@ -287,6 +287,9 @@ def ensure_session_state():
     if "stack_hit_log" not in st.session_state:
         # list of dicts: {slate_date, team, players, outcome, note}
         st.session_state["stack_hit_log"] = []
+    if "other_root_causes" not in st.session_state:
+        # list of dicts capturing queue rows marked review→Other
+        st.session_state["other_root_causes"] = []
 
 
 def run_optimizer(
@@ -988,12 +991,14 @@ with tab_lab:
             kq_cols[2].metric("Avg ownership", f"{avg_own:.1f}%")
             kq_cols[3].metric("Reviewed", n_reviewed)
 
-            # Build display columns: exclude lineup_id; include minutes cols when present
-            _queue_hide = {"lineup_id"}
+            # Build display columns: exclude lineup_id and contest_name (noise);
+            # focus on pts / own % / mins
+            _queue_hide = {"lineup_id", "contest_name"}
             _queue_prefer = [
-                "slate_date", "contest_name", "pos", "team", "name",
-                "salary", "own", "proj", "proj_minutes", "actual_minutes",
-                "actual", "queue_status",
+                "slate_date", "pos", "team", "name", "salary",
+                "proj", "actual", "proj_own", "own",
+                "proj_minutes", "actual_minutes",
+                "queue_status",
             ]
             _queue_display_cols = [
                 c for c in _queue_prefer if c in date_queue.columns
@@ -1010,6 +1015,12 @@ with tab_lab:
                 queue_edit_df,
                 column_config={
                     "✓": st.column_config.CheckboxColumn("✓", default=False, width="small"),
+                    "proj": st.column_config.NumberColumn("Proj Pts", format="%.1f"),
+                    "actual": st.column_config.NumberColumn("Act Pts", format="%.1f"),
+                    "proj_own": st.column_config.NumberColumn("Proj Own %", format="%.1f"),
+                    "own": st.column_config.NumberColumn("Act Own %", format="%.1f"),
+                    "proj_minutes": st.column_config.NumberColumn("Proj Mins", format="%.1f"),
+                    "actual_minutes": st.column_config.NumberColumn("Act Mins", format="%.1f"),
                 },
                 disabled=[c for c in queue_edit_df.columns if c != "✓"],
                 use_container_width=True,
@@ -1020,32 +1031,61 @@ with tab_lab:
             n_selected = int(edited_queue["✓"].sum())
             action_choice = st.radio(
                 "Action",
-                ["reviewed", "questioned", "apply_config", "dismissed"],
+                ["pass", "review"],
                 horizontal=True,
                 key="queue_action",
             )
 
-            col_apply, col_suggest = st.columns([1, 2])
-            with col_apply:
-                if st.button(
-                    f"Apply to {n_selected} selected" if n_selected else "Apply (select rows above)",
-                    key="queue_apply_btn",
-                    disabled=(n_selected == 0),
-                ):
-                    sel_row_ids = date_queue.index[edited_queue["✓"].values].tolist()
-                    updated_q = action_queue_items(
-                        st.session_state["cal_queue_df"], sel_row_ids, action_choice, id_col="row_id"
+            root_cause = None
+            if action_choice == "review":
+                root_cause = st.selectbox(
+                    "Root Cause",
+                    ["proj pts", "proj mins", "proj own %", "Other"],
+                    key="queue_root_cause",
+                )
+
+            if st.button(
+                f"Apply to {n_selected} selected" if n_selected else "Apply (select rows above)",
+                key="queue_apply_btn",
+                disabled=(n_selected == 0),
+            ):
+                sel_row_ids = date_queue.index[edited_queue["✓"].values].tolist()
+                updated_q = action_queue_items(
+                    st.session_state["cal_queue_df"], sel_row_ids, action_choice, id_col="row_id"
+                )
+                st.session_state["cal_queue_df"] = updated_q
+                if action_choice == "review" and root_cause == "Other":
+                    sel_rows = date_queue.loc[sel_row_ids]
+                    for _, row in sel_rows.iterrows():
+                        def _to_float(val):
+                            try:
+                                v = float(val)
+                                return v if not pd.isna(v) else 0.0
+                            except (TypeError, ValueError):
+                                return 0.0
+                        st.session_state["other_root_causes"].append({
+                            "slate_date": str(row.get("slate_date", queue_date_sel)),
+                            "name": str(row.get("name", "")),
+                            "pos": str(row.get("pos", "")),
+                            "proj": _to_float(row.get("proj")),
+                            "actual": _to_float(row.get("actual")),
+                            "own": _to_float(row.get("own")),
+                        })
+                st.success(f"Marked {n_selected} row(s) as '{action_choice}'.")
+
+            with st.expander("🔍 Other Root Causes", expanded=False):
+                other_causes = st.session_state.get("other_root_causes", [])
+                if other_causes:
+                    st.caption(
+                        f"{len(other_causes)} item(s) flagged as 'Other'. "
+                        "Watch for emerging trends across these entries."
                     )
-                    st.session_state["cal_queue_df"] = updated_q
-                    st.success(f"Marked {n_selected} row(s) as '{action_choice}'.")
-            with col_suggest:
-                if st.button("Suggest config changes from queue", key="queue_suggest_btn"):
-                    cal_cfg = load_calibration_config()
-                    suggested = suggest_config_from_queue(
-                        st.session_state["cal_queue_df"], cal_cfg
-                    )
-                    st.success("Config suggestions derived from queue analysis.")
-                    st.json(suggested)
+                    st.dataframe(pd.DataFrame(other_causes), use_container_width=True)
+                    if st.button("Clear 'Other' causes", key="clear_other_causes"):
+                        st.session_state["other_root_causes"] = []
+                        st.rerun()
+                else:
+                    st.info("No 'Other' root causes logged yet.")
 
     # ---- Stack Hit Log ----
     st.markdown("---")
