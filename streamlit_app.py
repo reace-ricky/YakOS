@@ -81,7 +81,7 @@ from yak_core.multislate import (  # type: ignore
     compare_slates,
 )
 from yak_core.projections import salary_implied_proj, noisy_proj  # type: ignore
-from yak_core.scoring import calibration_kpi_summary, calibration_rag  # type: ignore
+from yak_core.scoring import calibration_kpi_summary  # type: ignore
 
 
 # -----------------------------
@@ -1024,10 +1024,6 @@ with tab_lab:
 
     # ── Calibration KPI Dashboard ────────────────────────────────────────────
     st.markdown("### 📊 Calibration KPI Dashboard")
-    st.markdown(
-        "4 headline metrics — each tagged 🟢 / 🟡 / 🔴 vs calibration targets. "
-        "Error = actual − projected (positive = under-projected)."
-    )
 
     _kpis = calibration_kpi_summary(hist_df) if not hist_df.empty else {}
 
@@ -1036,72 +1032,63 @@ with tab_lab:
             "No historical data found. Add `data/historical_lineups.csv` to populate these KPIs."
         )
     else:
-        _rag = calibration_rag(_kpis)
         _strat = _kpis["strategy"]
         _ptsl = _kpis["points_lineup"]
         _ptsp = _kpis["points_player"]
 
-        # ── 4 high-level KPI cards ───────────────────────────────────────────
+        # ── 4 high-level KPI boxes ───────────────────────────────────────────
         kc1, kc2, kc3, kc4 = st.columns(4)
 
+        _card = (
+            '<div style="border:1px solid #3a3a3a;border-radius:8px;'
+            'padding:18px 12px;text-align:center;background:#1a1a1a;">'
+            '<div style="font-size:0.78rem;text-transform:uppercase;'
+            'letter-spacing:0.06em;color:#888;margin-bottom:8px;">{label}</div>'
+            '<div style="font-size:2rem;font-weight:700;color:#f0f0f0;">{value}</div>'
+            '</div>'
+        )
+
         with kc1:
-            st.markdown(f"**{_rag['points']} Points Accuracy**")
-            st.metric(
-                "MAE (lineup pts)",
-                f"{_ptsl['mae']:.2f}",
-                help="Mean absolute lineup-level points error — target ≤ 5 pts",
+            st.markdown(
+                _card.format(label="Points MAE (lineup)", value=f"{_ptsl['mae']:.2f} pts"),
+                unsafe_allow_html=True,
             )
-            st.caption(f"R² {_ptsl['r_squared']:.3f} · Bias {_ptsl['mean_error']:+.2f} pts")
 
         with kc2:
             if "minutes" in _kpis:
                 _mins = _kpis["minutes"]
-                st.markdown(f"**{_rag['minutes']} Minutes Accuracy**")
-                st.metric(
-                    "MAE (mins)",
-                    f"{_mins['mae']:.2f}",
-                    help="Mean absolute minutes error — target ≤ 3 mins",
-                )
-                st.caption(
-                    f"Bias {_mins['mean_error']:+.2f} · "
-                    f"Pts err (>5 min miss) {_mins['avg_pts_err_large_min_miss']:+.2f}"
+                st.markdown(
+                    _card.format(label="Minutes MAE", value=f"{_mins['mae']:.2f} min"),
+                    unsafe_allow_html=True,
                 )
             else:
-                st.markdown(f"**{_rag['minutes']} Minutes Accuracy**")
-                st.metric("MAE (mins)", "N/A", help="No proj_minutes / actual_minutes data")
-                st.caption("Add proj_minutes & actual_minutes columns to unlock")
+                st.markdown(
+                    _card.format(label="Minutes MAE", value="N/A"),
+                    unsafe_allow_html=True,
+                )
 
         with kc3:
             if "ownership" in _kpis:
                 _own = _kpis["ownership"]
-                st.markdown(f"**{_rag['ownership']} Ownership Accuracy**")
-                st.metric(
-                    "MAE (own %)",
-                    f"{_own['mae']:.2f}%",
-                    help="Mean absolute ownership error — target ≤ 3%",
+                st.markdown(
+                    _card.format(label="Ownership MAE", value=f"{_own['mae']:.2f}%"),
+                    unsafe_allow_html=True,
                 )
-                st.caption(f"Bias {_own['mean_error']:+.2f}%")
             else:
-                st.markdown(f"**{_rag['ownership']} Ownership Accuracy**")
-                st.metric("MAE (own %)", "N/A", help="No proj_own / own data")
-                st.caption("Add proj_own & own columns to unlock")
+                st.markdown(
+                    _card.format(label="Ownership MAE", value="N/A"),
+                    unsafe_allow_html=True,
+                )
 
         with kc4:
-            st.markdown(f"**{_rag['strategy']} Strategy**")
-            st.metric(
-                "Hit Rate",
-                f"{_strat['hit_rate']:.0%}",
-                help="% lineups where actual ≥ projected — target ≥ 50%",
-            )
-            st.caption(
-                f"Lineups {_strat['num_lineups']} · "
-                f"Avg proj {_strat['avg_proj']:.1f} · "
-                f"Best {_strat['best_actual']:.1f} pts"
+            st.markdown(
+                _card.format(label="Hit Rate", value=f"{_strat['hit_rate']:.0%}"),
+                unsafe_allow_html=True,
             )
 
         # ── Detail expanders ─────────────────────────────────────────────────
         with st.expander(
-            f"📈 Points Detail — Projected vs Actual  {_rag['points']}", expanded=False
+            "📈 Points Detail — Projected vs Actual", expanded=False
         ):
             _dc1, _dc2, _dc3, _dc4 = st.columns(4)
             _dc1.metric(
@@ -1161,7 +1148,7 @@ with tab_lab:
 
         if "minutes" in _kpis:
             with st.expander(
-                f"⏱ Minutes Detail — Projected vs Actual  {_rag['minutes']}", expanded=False
+                "⏱ Minutes Detail — Projected vs Actual", expanded=False
             ):
                 _mins = _kpis["minutes"]
                 _mc1, _mc2, _mc3, _mc4 = st.columns(4)
@@ -1188,10 +1175,10 @@ with tab_lab:
 
         if "ownership" in _kpis:
             with st.expander(
-                f"👥 Ownership Detail — Projected vs Actual  {_rag['ownership']}", expanded=False
+                "👥 Ownership Detail — Projected vs Actual", expanded=False
             ):
                 _own = _kpis["ownership"]
-                _oc1, _oc2, _oc3, _oc4 = st.columns(4)
+                _oc1, _oc2, _oc3 = st.columns(3)
                 _oc1.metric(
                     "Mean Error (own %)",
                     f"{_own['mean_error']:+.2f}%",
@@ -1203,7 +1190,6 @@ with tab_lab:
                     help="Mean absolute ownership error per player",
                 )
                 _oc3.metric("Players Tracked", f"{int(_kpis['ownership']['bucket_df']['count'].sum())}")
-                _oc4.metric("RAG Status", _rag["ownership"])
                 _bkt = _kpis["ownership"]["bucket_df"].copy()
                 st.dataframe(
                     _bkt.rename(columns={
