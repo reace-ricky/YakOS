@@ -76,6 +76,7 @@ from yak_core.right_angle import (  # type: ignore
 from yak_core.sims import (  # type: ignore
     run_monte_carlo_for_lineups,
     simulate_live_updates,
+    build_sim_player_accuracy_table,
     SMASH_THRESHOLD as _SIM_SMASH_THRESHOLD,
     BUST_THRESHOLD as _SIM_BUST_THRESHOLD,
 )
@@ -300,6 +301,8 @@ def ensure_session_state():
         st.session_state["sim_lineups_df"] = None
     if "sim_results_df" not in st.session_state:
         st.session_state["sim_results_df"] = None
+    if "sim_actuals_df" not in st.session_state:
+        st.session_state["sim_actuals_df"] = None
     if "ms_result" not in st.session_state:
         st.session_state["ms_result"] = None
     if "rapidapi_key" not in st.session_state:
@@ -2075,6 +2078,62 @@ with tab_lab:
             )
             sim_min_sal = st.number_input("Min salary", 0, 50000, 46500, step=500, key="sim_min_sal")
 
+        # Actuals upload — for historical slate calibration
+        with st.expander("📊 Load Actuals (Historical Slate Calibration)", expanded=False):
+            st.markdown(
+                "Upload an actuals file to compare sim projections against real outcomes. "
+                "Accepts the RotoGrinders contest-results CSV (has `FPTS` / `PLAYER` columns) "
+                "or any CSV with `name`/`player_name` and `actual`/`actual_fp` columns."
+            )
+            _actuals_upload = st.file_uploader(
+                "Upload actuals CSV",
+                type=["csv"],
+                key="sim_actuals_upload",
+                help="RotoGrinders contest export or any CSV with player names and actual FP scored.",
+            )
+            if _actuals_upload is not None:
+                try:
+                    _acts_raw = pd.read_csv(_actuals_upload)
+                    # Normalise column names — apply only the first match found so
+                    # we don't create duplicate target columns when, e.g., both
+                    # "PLAYER" and "Player" happen to be present.
+                    _col_renames: dict = {}
+                    for _src in ("PLAYER", "Player"):
+                        if _src in _acts_raw.columns and "player_name" not in _acts_raw.columns:
+                            _col_renames[_src] = "player_name"
+                            break
+                    for _src in ("FPTS", "fpts"):
+                        if _src in _acts_raw.columns and "actual_fp" not in _acts_raw.columns:
+                            _col_renames[_src] = "actual_fp"
+                            break
+                    _acts_norm = _acts_raw.rename(columns=_col_renames)
+                    # Accept 'actual' column directly too
+                    if "actual" in _acts_norm.columns and "actual_fp" not in _acts_norm.columns:
+                        _acts_norm = _acts_norm.rename(columns={"actual": "actual_fp"})
+                    if "name" in _acts_norm.columns and "player_name" not in _acts_norm.columns:
+                        _acts_norm = _acts_norm.rename(columns={"name": "player_name"})
+                    _name_col = "player_name" if "player_name" in _acts_norm.columns else None
+                    _fp_col = "actual_fp" if "actual_fp" in _acts_norm.columns else None
+                    if _name_col and _fp_col:
+                        _acts_clean = _acts_norm[[_name_col, _fp_col]].copy()
+                        _acts_clean[_fp_col] = pd.to_numeric(_acts_clean[_fp_col], errors="coerce")
+                        _acts_clean = _acts_clean.dropna(subset=[_fp_col])
+                        st.session_state["sim_actuals_df"] = _acts_clean
+                        st.success(f"✅ Loaded actuals for {len(_acts_clean)} players.")
+                    else:
+                        st.error(
+                            "Could not find required columns. Expected `PLAYER`/`name`/`player_name` "
+                            "and `FPTS`/`actual`/`actual_fp`."
+                        )
+                except Exception as _e:
+                    st.error(f"Error reading actuals file: {_e}")
+            _loaded_actuals = st.session_state.get("sim_actuals_df")
+            if _loaded_actuals is not None and not _loaded_actuals.empty:
+                st.caption(f"Actuals loaded: **{len(_loaded_actuals)} players**")
+                if st.button("Clear actuals", key="sim_clear_actuals_btn"):
+                    st.session_state["sim_actuals_df"] = None
+                    st.rerun()
+
         active_sim_pool = st.session_state.get("sim_pool_df") or pool_for_sim
 
         if st.button("🎲 Run Sims", type="primary", key="sim_run_btn"):
@@ -2259,6 +2318,73 @@ with tab_lab:
                         "slot columns PG/SG/SF/PF/C/G/F/UTIL. "
                         "Fill in Entry ID and Contest info before uploading."
                     ),
+                )
+
+        # ---- Sim vs Actuals player accuracy table ----
+        _sim_actuals = st.session_state.get("sim_actuals_df")
+        if _sim_actuals is not None and not _sim_actuals.empty:
+            st.markdown("#### 🎯 Sim vs Actuals — Player Accuracy")
+            st.caption(
+                "Compares the sim's input projections to actual DraftKings fantasy points scored. "
+                "Load actuals above using the 📊 expander."
+            )
+            _acc = build_sim_player_accuracy_table(pool_for_sim, _sim_actuals)
+            if _acc["n_players"] > 0:
+                _acc_kpis = st.columns(5)
+                _acc_kpis[0].metric("Players matched", _acc["n_players"])
+                _acc_kpis[1].metric("MAE", f"{_acc['mae']:.1f} FP")
+                _acc_kpis[2].metric("RMSE", f"{_acc['rmse']:.1f} FP")
+                _acc_kpis[3].metric(
+                    "Bias",
+                    f"{_acc['bias']:+.1f} FP",
+                    help="Positive = sim over-projected on average",
+                )
+                _acc_kpis[4].metric(
+                    "Hit rate (±10 FP)",
+                    f"{_acc['hit_rate']:.0f}%",
+                    help="% of players where |proj − actual| ≤ 10 FP",
+                )
+                with st.expander("Player projection vs actuals table", expanded=True):
+                    st.markdown(
+                        "**Column guide**\n\n"
+                        "| Column | Description |\n"
+                        "|--------|-------------|\n"
+                        "| **Name** | Player name |\n"
+                        "| **Proj FP** | Pre-game sim projection |\n"
+                        "| **Actual FP** | Real DraftKings fantasy points scored |\n"
+                        "| **Error** | Proj − Actual (positive = over-projected) |\n"
+                        "| **Abs Error** | |Error| — magnitude of miss |\n"
+                        "| **Err %** | Error as % of actual score |"
+                    )
+                    _acc_display = _acc["player_df"].rename(columns={
+                        "name": "Name",
+                        "proj": "Proj FP",
+                        "actual": "Actual FP",
+                        "error": "Error",
+                        "abs_error": "Abs Error",
+                        "pct_error": "Err %",
+                    }).sort_values("Abs Error", ascending=False)
+                    _acc_display["Proj FP"] = _acc_display["Proj FP"].round(1)
+                    _acc_display["Actual FP"] = _acc_display["Actual FP"].round(1)
+                    _acc_display["Error"] = _acc_display["Error"].round(1)
+                    _acc_display["Abs Error"] = _acc_display["Abs Error"].round(1)
+                    _acc_display["Err %"] = _acc_display["Err %"].round(1)
+                    st.dataframe(
+                        _acc_display,
+                        use_container_width=True,
+                        height=400,
+                    )
+                    st.download_button(
+                        "📥 Download player accuracy CSV",
+                        data=to_csv_bytes(_acc_display),
+                        file_name="yakos_sim_player_accuracy.csv",
+                        mime="text/csv",
+                        key="sim_acc_dl",
+                    )
+            else:
+                st.warning(
+                    "No player names matched between the pool and the actuals file. "
+                    "Check that both use the same player-name format."
                 )
 
     st.markdown("---")

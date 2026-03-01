@@ -73,6 +73,7 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 47 | **Slate Room 3-layer redesign** — Layer 1: color-coded KPI strip (Slate EV, Approved count by archetype, Exposure risk, Simmed hit rate, Last updated); Layer 2: data-driven Edge Analysis via `compute_stack_scores()` + `compute_value_scores()` (stack score, leverage tag, value index, ownership tag); Layer 3: Approved Lineups with archetype tabs, expandable compact lineup cards, late-swap badge, calibration note. Added `ApprovedLineup` dataclass + `build_approved_lineups()` / `get_approved_lineups_by_archetype()` / `compute_slate_kpis()` to `calibration.py`. Optimizer now injects stack/value scores into LP objective via `STACK_WEIGHT` / `VALUE_WEIGHT` config. 40 new unit tests. | `yak_core/right_angle.py`, `yak_core/calibration.py`, `yak_core/lineups.py`, `yak_core/config.py`, `streamlit_app.py`, `tests/test_slate_room_features.py` | latest |
 | 46 | **Ricky's Calibration Lab (BacktestIQ-style)** — new 4th tab with backtest controls (sport, date range, site, contest-archetype multi-select, build config override, # lineups, Run Backtest), global KPI strip (ROI / cash rate / avg finish %ile / best finish with green/yellow/red coloring), archetype summary table (sorted worst ROI first, row coloring), slate-level drilldown, and Player Calibration Queue integration; `BACKTEST_ARCHETYPES` config + `run_archetype_backtest()` engine + `_reconstruct_pool_from_slate()` helper added to `yak_core/calibration.py`; 19 new unit tests in `tests/test_backtest_engine.py` | `yak_core/calibration.py`, `streamlit_app.py`, `tests/test_backtest_engine.py` | latest |
 | 48 | **Sim Module table column glossary** — "Lineup-level sim metrics" expander now shows friendly column names (Avg Score, Std Dev, Smash %, Bust %, Median Score, P85 (Upside), P15 (Floor)) plus an inline markdown table explaining each metric in plain English; threshold values (`SMASH_THRESHOLD`, `BUST_THRESHOLD`) exported from `sims.py` and referenced dynamically in the UI | `streamlit_app.py`, `yak_core/sims.py` | latest |
+| 49 | **Sim Module player accuracy table** — `build_sim_player_accuracy_table()` in `yak_core/sims.py` compares per-player sim projections to real actuals (MAE, RMSE, bias, hit rate ±10 FP, R²); actuals CSV uploader added to Sim Module section C in the Calibration Lab; player table sorted by abs error, with download button; 23 new unit tests in `tests/test_sim_player_accuracy.py` | `yak_core/sims.py`, `streamlit_app.py`, `tests/test_sim_player_accuracy.py` | latest |
 
 ---
 
@@ -122,7 +123,7 @@ YakOS/
 │   ├── projections.py        # salary_implied, regression, blend, proj_model
 │   ├── calibration.py        # archetypes, queue, backtest, config knobs, persistent calibration_config.json
 │   ├── right_angle.py        # stack/pace/value edge analysis + lineup tagging
-│   ├── sims.py               # Monte Carlo, live update, promote logic
+│   ├── sims.py               # Monte Carlo, live update, promote logic, player accuracy table
 │   ├── live.py               # Tank01 API (live pool + injury updates)
 │   ├── ownership.py          # salary-rank ownership, leverage
 │   ├── scoring.py            # KPIs, hit rate, projection %, backtest summary
@@ -145,7 +146,8 @@ YakOS/
 │   ├── test_calibration_queue.py        (12 tests)
 │   ├── test_backtest_engine.py          (19 tests)
 │   ├── test_slate_room_features.py      (40 tests)
-│   └── test_sim_backtest.py             (19 tests)
+│   ├── test_sim_backtest.py             (19 tests)
+│   └── test_sim_player_accuracy.py      (23 tests)
 └── requirements.txt
 ```
 
