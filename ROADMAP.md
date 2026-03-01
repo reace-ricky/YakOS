@@ -81,7 +81,7 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 56 | **Fix `fetch_actuals_from_api` actuals bug** — function no longer returns Tank01 projections as actuals; always uses box scores (`getNBAGamesForDate` + `getNBABoxScore`); tests updated | `yak_core/live.py`, `tests/test_live_actuals.py` | latest |
 | 57 | **`fetch_live_opt_pool` projection provenance** — adds `tank01_proj` (original Tank01 proj) and `proj_source = 'tank01'` columns | `yak_core/live.py` | latest |
 | 59 | **Wire YakOS projection engine into app** — `yakos_fp_projection`, `yakos_minutes_projection`, `yakos_ownership_projection`, `yakos_ensemble` imported and called via new `_apply_yakos_projections()` helper; replaces `_apply_proj_fallback` at both API fetch call sites (Slate Room + Calibration Lab); adds `proj_source` column; Tank01 proj blended via `yakos_ensemble` (40% YakOS + 30% Tank01 + 30% RG when available); Player Projections table added in Slate Room showing all players sorted by proj with floor/ceil/proj_minutes/proj_own/proj_source columns | `streamlit_app.py` | latest |
-| 60 | **Calibration Lab UI redesign** — merged 🔬 Calibration Lab + 📡 Ricky's Calibration Lab into one "📡 Calibration Lab" tab (3 tabs total); removed pass/review radio buttons + checkbox column from Calibration Queue (replaced with read-only accuracy dashboard table + flagged-player warning); generalized "Upload RotoGrinders NBA CSV" label to "Upload Player Pool CSV" | `streamlit_app.py` | latest |
+| 61 | **Train and commit .pkl model files** — `scripts/train_models.py` generates synthetic training data from `data/NBADK20260227.csv`, trains 3 sklearn Pipeline models (FP, Minutes, Ownership), saves to `models/`; `projections.py` fixed to handle missing feature columns via `feature_names_in_` + NaN-fill, zero-salary guards, rolling-signal blending, and b2b/spread adjustments always applied | `scripts/train_models.py`, `models/yakos_fp_model.pkl`, `models/yakos_minutes_model.pkl`, `models/yakos_ownership_model.pkl`, `yak_core/projections.py` | latest |
 
 ---
 
@@ -110,7 +110,7 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 |---|---------|-------|
 | ~~R8~~ | ~~**Docker / one-click deploy**~~ | ✅ Done — `Dockerfile` + `docker-compose.yml` added. Run `docker compose up` to spin up the Streamlit app at http://localhost:8501. |
 | ~~R11~~ | ~~**Dark mode / UI polish**~~ | ✅ Done — `.streamlit/config.toml` updated with dark base theme, orange primary colour, and clean dark background palette. |
-| R9 | **Historical projection model training** | `proj_model()` exists in `yak_core/projections.py` but relies on parquet files at `YAKOS_ROOT`. Use Notebook 1→3 workflow to collect data and train. Run `notebooks/03_fp_projection_model.ipynb` and copy `models/yakos_fp_model.pkl` to `YAKOS_ROOT/models/`. |
+| R9 | **Historical projection model training** | ✅ Done — `scripts/train_models.py` trains FP/Minutes/Ownership models from synthetic data; `.pkl` files committed to `models/`; `projections.py` updated to handle partial feature dicts. |
 | R10 | **Export / share lineups via URL** | Streamlit `st.query_params` could encode a shareable lineup state. |
 
 ---
@@ -147,6 +147,12 @@ YakOS/
 │   ├── multislate.py         # multi-slate discovery, run, compare, DK CSV ingest
 │   ├── contest_ingest.py     # DK contest results CSV → ownership
 │   └── validation.py         # lineup validity checks
+├── scripts/
+│   └── train_models.py           # Train FP/Minutes/Ownership models → models/*.pkl
+├── models/
+│   ├── yakos_fp_model.pkl        # Trained FP projection pipeline
+│   ├── yakos_minutes_model.pkl   # Trained minutes projection pipeline
+│   └── yakos_ownership_model.pkl # Trained ownership projection pipeline
 ├── data/
 │   ├── calibration_config.json  # committed default calibration config
 │   ├── NBADK20260227.csv     # sample RG pool file

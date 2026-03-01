@@ -267,6 +267,10 @@ def yakos_fp_projection(player_features: dict) -> dict:
     import os
     from yak_core.config import YAKOS_ROOT
 
+    salary = float(player_features.get("salary", 0))
+    if salary == 0:
+        return {"proj": 0.0, "floor": 0.0, "ceil": 0.0}
+
     # Try loading trained model first
     model_path = os.path.join(YAKOS_ROOT, "models", "yakos_fp_model.pkl")
     if os.path.isfile(model_path):
@@ -274,15 +278,41 @@ def yakos_fp_projection(player_features: dict) -> dict:
             import joblib
             import pandas as _pd
             model = joblib.load(model_path)
-            feat_df = _pd.DataFrame([player_features])
+            expected = list(getattr(model, "feature_names_in_", [
+                # Fallback list must stay in sync with FP_FEATURES in scripts/train_models.py
+                "salary", "tank01_proj", "rg_proj",
+                "rolling_fp_5", "rolling_fp_10", "rolling_fp_20",
+                "rolling_min_5", "rolling_min_10",
+                "dvp", "vegas_total", "vegas_spread", "home", "b2b", "days_rest",
+            ]))
+            row = {col: player_features.get(col, float("nan")) for col in expected}
+            feat_df = _pd.DataFrame([row])[expected]
             pred = float(model.predict(feat_df)[0])
+            # Blend with rolling signal when provided so rolling averages
+            # remain influential even with model active
+            rolling_w_sum = 0.0
+            rolling_weighted = 0.0
+            for key, w in [("rolling_fp_5", 0.30), ("rolling_fp_10", 0.20), ("rolling_fp_20", 0.10)]:
+                val = player_features.get(key)
+                if val is not None:
+                    try:
+                        rolling_weighted += float(val) * w
+                        rolling_w_sum += w
+                    except (ValueError, TypeError):
+                        pass
+            if rolling_w_sum > 0:
+                rolling_signal = rolling_weighted / rolling_w_sum
+                # 60% weight on rolling signal (recent performance) vs 40% on model
+                # (which uses salary and context): ensures explicit rolling averages
+                # override model imputation of missing rolling features.
+                pred = pred * 0.4 + rolling_signal * 0.6
+            pred = max(0.0, pred)
             floor = max(0.0, pred * 0.65)
             ceil = pred * 1.45
             return {"proj": round(pred, 2), "floor": round(floor, 2), "ceil": round(ceil, 2)}
         except Exception:
             pass  # fall through to formula approach
 
-    salary = float(player_features.get("salary", 0))
     sal_base = salary * DEFAULT_FP_PER_K / 1000.0
 
     signals: list = []
@@ -332,36 +362,46 @@ def yakos_minutes_projection(player_features: dict) -> dict:
     import os
     from yak_core.config import YAKOS_ROOT
 
+    salary = float(player_features.get("salary", 0))
+    proj_minutes = None  # set by model or formula below
+
+    # Only use the model when salary is provided — without salary the model
+    # can't make meaningful predictions and the formula uses rolling avgs directly
     model_path = os.path.join(YAKOS_ROOT, "models", "yakos_minutes_model.pkl")
-    if os.path.isfile(model_path):
+    if salary > 0 and os.path.isfile(model_path):
         try:
             import joblib
             import pandas as _pd
             model = joblib.load(model_path)
-            feat_df = _pd.DataFrame([player_features])
-            pred = float(model.predict(feat_df)[0])
-            return {"proj_minutes": round(max(0.0, pred), 1)}
+            expected = list(getattr(model, "feature_names_in_", [
+                "salary", "rolling_min_5", "rolling_min_10", "rolling_min_20",
+                "b2b", "spread",
+            ]))
+            row = {col: player_features.get(col, float("nan")) for col in expected}
+            feat_df = _pd.DataFrame([row])[expected]
+            proj_minutes = float(model.predict(feat_df)[0])
         except Exception:
             pass
 
-    signals: list = []
-    weights: list = []
-    for key, w in [("rolling_min_5", 0.50), ("rolling_min_10", 0.30), ("rolling_min_20", 0.20)]:
-        val = player_features.get(key)
-        if val is not None:
-            try:
-                signals.append(float(val))
-                weights.append(w)
-            except (ValueError, TypeError):
-                pass
+    if proj_minutes is None:
+        signals: list = []
+        weights: list = []
+        for key, w in [("rolling_min_5", 0.50), ("rolling_min_10", 0.30), ("rolling_min_20", 0.20)]:
+            val = player_features.get(key)
+            if val is not None:
+                try:
+                    signals.append(float(val))
+                    weights.append(w)
+                except (ValueError, TypeError):
+                    pass
 
-    if signals:
-        total_w = sum(weights)
-        proj_minutes = sum(s * w for s, w in zip(signals, weights)) / total_w
-    else:
-        salary = float(player_features.get("salary", 0))
-        proj_minutes = min(36.0, max(10.0, salary / 300.0))
+        if signals:
+            total_w = sum(weights)
+            proj_minutes = sum(s * w for s, w in zip(signals, weights)) / total_w
+        else:
+            proj_minutes = min(36.0, max(10.0, salary / 300.0))
 
+    # Always apply contextual adjustments regardless of which path produced the base
     # Back-to-back discount (~7%)
     if player_features.get("b2b"):
         proj_minutes *= 0.93
@@ -400,19 +440,26 @@ def yakos_ownership_projection(player_features: dict) -> dict:
     import os
     from yak_core.config import YAKOS_ROOT
 
+    salary = float(player_features.get("salary", 0))
+    if salary == 0:
+        return {"proj_own": 0.0}
+
     model_path = os.path.join(YAKOS_ROOT, "models", "yakos_ownership_model.pkl")
     if os.path.isfile(model_path):
         try:
             import joblib
             import pandas as _pd
             model = joblib.load(model_path)
-            feat_df = _pd.DataFrame([player_features])
+            expected = list(getattr(model, "feature_names_in_", [
+                "salary", "proj", "rg_ownership",
+            ]))
+            row = {col: player_features.get(col, float("nan")) for col in expected}
+            feat_df = _pd.DataFrame([row])[expected]
             pred = float(model.predict(feat_df)[0])
             return {"proj_own": round(max(0.0, min(100.0, pred)), 1)}
         except Exception:
             pass
 
-    salary = float(player_features.get("salary", 0))
     proj = float(player_features.get("proj", 0.0))
     rg_ownership = player_features.get("rg_ownership")
 
