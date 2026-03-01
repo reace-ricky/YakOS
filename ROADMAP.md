@@ -54,6 +54,7 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 26 | **Persistent calibration config** — default `data/calibration_config.json` | `yak_core/calibration.py`, `data/calibration_config.json` | latest |
 | 27 | **Multi-slate UI** — discover, batch-run, compare slates in Calibration Lab | `streamlit_app.py` | latest |
 | 28 | **CI/CD pipeline** — GitHub Actions `pytest` on push/PR | `.github/workflows/ci.yml` | latest |
+| 29 | **Expanded test coverage** — projections, ownership model, right-angle edge analysis | `tests/test_projections.py`, `tests/test_ownership.py`, `tests/test_right_angle.py` | latest |
 
 ---
 
@@ -72,7 +73,7 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | # | Feature | Notes |
 |---|---------|-------|
 | ~~R4~~ | ~~**CI/CD pipeline**~~ | ✅ Done — `.github/workflows/ci.yml` runs `pytest` on every push/PR. |
-| R5 | **Expanded test coverage** | Only optimizer-cancellations and DK-upload-format are tested. Add tests for projections, calibration metrics, ownership model, right-angle edge analysis. |
+| ~~R5~~ | ~~**Expanded test coverage**~~ | ✅ Done — 75 tests added across `test_projections.py` (26 tests), `test_ownership.py` (21 tests), `test_right_angle.py` (28 tests). |
 | R6 | **Lineup correlation / diversity controls** | Current exposure cap is the only uniqueness mechanism. Could add player-pair fade (same player not allowed in N consecutive lineups) or explicit game-stack enforcement. |
 | R7 | **Showdown Captain mode full optimizer** | Captain slot logic exists in `apply_slate_filters` but `_eligible_slots` in lineups.py treats "CPT" as a regular slot. Verify Captain 1.5× salary / scoring multiplier is applied correctly end-to-end. |
 
@@ -116,7 +117,10 @@ YakOS/
 │   └── yakos_projections_2026-02-27.csv
 ├── tests/
 │   ├── test_optimizer_cancellations.py  (10 tests)
-│   └── test_dk_upload_format.py         (10 tests)
+│   ├── test_dk_upload_format.py         (10 tests)
+│   ├── test_projections.py              (26 tests)
+│   ├── test_ownership.py                (21 tests)
+│   └── test_right_angle.py              (28 tests)
 └── requirements.txt
 ```
 
