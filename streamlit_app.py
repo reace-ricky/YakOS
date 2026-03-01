@@ -930,7 +930,7 @@ with tab_lab:
     if hist_df.empty:
         st.warning(
             "No historical data found. Add `data/historical_lineups.csv` to the repo "
-            "with columns: slate_date, contest_name, lineup_id, pos, team, name, "
+            "with columns: slate_date, contest_name, pos, team, name, "
             "salary, own, actual."
         )
     else:
@@ -947,32 +947,63 @@ with tab_lab:
 
             # KPIs for the queue date
             kq_cols = st.columns(4)
-            n_lu = date_queue["lineup_id"].nunique()
+            n_players = len(date_queue)
             avg_actual = date_queue["actual"].mean() if "actual" in date_queue.columns else 0
             avg_own = date_queue["own"].mean() if "own" in date_queue.columns else 0
             n_reviewed = (date_queue["queue_status"] == "reviewed").sum() if "queue_status" in date_queue.columns else 0
-            kq_cols[0].metric("Lineups in queue", n_lu)
+            kq_cols[0].metric("Players in queue", n_players)
             kq_cols[1].metric("Avg actual score", f"{avg_actual:.1f}")
             kq_cols[2].metric("Avg ownership", f"{avg_own:.1f}%")
             kq_cols[3].metric("Reviewed", n_reviewed)
 
-            with st.expander("View queue lineups", expanded=True):
-                st.dataframe(date_queue, use_container_width=True, height=300)
+            # Build display columns: exclude lineup_id; include minutes cols when present
+            _queue_hide = {"lineup_id"}
+            _queue_prefer = [
+                "slate_date", "contest_name", "pos", "team", "name",
+                "salary", "own", "proj", "proj_minutes", "actual_minutes",
+                "actual", "queue_status",
+            ]
+            _queue_display_cols = [
+                c for c in _queue_prefer if c in date_queue.columns
+            ] + [
+                c for c in date_queue.columns
+                if c not in _queue_prefer and c not in _queue_hide
+            ]
 
-            # Individual / Bulk action
+            with st.expander("View queue players", expanded=True):
+                st.dataframe(date_queue[_queue_display_cols], use_container_width=True, height=300)
+
+            # Individual / Bulk action — by player name or row ID
             st.markdown("#### Review & Action")
-            all_lu_ids = sorted(date_queue["lineup_id"].unique().tolist())
+            all_player_names = sorted(date_queue["name"].unique().tolist()) if "name" in date_queue.columns else []
             col_act_l, col_act_r = st.columns(2)
             with col_act_l:
-                sel_ids = st.multiselect(
-                    "Select lineup IDs to action",
-                    all_lu_ids,
-                    default=all_lu_ids,
-                    key="queue_sel_ids",
+                sel_action_by = st.radio(
+                    "Action by",
+                    ["Player name", "Row ID"],
+                    horizontal=True,
+                    key="queue_action_by",
                 )
+                if sel_action_by == "Player name":
+                    sel_ids = st.multiselect(
+                        "Select players to action",
+                        all_player_names,
+                        default=all_player_names,
+                        key="queue_sel_ids",
+                    )
+                    _id_col = "name"
+                else:
+                    all_row_ids = sorted(date_queue.index.tolist())
+                    sel_ids = st.multiselect(
+                        "Select row IDs to action",
+                        all_row_ids,
+                        default=all_row_ids,
+                        key="queue_sel_ids",
+                    )
+                    _id_col = "row_id"
                 action_choice = st.selectbox(
                     "Action",
-                    ["reviewed", "apply_config", "dismissed"],
+                    ["reviewed", "questioned", "apply_config", "dismissed"],
                     key="queue_action",
                 )
             with col_act_r:
@@ -980,17 +1011,17 @@ with tab_lab:
                 st.markdown(" ")
                 if st.button("Apply action to selected", key="queue_apply_btn"):
                     updated_q = action_queue_items(
-                        st.session_state["cal_queue_df"], sel_ids, action_choice
+                        st.session_state["cal_queue_df"], sel_ids, action_choice, id_col=_id_col
                     )
                     st.session_state["cal_queue_df"] = updated_q
-                    st.success(f"Marked {len(sel_ids)} lineup(s) as '{action_choice}'.")
+                    st.success(f"Marked {len(sel_ids)} player(s) as '{action_choice}'.")
 
                 if st.button("Bulk: mark all as reviewed", key="queue_bulk_btn"):
                     updated_q = action_queue_items(
-                        st.session_state["cal_queue_df"], all_lu_ids, "reviewed"
+                        st.session_state["cal_queue_df"], all_player_names, "reviewed", id_col="name"
                     )
                     st.session_state["cal_queue_df"] = updated_q
-                    st.success("All lineups marked as reviewed.")
+                    st.success("All players marked as reviewed.")
 
                 if st.button("Suggest config changes from queue", key="queue_suggest_btn"):
                     cal_cfg = load_calibration_config()

@@ -661,32 +661,42 @@ def get_calibration_queue(
 
 def action_queue_items(
     queue_df: pd.DataFrame,
-    lineup_ids: List[int],
+    identifiers: List,
     action: str,
+    id_col: str = "name",
 ) -> pd.DataFrame:
-    """Apply an action to selected lineup IDs in the calibration queue.
+    """Apply an action to selected rows in the calibration queue.
 
     Parameters
     ----------
     queue_df : pd.DataFrame
         Queue DataFrame (output of ``get_calibration_queue``).
-    lineup_ids : list of int
-        ``lineup_id`` values to update.
+    identifiers : list
+        Values to match in ``id_col``.  Typically player names (``name``
+        column) or row-index integers when ``id_col`` is ``"row_id"``.
     action : str
-        ``"reviewed"``, ``"apply_config"``, or ``"dismissed"``.
+        ``"reviewed"``, ``"apply_config"``, ``"dismissed"``, or
+        ``"questioned"``.
+    id_col : str, optional
+        Column to match ``identifiers`` against.  Defaults to ``"name"``
+        (player name).  Pass ``"row_id"`` to target specific rows by
+        their index position.
 
     Returns
     -------
     pd.DataFrame
         Updated queue with ``queue_status`` set for the targeted rows.
     """
-    valid_actions = {"reviewed", "apply_config", "dismissed"}
+    valid_actions = {"reviewed", "apply_config", "dismissed", "questioned"}
     if action not in valid_actions:
         raise ValueError(f"action must be one of {valid_actions}")
 
     out = queue_df.copy()
-    mask = out["lineup_id"].isin(lineup_ids)
-    out.loc[mask, "queue_status"] = action
+    if id_col == "row_id":
+        out.loc[out.index.isin(identifiers), "queue_status"] = action
+    else:
+        mask = out[id_col].isin(identifiers)
+        out.loc[mask, "queue_status"] = action
     return out
 
 
