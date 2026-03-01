@@ -64,6 +64,7 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 37 | **Remove contest_entry / contest_entries from Calibration Queue display** — also removed fixed height for auto-sizing | `streamlit_app.py` | latest |
 | 38 | **Auto-load sample pool on startup** — `NBADK20260227.csv` is loaded at first run so the dashboard immediately shows projections without manual upload; fixed NaN ownership KPI display | `streamlit_app.py` | latest |
 | 39 | **Player Projections table in Calibration Lab Review & Action** — same sorted projections expander (expanded by default) shown under Review & Action in Section A | `streamlit_app.py` | latest |
+| 40 | **Merge player projections into Review & Action table** — `floor`, `ceil` (and `proj_own` if missing) from pool joined into the Review & Action data editor; proj pts before act pts, proj own % before act own %; standalone expander removed | `streamlit_app.py` | latest |
 
 ---
 
