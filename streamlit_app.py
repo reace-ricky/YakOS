@@ -91,7 +91,14 @@ from yak_core.multislate import (  # type: ignore
     run_multi_slate,
     compare_slates,
 )
-from yak_core.projections import salary_implied_proj, noisy_proj  # type: ignore
+from yak_core.projections import (  # type: ignore
+    salary_implied_proj,
+    noisy_proj,
+    yakos_fp_projection,
+    yakos_minutes_projection,
+    yakos_ownership_projection,
+    yakos_ensemble,
+)
 from yak_core.scoring import calibration_kpi_summary, quality_color, _QUALITY_BG, _QUALITY_TEXT  # type: ignore
 
 
@@ -265,6 +272,108 @@ def _apply_proj_fallback(pool: pd.DataFrame) -> pd.DataFrame:
     if "proj" not in pool.columns or pool["proj"].fillna(0).max() == 0:
         pool = pool.copy()
         pool["proj"] = noisy_proj(salary_implied_proj(pool["salary"]))
+    return pool
+
+
+def _apply_yakos_projections(pool: pd.DataFrame) -> pd.DataFrame:
+    """Apply the YakOS projection engine to a player pool.
+
+    Calls ``yakos_fp_projection`` per player (with whatever signals are
+    available), blends the result with any existing Tank01/RG projections via
+    ``yakos_ensemble``, and records the signal mix in a ``proj_source`` column.
+    Also populates ``floor``, ``ceil``, ``proj_minutes``, and ``proj_own``
+    when they are not already present.
+    """
+    if pool is None or pool.empty:
+        return pool
+
+    pool = pool.copy()
+
+    proj_values: list = []
+    floor_values: list = []
+    ceil_values: list = []
+    proj_minutes_values: list = []
+    proj_own_values: list = []
+    proj_source_values: list = []
+
+    for _, row in pool.iterrows():
+        salary = float(row.get("salary") or 0)
+
+        # Tank01 projection already stored in "proj" (may be 0 if missing)
+        _raw_tank01 = row.get("proj")
+        tank01_proj = float(_raw_tank01) if _raw_tank01 is not None and pd.notna(_raw_tank01) and float(_raw_tank01) > 0 else None
+
+        # RotoGrinders projection stored separately when available
+        _raw_rg = row.get("proj_rg")
+        rg_proj = float(_raw_rg) if _raw_rg is not None and pd.notna(_raw_rg) and float(_raw_rg) > 0 else None
+
+        rg_ownership = row.get("ownership") if pd.notna(row.get("ownership", float("nan"))) else None
+
+        player_features: dict = {"salary": salary}
+        if tank01_proj is not None:
+            player_features["tank01_proj"] = tank01_proj
+        if rg_proj is not None:
+            player_features["rg_proj"] = rg_proj
+        if rg_ownership is not None:
+            player_features["rg_ownership"] = rg_ownership
+
+        # Include rolling/contextual columns if present
+        for col in (
+            "rolling_fp_5", "rolling_fp_10", "rolling_fp_20",
+            "rolling_min_5", "rolling_min_10", "rolling_min_20",
+            "dvp", "vegas_total", "spread", "b2b", "home", "rest_days",
+        ):
+            val = row.get(col)
+            if val is not None and pd.notna(val):
+                player_features[col] = val
+
+        # FP projection
+        fp_result = yakos_fp_projection(player_features)
+        yakos_proj_val = fp_result["proj"]
+
+        # Minutes projection
+        min_result = yakos_minutes_projection(player_features)
+
+        # Ensemble blend: YakOS + Tank01 + RG
+        blended = yakos_ensemble(yakos_proj_val, tank01_proj, rg_proj)
+        final_proj = blended if blended > 0 else yakos_proj_val
+
+        # Ownership projection (uses final blended proj as input)
+        own_features = {**player_features, "proj": final_proj}
+        own_result = yakos_ownership_projection(own_features)
+
+        # Build proj_source label from which signal sources were available
+        signal_sources: list = []
+        if any(k in player_features for k in ("rolling_fp_5", "rolling_fp_10", "rolling_fp_20")):
+            signal_sources.append("rolling")
+        if tank01_proj is not None:
+            signal_sources.append("tank01")
+        if rg_proj is not None:
+            signal_sources.append("rg")
+        if not signal_sources:
+            signal_sources.append("salary")
+
+        proj_values.append(final_proj)
+        floor_values.append(fp_result["floor"])
+        ceil_values.append(fp_result["ceil"])
+        proj_minutes_values.append(min_result["proj_minutes"])
+        proj_own_values.append(own_result["proj_own"])
+        proj_source_values.append("+".join(signal_sources))
+
+    pool["proj"] = proj_values
+    # Only overwrite floor/ceil if they are absent or all-zero
+    if "floor" not in pool.columns or pool["floor"].fillna(0).max() == 0:
+        pool["floor"] = floor_values
+    if "ceil" not in pool.columns or pool["ceil"].fillna(0).max() == 0:
+        pool["ceil"] = ceil_values
+    # proj_minutes: fill in when absent
+    if "proj_minutes" not in pool.columns:
+        pool["proj_minutes"] = proj_minutes_values
+    # proj_own: fill in when absent or all-zero
+    if "proj_own" not in pool.columns or pool["proj_own"].fillna(0).max() == 0:
+        pool["proj_own"] = proj_own_values
+    pool["proj_source"] = proj_source_values
+
     return pool
 
 
@@ -548,12 +657,14 @@ with st.sidebar:
         st.session_state["rapidapi_key"] = rapidapi_key_input
         os.environ["RAPIDAPI_KEY"] = rapidapi_key_input
 
-tab_slate, tab_optimizer, tab_lab, tab_calib = st.tabs([
+tab_slate, tab_optimizer, tab_lab = st.tabs([
     "🏀 Ricky's Slate Room",
     "⚡ Optimizer",
-    "🔬 Calibration Lab",
-    "📡 Ricky's Calibration Lab",
+    "📡 Calibration Lab",
 ])
+
+# Keep backward-compat alias so all existing `with tab_calib:` blocks still work
+tab_calib = tab_lab
 
 
 # ============================================================
@@ -592,7 +703,7 @@ with tab_slate:
                                 )
                                 if "player_name" not in live_pool.columns and "name" in live_pool.columns:
                                     live_pool = live_pool.rename(columns={"name": "player_name"})
-                                live_pool = _apply_proj_fallback(live_pool)
+                                live_pool = _apply_yakos_projections(live_pool)
                                 st.session_state["pool_df"] = live_pool
                                 st.success(f"Loaded {len(live_pool)} players from API.")
                             except Exception as _e:
@@ -759,6 +870,41 @@ with tab_slate:
                         )
                 else:
                     st.info("No stand-out value plays identified.")
+
+            st.markdown("---")
+
+            # ════════════════════════════════════════════════════════════
+            # LAYER 2b — Player Projections Table
+            # ════════════════════════════════════════════════════════════
+            st.markdown("### 📋 Player Projections")
+            _proj_disp_cols = [c for c in [
+                "player_name", "pos", "team", "salary",
+                "proj", "floor", "ceil", "proj_minutes", "proj_own", "proj_source",
+            ] if c in pool_df.columns]
+            _proj_table = (
+                pool_df[_proj_disp_cols]
+                .sort_values("proj", ascending=False)
+                .reset_index(drop=True)
+            )
+            with st.expander("📋 All Players — sorted by projection", expanded=True):
+                _col_cfg: dict = {
+                    "player_name": st.column_config.TextColumn("Player"),
+                    "pos": st.column_config.TextColumn("Pos", width="small"),
+                    "team": st.column_config.TextColumn("Team", width="small"),
+                    "salary": st.column_config.NumberColumn("Salary", format="$%d"),
+                    "proj": st.column_config.NumberColumn("Proj", format="%.2f"),
+                    "floor": st.column_config.NumberColumn("Floor", format="%.2f"),
+                    "ceil": st.column_config.NumberColumn("Ceil", format="%.2f"),
+                    "proj_minutes": st.column_config.NumberColumn("Mins", format="%.1f"),
+                    "proj_own": st.column_config.NumberColumn("Own %", format="%.1f"),
+                    "proj_source": st.column_config.TextColumn("Source"),
+                }
+                st.dataframe(
+                    _proj_table,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={k: v for k, v in _col_cfg.items() if k in _proj_table.columns},
+                )
 
             st.markdown("---")
 
@@ -1108,22 +1254,22 @@ with tab_optimizer:
 # Tab 3: 🔬 Calibration Lab
 # ============================================================
 with tab_lab:
-    st.subheader("🔬 Calibration Lab")
+    st.subheader("📡 Calibration Lab")
 
     # ── 0. Player Pool / RG Projection Upload ─────────────────────────────
     st.markdown("### 📂 Load Player Pool")
     st.markdown(
-        "Upload your RotoGrinders projection sheet here. "
-        "This is the primary way to load a pool — it powers the Slate Room, Optimizer, and Sims."
+        "Upload your player pool CSV here (RotoGrinders export or any compatible format). "
+        "This powers the Slate Room, Optimizer, and Sims."
     )
 
     cal_upload_l, cal_upload_r = st.columns([2, 1])
     with cal_upload_l:
         rg_upload_cal = st.file_uploader(
-            "Upload RotoGrinders NBA CSV",
+            "Upload Player Pool CSV",
             type=["csv"],
             key="cal_rg_upload",
-            help="RG projection export — FPTS, SALARY, OWNERSHIP columns will be mapped automatically.",
+            help="RotoGrinders or compatible export — FPTS/SALARY/OWNERSHIP columns mapped automatically.",
         )
     with cal_upload_r:
         st.markdown("**— or fetch from API —**")
@@ -1149,7 +1295,7 @@ with tab_lab:
                         )
                         if "player_name" not in live_pool.columns and "name" in live_pool.columns:
                             live_pool = live_pool.rename(columns={"name": "player_name"})
-                        live_pool = _apply_proj_fallback(live_pool)
+                        live_pool = _apply_yakos_projections(live_pool)
                         st.session_state["pool_df"] = live_pool
                         st.success(f"Loaded {len(live_pool)} players from API.")
                     except Exception as _e:
@@ -1167,7 +1313,7 @@ with tab_lab:
     if current_pool_df is not None and not current_pool_df.empty:
         st.caption(f"Active pool: **{len(current_pool_df)} players** loaded.")
     else:
-        st.info("No pool loaded yet. Upload an RG CSV above to begin.")
+        st.info("No pool loaded yet. Upload a player pool CSV above to begin.")
 
     st.markdown("---")
 
@@ -1382,14 +1528,11 @@ with tab_lab:
             _focused_avail = [c for c in _focused_cols_map if c in _qd.columns or c == "Player"]
             _queue_focused = _qd[_focused_avail].rename(columns=_focused_cols_map)
 
-            # ── Review & Action — check rows, pick a bubble, hit Apply ──
-            st.markdown("#### Review & Action")
-            queue_edit_df = _queue_focused.copy()
-            queue_edit_df.insert(0, "✓", False)
-            edited_queue = st.data_editor(
-                queue_edit_df,
+            # ── Calibration Queue — read-only accuracy dashboard ──
+            st.markdown("#### Calibration Queue")
+            st.dataframe(
+                _queue_focused,
                 column_config={
-                    "✓": st.column_config.CheckboxColumn("✓", default=False, width="small"),
                     "Salary": st.column_config.NumberColumn("Salary", format="$%d"),
                     "Proj FP": st.column_config.NumberColumn("Proj FP", format="%.1f"),
                     "Act FP": st.column_config.NumberColumn("Act FP", format="%.1f"),
@@ -1402,69 +1545,16 @@ with tab_lab:
                     "Own Error": st.column_config.NumberColumn("Own Error", format="%+.1f"),
                     "Flag": st.column_config.CheckboxColumn("Flag", disabled=True),
                 },
-                disabled=[c for c in queue_edit_df.columns if c != "✓"],
                 use_container_width=True,
-                key=f"queue_editor_{queue_date_sel}",
+                hide_index=True,
             )
 
-            n_selected = int(edited_queue["✓"].sum())
-            action_choice = st.radio(
-                "Action",
-                ["pass", "review"],
-                horizontal=True,
-                key="queue_action",
-            )
-
-            root_cause = None
-            if action_choice == "review":
-                root_cause = st.selectbox(
-                    "Root Cause",
-                    ["proj pts", "proj mins", "proj own %", "Other"],
-                    key="queue_root_cause",
+            _n_flagged = int(_queue_focused["Flag"].sum()) if "Flag" in _queue_focused.columns else 0
+            if _n_flagged > 0:
+                st.warning(
+                    f"⚠️ {_n_flagged} player(s) flagged with large projection errors "
+                    "(pts >6, mins >3, or own% >3). Review archetype config knobs below."
                 )
-
-            if st.button(
-                f"Apply to {n_selected} selected" if n_selected else "Apply (select rows above)",
-                key="queue_apply_btn",
-                disabled=(n_selected == 0),
-            ):
-                sel_row_ids = date_queue.index[edited_queue["✓"].values].tolist()
-                updated_q = action_queue_items(
-                    st.session_state["cal_queue_df"], sel_row_ids, action_choice, id_col="row_id"
-                )
-                st.session_state["cal_queue_df"] = updated_q
-                if action_choice == "review" and root_cause == "Other":
-                    sel_rows = date_queue.loc[sel_row_ids]
-                    for _, row in sel_rows.iterrows():
-                        def _to_float(val):
-                            try:
-                                v = float(val)
-                                return v if not pd.isna(v) else 0.0
-                            except (TypeError, ValueError):
-                                return 0.0
-                        st.session_state["other_root_causes"].append({
-                            "slate_date": str(row.get("slate_date", queue_date_sel)),
-                            "name": str(row.get("name", "")),
-                            "pos": str(row.get("pos", "")),
-                            "proj": _to_float(row.get("proj")),
-                            "actual": _to_float(row.get("actual")),
-                            "own": _to_float(row.get("own")),
-                        })
-                st.success(f"Marked {n_selected} row(s) as '{action_choice}'.")
-
-            with st.expander("🔍 Other Root Causes", expanded=False):
-                other_causes = st.session_state.get("other_root_causes", [])
-                if other_causes:
-                    st.caption(
-                        f"{len(other_causes)} item(s) flagged as 'Other'. "
-                        "Watch for emerging trends across these entries."
-                    )
-                    st.dataframe(pd.DataFrame(other_causes), use_container_width=True)
-                    if st.button("Clear 'Other' causes", key="clear_other_causes"):
-                        st.session_state["other_root_causes"] = []
-                        st.rerun()
-                else:
-                    st.info("No 'Other' root causes logged yet.")
 
     # ---- Section B: Archetype Config Knobs ----
     st.markdown("---")
@@ -2413,7 +2503,7 @@ with tab_lab:
 # Tab 4: 📡 Ricky's Calibration Lab
 # ============================================================
 with tab_calib:
-    st.markdown("## 📡 Ricky's Calibration Lab – Backtesting & Calibration")
+    st.markdown("### E. 📡 Backtesting & Strategy Calibration")
     st.markdown(
         "Backtest any DFS build against past contests and see which contest archetypes "
         "need retuning — mirroring the BacktestIQ approach."
