@@ -93,6 +93,9 @@ def fetch_live_opt_pool(slate_date, cfg):
         raise ValueError("No players with salary > 0 for live slate " + slate_date)
     if "player_id" not in df.columns or df["player_id"].isna().all():
         df["player_id"] = df["player_name"].str.lower().str.replace(" ", "_")
+    # Preserve Tank01's projection as a named column before any overrides
+    df["tank01_proj"] = df["proj"].copy()
+    df["proj_source"] = "tank01"
     print("[fetch_live_opt_pool] Live pool: " + str(len(df)) + " players for " + slate_date)
     return df
 
@@ -264,14 +267,11 @@ def _fetch_actuals_from_box_scores(date_key: str, cfg: dict) -> pd.DataFrame:
 
 
 def fetch_actuals_from_api(date_key: str, cfg: dict) -> pd.DataFrame:
-    """Fetch actual DraftKings fantasy points for a completed slate from Tank01.
+    """Fetch actual DraftKings fantasy points for a completed slate via box scores.
 
-    First attempts the ``getNBADFS`` endpoint (works when Tank01 has already
-    back-filled final fantasy points into the ``fantasyPoints`` field for the
-    requested date).  If that endpoint returns no usable player rows the
-    function falls back to :func:`_fetch_actuals_from_box_scores`, which calls
-    ``getNBAGamesForDate`` + ``getNBABoxScore`` — a more reliable path for
-    *historical* dates.
+    Always uses ``getNBAGamesForDate`` + ``getNBABoxScore`` to retrieve real
+    game statistics.  The ``getNBADFS`` endpoint returns *projected* fantasy
+    points, not actuals, and is therefore not used here.
 
     Parameters
     ----------
@@ -291,24 +291,10 @@ def fetch_actuals_from_api(date_key: str, cfg: dict) -> pd.DataFrame:
     Raises
     ------
     RuntimeError
-        If both the DFS endpoint and the box-score fallback fail.
+        If the box-score API call fails.
     """
     date_key_clean = date_key.replace("-", "")
 
-    # Try the DFS endpoint first (works for current/recent slates where
-    # Tank01 has back-filled actual fantasy points into "fantasyPoints")
-    try:
-        dfs_df = fetch_live_dfs(date_key_clean, cfg)
-        if not dfs_df.empty:
-            result = dfs_df[["player_name", "proj"]].copy()
-            result = result.rename(columns={"proj": "actual_fp"})
-            result["actual_fp"] = pd.to_numeric(result["actual_fp"], errors="coerce").fillna(0.0)
-            print(f"[fetch_actuals_from_api] {len(result)} player actuals via DFS endpoint for {date_key}")
-            return result.reset_index(drop=True)
-    except Exception:
-        pass  # fall through to box-score approach
-
-    # Fallback: box scores are always available for completed games
     try:
         df = _fetch_actuals_from_box_scores(date_key_clean, cfg)
         print(f"[fetch_actuals_from_api] {len(df)} player actuals via box scores for {date_key}")

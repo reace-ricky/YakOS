@@ -243,6 +243,251 @@ def proj_model(
     return noisy_proj(result, noise_std=noise_std)
 
 
+def yakos_fp_projection(player_features: dict) -> dict:
+    """YakOS FP projection for a single player.
+
+    Blends rolling game-log averages, consensus projections (Tank01/RG), and a
+    salary-implied baseline into a single point estimate plus floor/ceiling
+    bounds.  When a trained ``yakos_fp_model.pkl`` is present it will be
+    loaded and used instead (see Notebook 3).
+
+    Parameters
+    ----------
+    player_features : dict
+        Any/all of: ``salary``, ``rolling_fp_5``, ``rolling_fp_10``,
+        ``rolling_fp_20``, ``tank01_proj``, ``rg_proj``, ``dvp``,
+        ``vegas_total``, ``spread``, ``home``, ``rest_days``,
+        ``proj_minutes``.
+
+    Returns
+    -------
+    dict
+        Keys: ``proj`` (float), ``floor`` (float), ``ceil`` (float).
+    """
+    import os
+    from yak_core.config import YAKOS_ROOT
+
+    # Try loading trained model first
+    model_path = os.path.join(YAKOS_ROOT, "models", "yakos_fp_model.pkl")
+    if os.path.isfile(model_path):
+        try:
+            import joblib
+            import pandas as _pd
+            model = joblib.load(model_path)
+            feat_df = _pd.DataFrame([player_features])
+            pred = float(model.predict(feat_df)[0])
+            floor = max(0.0, pred * 0.65)
+            ceil = pred * 1.45
+            return {"proj": round(pred, 2), "floor": round(floor, 2), "ceil": round(ceil, 2)}
+        except Exception:
+            pass  # fall through to formula approach
+
+    salary = float(player_features.get("salary", 0))
+    sal_base = salary * DEFAULT_FP_PER_K / 1000.0
+
+    signals: list = []
+    weights: list = []
+    for key, w in [("rolling_fp_5", 0.30), ("rolling_fp_10", 0.20),
+                   ("rolling_fp_20", 0.10), ("tank01_proj", 0.20), ("rg_proj", 0.15)]:
+        val = player_features.get(key)
+        if val is not None:
+            try:
+                signals.append(float(val))
+                weights.append(w)
+            except (ValueError, TypeError):
+                pass
+
+    if signals:
+        total_w = sum(weights)
+        signal_proj = sum(s * w for s, w in zip(signals, weights)) / total_w
+        proj = signal_proj * 0.70 + sal_base * 0.30
+    else:
+        proj = sal_base
+
+    proj = max(0.0, proj)
+    floor = max(0.0, proj * 0.65)
+    ceil = proj * 1.45
+    return {"proj": round(proj, 2), "floor": round(floor, 2), "ceil": round(ceil, 2)}
+
+
+def yakos_minutes_projection(player_features: dict) -> dict:
+    """YakOS minutes projection for a single player.
+
+    Uses rolling minutes averages with contextual adjustments for back-to-back
+    games and blowout risk (large spreads).  When a trained
+    ``yakos_minutes_model.pkl`` is present it will be used instead (see
+    Notebook 4).
+
+    Parameters
+    ----------
+    player_features : dict
+        Any/all of: ``rolling_min_5``, ``rolling_min_10``, ``rolling_min_20``,
+        ``b2b`` (bool), ``spread`` (float), ``salary``.
+
+    Returns
+    -------
+    dict
+        Key: ``proj_minutes`` (float).
+    """
+    import os
+    from yak_core.config import YAKOS_ROOT
+
+    model_path = os.path.join(YAKOS_ROOT, "models", "yakos_minutes_model.pkl")
+    if os.path.isfile(model_path):
+        try:
+            import joblib
+            import pandas as _pd
+            model = joblib.load(model_path)
+            feat_df = _pd.DataFrame([player_features])
+            pred = float(model.predict(feat_df)[0])
+            return {"proj_minutes": round(max(0.0, pred), 1)}
+        except Exception:
+            pass
+
+    signals: list = []
+    weights: list = []
+    for key, w in [("rolling_min_5", 0.50), ("rolling_min_10", 0.30), ("rolling_min_20", 0.20)]:
+        val = player_features.get(key)
+        if val is not None:
+            try:
+                signals.append(float(val))
+                weights.append(w)
+            except (ValueError, TypeError):
+                pass
+
+    if signals:
+        total_w = sum(weights)
+        proj_minutes = sum(s * w for s, w in zip(signals, weights)) / total_w
+    else:
+        salary = float(player_features.get("salary", 0))
+        proj_minutes = min(36.0, max(10.0, salary / 300.0))
+
+    # Back-to-back discount (~7%)
+    if player_features.get("b2b"):
+        proj_minutes *= 0.93
+
+    # Blowout risk: large spreads mean starters sit late
+    try:
+        abs_spread = abs(float(player_features.get("spread", 0.0)))
+    except (ValueError, TypeError):
+        abs_spread = 0.0
+    if abs_spread >= 15:
+        proj_minutes *= 0.90
+    elif abs_spread >= 10:
+        proj_minutes *= 0.95
+
+    return {"proj_minutes": round(max(0.0, proj_minutes), 1)}
+
+
+def yakos_ownership_projection(player_features: dict) -> dict:
+    """YakOS GPP ownership % projection.
+
+    Estimates DraftKings large-field GPP ownership using value score, salary,
+    and RG consensus ownership when available.  When a trained
+    ``yakos_ownership_model.pkl`` is present it will be used instead (see
+    Notebook 5).
+
+    Parameters
+    ----------
+    player_features : dict
+        Any/all of: ``salary``, ``proj``, ``rg_ownership``.
+
+    Returns
+    -------
+    dict
+        Key: ``proj_own`` (float, 0–100 ownership %).
+    """
+    import os
+    from yak_core.config import YAKOS_ROOT
+
+    model_path = os.path.join(YAKOS_ROOT, "models", "yakos_ownership_model.pkl")
+    if os.path.isfile(model_path):
+        try:
+            import joblib
+            import pandas as _pd
+            model = joblib.load(model_path)
+            feat_df = _pd.DataFrame([player_features])
+            pred = float(model.predict(feat_df)[0])
+            return {"proj_own": round(max(0.0, min(100.0, pred)), 1)}
+        except Exception:
+            pass
+
+    salary = float(player_features.get("salary", 0))
+    proj = float(player_features.get("proj", 0.0))
+    rg_ownership = player_features.get("rg_ownership")
+
+    # Value score: proj FP per $1K salary
+    value_score = proj / (salary / 1000.0) if salary > 0 else 0.0
+
+    # Base ownership calibrated to typical DK NBA GPP range (5–30%)
+    base_own = max(0.0, (value_score - 3.0) * 5.0)
+    base_own = min(50.0, base_own)
+
+    if rg_ownership is not None:
+        try:
+            proj_own = float(rg_ownership) * 0.70 + base_own * 0.30
+        except (ValueError, TypeError):
+            proj_own = base_own
+    else:
+        proj_own = base_own
+
+    return {"proj_own": round(max(0.0, proj_own), 1)}
+
+
+def yakos_ensemble(
+    yakos_proj: float,
+    tank01_proj: float,
+    rg_proj: float,
+    weights: dict = None,
+) -> float:
+    """Blend YakOS, Tank01, and RotoGrinders projections into a final value.
+
+    Handles missing (``None`` or ``NaN``) inputs gracefully by redistributing
+    their weight among the remaining sources.
+
+    Parameters
+    ----------
+    yakos_proj : float
+        YakOS model projection (from :func:`yakos_fp_projection`).
+    tank01_proj : float
+        Tank01 API projection.
+    rg_proj : float
+        RotoGrinders projection.
+    weights : dict, optional
+        Keys ``yakos``, ``tank01``, ``rg`` (floats summing to 1.0).
+        Defaults to ``{"yakos": 0.40, "tank01": 0.30, "rg": 0.30}``.
+
+    Returns
+    -------
+    float
+        Blended projection, rounded to 2 decimal places.
+    """
+    if weights is None:
+        weights = {"yakos": 0.40, "tank01": 0.30, "rg": 0.30}
+
+    sources = [
+        (yakos_proj, weights.get("yakos", 0.40)),
+        (tank01_proj, weights.get("tank01", 0.30)),
+        (rg_proj, weights.get("rg", 0.30)),
+    ]
+
+    total_w = 0.0
+    blended = 0.0
+    for val, w in sources:
+        if val is not None:
+            try:
+                fval = float(val)
+                if not np.isnan(fval):
+                    blended += fval * w
+                    total_w += w
+            except (ValueError, TypeError):
+                pass
+
+    if total_w == 0:
+        return 0.0
+    return round(blended / total_w, 2)
+
+
 def apply_projections(
     pool_df: pd.DataFrame,
     cfg: Dict[str, Any],

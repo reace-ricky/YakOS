@@ -199,60 +199,48 @@ class TestFetchActualsFromApi:
     DATE = "20260227"
 
     @patch("yak_core.live._fetch_actuals_from_box_scores")
-    @patch("yak_core.live.fetch_live_dfs")
-    def test_uses_dfs_endpoint_when_it_works(self, mock_dfs, mock_box):
-        """When getNBADFS returns data, box scores should NOT be called."""
-        mock_dfs.return_value = pd.DataFrame([
-            {"player_name": "Alice", "proj": 42.5},
+    def test_always_uses_box_scores(self, mock_box):
+        """fetch_actuals_from_api must always use box scores, never the DFS endpoint."""
+        mock_box.return_value = pd.DataFrame([
+            {"player_name": "Alice", "actual_fp": 42.5},
         ])
         df = fetch_actuals_from_api(self.DATE, self.CFG)
-        mock_box.assert_not_called()
+        mock_box.assert_called_once()
         assert df["player_name"].iloc[0] == "Alice"
         assert df["actual_fp"].iloc[0] == pytest.approx(42.5)
 
     @patch("yak_core.live._fetch_actuals_from_box_scores")
-    @patch("yak_core.live.fetch_live_dfs")
-    def test_falls_back_to_box_scores_when_dfs_raises(self, mock_dfs, mock_box):
-        """When getNBADFS raises, the box-score fallback should be used."""
-        mock_dfs.side_effect = ValueError("No DFS player rows parsed for 20260227")
+    def test_returns_actual_fp_column(self, mock_box):
+        """Returned DataFrame must have player_name and actual_fp columns."""
         mock_box.return_value = pd.DataFrame([
             {"player_name": "Bob", "actual_fp": 35.0},
         ])
         df = fetch_actuals_from_api(self.DATE, self.CFG)
-        mock_box.assert_called_once()
-        assert df["player_name"].iloc[0] == "Bob"
+        assert "actual_fp" in df.columns
+        assert "player_name" in df.columns
 
     @patch("yak_core.live._fetch_actuals_from_box_scores")
-    @patch("yak_core.live.fetch_live_dfs")
-    def test_falls_back_when_dfs_returns_empty(self, mock_dfs, mock_box):
-        """When getNBADFS returns an empty DataFrame, use box scores."""
-        mock_dfs.return_value = pd.DataFrame()
-        mock_box.return_value = pd.DataFrame([
-            {"player_name": "Carol", "actual_fp": 27.0},
-        ])
-        df = fetch_actuals_from_api(self.DATE, self.CFG)
-        mock_box.assert_called_once()
-        assert len(df) == 1
-
-    @patch("yak_core.live._fetch_actuals_from_box_scores")
-    @patch("yak_core.live.fetch_live_dfs")
-    def test_raises_runtime_error_when_both_fail(self, mock_dfs, mock_box):
-        """Both endpoints failing should raise RuntimeError."""
-        mock_dfs.side_effect = ValueError("No DFS player rows parsed for 20260227")
+    def test_raises_runtime_error_when_box_scores_fail(self, mock_box):
+        """Box-score failure should raise RuntimeError."""
         mock_box.side_effect = ValueError("No games found for 20260227")
         with pytest.raises(RuntimeError, match="Tank01 actuals API error"):
             fetch_actuals_from_api(self.DATE, self.CFG)
 
     @patch("yak_core.live._fetch_actuals_from_box_scores")
-    @patch("yak_core.live.fetch_live_dfs")
-    def test_date_with_hyphens_accepted(self, mock_dfs, mock_box):
+    def test_date_with_hyphens_accepted(self, mock_box):
         """YYYY-MM-DD date is normalised correctly."""
-        mock_dfs.side_effect = ValueError("No DFS data")
         mock_box.return_value = pd.DataFrame([{"player_name": "Dave", "actual_fp": 20.0}])
         df = fetch_actuals_from_api("2026-02-27", self.CFG)
-        # box scores called with clean YYYYMMDD key
         mock_box.assert_called_once_with("20260227", self.CFG)
         assert not df.empty
+
+    @patch("yak_core.live._fetch_actuals_from_box_scores")
+    def test_dfs_endpoint_is_never_called(self, mock_box):
+        """The DFS endpoint (fetch_live_dfs) must not be called for actuals."""
+        mock_box.return_value = pd.DataFrame([{"player_name": "Eve", "actual_fp": 28.0}])
+        with patch("yak_core.live.fetch_live_dfs") as mock_dfs:
+            fetch_actuals_from_api(self.DATE, self.CFG)
+            mock_dfs.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
