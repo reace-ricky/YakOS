@@ -2329,8 +2329,11 @@ with tab_lab:
                     """Return sorted player labels eligible for a DK Classic slot."""
                     eligible_pos = _DK_SLOT_POS.get(slot, [])
                     if _bp_pos_col and eligible_pos:
-                        mask = _bp_pool[_bp_pos_col].str.upper().isin(
-                            [p.upper() for p in eligible_pos]
+                        eligible_upper = {p.upper() for p in eligible_pos}
+                        # Handle multi-position players (e.g. "SG/SF", "PF/C");
+                        # split on "/" and check if any individual position matches.
+                        mask = _bp_pool[_bp_pos_col].fillna("").str.upper().apply(
+                            lambda pos: bool(set(pos.split("/")) & eligible_upper)
                         )
                         sub = _bp_pool[mask]
                     else:
