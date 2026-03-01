@@ -17,13 +17,28 @@ Right Angle Ricky DFS Optimizer — an NBA DraftKings lineup optimizer with a St
 
 ## Setup
 
+### Local development
+
 ```bash
 pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-A Tank01 RapidAPI key is optional but required for live pool fetch and injury updates.  
-Set it via the sidebar or the `RAPIDAPI_KEY` environment variable.
+The app will open at **http://localhost:8501**.
+
+### Streamlit Community Cloud (free web deployment)
+
+1. Fork or push this repo to your GitHub account.
+2. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub.
+3. Click **New app** → select your repository → set the main file to `streamlit_app.py`.
+4. Click **Deploy**. The app will be live at `https://<your-app>.streamlit.app` in ~2 minutes.
+
+No extra configuration is required — `requirements.txt` and `.streamlit/config.toml` are already committed to the repo.
+
+### Optional: Tank01 RapidAPI key
+
+Required for **Fetch Pool from API** and live injury updates.  
+Set it via the sidebar text box, the `RAPIDAPI_KEY` environment variable, or — on Streamlit Cloud — add it as a secret named `RAPIDAPI_KEY` under **Settings → Secrets**.
 
 ## Data
 
