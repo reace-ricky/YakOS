@@ -59,6 +59,9 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 32 | **Docker / one-click deploy** | `Dockerfile`, `docker-compose.yml` | latest |
 | 33 | **Dark mode / UI polish** | `.streamlit/config.toml` | latest |
 | 34 | **Unit tests: diversity + Showdown** (25 tests) | `tests/test_diversity_and_showdown.py` | latest |
+| 35 | **Dashboard API fetch + projection fallback** — fetch pool from API directly on Ricky's Slate Room; salary-implied fallback when API returns 0 proj | `streamlit_app.py` | latest |
+| 36 | **Player Projections table on dashboard** — expanded by default, sorted by proj desc, clean columns, auto-sized | `streamlit_app.py` | latest |
+| 37 | **Remove contest_entry / contest_entries from Calibration Queue display** — also removed fixed height for auto-sizing | `streamlit_app.py` | latest |
 
 ---
 

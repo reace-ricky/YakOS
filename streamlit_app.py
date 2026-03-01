@@ -80,6 +80,7 @@ from yak_core.multislate import (  # type: ignore
     run_multi_slate,
     compare_slates,
 )
+from yak_core.projections import salary_implied_proj, noisy_proj  # type: ignore
 
 
 # -----------------------------
@@ -239,6 +240,14 @@ def _slate_value_leader(pool_df: pd.DataFrame) -> str:
         return "—"
     row = top.iloc[0]
     return f"{row['player_name']} ({row['_v']:.2f}x)"
+
+
+def _apply_proj_fallback(pool: pd.DataFrame) -> pd.DataFrame:
+    """Apply salary-implied projections if all proj values are zero or missing."""
+    if "proj" not in pool.columns or pool["proj"].fillna(0).max() == 0:
+        pool = pool.copy()
+        pool["proj"] = noisy_proj(salary_implied_proj(pool["salary"]))
+    return pool
 
 
 def ensure_session_state():
@@ -486,13 +495,47 @@ with tab_slate:
     if sport == "PGA":
         st.info("PGA support is coming soon. Please select NBA for now.")
     else:
+        # ── API fetch on the dashboard ───────────────────────────────────
+        with st.expander("🌐 Fetch Player Pool from API", expanded=False):
+            slate_fetch_col_l, slate_fetch_col_r = st.columns([1, 1])
+            with slate_fetch_col_l:
+                slate_fetch_date = st.date_input(
+                    "Slate date",
+                    value=_today_est(),
+                    key="slate_fetch_date",
+                )
+            with slate_fetch_col_r:
+                if st.button(
+                    "🌐 Fetch Pool from API",
+                    key="slate_fetch_api_btn",
+                    help="Requires Tank01 RapidAPI key set in the sidebar.",
+                ):
+                    api_key = st.session_state.get("rapidapi_key", "")
+                    if not api_key:
+                        st.error("Set your Tank01 RapidAPI key in the sidebar first.")
+                    else:
+                        with st.spinner("Fetching live DK pool from Tank01…"):
+                            try:
+                                live_pool = fetch_live_opt_pool(
+                                    str(slate_fetch_date),
+                                    {"RAPIDAPI_KEY": api_key},
+                                )
+                                if "player_name" not in live_pool.columns and "name" in live_pool.columns:
+                                    live_pool = live_pool.rename(columns={"name": "player_name"})
+                                live_pool = _apply_proj_fallback(live_pool)
+                                st.session_state["pool_df"] = live_pool
+                                st.success(f"Loaded {len(live_pool)} players from API.")
+                            except Exception as _e:
+                                st.error(f"API fetch failed: {_e}")
+
         pool_df = st.session_state.get("pool_df")
 
         if pool_df is None or pool_df.empty:
             st.info(
-                "📋 **No player pool loaded.** Upload your RotoGrinders projection sheet "
-                "in the **🔬 Calibration Lab** tab to get started."
+                "📋 **No player pool loaded.** Use the **Fetch Pool from API** button above "
+                "or upload your RotoGrinders projection sheet in the **🔬 Calibration Lab** tab."
             )
+
         else:
             # ── KPIs (top) ──────────────────────────────────────────────
             n_players = len(pool_df)
@@ -516,8 +559,17 @@ with tab_slate:
                     f"Avg ownership: {avg_own:.1f}% | Slate value leader: {value_leader}"
                 )
 
-            with st.expander("View player pool", expanded=False):
-                st.dataframe(pool_df, use_container_width=True, height=350)
+            with st.expander("📊 Player Projections", expanded=True):
+                _proj_cols = [c for c in ["player_name", "pos", "team", "salary", "proj", "floor", "ceil", "ownership"] if c in pool_df.columns]
+                _sort_col = "proj" if "proj" in _proj_cols else (_proj_cols[0] if _proj_cols else None)
+                _proj_display = pool_df[_proj_cols].reset_index(drop=True)
+                if _sort_col:
+                    _proj_display = _proj_display.sort_values(_sort_col, ascending=False).reset_index(drop=True)
+                st.dataframe(
+                    _proj_display,
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
             st.markdown("---")
 
@@ -935,6 +987,7 @@ with tab_lab:
                         )
                         if "player_name" not in live_pool.columns and "name" in live_pool.columns:
                             live_pool = live_pool.rename(columns={"name": "player_name"})
+                        live_pool = _apply_proj_fallback(live_pool)
                         st.session_state["pool_df"] = live_pool
                         st.success(f"Loaded {len(live_pool)} players from API.")
                     except Exception as _e:
@@ -995,9 +1048,9 @@ with tab_lab:
             kq_cols[4].metric("Avg ownership", f"{avg_own:.1f}%")
             kq_cols[5].metric("Reviewed", n_reviewed)
 
-            # Build display columns: exclude lineup_id and contest_name (noise);
-            # focus on pts / own % / mins
-            _queue_hide = {"lineup_id", "contest_name"}
+            # Build display columns: exclude lineup_id, contest_name, contest_entry,
+            # contest_entries (noise); focus on pts / own % / mins
+            _queue_hide = {"lineup_id", "contest_name", "contest_entry", "contest_entries"}
             _queue_prefer = [
                 "slate_date", "pos", "team", "name", "salary",
                 "proj", "actual", "proj_own", "own",
@@ -1028,7 +1081,6 @@ with tab_lab:
                 },
                 disabled=[c for c in queue_edit_df.columns if c != "✓"],
                 use_container_width=True,
-                height=300,
                 key=f"queue_editor_{queue_date_sel}",
             )
 
