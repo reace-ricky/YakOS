@@ -1152,6 +1152,23 @@ with tab_lab:
                 else:
                     st.info("No 'Other' root causes logged yet.")
 
+            _cal_pool = st.session_state.get("pool_df")
+            if _cal_pool is not None and not _cal_pool.empty:
+                with st.expander("📊 Player Projections", expanded=True):
+                    _cal_proj_cols = [
+                        c for c in ["player_name", "pos", "team", "salary", "proj", "floor", "ceil", "ownership"]
+                        if c in _cal_pool.columns
+                    ]
+                    _cal_sort_col = "proj" if "proj" in _cal_proj_cols else (_cal_proj_cols[0] if _cal_proj_cols else None)
+                    _cal_proj_display = _cal_pool[_cal_proj_cols].reset_index(drop=True)
+                    if _cal_sort_col:
+                        _cal_proj_display = _cal_proj_display.sort_values(_cal_sort_col, ascending=False).reset_index(drop=True)
+                    st.dataframe(
+                        _cal_proj_display,
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
     # ---- Stack Hit Log ----
     st.markdown("---")
     st.markdown("### 📊 Stack Hit Log")
