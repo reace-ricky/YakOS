@@ -1,5 +1,6 @@
 """YakOS DFS Optimizer - Ricky's Slate Room + Optimizer + Calibration Lab."""
 
+import json
 import sys
 import os
 from typing import Dict, Any, Tuple
@@ -16,6 +17,29 @@ _EST = ZoneInfo("America/New_York")
 def _today_est():
     """Return today's date in US/Eastern (EST/EDT)."""
     return pd.Timestamp.now(tz=_EST).date()
+
+
+# ── Persistent API-key helpers ──────────────────────────────────────────────
+_API_CONFIG_PATH = Path(__file__).parent / "data" / "api_config.json"
+
+
+def _load_persisted_api_key() -> str:
+    """Return the Tank01 RapidAPI key saved in data/api_config.json, or ''."""
+    if _API_CONFIG_PATH.exists():
+        try:
+            with open(_API_CONFIG_PATH, "r") as _f:
+                return json.load(_f).get("rapidapi_key", "")
+        except Exception:
+            pass
+    return ""
+
+
+def _save_persisted_api_key(key: str) -> None:
+    """Write the Tank01 RapidAPI key to data/api_config.json."""
+    _API_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(_API_CONFIG_PATH, "w") as _f:
+        json.dump({"rapidapi_key": key}, _f)
+
 
 # Make yak_core importable (works when yak_core is in the repo / installed)
 if "yak_core" not in sys.modules:
@@ -255,7 +279,11 @@ def ensure_session_state():
     if "ms_result" not in st.session_state:
         st.session_state["ms_result"] = None
     if "rapidapi_key" not in st.session_state:
-        st.session_state["rapidapi_key"] = os.environ.get("RAPIDAPI_KEY", "")
+        st.session_state["rapidapi_key"] = (
+            os.environ.get("RAPIDAPI_KEY", "") or _load_persisted_api_key()
+        )
+    if "_pool_df_filename" not in st.session_state:
+        st.session_state["_pool_df_filename"] = None
     if "stack_hit_log" not in st.session_state:
         # list of dicts: {slate_date, team, players, outcome, note}
         st.session_state["stack_hit_log"] = []
@@ -434,6 +462,8 @@ with st.sidebar:
         key="sidebar_rapidapi_key",
     )
     if rapidapi_key_input:
+        if rapidapi_key_input != st.session_state.get("rapidapi_key"):
+            _save_persisted_api_key(rapidapi_key_input)
         st.session_state["rapidapi_key"] = rapidapi_key_input
         os.environ["RAPIDAPI_KEY"] = rapidapi_key_input
 
@@ -908,10 +938,12 @@ with tab_lab:
                         st.error(f"API fetch failed: {_e}")
 
     if rg_upload_cal is not None:
-        raw_df = pd.read_csv(rg_upload_cal)
-        pool_df_cal = rename_rg_columns_to_yakos(raw_df)
-        st.session_state["pool_df"] = pool_df_cal
-        st.success(f"✅ Pool loaded — {len(pool_df_cal)} players. Head to **🏀 Ricky's Slate Room** to review.")
+        if st.session_state.get("_pool_df_filename") != rg_upload_cal.name:
+            raw_df = pd.read_csv(rg_upload_cal)
+            pool_df_cal = rename_rg_columns_to_yakos(raw_df)
+            st.session_state["pool_df"] = pool_df_cal
+            st.session_state["_pool_df_filename"] = rg_upload_cal.name
+            st.success(f"✅ Pool loaded — {len(pool_df_cal)} players. Head to **🏀 Ricky's Slate Room** to review.")
 
     current_pool_df = st.session_state.get("pool_df")
     if current_pool_df is not None and not current_pool_df.empty:
@@ -970,59 +1002,43 @@ with tab_lab:
                 if c not in _queue_prefer and c not in _queue_hide
             ]
 
-            with st.expander("View queue players", expanded=True):
-                st.dataframe(date_queue[_queue_display_cols], use_container_width=True, height=300)
-
-            # Individual / Bulk action — by player name or row ID
+            # ── Review & Action — check rows, pick a bubble, hit Apply ──
             st.markdown("#### Review & Action")
-            all_player_names = sorted(date_queue["name"].unique().tolist()) if "name" in date_queue.columns else []
-            col_act_l, col_act_r = st.columns(2)
-            with col_act_l:
-                sel_action_by = st.radio(
-                    "Action by",
-                    ["Player name", "Row ID"],
-                    horizontal=True,
-                    key="queue_action_by",
-                )
-                if sel_action_by == "Player name":
-                    sel_ids = st.multiselect(
-                        "Select players to action",
-                        all_player_names,
-                        default=all_player_names,
-                        key="queue_sel_ids",
-                    )
-                    _id_col = "name"
-                else:
-                    all_row_ids = sorted(date_queue.index.tolist())
-                    sel_ids = st.multiselect(
-                        "Select row IDs to action",
-                        all_row_ids,
-                        default=all_row_ids,
-                        key="queue_sel_ids",
-                    )
-                    _id_col = "row_id"
-                action_choice = st.selectbox(
-                    "Action",
-                    ["reviewed", "questioned", "apply_config", "dismissed"],
-                    key="queue_action",
-                )
-            with col_act_r:
-                st.markdown(" ")
-                st.markdown(" ")
-                if st.button("Apply action to selected", key="queue_apply_btn"):
+            queue_edit_df = date_queue[_queue_display_cols].copy()
+            queue_edit_df.insert(0, "✓", False)
+            edited_queue = st.data_editor(
+                queue_edit_df,
+                column_config={
+                    "✓": st.column_config.CheckboxColumn("✓", default=False, width="small"),
+                },
+                disabled=[c for c in queue_edit_df.columns if c != "✓"],
+                use_container_width=True,
+                height=300,
+                key=f"queue_editor_{queue_date_sel}",
+            )
+
+            n_selected = int(edited_queue["✓"].sum())
+            action_choice = st.radio(
+                "Action",
+                ["reviewed", "questioned", "apply_config", "dismissed"],
+                horizontal=True,
+                key="queue_action",
+            )
+
+            col_apply, col_suggest = st.columns([1, 2])
+            with col_apply:
+                if st.button(
+                    f"Apply to {n_selected} selected" if n_selected else "Apply (select rows above)",
+                    key="queue_apply_btn",
+                    disabled=(n_selected == 0),
+                ):
+                    sel_row_ids = date_queue.index[edited_queue["✓"].values].tolist()
                     updated_q = action_queue_items(
-                        st.session_state["cal_queue_df"], sel_ids, action_choice, id_col=_id_col
+                        st.session_state["cal_queue_df"], sel_row_ids, action_choice, id_col="row_id"
                     )
                     st.session_state["cal_queue_df"] = updated_q
-                    st.success(f"Marked {len(sel_ids)} player(s) as '{action_choice}'.")
-
-                if st.button("Bulk: mark all as reviewed", key="queue_bulk_btn"):
-                    updated_q = action_queue_items(
-                        st.session_state["cal_queue_df"], all_player_names, "reviewed", id_col="name"
-                    )
-                    st.session_state["cal_queue_df"] = updated_q
-                    st.success("All players marked as reviewed.")
-
+                    st.success(f"Marked {n_selected} row(s) as '{action_choice}'.")
+            with col_suggest:
                 if st.button("Suggest config changes from queue", key="queue_suggest_btn"):
                     cal_cfg = load_calibration_config()
                     suggested = suggest_config_from_queue(
