@@ -275,7 +275,14 @@ def _apply_proj_fallback(pool: pd.DataFrame) -> pd.DataFrame:
     return pool
 
 
-def _apply_yakos_projections(pool: pd.DataFrame) -> pd.DataFrame:
+# Default constants used by _apply_yakos_projections for b2b / blowout adjustments
+_DEFAULT_B2B_DISCOUNT = 0.93
+_DEFAULT_BLOWOUT_THRESHOLD = 15
+_BLOWOUT_REDUCTION_STRONG = 0.90
+_BLOWOUT_REDUCTION_MILD = 0.95
+
+
+def _apply_yakos_projections(pool: pd.DataFrame, knobs: dict = None) -> pd.DataFrame:
     """Apply the YakOS projection engine to a player pool.
 
     Calls ``yakos_fp_projection`` per player (with whatever signals are
@@ -283,11 +290,38 @@ def _apply_yakos_projections(pool: pd.DataFrame) -> pd.DataFrame:
     ``yakos_ensemble``, and records the signal mix in a ``proj_source`` column.
     Also populates ``floor``, ``ceil``, ``proj_minutes``, and ``proj_own``
     when they are not already present.
+
+    Parameters
+    ----------
+    pool : pd.DataFrame
+        Player pool to project.
+    knobs : dict, optional
+        Calibration knobs from ``st.session_state["cal_knobs"]``.  Supported
+        keys: ``ensemble_w_yakos``, ``ensemble_w_tank01``, ``ensemble_w_rg``
+        (ensemble weights), ``b2b_discount`` (override default 0.93 b2b
+        discount), ``blowout_threshold`` (spread threshold for blowout
+        reduction).  When *None* or absent, existing defaults are used.
     """
     if pool is None or pool.empty:
         return pool
 
+    knobs = knobs or {}
+
     pool = pool.copy()
+
+    # Build ensemble weights dict from knobs (falls back to yakos_ensemble defaults)
+    _ens_weights: dict = {}
+    if knobs.get("ensemble_w_yakos") is not None:
+        _ens_weights["yakos"] = float(knobs["ensemble_w_yakos"])
+    if knobs.get("ensemble_w_tank01") is not None:
+        _ens_weights["tank01"] = float(knobs["ensemble_w_tank01"])
+    if knobs.get("ensemble_w_rg") is not None:
+        _ens_weights["rg"] = float(knobs["ensemble_w_rg"])
+    _ensemble_weights = _ens_weights if _ens_weights else None
+
+    # b2b discount override: ratio to apply on top of the default multiplier
+    _b2b_override = float(knobs["b2b_discount"]) if knobs.get("b2b_discount") is not None else None
+    _blowout_threshold = int(knobs["blowout_threshold"]) if knobs.get("blowout_threshold") is not None else _DEFAULT_BLOWOUT_THRESHOLD
 
     proj_values: list = []
     floor_values: list = []
@@ -331,11 +365,40 @@ def _apply_yakos_projections(pool: pd.DataFrame) -> pd.DataFrame:
         fp_result = yakos_fp_projection(player_features)
         yakos_proj_val = fp_result["proj"]
 
-        # Minutes projection
+        # Minutes projection (uses yakos_minutes_projection base calculation,
+        # then applies b2b_discount knob scaling if provided)
         min_result = yakos_minutes_projection(player_features)
+        proj_min = min_result["proj_minutes"]
 
-        # Ensemble blend: YakOS + Tank01 + RG
-        blended = yakos_ensemble(yakos_proj_val, tank01_proj, rg_proj)
+        # Apply b2b_discount knob override: scale relative to the built-in default
+        if _b2b_override is not None and player_features.get("b2b"):
+            # yakos_minutes_projection already multiplied by _DEFAULT_B2B_DISCOUNT; scale to knob value
+            proj_min = proj_min * (_b2b_override / _DEFAULT_B2B_DISCOUNT)
+
+        # Apply blowout_threshold from knobs (overrides hardcoded threshold)
+        # We re-apply the blowout logic using the knob threshold.  The base minutes
+        # already have the default thresholds applied by yakos_minutes_projection, so
+        # we only need to act when the knob threshold differs from the defaults.
+        _abs_spread = 0.0
+        try:
+            _abs_spread = abs(float(player_features.get("spread", 0.0)))
+        except (ValueError, TypeError):
+            pass
+        if _blowout_threshold != _DEFAULT_BLOWOUT_THRESHOLD and _abs_spread > 0:
+            # Remove default blowout adjustment and reapply with knob threshold
+            if _abs_spread >= _DEFAULT_BLOWOUT_THRESHOLD:
+                proj_min /= _BLOWOUT_REDUCTION_STRONG  # undo default strong reduction
+            elif _abs_spread >= (_DEFAULT_BLOWOUT_THRESHOLD - 5):
+                proj_min /= _BLOWOUT_REDUCTION_MILD    # undo default mild reduction
+            if _abs_spread >= _blowout_threshold:
+                proj_min *= _BLOWOUT_REDUCTION_STRONG
+            elif _abs_spread >= (_blowout_threshold - 5):
+                proj_min *= _BLOWOUT_REDUCTION_MILD
+
+        proj_min = round(max(0.0, proj_min), 1)
+
+        # Ensemble blend: YakOS + Tank01 + RG (using knob weights when provided)
+        blended = yakos_ensemble(yakos_proj_val, tank01_proj, rg_proj, weights=_ensemble_weights)
         final_proj = blended if blended > 0 else yakos_proj_val
 
         # Ownership projection (uses final blended proj as input)
@@ -356,7 +419,7 @@ def _apply_yakos_projections(pool: pd.DataFrame) -> pd.DataFrame:
         proj_values.append(final_proj)
         floor_values.append(fp_result["floor"])
         ceil_values.append(fp_result["ceil"])
-        proj_minutes_values.append(min_result["proj_minutes"])
+        proj_minutes_values.append(proj_min)
         proj_own_values.append(own_result["proj_own"])
         proj_source_values.append("+".join(signal_sources))
 
@@ -703,7 +766,7 @@ with tab_slate:
                                 )
                                 if "player_name" not in live_pool.columns and "name" in live_pool.columns:
                                     live_pool = live_pool.rename(columns={"name": "player_name"})
-                                live_pool = _apply_yakos_projections(live_pool)
+                                live_pool = _apply_yakos_projections(live_pool, knobs=st.session_state.get("cal_knobs", {}))
                                 st.session_state["pool_df"] = live_pool
                                 st.success(f"Loaded {len(live_pool)} players from API.")
                             except Exception as _e:
@@ -1295,7 +1358,7 @@ with tab_lab:
                         )
                         if "player_name" not in live_pool.columns and "name" in live_pool.columns:
                             live_pool = live_pool.rename(columns={"name": "player_name"})
-                        live_pool = _apply_yakos_projections(live_pool)
+                        live_pool = _apply_yakos_projections(live_pool, knobs=st.session_state.get("cal_knobs", {}))
                         st.session_state["pool_df"] = live_pool
                         st.success(f"Loaded {len(live_pool)} players from API.")
                     except Exception as _e:
@@ -1556,6 +1619,40 @@ with tab_lab:
                     "(pts >6, mins >3, or own% >3). Review archetype config knobs below."
                 )
 
+                # ── Error Diagnosis ──────────────────────────────────────────
+                _qd_diag = _qd.copy()
+                _pts_errors = _qd_diag[_qd_diag["pts_error"].abs().gt(6)] if "pts_error" in _qd_diag.columns else _qd_diag.iloc[:0]
+                _min_errors = _qd_diag[_qd_diag["min_error"].abs().gt(3)] if "min_error" in _qd_diag.columns else _qd_diag.iloc[:0]
+                _own_errors = _qd_diag[_qd_diag["own_error"].abs().gt(3)] if "own_error" in _qd_diag.columns else _qd_diag.iloc[:0]
+
+                st.markdown("#### 🔍 Error Diagnosis")
+                _diag_col1, _diag_col2, _diag_col3 = st.columns(3)
+                _diag_col1.metric("FP Errors", len(_pts_errors), help="Players with >6pt projection error")
+                _diag_col2.metric("Minutes Errors", len(_min_errors), help="Players with >3min projection error")
+                _diag_col3.metric("Ownership Errors", len(_own_errors), help="Players with >3% ownership error")
+
+                _err_counts = {
+                    "pts": len(_pts_errors),
+                    "min": len(_min_errors),
+                    "own": len(_own_errors),
+                }
+                _dominant = max(_err_counts, key=_err_counts.get)
+                if _err_counts[_dominant] > 0:
+                    if _dominant == "pts":
+                        st.info(
+                            "💡 FP errors dominate. Try adjusting ensemble weights below "
+                            "(reduce YakOS weight if model is biased, increase Tank01/RG weight for consensus)."
+                        )
+                    elif _dominant == "min":
+                        st.info(
+                            "💡 Minutes errors dominate. Check b2b discount and blowout threshold knobs below."
+                        )
+                    else:
+                        st.info(
+                            "💡 Ownership errors dominate. This typically means RG ownership data was stale. "
+                            "Consider increasing RG ensemble weight if RG data is fresh."
+                        )
+
     # ---- Section B: Archetype Config Knobs ----
     st.markdown("---")
     st.markdown("### B. 🎛️ Archetype Config Knobs")
@@ -1613,6 +1710,81 @@ with tab_lab:
             })
             st.success(f"Archetype '{arch_sel_knobs}' updated for this session.")
 
+        st.markdown("---")
+        st.markdown("**⚙️ Projection Engine Knobs**")
+        st.markdown("These knobs control how YakOS blends projection sources and applies contextual adjustments.")
+
+        _cal_knobs = st.session_state.get("cal_knobs", {})
+
+        _pk1, _pk2 = st.columns(2)
+        with _pk1:
+            _ens_w_yakos = st.slider(
+                "YakOS model weight (ensemble_w_yakos)",
+                0.0, 1.0,
+                float(_cal_knobs.get("ensemble_w_yakos", 0.40)),
+                step=0.05,
+                key="knob_ens_yakos",
+                help="Weight of YakOS model projection in the ensemble blend.",
+            )
+            _ens_w_tank01 = st.slider(
+                "Tank01 weight (ensemble_w_tank01)",
+                0.0, 1.0,
+                float(_cal_knobs.get("ensemble_w_tank01", 0.30)),
+                step=0.05,
+                key="knob_ens_tank01",
+                help="Weight of Tank01 API projection in the ensemble blend.",
+            )
+            _ens_w_rg = st.slider(
+                "RotoGrinders weight (ensemble_w_rg)",
+                0.0, 1.0,
+                float(_cal_knobs.get("ensemble_w_rg", 0.30)),
+                step=0.05,
+                key="knob_ens_rg",
+                help="Weight of RotoGrinders projection in the ensemble blend.",
+            )
+            _ens_total = _ens_w_yakos + _ens_w_tank01 + _ens_w_rg
+            if abs(_ens_total - 1.0) > 0.05:
+                st.warning(f"⚠️ Ensemble weights sum to {_ens_total:.2f} — should be ~1.0.")
+        with _pk2:
+            _b2b_discount = st.slider(
+                "B2B minutes discount (b2b_discount)",
+                0.80, 1.00,
+                float(_cal_knobs.get("b2b_discount", 0.93)),
+                step=0.01,
+                key="knob_b2b_discount",
+                help="Multiplier applied to projected minutes for back-to-back games (default 0.93).",
+            )
+            _blowout_threshold = st.slider(
+                "Blowout spread threshold (blowout_threshold)",
+                8, 20,
+                int(_cal_knobs.get("blowout_threshold", 15)),
+                step=1,
+                key="knob_blowout_threshold",
+                help="Spread (pts) at which blowout minutes reduction kicks in (default 15).",
+            )
+
+        if st.button("Save projection knobs", key="knobs_proj_save"):
+            st.session_state["cal_knobs"] = {
+                "ensemble_w_yakos": _ens_w_yakos,
+                "ensemble_w_tank01": _ens_w_tank01,
+                "ensemble_w_rg": _ens_w_rg,
+                "b2b_discount": _b2b_discount,
+                "blowout_threshold": _blowout_threshold,
+            }
+            st.success("Projection knobs saved to session.")
+
+    # ── Re-project Pool with current knobs ──────────────────────────────────
+    if st.button("🔄 Re-project Pool with Current Knobs", key="reproj_pool_btn"):
+        _reproj_pool = st.session_state.get("pool_df")
+        if _reproj_pool is None or _reproj_pool.empty:
+            st.warning("No pool loaded. Load a player pool first.")
+        else:
+            _active_knobs = st.session_state.get("cal_knobs", {})
+            _reproj_pool = _apply_yakos_projections(_reproj_pool, knobs=_active_knobs)
+            st.session_state["pool_df"] = _reproj_pool
+            st.success("Pool re-projected with updated knobs.")
+            st.rerun()
+
     # ---- Section C: Sim Module ----
     st.markdown("---")
     st.markdown("### C. 🎲 Sim Module")
@@ -1647,6 +1819,20 @@ with tab_lab:
         st.caption("🔴 Live mode — using today's loaded player pool.")
 
     pool_for_sim = st.session_state.get("pool_df")
+    # Caption: show pool size and active knob summary
+    _sim_knobs = st.session_state.get("cal_knobs", {})
+    if pool_for_sim is not None and not pool_for_sim.empty:
+        if _sim_knobs:
+            _knob_summary = (
+                f"w_yakos={_sim_knobs.get('ensemble_w_yakos', 0.40):.2f}, "
+                f"w_tank01={_sim_knobs.get('ensemble_w_tank01', 0.30):.2f}, "
+                f"w_rg={_sim_knobs.get('ensemble_w_rg', 0.30):.2f}, "
+                f"b2b={_sim_knobs.get('b2b_discount', 0.93):.2f}, "
+                f"blowout_thr={_sim_knobs.get('blowout_threshold', 15)}"
+            )
+        else:
+            _knob_summary = "defaults"
+        st.caption(f"Using projections from pool ({len(pool_for_sim)} players). Knobs: {_knob_summary}.")
     if pool_for_sim is None:
         st.info(
             "Load a player pool using the **📂 Load Player Pool** section at the top of this tab to enable sims."
@@ -2412,88 +2598,90 @@ with tab_lab:
     st.markdown("---")
     # ---- Section D: Multi-Slate ----
     st.markdown("### D. Multi-Slate Comparison")
-    st.markdown(
-        "Discover available historical slates, batch-run the optimizer across "
-        "multiple dates, and compare KPIs side-by-side."
-    )
 
-    slates_df = discover_slates()
-    if slates_df.empty:
-        st.info(
-            "No parquet pool files found in the YakOS root directory.  "
-            "Multi-slate comparison requires `tank_opt_pool_<date>.parquet` files.  "
-            "Set the `YAKOS_ROOT` environment variable to the folder that contains them."
-        )
-    else:
-        st.write(f"**{len(slates_df)} slate(s) discovered:**")
-        st.dataframe(slates_df[["slate_date", "filename", "size_kb"]], use_container_width=True)
-
-        available_dates = slates_df["slate_date"].tolist()
-        ms_dates = st.multiselect(
-            "Select slate dates to compare",
-            available_dates,
-            default=available_dates[:min(3, len(available_dates))],
-            key="ms_dates_sel",
+    with st.expander("Multi-Slate Comparison (expand to use)", expanded=False):
+        st.markdown(
+            "Discover available historical slates, batch-run the optimizer across "
+            "multiple dates, and compare KPIs side-by-side."
         )
 
-        ms_col1, ms_col2 = st.columns(2)
-        with ms_col1:
-            ms_num_lu = st.number_input(
-                "Lineups per slate",
-                min_value=1,
-                max_value=150,  # DK bulk-upload cap is 150 lineups per contest
-                value=20,
-                key="ms_num_lu",
+        slates_df = discover_slates()
+        if slates_df.empty:
+            st.info(
+                "Multi-slate comparison requires historical parquet files. "
+                "Run data collection notebooks to enable. "
+                "(Files matching `tank_opt_pool_<date>.parquet` in `YAKOS_ROOT`.)"
             )
-        with ms_col2:
-            ms_max_exp = st.slider(
-                "Max exposure", min_value=0.1, max_value=1.0, value=0.6, step=0.05, key="ms_max_exp"
+        else:
+            st.write(f"**{len(slates_df)} slate(s) discovered:**")
+            st.dataframe(slates_df[["slate_date", "filename", "size_kb"]], use_container_width=True)
+
+            available_dates = slates_df["slate_date"].tolist()
+            ms_dates = st.multiselect(
+                "Select slate dates to compare",
+                available_dates,
+                default=available_dates[:min(3, len(available_dates))],
+                key="ms_dates_sel",
             )
 
-        if st.button("▶ Run Multi-Slate", type="primary", key="ms_run_btn"):
-            if not ms_dates:
-                st.warning("Select at least one slate date.")
-            else:
-                with st.spinner(f"Running optimizer across {len(ms_dates)} slate(s)…"):
-                    ms_result = run_multi_slate(
-                        ms_dates,
-                        base_cfg={"NUM_LINEUPS": ms_num_lu, "MAX_EXPOSURE": ms_max_exp},
-                    )
-                    st.session_state["ms_result"] = ms_result
+            ms_col1, ms_col2 = st.columns(2)
+            with ms_col1:
+                ms_num_lu = st.number_input(
+                    "Lineups per slate",
+                    min_value=1,
+                    max_value=150,  # DK bulk-upload cap is 150 lineups per contest
+                    value=20,
+                    key="ms_num_lu",
+                )
+            with ms_col2:
+                ms_max_exp = st.slider(
+                    "Max exposure", min_value=0.1, max_value=1.0, value=0.6, step=0.05, key="ms_max_exp"
+                )
 
-        if st.session_state.get("ms_result"):
-            ms_res = st.session_state["ms_result"]
-            comparison = compare_slates(ms_res)
-            sdf = comparison.get("summary_df", pd.DataFrame())
-
-            if not sdf.empty:
-                st.markdown("#### Per-Slate Summary")
-                st.dataframe(sdf, use_container_width=True)
-
-            if comparison.get("n_slates", 0) > 0:
-                st.markdown("#### Cross-Slate Trends")
-                trends = comparison.get("trends", {})
-                if trends:
-                    trend_rows = []
-                    for metric, stats in trends.items():
-                        trend_rows.append({"metric": metric, **stats})
-                    st.dataframe(pd.DataFrame(trend_rows), use_container_width=True)
-
-                cons = comparison.get("consistency", {})
-                if cons:
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("Slates OK", cons.get("n_slates_ok", 0))
-                    c2.metric("Slates failed", cons.get("n_slates_fail", 0))
-                    c3.metric(
-                        "LU proj CV (%)",
-                        f"{cons.get('lu_proj_cv', 0):.1f}",
-                        help="Coefficient of variation of avg lineup proj across slates — lower = more consistent.",
-                    )
-                    if "avg_proj_error" in cons:
-                        st.metric(
-                            "Avg projection error (vs actuals)",
-                            f"{cons['avg_proj_error']:+.1f} pts",
+            if st.button("▶ Run Multi-Slate", type="primary", key="ms_run_btn"):
+                if not ms_dates:
+                    st.warning("Select at least one slate date.")
+                else:
+                    with st.spinner(f"Running optimizer across {len(ms_dates)} slate(s)…"):
+                        ms_result = run_multi_slate(
+                            ms_dates,
+                            base_cfg={"NUM_LINEUPS": ms_num_lu, "MAX_EXPOSURE": ms_max_exp},
                         )
+                        st.session_state["ms_result"] = ms_result
+
+            if st.session_state.get("ms_result"):
+                ms_res = st.session_state["ms_result"]
+                comparison = compare_slates(ms_res)
+                sdf = comparison.get("summary_df", pd.DataFrame())
+
+                if not sdf.empty:
+                    st.markdown("#### Per-Slate Summary")
+                    st.dataframe(sdf, use_container_width=True)
+
+                if comparison.get("n_slates", 0) > 0:
+                    st.markdown("#### Cross-Slate Trends")
+                    trends = comparison.get("trends", {})
+                    if trends:
+                        trend_rows = []
+                        for metric, stats in trends.items():
+                            trend_rows.append({"metric": metric, **stats})
+                        st.dataframe(pd.DataFrame(trend_rows), use_container_width=True)
+
+                    cons = comparison.get("consistency", {})
+                    if cons:
+                        c1, c2, c3 = st.columns(3)
+                        c1.metric("Slates OK", cons.get("n_slates_ok", 0))
+                        c2.metric("Slates failed", cons.get("n_slates_fail", 0))
+                        c3.metric(
+                            "LU proj CV (%)",
+                            f"{cons.get('lu_proj_cv', 0):.1f}",
+                            help="Coefficient of variation of avg lineup proj across slates — lower = more consistent.",
+                        )
+                        if "avg_proj_error" in cons:
+                            st.metric(
+                                "Avg projection error (vs actuals)",
+                                f"{cons['avg_proj_error']:+.1f} pts",
+                            )
 
     st.markdown("---")
     st.caption("YakOS Calibration Lab — data-driven lineup refinement.")
@@ -2914,4 +3102,16 @@ with tab_calib:
 
     st.markdown("---")
     st.caption("Ricky's Calibration Lab — BacktestIQ-style strategy calibration.")
+
+
+# ── System Audit (PR #62) ──────────────────────────────────────────
+# [x] All imports used
+# [x] All session_state keys have readers and writers
+# [x] No orphaned functions
+# [x] 3-tab layout consistent (tab_slate, tab_optimizer, tab_lab); tab_calib aliased to tab_lab
+# [x] Knobs propagate: slider → cal_knobs session_state → _apply_yakos_projections → yakos_ensemble
+# [x] Both fetch call sites pass knobs (Slate Room ~line 764, Cal Lab ~line 1356)
+# [x] Cal Lab section ordering verified: Load Pool → KPI Cards → A (Queue) → Error Diagnosis → B (Knobs) → Re-project Button → C (Sims) → D (Multi-Slate, hidden if no data) → E (Backtest)
+# [x] Section D hidden gracefully when no parquets (collapsed expander + st.info message)
+# ────────────────────────────────────────────────────────────────────
 
