@@ -237,6 +237,8 @@ def ensure_session_state():
         st.session_state["prev_dk_contest_type"] = st.session_state["dk_contest_type"]
     if "sim_pool_df" not in st.session_state:
         st.session_state["sim_pool_df"] = None
+    if "sim_pool_orig_df" not in st.session_state:
+        st.session_state["sim_pool_orig_df"] = None
     if "sim_lineups_df" not in st.session_state:
         st.session_state["sim_lineups_df"] = None
     if "sim_results_df" not in st.session_state:
@@ -1389,6 +1391,7 @@ with tab_lab:
                                         pool_for_sim, api_updates
                                     )
                                     st.session_state["sim_pool_df"] = sim_pool_api
+                                    st.session_state["sim_pool_orig_df"] = sim_pool_api
                                     st.success(
                                         f"Applied {len(api_updates)} injury update(s) "
                                         "from API."
@@ -1446,8 +1449,8 @@ with tab_lab:
                 if news_updates:
                     sim_pool = simulate_live_updates(pool_for_sim, news_updates)
                     st.session_state["sim_pool_df"] = sim_pool
+                    st.session_state["sim_pool_orig_df"] = sim_pool
                     st.info(f"Applied {len(news_updates)} update(s) to player pool.")
-                    changed = []
                     for u in news_updates:
                         orig = pool_for_sim[pool_for_sim["player_name"] == u["player_name"]]
                         upd = sim_pool[sim_pool["player_name"] == u["player_name"]]
@@ -1530,7 +1533,10 @@ with tab_lab:
                     )
                     boost_names = top_players[top_players >= 2].index.tolist()
                     if boost_names:
-                        updated_pool = active_sim_pool.copy()
+                        # Always boost from the original (pre-boost) pool to prevent
+                        # compounding multiplier drift each time the button is clicked.
+                        orig_pool = st.session_state.get("sim_pool_orig_df") or pool_for_sim
+                        updated_pool = orig_pool.copy()
                         mask = updated_pool["player_name"].isin(boost_names)
                         updated_pool.loc[mask, "proj"] = updated_pool.loc[mask, "proj"] * (1.0 + _SIM_LEARNING_BOOST)
                         st.session_state["sim_pool_df"] = updated_pool

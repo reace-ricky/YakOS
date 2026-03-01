@@ -1,5 +1,7 @@
 """Tests for yak_core.right_angle — edge analysis and lineup annotation."""
 
+import re
+
 import pandas as pd
 import pytest
 from yak_core.right_angle import (
@@ -156,6 +158,33 @@ class TestDetectStackAlerts:
             # One of the teams from the pool should appear in the top alert
             assert any(team in alerts[0] for team in ["GSW", "LAL", "BOS", "MIA"])
 
+    def test_projection_uses_top_3_only(self):
+        # Build a pool where one team has many players with known projections.
+        # Summing all players would give 10×20 = 200; top-3 only = 60.
+        rows = [
+            {"player_name": f"P{i}", "team": "TST", "proj": 20.0}
+            for i in range(10)
+        ]
+        pool = pd.DataFrame(rows)
+        alerts = detect_stack_alerts(pool)
+        assert len(alerts) == 1
+        # The alert projection should be top-3 sum (60.0), not all-players sum (200.0)
+        assert "60.0" in alerts[0]
+
+    def test_projection_not_inflated_by_full_roster(self):
+        # Each team has 15 players at 20 pts — full-roster sum would be 300 pts,
+        # which is the "crazy" scenario from the bug report.  Top-3 = 60.
+        teams = ["AAA", "BBB", "CCC"]
+        rows = []
+        for team in teams:
+            for i in range(15):
+                rows.append({"player_name": f"{team}_{i}", "team": team, "proj": 20.0})
+        pool = pd.DataFrame(rows)
+        alerts = detect_stack_alerts(pool)
+        for alert in alerts:
+            # No single alert should reference a value ≥ 100 pts for a stack
+            nums = [float(m) for m in re.findall(r"[\d]+\.[\d]+", alert)]
+            assert all(n < 100 for n in nums), f"Inflated projection in alert: {alert}"
 
 class TestDetectPaceEnvironment:
     def test_returns_list(self):

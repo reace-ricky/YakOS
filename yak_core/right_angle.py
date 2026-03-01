@@ -118,11 +118,16 @@ def ricky_annotate(
 # ============================================================
 
 
+_STACK_SIZE = 3  # number of top players used for stack projection totals
+
+
 def detect_stack_alerts(pool_df: pd.DataFrame) -> list:
     """Return stack-alert strings for the top-projected teams.
 
-    Looks at team-level aggregate projection totals to surface the best
-    correlation / stacking candidates.
+    Looks at the top-``_STACK_SIZE`` players per team to surface the best
+    correlation / stacking candidates.  Using only the top players (rather
+    than summing every roster spot) keeps the projected totals in a realistic
+    range for a typical DFS stack.
 
     Parameters
     ----------
@@ -140,12 +145,14 @@ def detect_stack_alerts(pool_df: pd.DataFrame) -> list:
 
     team_totals = (
         pool_df.groupby("team")["proj"]
-        .agg(["sum", "count"])
-        .rename(columns={"sum": "team_proj", "count": "n_players"})
+        .apply(lambda s: s.nlargest(_STACK_SIZE).sum())
+        .rename("team_proj")
+        .reset_index()
         .sort_values("team_proj", ascending=False)
     )
 
-    for team, row in team_totals.head(3).iterrows():
+    for _, row in team_totals.head(3).iterrows():
+        team = row["team"]
         top_names = (
             pool_df[pool_df["team"] == team]
             .nlargest(3, "proj")["player_name"]
@@ -153,8 +160,8 @@ def detect_stack_alerts(pool_df: pd.DataFrame) -> list:
         )
         top_str = ", ".join(top_names[:2]) if top_names else "—"
         alerts.append(
-            f"🔥 **{team}** stack: {row['team_proj']:.1f} team-proj pts "
-            f"({int(row['n_players'])} players) — top: {top_str}"
+            f"🔥 **{team}** stack: {row['team_proj']:.1f} proj pts (top {_STACK_SIZE}) "
+            f"— top: {top_str}"
         )
 
     return alerts
