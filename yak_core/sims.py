@@ -5,8 +5,12 @@ import numpy as np
 import pandas as pd
 
 # DK NBA scoring thresholds (classic 8-man roster)
-_SMASH_THRESHOLD = 300.0  # strong GPP score
-_BUST_THRESHOLD = 230.0   # likely cash-game miss
+SMASH_THRESHOLD = 300.0  # strong GPP score
+BUST_THRESHOLD = 230.0   # likely cash-game miss
+
+# Private aliases kept for backwards compatibility
+_SMASH_THRESHOLD = SMASH_THRESHOLD
+_BUST_THRESHOLD = BUST_THRESHOLD
 
 
 def run_monte_carlo_for_lineups(
