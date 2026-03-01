@@ -9,10 +9,11 @@
 
 Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS / Right Angle Ricky* with:
 
-1. A polished **Streamlit web UI** with three tabs:
+1. A polished **Streamlit web UI** with four tabs:
    - 🏀 **Ricky's Slate Room** — pool loader, KPI dashboard, edge analysis, promoted lineups
    - ⚡ **Optimizer** — build lineups for any DK contest type with full override controls
    - 🔬 **Calibration Lab** — backtest, queue, ownership ingest, archetype knobs, sim module
+   - 📡 **Ricky's Calibration Lab** — BacktestIQ-style backtesting: contest archetype ROI/cash-rate/percentile KPIs
 
 2. A clean **`yak_core` Python library** that can be used headlessly (no Streamlit required)
 
@@ -68,6 +69,7 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 41 | **Calibration KPI Dashboard** — `📊 Calibration KPI Dashboard` section at top of Calibration Lab: strategy KPIs (total lineups, hit rate, avg score), points accuracy (mean error, std, MAE, RMSE, R²) at lineup and player level, proj vs actual scatter chart, salary-bracket error table, ownership bucket calibration, and conditional minutes accuracy metrics | `yak_core/scoring.py`, `streamlit_app.py` | latest |
 | 43 | **Calibration KPI Dashboard cleanup** — removed RAG status badges, `st.metric` circles, bold headers, and caption text from the 4 top-level KPI cards; replaced with clean bordered HTML boxes (label + value); removed `calibration_rag` import; expander titles cleaned of RAG emojis | `streamlit_app.py` | latest |
 | 45 | **Calibration page redesign** — thin 4-KPI strip (Pts MAE player, Min MAE player, Own MAE player, Hit rate) with color-coded cards via `quality_color()`; advanced stats collapsed under "Advanced breakdown"; queue table shows focused columns (Player, Salary, Proj/Act FP, Error, Proj/Act Mins, Min Error, Proj/Act Own%, Own Error, Flag) | `yak_core/scoring.py`, `streamlit_app.py` | latest |
+| 46 | **Ricky's Calibration Lab (BacktestIQ-style)** — new 4th tab with backtest controls (sport, date range, site, contest-archetype multi-select, build config override, # lineups, Run Backtest), global KPI strip (ROI / cash rate / avg finish %ile / best finish with green/yellow/red coloring), archetype summary table (sorted worst ROI first, row coloring), slate-level drilldown, and Player Calibration Queue integration; `BACKTEST_ARCHETYPES` config + `run_archetype_backtest()` engine + `_reconstruct_pool_from_slate()` helper added to `yak_core/calibration.py`; 19 new unit tests in `tests/test_backtest_engine.py` | `yak_core/calibration.py`, `streamlit_app.py`, `tests/test_backtest_engine.py` | latest |
 
 ---
 
@@ -136,7 +138,9 @@ YakOS/
 │   ├── test_projections.py              (26 tests)
 │   ├── test_ownership.py                (21 tests)
 │   ├── test_right_angle.py              (28 tests)
-│   └── test_diversity_and_showdown.py   (25 tests)
+│   ├── test_diversity_and_showdown.py   (25 tests)
+│   ├── test_calibration_queue.py        (12 tests)
+│   └── test_backtest_engine.py          (19 tests)
 └── requirements.txt
 ```
 
