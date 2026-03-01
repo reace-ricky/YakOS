@@ -41,7 +41,12 @@ from yak_core.live import (  # type: ignore
     fetch_live_opt_pool,
     fetch_injury_updates,
 )
-from yak_core.multislate import parse_dk_contest_csv  # type: ignore
+from yak_core.multislate import (  # type: ignore
+    parse_dk_contest_csv,
+    discover_slates,
+    run_multi_slate,
+    compare_slates,
+)
 
 
 # -----------------------------
@@ -228,6 +233,8 @@ def ensure_session_state():
         st.session_state["sim_lineups_df"] = None
     if "sim_results_df" not in st.session_state:
         st.session_state["sim_results_df"] = None
+    if "ms_result" not in st.session_state:
+        st.session_state["ms_result"] = None
     if "rapidapi_key" not in st.session_state:
         st.session_state["rapidapi_key"] = os.environ.get("RAPIDAPI_KEY", "")
 
@@ -1499,6 +1506,92 @@ with tab_lab:
                         "Fill in Entry ID and Contest info before uploading."
                     ),
                 )
+
+    st.markdown("---")
+    # ---- Section F: Multi-Slate ----
+    st.markdown("### F. Multi-Slate Comparison")
+    st.markdown(
+        "Discover available historical slates, batch-run the optimizer across "
+        "multiple dates, and compare KPIs side-by-side."
+    )
+
+    slates_df = discover_slates()
+    if slates_df.empty:
+        st.info(
+            "No parquet pool files found in the YakOS root directory.  "
+            "Multi-slate comparison requires `tank_opt_pool_<date>.parquet` files.  "
+            "Set the `YAKOS_ROOT` environment variable to the folder that contains them."
+        )
+    else:
+        st.write(f"**{len(slates_df)} slate(s) discovered:**")
+        st.dataframe(slates_df[["slate_date", "filename", "size_kb"]], use_container_width=True)
+
+        available_dates = slates_df["slate_date"].tolist()
+        ms_dates = st.multiselect(
+            "Select slate dates to compare",
+            available_dates,
+            default=available_dates[:min(3, len(available_dates))],
+            key="ms_dates_sel",
+        )
+
+        ms_col1, ms_col2 = st.columns(2)
+        with ms_col1:
+            ms_num_lu = st.number_input(
+                "Lineups per slate",
+                min_value=1,
+                max_value=150,  # DK bulk-upload cap is 150 lineups per contest
+                value=20,
+                key="ms_num_lu",
+            )
+        with ms_col2:
+            ms_max_exp = st.slider(
+                "Max exposure", min_value=0.1, max_value=1.0, value=0.6, step=0.05, key="ms_max_exp"
+            )
+
+        if st.button("▶ Run Multi-Slate", type="primary", key="ms_run_btn"):
+            if not ms_dates:
+                st.warning("Select at least one slate date.")
+            else:
+                with st.spinner(f"Running optimizer across {len(ms_dates)} slate(s)…"):
+                    ms_result = run_multi_slate(
+                        ms_dates,
+                        base_cfg={"NUM_LINEUPS": ms_num_lu, "MAX_EXPOSURE": ms_max_exp},
+                    )
+                    st.session_state["ms_result"] = ms_result
+
+        if st.session_state.get("ms_result"):
+            ms_res = st.session_state["ms_result"]
+            comparison = compare_slates(ms_res)
+            sdf = comparison.get("summary_df", pd.DataFrame())
+
+            if not sdf.empty:
+                st.markdown("#### Per-Slate Summary")
+                st.dataframe(sdf, use_container_width=True)
+
+            if comparison.get("n_slates", 0) > 0:
+                st.markdown("#### Cross-Slate Trends")
+                trends = comparison.get("trends", {})
+                if trends:
+                    trend_rows = []
+                    for metric, stats in trends.items():
+                        trend_rows.append({"metric": metric, **stats})
+                    st.dataframe(pd.DataFrame(trend_rows), use_container_width=True)
+
+                cons = comparison.get("consistency", {})
+                if cons:
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Slates OK", cons.get("n_slates_ok", 0))
+                    c2.metric("Slates failed", cons.get("n_slates_fail", 0))
+                    c3.metric(
+                        "LU proj CV (%)",
+                        f"{cons.get('lu_proj_cv', 0):.1f}",
+                        help="Coefficient of variation of avg lineup proj across slates — lower = more consistent.",
+                    )
+                    if "avg_proj_error" in cons:
+                        st.metric(
+                            "Avg projection error (vs actuals)",
+                            f"{cons['avg_proj_error']:+.1f} pts",
+                        )
 
     st.markdown("---")
     st.caption("YakOS Calibration Lab — data-driven lineup refinement.")

@@ -1,10 +1,14 @@
 """YakOS Core – configuration constants and helpers."""
+import os
+from pathlib import Path
 from typing import Dict, Any
 
-# ----- Canonical YakOS root (update ONLY here) -----
-YAKOS_ROOT: str = (
-    "/Users/franklynch/Library/CloudStorage/"
-    "GoogleDrive-reacelong5@gmail.com/My Drive/YakOS"
+# ----- Canonical YakOS root -----
+# Prefer the YAKOS_ROOT environment variable; fall back to the repo root so the
+# app works on any machine without manual edits.
+YAKOS_ROOT: str = os.environ.get(
+    "YAKOS_ROOT",
+    str(Path(__file__).resolve().parent.parent),
 )
 
 # ----- DK NBA roster shape -----

@@ -50,6 +50,10 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 22 | Download DK upload CSV button in Optimizer + Sim tabs | `streamlit_app.py` | #12 |
 | 23 | Unit tests: optimizer cancellations (10 tests) | `tests/test_optimizer_cancellations.py` | early |
 | 24 | Unit tests: DK upload format (10 tests) | `tests/test_dk_upload_format.py` | #12 |
+| 25 | **Fix `YAKOS_ROOT` hardcoded path** — env var + relative fallback | `yak_core/config.py` | latest |
+| 26 | **Persistent calibration config** — default `data/calibration_config.json` | `yak_core/calibration.py`, `data/calibration_config.json` | latest |
+| 27 | **Multi-slate UI** — discover, batch-run, compare slates in Calibration Lab | `streamlit_app.py` | latest |
+| 28 | **CI/CD pipeline** — GitHub Actions `pytest` on push/PR | `.github/workflows/ci.yml` | latest |
 
 ---
 
@@ -59,15 +63,15 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 
 | # | Feature | Notes |
 |---|---------|-------|
-| R1 | **Fix `YAKOS_ROOT` hardcoded path** | `yak_core/config.py` line 6 has `/Users/franklynch/Library/…`. Should fall back to a relative or env-var path so the app runs on any machine. |
-| R2 | **Multi-slate UI** | `yak_core/multislate.py` has `discover_slates()`, `run_multi_slate()`, `compare_slates()` but none are surfaced in the Streamlit UI yet. |
-| R3 | **Persistent calibration config** | `save_calibration_config` writes to a local path. Need to decide on a committed default (e.g., `data/calibration_config.json`) so settings survive a fresh clone. |
+| ~~R1~~ | ~~**Fix `YAKOS_ROOT` hardcoded path**~~ | ✅ Done — uses `YAKOS_ROOT` env var, falls back to repo root via `Path(__file__).parent.parent`. |
+| ~~R2~~ | ~~**Multi-slate UI**~~ | ✅ Done — Section F in Calibration Lab surfaces `discover_slates`, `run_multi_slate`, `compare_slates`. |
+| ~~R3~~ | ~~**Persistent calibration config**~~ | ✅ Done — defaults to `data/calibration_config.json`; committed default ships with the repo. |
 
 ### Medium Priority
 
 | # | Feature | Notes |
 |---|---------|-------|
-| R4 | **CI/CD pipeline** | No GitHub Actions workflow. Add a simple `pytest` run on push/PR so tests stay green. |
+| ~~R4~~ | ~~**CI/CD pipeline**~~ | ✅ Done — `.github/workflows/ci.yml` runs `pytest` on every push/PR. |
 | R5 | **Expanded test coverage** | Only optimizer-cancellations and DK-upload-format are tested. Add tests for projections, calibration metrics, ownership model, right-angle edge analysis. |
 | R6 | **Lineup correlation / diversity controls** | Current exposure cap is the only uniqueness mechanism. Could add player-pair fade (same player not allowed in N consecutive lineups) or explicit game-stack enforcement. |
 | R7 | **Showdown Captain mode full optimizer** | Captain slot logic exists in `apply_slate_filters` but `_eligible_slots` in lineups.py treats "CPT" as a regular slot. Verify Captain 1.5× salary / scoring multiplier is applied correctly end-to-end. |
@@ -87,12 +91,15 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 
 ```
 YakOS/
+├── .github/
+│   └── workflows/
+│       └── ci.yml                # GitHub Actions — pytest on push/PR
 ├── streamlit_app.py          # Streamlit UI — imports from yak_core
 ├── yak_core/
-│   ├── config.py             # DEFAULT_CONFIG, merge_config, DK constants
+│   ├── config.py             # DEFAULT_CONFIG, merge_config, DK constants, YAKOS_ROOT (env-var + relative fallback)
 │   ├── lineups.py            # LP optimizer, exposure control, to_dk_upload_format
 │   ├── projections.py        # salary_implied, regression, blend, proj_model
-│   ├── calibration.py        # archetypes, queue, backtest, config knobs
+│   ├── calibration.py        # archetypes, queue, backtest, config knobs, persistent calibration_config.json
 │   ├── right_angle.py        # stack/pace/value edge analysis + lineup tagging
 │   ├── sims.py               # Monte Carlo, live update, promote logic
 │   ├── live.py               # Tank01 API (live pool + injury updates)
@@ -103,6 +110,7 @@ YakOS/
 │   ├── contest_ingest.py     # DK contest results CSV → ownership
 │   └── validation.py         # lineup validity checks
 ├── data/
+│   ├── calibration_config.json  # committed default calibration config
 │   ├── NBADK20260227.csv     # sample RG pool file
 │   ├── historical_lineups.csv
 │   └── yakos_projections_2026-02-27.csv
