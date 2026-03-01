@@ -981,15 +981,19 @@ with tab_lab:
             date_queue = cal_queue[cal_queue["slate_date"] == queue_date_sel]
 
             # KPIs for the queue date
-            kq_cols = st.columns(4)
+            kq_cols = st.columns(6)
             n_players = len(date_queue)
+            avg_proj = date_queue["proj"].mean() if "proj" in date_queue.columns else 0
+            avg_proj_own = date_queue["proj_own"].mean() if "proj_own" in date_queue.columns else 0
             avg_actual = date_queue["actual"].mean() if "actual" in date_queue.columns else 0
             avg_own = date_queue["own"].mean() if "own" in date_queue.columns else 0
             n_reviewed = (date_queue["queue_status"] == "reviewed").sum() if "queue_status" in date_queue.columns else 0
             kq_cols[0].metric("Players in queue", n_players)
-            kq_cols[1].metric("Avg actual score", f"{avg_actual:.1f}")
-            kq_cols[2].metric("Avg ownership", f"{avg_own:.1f}%")
-            kq_cols[3].metric("Reviewed", n_reviewed)
+            kq_cols[1].metric("Avg Projected", f"{avg_proj:.1f}")
+            kq_cols[2].metric("Avg Proj Own %", f"{avg_proj_own:.1f}%")
+            kq_cols[3].metric("Avg actual score", f"{avg_actual:.1f}")
+            kq_cols[4].metric("Avg ownership", f"{avg_own:.1f}%")
+            kq_cols[5].metric("Reviewed", n_reviewed)
 
             # Build display columns: exclude lineup_id and contest_name (noise);
             # focus on pts / own % / mins
@@ -1151,6 +1155,8 @@ with tab_lab:
             agg_cols_hist = {"actual": "mean", "salary": "first", "own": "mean"}
             if "proj" in slate_data.columns:
                 agg_cols_hist["proj"] = "mean"
+            if "proj_own" in slate_data.columns:
+                agg_cols_hist["proj_own"] = "mean"
             player_agg = (
                 slate_data.groupby("name").agg(agg_cols_hist).reset_index()
             )
@@ -1573,6 +1579,7 @@ with tab_lab:
                     sim_pool = simulate_live_updates(pool_for_sim, news_updates)
                     st.session_state["sim_pool_df"] = sim_pool
                     st.session_state["sim_pool_orig_df"] = sim_pool
+                    changed = []
                     st.info(f"Applied {len(news_updates)} update(s) to player pool.")
                     for u in news_updates:
                         orig = pool_for_sim[pool_for_sim["player_name"] == u["player_name"]]
