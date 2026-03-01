@@ -300,6 +300,18 @@ def ensure_session_state():
     if "other_root_causes" not in st.session_state:
         # list of dicts capturing queue rows marked review→Other
         st.session_state["other_root_causes"] = []
+    if "bl_lineups_df" not in st.session_state:
+        st.session_state["bl_lineups_df"] = None
+    if "bl_metrics" not in st.session_state:
+        st.session_state["bl_metrics"] = None
+    if "bl_slate_date" not in st.session_state:
+        st.session_state["bl_slate_date"] = None
+    if "bl_slate_data" not in st.session_state:
+        st.session_state["bl_slate_data"] = None
+    if "bl_contest_type" not in st.session_state:
+        st.session_state["bl_contest_type"] = None
+    if "cmp_dk_df" not in st.session_state:
+        st.session_state["cmp_dk_df"] = None
 
 
 def run_optimizer(
@@ -1390,307 +1402,384 @@ with tab_lab:
             "after each slate to build a hit-rate history."
         )
 
-    # ---- Section B: Ad Hoc Historical Lineup Builder ----
+    # ---- Consolidated: Build Best Lineup + Compare vs Contest ----
     st.markdown("---")
-    st.markdown("### B. Ad Hoc Historical Lineup Builder")
-    st.markdown(
-        "Select a past slate date, apply YakOS projections to the RG pool, "
-        "generate optimizer lineups, and compare against actuals."
-    )
-
-    if not hist_df.empty:
-        available_dates_lab = sorted(hist_df["slate_date"].unique(), reverse=True)
-        selected_date = st.selectbox("Slate date", available_dates_lab, key="lab_date_sel")
-        slate_data = hist_df[hist_df["slate_date"] == selected_date].copy()
-
-        # Historical slate KPIs
-        st.markdown("#### Historical Slate Summary")
-        kpi_lab = st.columns(4)
-        n_lu_hist = slate_data["lineup_id"].nunique()
-        avg_proj_hist = (
-            slate_data.groupby("lineup_id")["proj"].sum().mean()
-            if "proj" in slate_data.columns else 0
+    with st.expander("🏗️ Build Best Lineup for a Slate", expanded=False):
+        st.markdown(
+            "Select a past slate, apply YakOS projections to the RG pool, "
+            "and generate our best optimizer lineup to use as a calibration baseline."
         )
-        avg_actual_hist = (
-            slate_data.groupby("lineup_id")["actual"].sum().mean()
-            if "actual" in slate_data.columns else 0
-        )
-        proj_err_hist = avg_actual_hist - avg_proj_hist if avg_actual_hist else 0
-        kpi_lab[0].metric("Lineups", n_lu_hist)
-        kpi_lab[1].metric("Avg Projected", f"{avg_proj_hist:.1f}")
-        kpi_lab[2].metric("Avg Actual", f"{avg_actual_hist:.1f}")
-        kpi_lab[3].metric("Avg Error", f"{proj_err_hist:+.1f}")
-
-        if "actual" in slate_data.columns:
-            agg_cols_hist = {"actual": "mean", "salary": "first", "own": "mean"}
-            if "proj" in slate_data.columns:
-                agg_cols_hist["proj"] = "mean"
-            if "proj_own" in slate_data.columns:
-                agg_cols_hist["proj_own"] = "mean"
-            player_agg = (
-                slate_data.groupby("name").agg(agg_cols_hist).reset_index()
-            )
-            if "proj" in player_agg.columns:
-                player_agg["error"] = player_agg["actual"] - player_agg["proj"]
-                player_agg["abs_error"] = player_agg["error"].abs()
-                player_agg = player_agg.sort_values("abs_error", ascending=False)
-            with st.expander("Player accuracy (historical entries)", expanded=False):
-                st.dataframe(player_agg, use_container_width=True, height=300)
-
-        # RG pool vs actuals
-        rg_file = RG_POOL_FILES.get(str(selected_date))
-        if rg_file:
-            st.markdown("##### RG Pool vs Actuals")
-            rg_pool = load_rg_pool(rg_file)
-            if (not rg_pool.empty) and ("actual" in slate_data.columns):
-                merged_hist = rg_pool.merge(
-                    slate_data[["name", "actual"]].rename(
-                        columns={"name": "player_name"}
-                    ).drop_duplicates(),
-                    on="player_name",
-                    how="left",
-                )
-                merged_hist["error"] = merged_hist["actual"] - merged_hist["proj"]
-                disp_cols_hist = [
-                    c for c in ["player_name", "pos", "team", "salary", "proj", "actual", "error", "ownership"]
-                    if c in merged_hist.columns
-                ]
-                with st.expander("RG pool vs actuals table", expanded=False):
-                    st.dataframe(
-                        merged_hist[disp_cols_hist].sort_values("error", ascending=False),
-                        use_container_width=True,
-                        height=400,
-                    )
-
-        # Backtest optimizer
-        st.markdown("#### Generate & Compare Backtest Lineups")
-        rg_file_bt = RG_POOL_FILES.get(str(selected_date))
-        if not rg_file_bt:
+        _bl_dates_set = set(RG_POOL_FILES.keys())
+        if not hist_df.empty:
+            _bl_dates_set |= {str(d) for d in hist_df["slate_date"].unique()}
+        _bl_available = sorted(_bl_dates_set, reverse=True)
+        if not _bl_available:
             st.info(
-                f"No RG pool file configured for {selected_date}. "
-                "Add an entry to `RG_POOL_FILES` to enable backtest generation."
+                "No slate data available. Add an entry to `RG_POOL_FILES` or load "
+                "`data/historical_lineups.csv` to enable this feature."
             )
         else:
-            rg_pool_bt = load_rg_pool(rg_file_bt)
-            if rg_pool_bt.empty:
-                st.warning("RG pool file loaded but contains no valid players.")
+            _bl_date = st.selectbox("Slate date", _bl_available, key="bl_date_sel")
+            _bl_slate_data = (
+                hist_df[hist_df["slate_date"] == _bl_date].copy()
+                if not hist_df.empty else pd.DataFrame()
+            )
+
+            if not _bl_slate_data.empty:
+                st.markdown("#### Historical Slate Summary")
+                _bl_kpis = st.columns(4)
+                _bl_n_lu = _bl_slate_data["lineup_id"].nunique()
+                _bl_avg_proj = (
+                    _bl_slate_data.groupby("lineup_id")["proj"].sum().mean()
+                    if "proj" in _bl_slate_data.columns else 0
+                )
+                _bl_avg_actual = (
+                    _bl_slate_data.groupby("lineup_id")["actual"].sum().mean()
+                    if "actual" in _bl_slate_data.columns else 0
+                )
+                _bl_err = _bl_avg_actual - _bl_avg_proj if _bl_avg_actual else 0
+                _bl_kpis[0].metric("Lineups", _bl_n_lu)
+                _bl_kpis[1].metric("Avg Projected", f"{_bl_avg_proj:.1f}")
+                _bl_kpis[2].metric("Avg Actual", f"{_bl_avg_actual:.1f}")
+                _bl_kpis[3].metric("Avg Error", f"{_bl_err:+.1f}")
+
+                if "actual" in _bl_slate_data.columns:
+                    _bl_agg = {"actual": "mean", "salary": "first", "own": "mean"}
+                    if "proj" in _bl_slate_data.columns:
+                        _bl_agg["proj"] = "mean"
+                    _bl_player_agg = _bl_slate_data.groupby("name").agg(_bl_agg).reset_index()
+                    if "proj" in _bl_player_agg.columns:
+                        _bl_player_agg["error"] = _bl_player_agg["actual"] - _bl_player_agg["proj"]
+                        _bl_player_agg["abs_error"] = _bl_player_agg["error"].abs()
+                        _bl_player_agg = _bl_player_agg.sort_values("abs_error", ascending=False)
+                    with st.expander("Player accuracy (historical entries)", expanded=False):
+                        st.dataframe(_bl_player_agg, use_container_width=True, height=300)
+
+            _bl_rg_file = RG_POOL_FILES.get(str(_bl_date))
+            if not _bl_rg_file:
+                st.info(
+                    f"No RG pool file configured for {_bl_date}. "
+                    "Add an entry to `RG_POOL_FILES` to enable lineup generation."
+                )
             else:
-                bt_col_l, bt_col_r = st.columns(2)
-                with bt_col_l:
-                    bt_num_lu = st.slider("Backtest lineups", 1, 150, 20, key="bt_num_lu")
-                    bt_min_sal = st.number_input("Min salary", 0, 50000, 46500, step=500, key="bt_min_sal")
-                with bt_col_r:
-                    bt_max_exp = st.slider("Max exposure", 0.05, 1.0, 0.35, step=0.05, key="bt_max_exp")
-                    bt_dk_contest = st.selectbox(
-                        "DraftKings Contest Type",
-                        DK_CONTEST_TYPES,
-                        key="bt_contest_sel",
-                    )
-                    bt_archetype = st.selectbox(
-                        "DFS Archetype",
-                        list(DFS_ARCHETYPES.keys()),
-                        key="bt_archetype_sel",
-                    )
-
-                if st.button("▶ Run Backtest", type="primary", key="lab_backtest_btn"):
-                    with st.spinner("Running backtest optimizer..."):
-                        cal_config = load_calibration_config()
-                        bt_internal_contest = DK_CONTEST_TYPE_MAP.get(bt_dk_contest, "GPP")
-                        try:
-                            # Apply archetype before backtest
-                            bt_pool_arched = apply_archetype(rg_pool_bt, bt_archetype)
-                            bt_lu_df, _ = run_backtest_lineups(
-                                pool=bt_pool_arched,
-                                num_lineups=bt_num_lu,
-                                max_exposure=bt_max_exp,
-                                min_salary_used=bt_min_sal,
-                                contest_type=bt_internal_contest,
-                                config=cal_config,
-                            )
-                            if "actual" in slate_data.columns:
-                                actuals_lkp = (
-                                    slate_data[["name", "actual"]]
-                                    .rename(columns={"name": "player_name"})
-                                    .drop_duplicates("player_name")
-                                )
-                                metrics = compute_calibration_metrics(bt_lu_df, actuals_lkp)
-                            else:
-                                metrics = None
-                                st.warning(
-                                    "No 'actual' column in historical data — "
-                                    "lineups generated but comparison unavailable."
-                                )
-                            st.session_state["lab_lineups_df"] = bt_lu_df
-                            st.session_state["lab_metrics"] = metrics
-                            st.session_state["lab_contest_type"] = bt_dk_contest
-                            st.success(
-                                f"Generated {bt_lu_df['lineup_index'].nunique()} backtest lineups."
-                            )
-                        except Exception as e:
-                            st.error(f"Backtest error: {e}")
-
-                if st.session_state.get("lab_lineups_df") is not None:
-                    bt_lu_df = st.session_state["lab_lineups_df"]
-                    metrics = st.session_state["lab_metrics"]
-                    used_dk_contest = st.session_state["lab_contest_type"]
-
-                    st.markdown("#### Backtest Results")
-
-                    with st.expander("📋 Lineup Tickets", expanded=True):
-                        _lineup_ids = sorted(bt_lu_df["lineup_index"].unique())
-                        _sel_lu = st.selectbox(
-                            "Select lineup",
-                            _lineup_ids,
-                            format_func=lambda x: f"Lineup #{x + 1}",
-                            key="bt_ticket_lineup_sel",
+                _bl_rg_pool = load_rg_pool(_bl_rg_file)
+                if _bl_rg_pool.empty:
+                    st.warning("RG pool file loaded but contains no valid players.")
+                else:
+                    _bl_col_l, _bl_col_r = st.columns(2)
+                    with _bl_col_l:
+                        _bl_num_lu = st.slider("Lineups to generate", 1, 150, 10, key="bl_num_lu")
+                        _bl_min_sal = st.number_input(
+                            "Min salary", 0, 50000, 46500, step=500, key="bl_min_sal"
                         )
-                        _lu_rows = bt_lu_df[bt_lu_df["lineup_index"] == _sel_lu].copy()
+                    with _bl_col_r:
+                        _bl_max_exp = st.slider(
+                            "Max exposure", 0.05, 1.0, 0.35, step=0.05, key="bl_max_exp"
+                        )
+                        _bl_dk_contest = st.selectbox(
+                            "DraftKings Contest Type",
+                            DK_CONTEST_TYPES,
+                            key="bl_contest_sel",
+                        )
+                        _bl_archetype = st.selectbox(
+                            "DFS Archetype",
+                            list(DFS_ARCHETYPES.keys()),
+                            key="bl_archetype_sel",
+                        )
 
-                        # Merge actual FP and actual ownership from slate_data
-                        if not slate_data.empty:
-                            _actuals = (
-                                slate_data[
-                                    [c for c in ["name", "actual", "own"] if c in slate_data.columns]
+                    if st.button("▶ Build Best Lineup", type="primary", key="bl_run_btn"):
+                        with st.spinner("Generating lineup..."):
+                            _bl_cal_config = load_calibration_config()
+                            _bl_internal_contest = DK_CONTEST_TYPE_MAP.get(_bl_dk_contest, "GPP")
+                            try:
+                                _bl_pool_arched = apply_archetype(_bl_rg_pool, _bl_archetype)
+                                _bl_lu_df, _ = run_backtest_lineups(
+                                    pool=_bl_pool_arched,
+                                    num_lineups=_bl_num_lu,
+                                    max_exposure=_bl_max_exp,
+                                    min_salary_used=_bl_min_sal,
+                                    contest_type=_bl_internal_contest,
+                                    config=_bl_cal_config,
+                                )
+                                if (
+                                    not _bl_slate_data.empty
+                                    and "actual" in _bl_slate_data.columns
+                                ):
+                                    _bl_actuals_lkp = (
+                                        _bl_slate_data[["name", "actual"]]
+                                        .rename(columns={"name": "player_name"})
+                                        .drop_duplicates("player_name")
+                                    )
+                                    _bl_metrics = compute_calibration_metrics(
+                                        _bl_lu_df, _bl_actuals_lkp
+                                    )
+                                else:
+                                    _bl_metrics = None
+                                st.session_state["bl_lineups_df"] = _bl_lu_df
+                                st.session_state["bl_metrics"] = _bl_metrics
+                                st.session_state["bl_slate_date"] = _bl_date
+                                st.session_state["bl_slate_data"] = _bl_slate_data
+                                st.session_state["bl_contest_type"] = _bl_dk_contest
+                                st.success(
+                                    f"Generated {_bl_lu_df['lineup_index'].nunique()} "
+                                    f"lineup(s) for {_bl_date}."
+                                )
+                            except Exception as e:
+                                st.error(f"Optimizer error: {e}")
+
+                    if st.session_state.get("bl_lineups_df") is not None:
+                        _bl_lu_df = st.session_state["bl_lineups_df"]
+                        _bl_metrics = st.session_state["bl_metrics"]
+                        _bl_used_date = st.session_state.get("bl_slate_date", _bl_date)
+                        _bl_used_contest = st.session_state.get(
+                            "bl_contest_type", _bl_dk_contest
+                        )
+
+                        st.markdown("#### Best Lineup")
+                        _bl_lu_scores = _bl_lu_df.groupby("lineup_index")["proj"].sum()
+                        _bl_lu_scores = _bl_lu_scores.dropna()
+                        if _bl_lu_scores.empty:
+                            st.warning("No lineups generated.")
+                        else:
+                            _bl_top_idx = int(_bl_lu_scores.idxmax())
+                            _bl_top_rows = _bl_lu_df[
+                                _bl_lu_df["lineup_index"] == _bl_top_idx
+                            ].copy()
+
+                            # Merge actuals from saved slate data
+                            _bl_sd = st.session_state.get("bl_slate_data", pd.DataFrame())
+                            if not _bl_sd.empty:
+                                _bl_act = (
+                                    _bl_sd[
+                                        [c for c in ["name", "actual", "own"] if c in _bl_sd.columns]
+                                    ]
+                                    .drop_duplicates("name")
+                                    .rename(
+                                        columns={
+                                            "name": "player_name",
+                                            "actual": "actual_fp",
+                                            "own": "actual_own",
+                                        }
+                                    )
+                                )
+                                _bl_top_rows = _bl_top_rows.merge(
+                                    _bl_act, on="player_name", how="left"
+                                )
+
+                            _bl_ticket_cols = [
+                                c for c in [
+                                    "slot", "player_name", "pos", "salary", "proj",
+                                    "proj_own", "actual_own", "actual_fp",
                                 ]
-                                .drop_duplicates("name")
-                                .rename(columns={"name": "player_name", "actual": "actual_fp", "own": "actual_own"})
+                                if c in _bl_top_rows.columns
+                            ]
+                            _bl_col_labels = {
+                                "slot": "Slot", "player_name": "Player",
+                                "pos": "Position", "salary": "Salary",
+                                "proj": "Proj FP", "proj_own": "Proj Own%",
+                                "actual_own": "Actual Own%", "actual_fp": "Actual FP",
+                            }
+                            st.dataframe(
+                                _bl_top_rows[_bl_ticket_cols]
+                                .rename(columns=_bl_col_labels)
+                                .reset_index(drop=True),
+                                use_container_width=True,
                             )
-                            _lu_rows = _lu_rows.merge(_actuals, on="player_name", how="left")
+                            _bl_tot_cols = st.columns(3)
+                            _bl_tot_cols[0].metric(
+                                "Total Salary", f"${_bl_top_rows['salary'].sum():,.0f}"
+                            )
+                            _bl_tot_cols[1].metric(
+                                "Total Proj FP", f"{_bl_top_rows['proj'].sum():.1f}"
+                            )
+                            if "actual_fp" in _bl_top_rows.columns:
+                                _bl_tot_cols[2].metric(
+                                    "Total Actual FP",
+                                    f"{_bl_top_rows['actual_fp'].fillna(0).sum():.1f}",
+                                )
 
-                        # Build ordered ticket columns
-                        _ticket_cols = [c for c in ["slot", "player_name", "pos", "salary", "proj"] if c in _lu_rows.columns]
-                        if "proj_own" in _lu_rows.columns:
-                            _ticket_cols.append("proj_own")
-                        if "actual_own" in _lu_rows.columns:
-                            _ticket_cols.append("actual_own")
-                        if "minutes" in _lu_rows.columns:
-                            _ticket_cols.append("minutes")
-                        if "actual_fp" in _lu_rows.columns:
-                            _ticket_cols.append("actual_fp")
+                            if _bl_metrics is not None:
+                                _bl_ll = _bl_metrics["lineup_level"]
+                                _bl_kpi_bt = st.columns(4)
+                                _bl_kpi_bt[0].metric("Lineups", len(_bl_ll["df"]))
+                                _bl_kpi_bt[1].metric(
+                                    "Avg Projected", f"{_bl_ll['avg_proj']:.1f}"
+                                )
+                                _bl_kpi_bt[2].metric(
+                                    "Avg Actual", f"{_bl_ll['avg_actual']:.1f}"
+                                )
+                                _bl_kpi_bt[3].metric(
+                                    "Avg Error", f"{_bl_ll['avg_error']:+.1f}"
+                                )
 
-                        _col_labels = {
-                            "slot": "Slot",
-                            "player_name": "Player",
-                            "pos": "Position",
-                            "salary": "Salary",
-                            "proj": "Proj FP",
-                            "proj_own": "Proj Own%",
-                            "actual_own": "Actual Own%",
-                            "minutes": "Proj Mins",
-                            "actual_fp": "Actual FP",
-                        }
-                        _ticket_df = (
-                            _lu_rows[_ticket_cols]
-                            .rename(columns=_col_labels)
-                            .reset_index(drop=True)
-                        )
-                        st.dataframe(_ticket_df, use_container_width=True)
+                                _bl_internal_used = DK_CONTEST_TYPE_MAP.get(
+                                    _bl_used_contest, "GPP"
+                                )
+                                _bl_insights = identify_calibration_gaps(
+                                    _bl_metrics, _bl_internal_used
+                                )
+                                if _bl_insights["findings"]:
+                                    st.markdown("##### Calibration Insights")
+                                    for _bl_finding in _bl_insights["findings"]:
+                                        st.markdown(f"- {_bl_finding}")
 
-                        _tot_cols = st.columns(3)
-                        _tot_cols[0].metric("Total Salary", f"${_lu_rows['salary'].sum():,.0f}")
-                        _tot_cols[1].metric("Total Proj FP", f"{_lu_rows['proj'].sum():.1f}")
-                        if "actual_fp" in _lu_rows.columns:
-                            _missing = _lu_rows["actual_fp"].isna().sum()
-                            _actual_total = _lu_rows["actual_fp"].fillna(0).sum()
-                            _label = "Total Actual FP" if _missing == 0 else f"Total Actual FP ({_missing} missing→0)"
-                            _tot_cols[2].metric(_label, f"{_actual_total:.1f}")
+                            st.download_button(
+                                "Download all lineups CSV",
+                                data=to_csv_bytes(_bl_lu_df),
+                                file_name=f"yakos_best_lineups_{_bl_used_date}.csv",
+                                mime="text/csv",
+                                key="bl_download",
+                            )
 
-                    if metrics is not None:
-                        ll = metrics["lineup_level"]
-                        kpi_bt = st.columns(4)
-                        kpi_bt[0].metric("Lineups", len(ll["df"]))
-                        kpi_bt[1].metric("Avg Projected", f"{ll['avg_proj']:.1f}")
-                        kpi_bt[2].metric("Avg Actual", f"{ll['avg_actual']:.1f}")
-                        kpi_bt[3].metric("Avg Error", f"{ll['avg_error']:+.1f}")
+    with st.expander("📊 Compare vs. Contest Lineup", expanded=False):
+        st.markdown(
+            "Upload a DraftKings contest CSV to import real ownership, then select a "
+            "top lineup from that slate and compare it side-by-side with the YakOS "
+            "best lineup above as a calibration tool."
+        )
+        _cmp_upload = st.file_uploader(
+            "Upload DraftKings contest CSV",
+            type=["csv"],
+            key="cmp_dk_contest_csv",
+            help=(
+                "Export from DraftKings: My Contests → contest page → Export CSV. "
+                "Accepted formats: contest results with a 'Lineup' column, or "
+                "a simple Name / Ownership % file."
+            ),
+        )
+        if _cmp_upload is not None:
+            try:
+                _cmp_dk_df = parse_dk_contest_csv(_cmp_upload)
+                st.session_state["cmp_dk_df"] = _cmp_dk_df
+                st.success(f"Parsed {len(_cmp_dk_df)} players from DK contest CSV.")
+            except Exception as e:
+                st.error(f"Failed to parse DK contest CSV: {e}")
 
-                        col_m1, col_m2, col_m3 = st.columns(3)
-                        col_m1.metric("MAE", f"{ll['mae']:.2f}")
-                        col_m2.metric("RMSE", f"{ll['rmse']:.2f}")
-                        col_m3.metric("R²", f"{ll['r_squared']:.3f}")
+        _cmp_dk_df = st.session_state.get("cmp_dk_df")
+        if _cmp_dk_df is not None and not _cmp_dk_df.empty:
+            with st.expander("Contest player pool", expanded=False):
+                _cmp_disp_cols = [
+                    c for c in ["player_name", "pos", "team", "salary", "actual_fp", "ownership"]
+                    if c in _cmp_dk_df.columns
+                ]
+                _cmp_sorted = (
+                    _cmp_dk_df[_cmp_disp_cols].sort_values("actual_fp", ascending=False)
+                    if "actual_fp" in _cmp_dk_df.columns
+                    else _cmp_dk_df[_cmp_disp_cols]
+                )
+                st.dataframe(_cmp_sorted, use_container_width=True, height=250)
 
-                        st.caption(
-                            "⚠️ Actuals only cover players in historical contest entries. "
-                            "Players not in those lineups are scored as 0."
-                        )
+            # User selects players to form their "contest lineup"
+            st.markdown("**Select your top contest lineup (up to 8 players):**")
+            _cmp_names = (
+                sorted(_cmp_dk_df["player_name"].dropna().unique().tolist())
+                if "player_name" in _cmp_dk_df.columns
+                else []
+            )
+            _cmp_selected = st.multiselect(
+                "Pick players for your contest lineup",
+                _cmp_names,
+                max_selections=8,
+                key="cmp_player_sel",
+            )
 
-                        with st.expander("Lineup-by-Lineup Results", expanded=True):
-                            st.dataframe(ll["df"], use_container_width=True, height=300)
+            # Side-by-side comparison with YakOS best lineup
+            _cmp_bl_lu = st.session_state.get("bl_lineups_df")
+            if _cmp_bl_lu is not None and _cmp_selected:
+                st.markdown("#### Side-by-Side Comparison")
+                _cmp_lu_scores = _cmp_bl_lu.groupby("lineup_index")["proj"].sum().dropna()
+                if _cmp_lu_scores.empty:
+                    st.warning("YakOS lineup data is empty — rebuild using the expander above.")
+                else:
+                    _cmp_top_idx = int(_cmp_lu_scores.idxmax())
+                    _cmp_yakos_lu = _cmp_bl_lu[
+                        _cmp_bl_lu["lineup_index"] == _cmp_top_idx
+                    ][["player_name", "pos", "salary", "proj"]].copy()
 
-                        internal_used = DK_CONTEST_TYPE_MAP.get(used_dk_contest, "GPP")
-                        insights = identify_calibration_gaps(metrics, internal_used)
-                        if insights["findings"]:
-                            st.markdown("##### Calibration Insights")
-                            for finding in insights["findings"]:
-                                st.markdown(f"- {finding}")
-
-                        with st.expander("Player Accuracy", expanded=False):
-                            st.dataframe(metrics["player_level"]["df"], use_container_width=True, height=400)
-
-                        if "position_level" in metrics:
-                            with st.expander("By Position", expanded=False):
-                                st.dataframe(metrics["position_level"]["df"], use_container_width=True)
-
-                        with st.expander("By Salary Bracket", expanded=False):
-                            st.dataframe(metrics["salary_bracket"]["df"], use_container_width=True)
-
-                    st.download_button(
-                        "Download backtest lineups CSV",
-                        data=to_csv_bytes(bt_lu_df),
-                        file_name=f"yakos_backtest_{selected_date}.csv",
-                        mime="text/csv",
-                        key="bt_download",
+                    _cmp_contest_lu = (
+                        _cmp_dk_df[_cmp_dk_df["player_name"].isin(_cmp_selected)][
+                            [c for c in ["player_name", "pos", "salary", "actual_fp", "ownership"]
+                             if c in _cmp_dk_df.columns]
+                        ].copy()
+                        if "player_name" in _cmp_dk_df.columns
+                        else pd.DataFrame()
                     )
 
-    # ---- Section C: DK Contest CSV Ingest ----
-    st.markdown("---")
-    st.markdown("### C. 📥 DK Contest CSV — Real Ownership Ingest")
-    st.markdown(
-        "Upload a DraftKings contest results CSV to import **real ownership data** "
-        "into the live pool. The actual percentages are more accurate than model estimates "
-        "and sharpen GPP leverage signals."
-    )
+                    _cmp_col1, _cmp_col2 = st.columns(2)
+                    with _cmp_col1:
+                        st.markdown("**🤖 YakOS Best Lineup**")
+                        _cmp_yk_cols = [
+                            c for c in ["player_name", "pos", "salary", "proj"]
+                            if c in _cmp_yakos_lu.columns
+                        ]
+                        st.dataframe(
+                            _cmp_yakos_lu[_cmp_yk_cols].reset_index(drop=True),
+                            use_container_width=True,
+                        )
+                        st.metric("Total Proj FP", f"{_cmp_yakos_lu['proj'].sum():.1f}")
+                        st.metric("Total Salary", f"${_cmp_yakos_lu['salary'].sum():,.0f}")
+                    with _cmp_col2:
+                        st.markdown("**🎯 My Contest Pick**")
+                        _cmp_ct_disp = [
+                            c for c in ["player_name", "pos", "salary", "actual_fp", "ownership"]
+                            if c in _cmp_contest_lu.columns
+                        ]
+                        st.dataframe(
+                            _cmp_contest_lu[_cmp_ct_disp].reset_index(drop=True),
+                            use_container_width=True,
+                        )
+                        if "actual_fp" in _cmp_contest_lu.columns:
+                            st.metric(
+                                "Total Actual FP",
+                                f"{_cmp_contest_lu['actual_fp'].fillna(0).sum():.1f}",
+                            )
+                        if "salary" in _cmp_contest_lu.columns:
+                            st.metric(
+                                "Total Salary",
+                                f"${_cmp_contest_lu['salary'].fillna(0).sum():,.0f}",
+                            )
+            elif _cmp_selected and _cmp_bl_lu is None:
+                st.info(
+                    "Build a YakOS lineup first using "
+                    "**🏗️ Build Best Lineup for a Slate** above."
+                )
+            elif not _cmp_selected:
+                st.info(
+                    "Select up to 8 players above to build your contest lineup for comparison."
+                )
 
-    dk_csv_upload = st.file_uploader(
-        "Upload DraftKings contest CSV",
-        type=["csv"],
-        key="lab_dk_contest_csv",
-        help=(
-            "Export from DraftKings: My Contests → contest page → Export CSV. "
-            "Accepted formats: contest results with a 'Lineup' column, or "
-            "a simple Name / Ownership % file."
-        ),
-    )
-
-    if dk_csv_upload is not None:
-        try:
-            dk_contest_df = parse_dk_contest_csv(dk_csv_upload)
-            st.success(f"Parsed {len(dk_contest_df)} players from DK contest CSV.")
-
-            with st.expander("Parsed contest ownership", expanded=True):
-                disp_dk = [c for c in ["player_name", "pos", "team", "salary", "actual_fp", "ownership"] if c in dk_contest_df.columns]
-                st.dataframe(dk_contest_df[disp_dk] if disp_dk else dk_contest_df, use_container_width=True, height=300)
-
-            # Merge ownership into live pool if available
-            live_pool = st.session_state.get("pool_df")
-            if live_pool is not None and not live_pool.empty and "ownership" in dk_contest_df.columns:
-                if st.button("Merge real ownership → Live Pool", key="lab_merge_own_btn"):
-                    merged_pool = live_pool.copy()
-                    own_lkp = dict(zip(dk_contest_df["player_name"], dk_contest_df["ownership"]))
-                    merged_pool["ownership"] = merged_pool["player_name"].map(own_lkp).fillna(merged_pool.get("ownership", 0))
-                    st.session_state["pool_df"] = merged_pool
-                    matched = merged_pool["player_name"].isin(own_lkp).sum()
+            # Merge real ownership into live pool
+            _cmp_live_pool = st.session_state.get("pool_df")
+            if (
+                _cmp_live_pool is not None
+                and not _cmp_live_pool.empty
+                and "ownership" in _cmp_dk_df.columns
+            ):
+                if st.button("Merge real ownership → Live Pool", key="cmp_merge_own_btn"):
+                    _cmp_merged_pool = _cmp_live_pool.copy()
+                    _own_lkp = dict(
+                        zip(_cmp_dk_df["player_name"], _cmp_dk_df["ownership"])
+                    )
+                    _cmp_merged_pool["ownership"] = (
+                        _cmp_merged_pool["player_name"]
+                        .map(_own_lkp)
+                        .fillna(_cmp_merged_pool.get("ownership", 0))
+                    )
+                    st.session_state["pool_df"] = _cmp_merged_pool
+                    _cmp_matched = _cmp_merged_pool["player_name"].isin(_own_lkp).sum()
                     st.success(
-                        f"Merged real ownership for {matched}/{len(merged_pool)} players. "
-                        "Pool updated — head to the Optimizer to rebuild lineups."
+                        f"Merged real ownership for {_cmp_matched}/{len(_cmp_merged_pool)} "
+                        "players. Pool updated — head to the Optimizer to rebuild lineups."
                     )
-            elif live_pool is None:
-                st.info("Load a player pool using the **📂 Load Player Pool** section above to merge ownership.")
-        except Exception as e:
-            st.error(f"Failed to parse DK contest CSV: {e}")
+            elif _cmp_live_pool is None:
+                st.info(
+                    "Load a player pool using the **📂 Load Player Pool** section "
+                    "above to merge ownership."
+                )
 
-    # ---- Section D: Archetype Config Knobs ----
+    # ---- Section B: Archetype Config Knobs ----
     st.markdown("---")
-    st.markdown("### D. 🎛️ Archetype Config Knobs")
+    st.markdown("### B. 🎛️ Archetype Config Knobs")
 
     with st.expander("Tune DFS Archetype Configurations", expanded=False):
         st.markdown(
@@ -1745,9 +1834,9 @@ with tab_lab:
             })
             st.success(f"Archetype '{arch_sel_knobs}' updated for this session.")
 
-    # ---- Section E: Sim Module ----
+    # ---- Section C: Sim Module ----
     st.markdown("---")
-    st.markdown("### E. 🎲 Sim Module — Live Player Pool")
+    st.markdown("### C. 🎲 Sim Module — Live Player Pool")
     st.markdown(
         "Run Monte Carlo sims on the live player pool. "
         "Apply news / injury updates, then promote high-confidence lineups to Ricky's Slate Room."
@@ -2015,8 +2104,8 @@ with tab_lab:
                 )
 
     st.markdown("---")
-    # ---- Section F: Multi-Slate ----
-    st.markdown("### F. Multi-Slate Comparison")
+    # ---- Section D: Multi-Slate ----
+    st.markdown("### D. Multi-Slate Comparison")
     st.markdown(
         "Discover available historical slates, batch-run the optimizer across "
         "multiple dates, and compare KPIs side-by-side."
