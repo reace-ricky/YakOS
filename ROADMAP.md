@@ -9,11 +9,10 @@
 
 Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS / Right Angle Ricky* with:
 
-1. A polished **Streamlit web UI** with four tabs:
-   - 🏀 **Ricky's Slate Room** — pool loader, KPI dashboard, edge analysis, promoted lineups
+1. A polished **Streamlit web UI** with three tabs:
+   - 🏀 **Ricky's Slate Room** — pool loader, KPI dashboard, edge analysis, player projections table (with proj_source), promoted lineups
    - ⚡ **Optimizer** — build lineups for any DK contest type with full override controls
-   - 🔬 **Calibration Lab** — backtest, queue, ownership ingest, archetype knobs, sim module
-   - 📡 **Ricky's Calibration Lab** — BacktestIQ-style backtesting: contest archetype ROI/cash-rate/percentile KPIs
+   - 📡 **Calibration Lab** — backtest, queue (accuracy dashboard), ownership ingest, archetype knobs, sim module, BacktestIQ-style backtesting
 
 2. A clean **`yak_core` Python library** that can be used headlessly (no Streamlit required)
 
@@ -81,7 +80,8 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 55 | **YakOS Projection Engine functions** — `yakos_fp_projection`, `yakos_minutes_projection`, `yakos_ownership_projection`, `yakos_ensemble` added to `projections.py`; auto-load trained pickles from `models/` if present, formula fallback otherwise; 27 new tests | `yak_core/projections.py`, `tests/test_projections.py` | latest |
 | 56 | **Fix `fetch_actuals_from_api` actuals bug** — function no longer returns Tank01 projections as actuals; always uses box scores (`getNBAGamesForDate` + `getNBABoxScore`); tests updated | `yak_core/live.py`, `tests/test_live_actuals.py` | latest |
 | 57 | **`fetch_live_opt_pool` projection provenance** — adds `tank01_proj` (original Tank01 proj) and `proj_source = 'tank01'` columns | `yak_core/live.py` | latest |
-| 58 | **Colab Build Plan notebooks** (NB1–NB7) — data collection, feature engineering, FP model (Ridge + LightGBM + ensemble), minutes model, ownership model, backtesting/calibration loop, integration demo | `notebooks/` | latest |
+| 59 | **Wire YakOS projection engine into app** — `yakos_fp_projection`, `yakos_minutes_projection`, `yakos_ownership_projection`, `yakos_ensemble` imported and called via new `_apply_yakos_projections()` helper; replaces `_apply_proj_fallback` at both API fetch call sites (Slate Room + Calibration Lab); adds `proj_source` column; Tank01 proj blended via `yakos_ensemble` (40% YakOS + 30% Tank01 + 30% RG when available); Player Projections table added in Slate Room showing all players sorted by proj with floor/ceil/proj_minutes/proj_own/proj_source columns | `streamlit_app.py` | latest |
+| 60 | **Calibration Lab UI redesign** — merged 🔬 Calibration Lab + 📡 Ricky's Calibration Lab into one "📡 Calibration Lab" tab (3 tabs total); removed pass/review radio buttons + checkbox column from Calibration Queue (replaced with read-only accuracy dashboard table + flagged-player warning); generalized "Upload RotoGrinders NBA CSV" label to "Upload Player Pool CSV" | `streamlit_app.py` | latest |
 
 ---
 
