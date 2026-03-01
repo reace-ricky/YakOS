@@ -12,7 +12,7 @@ import streamlit as st
 if "yak_core" not in sys.modules:
     pass
 
-from yak_core.lineups import build_multiple_lineups_with_exposure, to_dk_upload_format  # type: ignore
+from yak_core.lineups import build_multiple_lineups_with_exposure, to_dk_upload_format, build_showdown_lineups, to_dk_showdown_upload_format  # type: ignore
 from yak_core.calibration import (  # type: ignore
     run_backtest_lineups,
     compute_calibration_metrics,
@@ -249,6 +249,8 @@ def run_optimizer(
     lock_names: list | None = None,
     exclude_names: list | None = None,
     bump_map: dict | None = None,
+    slate_type: str = "Classic",
+    max_pair_appearances: int = 0,
 ) -> Tuple[pd.DataFrame | None, pd.DataFrame | None]:
     # Remap the chosen projection style to 'proj' so the optimizer always reads 'proj'.
     # We work on a copy to leave the caller's DataFrame unchanged.
@@ -266,7 +268,7 @@ def run_optimizer(
     cfg: Dict[str, Any] = {
         "SITE": "dk",
         "SPORT": "nba",
-        "SLATE_TYPE": "classic",
+        "SLATE_TYPE": slate_type.lower().replace(" ", "_"),
         "NUM_LINEUPS": num_lineups,
         "MIN_SALARY_USED": min_salary_used,
         "MAX_EXPOSURE": max_exposure,
@@ -275,6 +277,7 @@ def run_optimizer(
         "LOCK": lock_names or [],
         "EXCLUDE": exclude_names or [],
         "BUMP": bump_map or {},
+        "MAX_PAIR_APPEARANCES": max_pair_appearances,
     }
 
     progress_bar = st.progress(0, text="Optimizing lineups…")
@@ -284,9 +287,14 @@ def run_optimizer(
         progress_bar.progress(pct, text=f"Solving lineup {done} of {total}…")
 
     try:
-        lineups_df, exposures_df = build_multiple_lineups_with_exposure(
-            opt_pool, cfg, progress_callback=_update_progress
-        )
+        if slate_type == "Showdown Captain":
+            lineups_df, exposures_df = build_showdown_lineups(
+                opt_pool, cfg, progress_callback=_update_progress
+            )
+        else:
+            lineups_df, exposures_df = build_multiple_lineups_with_exposure(
+                opt_pool, cfg, progress_callback=_update_progress
+            )
     except Exception as e:
         progress_bar.empty()
         st.error(f"Optimizer error: {e}")
@@ -703,13 +711,27 @@ with tab_optimizer:
 
             # --- Optimizer controls ---
             st.markdown("### 2. Build Controls")
-            ctrl_c1, ctrl_c2, ctrl_c3 = st.columns(3)
+            ctrl_c1, ctrl_c2, ctrl_c3, ctrl_c4 = st.columns(4)
             with ctrl_c1:
                 num_lu_opt = st.slider("Lineups", 1, 300, num_lineups_user, key="opt_num_lu")
             with ctrl_c2:
                 max_exp_opt = st.slider("Max exposure", 0.05, 1.0, max_exposure_user, step=0.05, key="opt_exp")
             with ctrl_c3:
                 min_sal_opt = st.number_input("Min salary used", 0, 50000, min_salary_used_user, step=500, key="opt_sal")
+            with ctrl_c4:
+                max_pair_opt = st.number_input(
+                    "Max pair appearances",
+                    min_value=0,
+                    max_value=num_lu_opt,
+                    value=0,
+                    step=1,
+                    key="opt_max_pair",
+                    help=(
+                        "Lineup diversity control: maximum number of lineups "
+                        "in which any two players can appear together. "
+                        "0 = disabled (default)."
+                    ),
+                )
 
             # Auto-set projection style when contest type changes
             if dk_contest_sel != st.session_state.get("prev_dk_contest_type"):
@@ -797,6 +819,8 @@ with tab_optimizer:
                         lock_names=_lock_names or None,
                         exclude_names=_exclude_names or None,
                         bump_map=_bump_map or None,
+                        slate_type=slate_type_opt,
+                        max_pair_appearances=int(max_pair_opt),
                     )
                     st.session_state["lineups_df"] = lu_df
                     st.session_state["exposures_df"] = exp_df
@@ -845,18 +869,27 @@ with tab_optimizer:
                             key="opt_dl_exp",
                         )
                 with dl3:
-                    dk_upload_df = to_dk_upload_format(lineups_df)
+                    if slate_type_opt == "Showdown Captain":
+                        dk_upload_df = to_dk_showdown_upload_format(lineups_df)
+                        dk_help = (
+                            "DraftKings Showdown bulk entry format: one row per lineup "
+                            "with CPT + 5 FLEX columns. "
+                            "Fill in Entry ID and Contest info before uploading."
+                        )
+                    else:
+                        dk_upload_df = to_dk_upload_format(lineups_df)
+                        dk_help = (
+                            "DraftKings bulk entry format: one row per lineup with "
+                            "slot columns PG/SG/SF/PF/C/G/F/UTIL. "
+                            "Fill in Entry ID and Contest info before uploading."
+                        )
                     st.download_button(
                         "📥 Download DK upload CSV",
                         data=to_csv_bytes(dk_upload_df),
                         file_name="yakos_dk_upload.csv",
                         mime="text/csv",
                         key="opt_dl_dk",
-                        help=(
-                            "DraftKings bulk entry format: one row per lineup with "
-                            "slot columns PG/SG/SF/PF/C/G/F/UTIL. "
-                            "Fill in Entry ID and Contest info before uploading."
-                        ),
+                        help=dk_help,
                     )
 
 

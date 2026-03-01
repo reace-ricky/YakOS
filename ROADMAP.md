@@ -54,7 +54,11 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 26 | **Persistent calibration config** — default `data/calibration_config.json` | `yak_core/calibration.py`, `data/calibration_config.json` | latest |
 | 27 | **Multi-slate UI** — discover, batch-run, compare slates in Calibration Lab | `streamlit_app.py` | latest |
 | 28 | **CI/CD pipeline** — GitHub Actions `pytest` on push/PR | `.github/workflows/ci.yml` | latest |
-| 29 | **Expanded test coverage** — projections, ownership model, right-angle edge analysis | `tests/test_projections.py`, `tests/test_ownership.py`, `tests/test_right_angle.py` | latest |
+| 30 | **Lineup diversity controls** (`MAX_PAIR_APPEARANCES`) | `yak_core/lineups.py`, `yak_core/config.py`, `streamlit_app.py` | latest |
+| 31 | **Showdown Captain full optimizer** — CPT × 1.5 salary/scoring, 6-man roster | `yak_core/lineups.py`, `yak_core/config.py`, `streamlit_app.py` | latest |
+| 32 | **Docker / one-click deploy** | `Dockerfile`, `docker-compose.yml` | latest |
+| 33 | **Dark mode / UI polish** | `.streamlit/config.toml` | latest |
+| 34 | **Unit tests: diversity + Showdown** (25 tests) | `tests/test_diversity_and_showdown.py` | latest |
 
 ---
 
@@ -74,17 +78,17 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 |---|---------|-------|
 | ~~R4~~ | ~~**CI/CD pipeline**~~ | ✅ Done — `.github/workflows/ci.yml` runs `pytest` on every push/PR. |
 | ~~R5~~ | ~~**Expanded test coverage**~~ | ✅ Done — 75 tests added across `test_projections.py` (26 tests), `test_ownership.py` (21 tests), `test_right_angle.py` (28 tests). |
-| R6 | **Lineup correlation / diversity controls** | Current exposure cap is the only uniqueness mechanism. Could add player-pair fade (same player not allowed in N consecutive lineups) or explicit game-stack enforcement. |
-| R7 | **Showdown Captain mode full optimizer** | Captain slot logic exists in `apply_slate_filters` but `_eligible_slots` in lineups.py treats "CPT" as a regular slot. Verify Captain 1.5× salary / scoring multiplier is applied correctly end-to-end. |
+| ~~R6~~ | ~~**Lineup correlation / diversity controls**~~ | ✅ Done — `MAX_PAIR_APPEARANCES` config key prevents any player pair from appearing together more than N times across all lineups. 0 = disabled (default). Exposed as "Max pair appearances" number input in the Optimizer tab. |
+| ~~R7~~ | ~~**Showdown Captain mode full optimizer**~~ | ✅ Done — `build_showdown_lineups()` implements CPT + 5 FLEX roster (6 players); Captain costs 1.5× salary and scores 1.5× fantasy points; `to_dk_showdown_upload_format()` exports the correct DK Showdown CSV; Optimizer tab dispatches to the correct function based on Slate Type. |
 
 ### Low Priority / Nice-to-Have
 
 | # | Feature | Notes |
 |---|---------|-------|
-| R8 | **Docker / one-click deploy** | `Dockerfile` + `docker-compose.yml` so anyone can spin up the Streamlit app without a local Python environment. |
+| ~~R8~~ | ~~**Docker / one-click deploy**~~ | ✅ Done — `Dockerfile` + `docker-compose.yml` added. Run `docker compose up` to spin up the Streamlit app at http://localhost:8501. |
+| ~~R11~~ | ~~**Dark mode / UI polish**~~ | ✅ Done — `.streamlit/config.toml` updated with dark base theme, orange primary colour, and clean dark background palette. |
 | R9 | **Historical projection model training** | `proj_model()` exists in `yak_core/projections.py` but relies on parquet files at `YAKOS_ROOT`. Could export training data from `data/historical_lineups.csv` and train inline. |
 | R10 | **Export / share lineups via URL** | Streamlit `st.query_params` could encode a shareable lineup state. |
-| R11 | **Dark mode / UI polish** | Minor Streamlit theme tweaks. |
 
 ---
 
@@ -95,10 +99,12 @@ YakOS/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml                # GitHub Actions — pytest on push/PR
+├── Dockerfile                    # Docker image for one-click deploy
+├── docker-compose.yml            # docker compose up → app at :8501
 ├── streamlit_app.py          # Streamlit UI — imports from yak_core
 ├── yak_core/
-│   ├── config.py             # DEFAULT_CONFIG, merge_config, DK constants, YAKOS_ROOT (env-var + relative fallback)
-│   ├── lineups.py            # LP optimizer, exposure control, to_dk_upload_format
+│   ├── config.py             # DEFAULT_CONFIG, merge_config, DK constants (Classic + Showdown), YAKOS_ROOT
+│   ├── lineups.py            # LP optimizer, exposure control, pair-fade diversity, Showdown optimizer, DK upload formats
 │   ├── projections.py        # salary_implied, regression, blend, proj_model
 │   ├── calibration.py        # archetypes, queue, backtest, config knobs, persistent calibration_config.json
 │   ├── right_angle.py        # stack/pace/value edge analysis + lineup tagging
@@ -120,7 +126,8 @@ YakOS/
 │   ├── test_dk_upload_format.py         (10 tests)
 │   ├── test_projections.py              (26 tests)
 │   ├── test_ownership.py                (21 tests)
-│   └── test_right_angle.py              (28 tests)
+│   ├── test_right_angle.py              (28 tests)
+│   └── test_diversity_and_showdown.py   (25 tests)
 └── requirements.txt
 ```
 
@@ -131,6 +138,12 @@ YakOS/
 ```bash
 pip install -r requirements.txt
 streamlit run streamlit_app.py
+```
+
+Docker (one-click):
+```bash
+docker compose up
+# App available at http://localhost:8501
 ```
 
 Tests:

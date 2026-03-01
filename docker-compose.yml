@@ -1,0 +1,11 @@
+services:
+  yakos:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      - RAPIDAPI_KEY=${RAPIDAPI_KEY:-}
+      - YAKOS_ROOT=/app
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

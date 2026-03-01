@@ -15,6 +15,9 @@ from .config import (
     DEFAULT_CONFIG,
     DK_LINEUP_SIZE,
     DK_POS_SLOTS,
+    DK_SHOWDOWN_LINEUP_SIZE,
+    DK_SHOWDOWN_SLOTS,
+    DK_SHOWDOWN_CAPTAIN_MULTIPLIER,
     merge_config,
 )
 
@@ -196,6 +199,7 @@ def build_multiple_lineups_with_exposure(
     max_appearances = max(1, int(num_lineups * max_exposure))
     pos_caps = cfg.get("POS_CAPS", {})
     lock_names = [n.strip() for n in cfg.get("LOCK", [])]
+    max_pair_appearances = int(cfg.get("MAX_PAIR_APPEARANCES", 0))
 
     players = player_pool.to_dict("records")
     n = len(players)
@@ -209,6 +213,8 @@ def build_multiple_lineups_with_exposure(
         p["_slots"] = _eligible_slots(p.get("pos", ""))
 
     appearance_count = [0] * n
+    # pair_appearances[(i, j)] = number of lineups where both player i and j appear
+    pair_appearances: dict[tuple[int, int], int] = {}
     all_lineups = []
     cancel_reasons: list[tuple[int, str]] = []
 
@@ -296,6 +302,16 @@ def build_multiple_lineups_with_exposure(
                 for s in DK_POS_SLOTS:
                     prob += x[(i, s)] == 0
 
+        # Pair-fade diversity: prevent overused player pairs from appearing together
+        if max_pair_appearances > 0:
+            for (pi, pj), count in pair_appearances.items():
+                if count >= max_pair_appearances:
+                    prob += (
+                        pulp.lpSum(x[(pi, s)] for s in DK_POS_SLOTS)
+                        + pulp.lpSum(x[(pj, s)] for s in DK_POS_SLOTS)
+                        <= 1
+                    )
+
         prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=solver_time_limit))
         if prob.status != 1:
             reason = pulp.LpStatus.get(prob.status, f"status={prob.status}")
@@ -359,6 +375,7 @@ def build_multiple_lineups_with_exposure(
                         f"[optimizer] Lineup {lu_num}: exposure cap relaxed for "
                         f"{len(capped_player_indices)} player(s) — consider raising MAX_EXPOSURE"
                     )
+                    selected_in_lu = []
                     for i in range(n):
                         for s in DK_POS_SLOTS:
                             if pulp.value(x2[(i, s)]) and pulp.value(x2[(i, s)]) > 0.5:
@@ -367,6 +384,12 @@ def build_multiple_lineups_with_exposure(
                                 row["lineup_index"] = lu_num
                                 all_lineups.append(row)
                                 appearance_count[i] += 1
+                                selected_in_lu.append(i)
+                    if max_pair_appearances > 0:
+                        for a in range(len(selected_in_lu)):
+                            for b in range(a + 1, len(selected_in_lu)):
+                                key = (selected_in_lu[a], selected_in_lu[b])
+                                pair_appearances[key] = pair_appearances.get(key, 0) + 1
                     if progress_callback is not None:
                         progress_callback(lu_num + 1, num_lineups)
                     continue
@@ -376,6 +399,7 @@ def build_multiple_lineups_with_exposure(
                 progress_callback(lu_num + 1, num_lineups)
             continue
 
+        selected_in_lu = []
         for i in range(n):
             for s in DK_POS_SLOTS:
                 if pulp.value(x[(i, s)]) and pulp.value(x[(i, s)]) > 0.5:
@@ -384,6 +408,13 @@ def build_multiple_lineups_with_exposure(
                     row["lineup_index"] = lu_num
                     all_lineups.append(row)
                     appearance_count[i] += 1
+                    selected_in_lu.append(i)
+
+        if max_pair_appearances > 0:
+            for a in range(len(selected_in_lu)):
+                for b in range(a + 1, len(selected_in_lu)):
+                    key = (selected_in_lu[a], selected_in_lu[b])
+                    pair_appearances[key] = pair_appearances.get(key, 0) + 1
 
         if progress_callback is not None:
             progress_callback(lu_num + 1, num_lineups)
@@ -470,6 +501,257 @@ def to_dk_upload_format(lineups_df: pd.DataFrame) -> pd.DataFrame:
         rows.append(row)
 
     return pd.DataFrame(rows, columns=all_cols)
+
+
+def to_dk_showdown_upload_format(lineups_df: pd.DataFrame) -> pd.DataFrame:
+    """Convert long-format Showdown lineups to DraftKings Showdown bulk upload format.
+
+    DraftKings Showdown format has one CPT column and five FLEX columns.
+    Players are formatted as ``"Name (TEAM)"``.
+
+    Parameters
+    ----------
+    lineups_df : pd.DataFrame
+        Long-format DataFrame produced by ``build_showdown_lineups``,
+        containing ``lineup_index``, ``slot``, ``player_name``, ``team`` columns.
+
+    Returns
+    -------
+    pd.DataFrame
+        Wide-format DataFrame with columns:
+        ``Entry ID``, ``Contest Name``, ``Contest ID``, ``Entry Fee``,
+        ``CPT``, ``FLEX``, ``FLEX``, ``FLEX``, ``FLEX``, ``FLEX``.
+    """
+    meta_cols = ["Entry ID", "Contest Name", "Contest ID", "Entry Fee"]
+    # DK Showdown upload uses CPT + five FLEX columns
+    slot_cols = ["CPT", "FLEX", "FLEX", "FLEX", "FLEX", "FLEX"]
+    all_cols = meta_cols + slot_cols
+
+    if lineups_df.empty or "lineup_index" not in lineups_df.columns:
+        return pd.DataFrame(columns=all_cols)
+
+    rows = []
+    for lu_id in sorted(lineups_df["lineup_index"].unique()):
+        lu = lineups_df[lineups_df["lineup_index"] == lu_id]
+        row: Dict[str, Any] = {c: "" for c in meta_cols}
+        # Collect CPT and FLEX players
+        cpt_players = lu[lu["slot"] == "CPT"]
+        flex_players = lu[lu["slot"] == "FLEX"]
+
+        def _fmt(p_row) -> str:
+            name = str(p_row.get("player_name", ""))
+            team = str(p_row.get("team", ""))
+            return f"{name} ({team})" if team and team != "nan" else name
+
+        row["CPT"] = _fmt(cpt_players.iloc[0]) if not cpt_players.empty else ""
+        for idx_flex in range(5):
+            if idx_flex < len(flex_players):
+                row[f"_flex_{idx_flex}"] = _fmt(flex_players.iloc[idx_flex])
+            else:
+                row[f"_flex_{idx_flex}"] = ""
+
+        # Build final row with duplicate FLEX column names handled via list
+        final_row = [
+            row.get("Entry ID", ""),
+            row.get("Contest Name", ""),
+            row.get("Contest ID", ""),
+            row.get("Entry Fee", ""),
+            row.get("CPT", ""),
+            row.get("_flex_0", ""),
+            row.get("_flex_1", ""),
+            row.get("_flex_2", ""),
+            row.get("_flex_3", ""),
+            row.get("_flex_4", ""),
+        ]
+        rows.append(final_row)
+
+    return pd.DataFrame(rows, columns=all_cols)
+
+
+# --------------------------------------------------------------------
+# Showdown Captain optimizer
+# --------------------------------------------------------------------
+
+def build_showdown_lineups(
+    player_pool: pd.DataFrame,
+    cfg: Dict[str, Any],
+    progress_callback=None,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Build DraftKings Showdown Captain lineups.
+
+    DK Showdown uses a 6-player roster: 1 Captain (CPT) + 5 FLEX.
+    The Captain slot costs 1.5× the player's listed salary and scores
+    1.5× their actual fantasy points.  Any player can fill any slot.
+
+    The optimizer models this by duplicating each player:
+    - CPT version: salary × 1.5, proj × 1.5, eligible only for CPT slot.
+    - FLEX version: normal salary + proj, eligible only for FLEX slots.
+
+    A player can appear as CPT *or* FLEX but not both in the same lineup.
+
+    Parameters
+    ----------
+    player_pool : pd.DataFrame
+        Classic player pool (filtered to the two Showdown teams).
+    cfg : dict
+        Optimizer config.  Same keys as ``build_multiple_lineups_with_exposure``
+        plus ``SALARY_CAP`` (default 50 000).
+
+    Returns
+    -------
+    (lineups_df, exposures_df) in the same long format as the Classic optimizer,
+    with ``slot`` values of ``"CPT"`` or ``"FLEX"``.
+    """
+    num_lineups = int(cfg.get("NUM_LINEUPS", 20))
+    salary_cap = int(cfg.get("SALARY_CAP", 50000))
+    max_exposure = float(cfg.get("MAX_EXPOSURE", 0.35))
+    solver_time_limit = int(cfg.get("SOLVER_TIME_LIMIT", 30))
+    lock_names = [n.strip() for n in cfg.get("LOCK", [])]
+    max_appearances = max(1, int(num_lineups * max_exposure))
+    max_pair_appearances = int(cfg.get("MAX_PAIR_APPEARANCES", 0))
+
+    base_players = player_pool.to_dict("records")
+    m = len(base_players)
+    if m < DK_SHOWDOWN_LINEUP_SIZE:
+        raise ValueError(
+            f"Showdown pool has only {m} players; need at least {DK_SHOWDOWN_LINEUP_SIZE}"
+        )
+
+    # Build two entries per player: CPT variant (index 0..m-1) and FLEX (m..2m-1)
+    # CPT entry: salary × 1.5, proj × 1.5
+    cpt_players = []
+    flex_players = []
+    for p in base_players:
+        cpt_entry = dict(p)
+        cpt_entry["salary"] = round(p["salary"] * DK_SHOWDOWN_CAPTAIN_MULTIPLIER)
+        cpt_entry["proj"] = p.get("proj", 0) * DK_SHOWDOWN_CAPTAIN_MULTIPLIER
+        cpt_entry["_is_cpt"] = True
+        cpt_players.append(cpt_entry)
+
+        flex_entry = dict(p)
+        flex_entry["_is_cpt"] = False
+        flex_players.append(flex_entry)
+
+    # i in [0, m) → CPT variant; i in [m, 2m) → FLEX variant
+    players = cpt_players + flex_players
+    n = len(players)  # 2 * m
+
+    appearance_count = [0] * m  # track per original player (both variants share the slot)
+    pair_appearances: dict[tuple[int, int], int] = {}
+    all_lineups = []
+    cancel_reasons: list[tuple[int, str]] = []
+
+    for lu_num in range(num_lineups):
+        prob = pulp.LpProblem(f"showdown_{lu_num}", pulp.LpMaximize)
+
+        # Binary vars: y[i] = 1 if player i (CPT or FLEX entry) is selected
+        y = {i: pulp.LpVariable(f"y_{i}_{lu_num}", cat="Binary") for i in range(n)}
+
+        # Objective: maximise total projected points
+        prob += pulp.lpSum(players[i]["proj"] * y[i] for i in range(n))
+
+        # Exactly 1 CPT (from CPT variants, indices 0..m-1)
+        prob += pulp.lpSum(y[i] for i in range(m)) == 1
+
+        # Exactly 5 FLEX (from FLEX variants, indices m..2m-1)
+        prob += pulp.lpSum(y[m + j] for j in range(m)) == 5
+
+        # Each original player used at most once (CPT or FLEX, not both)
+        for j in range(m):
+            prob += y[j] + y[m + j] <= 1
+
+        # Salary cap
+        prob += pulp.lpSum(players[i]["salary"] * y[i] for i in range(n)) <= salary_cap
+
+        # LOCK: locked players must appear (either as CPT or FLEX)
+        if lock_names:
+            for j in range(m):
+                if base_players[j].get("player_name", "") in lock_names:
+                    prob += y[j] + y[m + j] == 1
+
+        # Exposure cap per original player
+        for j in range(m):
+            if appearance_count[j] >= max_appearances:
+                prob += y[j] == 0
+                prob += y[m + j] == 0
+
+        # Pair-fade diversity
+        if max_pair_appearances > 0:
+            for (pi, pj), count in pair_appearances.items():
+                if count >= max_pair_appearances:
+                    # selected_pi + selected_pj <= 1
+                    prob += (
+                        (y[pi] + y[m + pi]) + (y[pj] + y[m + pj]) <= 1
+                    )
+
+        prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=solver_time_limit))
+
+        if prob.status != 1:
+            reason = pulp.LpStatus.get(prob.status, f"status={prob.status}")
+            cancel_reasons.append((lu_num, reason))
+            print(f"[showdown] Lineup {lu_num} cancelled: {reason}")
+            if progress_callback is not None:
+                progress_callback(lu_num + 1, num_lineups)
+            continue
+
+        selected_original = []
+        for j in range(m):
+            if pulp.value(y[j]) and pulp.value(y[j]) > 0.5:
+                row = dict(base_players[j])
+                row["slot"] = "CPT"
+                row["lineup_index"] = lu_num
+                # Store the 1.5× salary and proj so display reflects captain pricing
+                row["salary"] = cpt_players[j]["salary"]
+                row["proj"] = cpt_players[j]["proj"]
+                all_lineups.append(row)
+                appearance_count[j] += 1
+                selected_original.append(j)
+            elif pulp.value(y[m + j]) and pulp.value(y[m + j]) > 0.5:
+                row = dict(base_players[j])
+                row["slot"] = "FLEX"
+                row["lineup_index"] = lu_num
+                all_lineups.append(row)
+                appearance_count[j] += 1
+                selected_original.append(j)
+
+        if max_pair_appearances > 0:
+            for a in range(len(selected_original)):
+                for b in range(a + 1, len(selected_original)):
+                    key = (selected_original[a], selected_original[b])
+                    pair_appearances[key] = pair_appearances.get(key, 0) + 1
+
+        if progress_callback is not None:
+            progress_callback(lu_num + 1, num_lineups)
+
+    if not all_lineups:
+        cancellation_summary = (
+            "; ".join(f"lineup {lu}: {r}" for lu, r in cancel_reasons)
+            if cancel_reasons
+            else "unknown"
+        )
+        raise RuntimeError(
+            f"Showdown optimizer produced 0 feasible lineups out of {num_lineups} requested. "
+            f"Pool had {m} players. Cancellation reasons: {cancellation_summary}"
+        )
+
+    if cancel_reasons:
+        reason_counts: dict[str, int] = {}
+        for _, r in cancel_reasons:
+            reason_counts[r] = reason_counts.get(r, 0) + 1
+        summary = ", ".join(f"{r} ×{c}" for r, c in reason_counts.items())
+        print(f"[showdown] {len(cancel_reasons)} of {num_lineups} lineup(s) cancelled — {summary}")
+
+    lineups_df = pd.DataFrame(all_lineups)
+
+    exposures_df = (
+        lineups_df.groupby("player_id")["lineup_index"]
+        .nunique()
+        .reset_index()
+        .rename(columns={"lineup_index": "num_lineups"})
+    )
+    exposures_df["exposure"] = exposures_df["num_lineups"] / float(num_lineups)
+
+    return lineups_df, exposures_df
 
 
 # --------------------------------------------------------------------
