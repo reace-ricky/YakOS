@@ -81,7 +81,7 @@ from yak_core.multislate import (  # type: ignore
     compare_slates,
 )
 from yak_core.projections import salary_implied_proj, noisy_proj  # type: ignore
-from yak_core.scoring import calibration_kpi_summary  # type: ignore
+from yak_core.scoring import calibration_kpi_summary, calibration_rag  # type: ignore
 
 
 # -----------------------------
@@ -1025,8 +1025,8 @@ with tab_lab:
     # ── Calibration KPI Dashboard ────────────────────────────────────────────
     st.markdown("### 📊 Calibration KPI Dashboard")
     st.markdown(
-        "Projection accuracy across all historical slates. "
-        "Error = actual − projected (positive = under-projected, negative = over-projected)."
+        "4 headline metrics — each tagged 🟢 / 🟡 / 🔴 vs calibration targets. "
+        "Error = actual − projected (positive = under-projected)."
     )
 
     _kpis = calibration_kpi_summary(hist_df) if not hist_df.empty else {}
@@ -1036,51 +1036,114 @@ with tab_lab:
             "No historical data found. Add `data/historical_lineups.csv` to populate these KPIs."
         )
     else:
-        # ── Row 1: Strategy KPIs ─────────────────────────────────────────────
+        _rag = calibration_rag(_kpis)
         _strat = _kpis["strategy"]
         _ptsl = _kpis["points_lineup"]
-        kpi_s1, kpi_s2, kpi_s3, kpi_s4, kpi_s5 = st.columns(5)
-        kpi_s1.metric("Total Lineups", f"{_strat['num_lineups']}")
-        kpi_s2.metric("Hit Rate", f"{_strat['hit_rate']:.0%}", help="% lineups where actual ≥ projected")
-        kpi_s3.metric("Avg Actual Score", f"{_strat['avg_actual']:.1f}")
-        kpi_s4.metric("Avg Projected", f"{_strat['avg_proj']:.1f}")
-        kpi_s5.metric("Best Lineup", f"{_strat['best_actual']:.1f}")
-
-        # ── Row 2: Points accuracy (lineup-level) ────────────────────────────
-        st.markdown("#### Points Accuracy")
-        kpi_p1, kpi_p2, kpi_p3, kpi_p4, kpi_p5 = st.columns(5)
-        kpi_p1.metric(
-            "Mean Error (pts)",
-            f"{_ptsl['mean_error']:+.2f}",
-            help="avg(actual − proj) per lineup; + = under-projected",
-        )
-        kpi_p2.metric("Std Dev (pts)", f"{_ptsl['std_error']:.2f}")
-        kpi_p3.metric("MAE (pts)", f"{_ptsl['mae']:.2f}", help="Mean absolute lineup-level error")
-        kpi_p4.metric("RMSE (pts)", f"{_ptsl['rmse']:.2f}")
-        kpi_p5.metric("R² (lineup)", f"{_ptsl['r_squared']:.3f}", help="Correlation between proj and actual lineup scores")
-
         _ptsp = _kpis["points_player"]
-        kpi_pp1, kpi_pp2, kpi_pp3, kpi_pp4, kpi_pp5 = st.columns(5)
-        kpi_pp1.metric("Mean Error (player)", f"{_ptsp['mean_error']:+.2f}", help="avg(actual − proj) per player")
-        kpi_pp2.metric("MAE (player)", f"{_ptsp['mae']:.2f}", help="Mean absolute player-level error")
-        kpi_pp3.metric("R² (player)", f"{_ptsp['r_squared']:.3f}", help="Player-level projection correlation")
 
-        # ── Scatter: proj vs actual (lineup-level) ───────────────────────────
-        with st.expander("📈 Proj vs Actual — Lineup Scatter", expanded=True):
-            _lu_df = _ptsl["df"][["lineup_id", "proj", "actual", "error"]].copy()
-            _lu_df = _lu_df.rename(columns={"proj": "Projected", "actual": "Actual"})
-            st.scatter_chart(_lu_df, x="Projected", y="Actual", height=320)
-            _r2_val = _ptsl['r_squared']
-            _r_val = (_r2_val ** 0.5) if _r2_val >= 0 else float("nan")
+        # ── 4 high-level KPI cards ───────────────────────────────────────────
+        kc1, kc2, kc3, kc4 = st.columns(4)
+
+        with kc1:
+            st.markdown(f"**{_rag['points']} Points Accuracy**")
+            st.metric(
+                "MAE (lineup pts)",
+                f"{_ptsl['mae']:.2f}",
+                help="Mean absolute lineup-level points error — target ≤ 5 pts",
+            )
+            st.caption(f"R² {_ptsl['r_squared']:.3f} · Bias {_ptsl['mean_error']:+.2f} pts")
+
+        with kc2:
+            if "minutes" in _kpis:
+                _mins = _kpis["minutes"]
+                st.markdown(f"**{_rag['minutes']} Minutes Accuracy**")
+                st.metric(
+                    "MAE (mins)",
+                    f"{_mins['mae']:.2f}",
+                    help="Mean absolute minutes error — target ≤ 3 mins",
+                )
+                st.caption(
+                    f"Bias {_mins['mean_error']:+.2f} · "
+                    f"Pts err (>5 min miss) {_mins['avg_pts_err_large_min_miss']:+.2f}"
+                )
+            else:
+                st.markdown(f"**{_rag['minutes']} Minutes Accuracy**")
+                st.metric("MAE (mins)", "N/A", help="No proj_minutes / actual_minutes data")
+                st.caption("Add proj_minutes & actual_minutes columns to unlock")
+
+        with kc3:
+            if "ownership" in _kpis:
+                _own = _kpis["ownership"]
+                st.markdown(f"**{_rag['ownership']} Ownership Accuracy**")
+                st.metric(
+                    "MAE (own %)",
+                    f"{_own['mae']:.2f}%",
+                    help="Mean absolute ownership error — target ≤ 3%",
+                )
+                st.caption(f"Bias {_own['mean_error']:+.2f}%")
+            else:
+                st.markdown(f"**{_rag['ownership']} Ownership Accuracy**")
+                st.metric("MAE (own %)", "N/A", help="No proj_own / own data")
+                st.caption("Add proj_own & own columns to unlock")
+
+        with kc4:
+            st.markdown(f"**{_rag['strategy']} Strategy**")
+            st.metric(
+                "Hit Rate",
+                f"{_strat['hit_rate']:.0%}",
+                help="% lineups where actual ≥ projected — target ≥ 50%",
+            )
             st.caption(
-                f"Each point = one lineup. r = {_r_val:.3f}  "
-                f"R² = {_r2_val:.3f}  "
-                f"Diagonal = perfect calibration."
+                f"Lineups {_strat['num_lineups']} · "
+                f"Avg proj {_strat['avg_proj']:.1f} · "
+                f"Best {_strat['best_actual']:.1f} pts"
             )
 
-        # ── Player error by salary bracket ───────────────────────────────────
-        if "points_salary" in _kpis:
-            with st.expander("💰 Points Error by Salary Bracket", expanded=False):
+        # ── Detail expanders ─────────────────────────────────────────────────
+        with st.expander(
+            f"📈 Points Detail — Projected vs Actual  {_rag['points']}", expanded=False
+        ):
+            _dc1, _dc2, _dc3, _dc4 = st.columns(4)
+            _dc1.metric(
+                "Mean Error (pts)",
+                f"{_ptsl['mean_error']:+.2f}",
+                help="avg(actual − proj) per lineup; + = under-projected",
+            )
+            _dc2.metric("Std Dev (pts)", f"{_ptsl['std_error']:.2f}")
+            _dc3.metric("RMSE (pts)", f"{_ptsl['rmse']:.2f}")
+            _dc4.metric(
+                "R² (lineup)",
+                f"{_ptsl['r_squared']:.3f}",
+                help="Correlation between proj and actual lineup scores",
+            )
+
+            _lu_df = _ptsl["df"][["lineup_id", "proj", "actual", "error"]].copy()
+            _lu_df = _lu_df.rename(columns={"proj": "Projected", "actual": "Actual"})
+            st.scatter_chart(_lu_df, x="Projected", y="Actual", height=280)
+            _r2_val = _ptsl["r_squared"]
+            _r_val = (_r2_val ** 0.5) if _r2_val >= 0 else float("nan")
+            st.caption(
+                f"Each point = one lineup.  r = {_r_val:.3f}  R² = {_r2_val:.3f}  "
+                "Diagonal = perfect calibration."
+            )
+
+            st.markdown("**Player-level accuracy**")
+            _pc1, _pc2, _pc3, _pc4 = st.columns(4)
+            _pc1.metric(
+                "Mean Error (player)",
+                f"{_ptsp['mean_error']:+.2f}",
+                help="avg(actual − proj) per player",
+            )
+            _pc2.metric("MAE (player)", f"{_ptsp['mae']:.2f}", help="Mean absolute player-level error")
+            _pc3.metric(
+                "R² (player)",
+                f"{_ptsp['r_squared']:.3f}",
+                help="Player-level projection correlation",
+            )
+            _pc4.metric("Avg Actual (player)", f"{_ptsp['df']['actual'].mean():.1f}")
+
+            if "points_salary" in _kpis:
+                st.markdown("**Error by salary bracket**")
                 _sal_df = _kpis["points_salary"]["df"].copy()
                 _sal_df.columns = [str(c) for c in _sal_df.columns]
                 st.dataframe(
@@ -1096,19 +1159,51 @@ with tab_lab:
                 )
                 st.caption("Positive Mean Error = players in this bracket were under-projected on average.")
 
-        # ── Ownership KPIs ───────────────────────────────────────────────────
-        if "ownership" in _kpis:
-            st.markdown("#### Ownership Accuracy")
-            _own = _kpis["ownership"]
-            kpi_o1, kpi_o2, kpi_o3, kpi_o4, kpi_o5 = st.columns(5)
-            kpi_o1.metric(
-                "Mean Error (own %)",
-                f"{_own['mean_error']:+.2f}%",
-                help="avg(actual_own − proj_own) per player; + = under-estimated chalk",
-            )
-            kpi_o2.metric("MAE (own %)", f"{_own['mae']:.2f}%", help="Mean absolute ownership error per player")
+        if "minutes" in _kpis:
+            with st.expander(
+                f"⏱ Minutes Detail — Projected vs Actual  {_rag['minutes']}", expanded=False
+            ):
+                _mins = _kpis["minutes"]
+                _mc1, _mc2, _mc3, _mc4 = st.columns(4)
+                _mc1.metric(
+                    "Mean Error (mins)",
+                    f"{_mins['mean_error']:+.2f}",
+                    help="avg(actual_min − proj_min); + = played more than projected",
+                )
+                _mc2.metric("MAE (mins)", f"{_mins['mae']:.2f}")
+                _mc3.metric(
+                    "Pts err (>5 min miss)",
+                    f"{_mins['avg_pts_err_large_min_miss']:+.2f}",
+                    help="Avg points error when minutes miss > 5 min",
+                )
+                _mc4.metric(
+                    "Pts err (≤5 min miss)",
+                    f"{_mins['avg_pts_err_small_min_miss']:+.2f}",
+                    help="Avg points error when minutes miss ≤ 5 min",
+                )
+                st.caption(
+                    "Large minutes misses drive larger points errors — "
+                    "use this to tune the projection model."
+                )
 
-            with st.expander("📊 Ownership Bucket Calibration", expanded=False):
+        if "ownership" in _kpis:
+            with st.expander(
+                f"👥 Ownership Detail — Projected vs Actual  {_rag['ownership']}", expanded=False
+            ):
+                _own = _kpis["ownership"]
+                _oc1, _oc2, _oc3, _oc4 = st.columns(4)
+                _oc1.metric(
+                    "Mean Error (own %)",
+                    f"{_own['mean_error']:+.2f}%",
+                    help="avg(actual_own − proj_own); + = under-estimated chalk",
+                )
+                _oc2.metric(
+                    "MAE (own %)",
+                    f"{_own['mae']:.2f}%",
+                    help="Mean absolute ownership error per player",
+                )
+                _oc3.metric("Players Tracked", f"{int(_kpis['ownership']['bucket_df']['count'].sum())}")
+                _oc4.metric("RAG Status", _rag["ownership"])
                 _bkt = _kpis["ownership"]["bucket_df"].copy()
                 st.dataframe(
                     _bkt.rename(columns={
@@ -1122,31 +1217,9 @@ with tab_lab:
                     use_container_width=True,
                 )
                 st.caption(
-                    "Positive Mean Error = actual ownership was higher than projected in that bucket "
+                    "Positive Mean Error = actual ownership was higher than projected "
                     "(you under-estimated chalk / punts)."
                 )
-
-        # ── Minutes KPIs (only when minutes data present) ────────────────────
-        if "minutes" in _kpis:
-            st.markdown("#### Minutes Accuracy")
-            _mins = _kpis["minutes"]
-            kpi_m1, kpi_m2, kpi_m3, kpi_m4, _ = st.columns(5)
-            kpi_m1.metric(
-                "Mean Error (mins)",
-                f"{_mins['mean_error']:+.2f}",
-                help="avg(actual_min − proj_min); + = played more than projected",
-            )
-            kpi_m2.metric("MAE (mins)", f"{_mins['mae']:.2f}")
-            kpi_m3.metric(
-                "Pts Error | mins miss >5",
-                f"{_mins['avg_pts_err_large_min_miss']:+.2f}",
-                help="Avg points error when minutes miss > 5 min",
-            )
-            kpi_m4.metric(
-                "Pts Error | mins miss ≤5",
-                f"{_mins['avg_pts_err_small_min_miss']:+.2f}",
-                help="Avg points error when minutes miss ≤ 5 min",
-            )
 
     st.markdown("---")
 

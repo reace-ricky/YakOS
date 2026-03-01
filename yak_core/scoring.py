@@ -249,6 +249,73 @@ def calibration_kpi_summary(hist_df: pd.DataFrame) -> Dict[str, Any]:
     return result
 
 
+def rag_status(
+    value: float,
+    green_thresh: float,
+    amber_thresh: float,
+    lower_is_better: bool = True,
+) -> str:
+    """Return a RAG emoji based on *value* vs calibration thresholds.
+
+    lower_is_better=True  (e.g. MAE):
+        value ≤ green_thresh → 🟢, ≤ amber_thresh → 🟡, else 🔴
+    lower_is_better=False (e.g. hit rate, R²):
+        value ≥ green_thresh → 🟢, ≥ amber_thresh → 🟡, else 🔴
+    """
+    if lower_is_better:
+        if value <= green_thresh:
+            return "🟢"
+        elif value <= amber_thresh:
+            return "🟡"
+        return "🔴"
+    else:
+        if value >= green_thresh:
+            return "🟢"
+        elif value >= amber_thresh:
+            return "🟡"
+        return "🔴"
+
+
+def calibration_rag(kpis: Dict[str, Any]) -> Dict[str, str]:
+    """Return RAG statuses for the 4 headline KPI categories.
+
+    Returns dict with keys: ``'points'``, ``'minutes'``, ``'ownership'``,
+    ``'strategy'``.  Each value is a RAG emoji or ``'⚪'`` when no data is
+    available.
+
+    Thresholds:
+      points    — lineup MAE ≤ 5 pts  → 🟢, ≤ 10 → 🟡, > 10 → 🔴
+      minutes   — MAE ≤ 3 min         → 🟢, ≤ 6  → 🟡, > 6  → 🔴
+      ownership — MAE ≤ 3 %           → 🟢, ≤ 6  → 🟡, > 6  → 🔴
+      strategy  — hit_rate ≥ 50 %     → 🟢, ≥ 40 % → 🟡, < 40 % → 🔴
+    """
+    result: Dict[str, str] = {}
+
+    if "points_lineup" in kpis:
+        result["points"] = rag_status(kpis["points_lineup"]["mae"], 5.0, 10.0)
+    else:
+        result["points"] = "⚪"
+
+    if "minutes" in kpis:
+        result["minutes"] = rag_status(kpis["minutes"]["mae"], 3.0, 6.0)
+    else:
+        result["minutes"] = "⚪"
+
+    if "ownership" in kpis:
+        result["ownership"] = rag_status(kpis["ownership"]["mae"], 3.0, 6.0)
+    else:
+        result["ownership"] = "⚪"
+
+    if "strategy" in kpis:
+        result["strategy"] = rag_status(
+            kpis["strategy"]["hit_rate"], 0.50, 0.40, lower_is_better=False
+        )
+    else:
+        result["strategy"] = "⚪"
+
+    return result
+
+
 def print_dashboard(
     lineups: List[Dict],
     pool_df: pd.DataFrame,
