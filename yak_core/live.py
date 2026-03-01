@@ -83,6 +83,51 @@ def fetch_live_opt_pool(slate_date, cfg):
     return df
 
 
+def fetch_actuals_from_api(date_key: str, cfg: dict) -> pd.DataFrame:
+    """Fetch actual DraftKings fantasy points for a completed slate from Tank01.
+
+    Calls the ``getNBADFS`` endpoint for a *past* date.  For completed games,
+    Tank01 returns the real DK fantasy points scored in the ``fantasyPoints``
+    field, which this function exposes as ``actual_fp``.
+
+    Parameters
+    ----------
+    date_key : str
+        Date string in ``YYYYMMDD`` or ``YYYY-MM-DD`` format.
+    cfg : dict
+        Must contain ``RAPIDAPI_KEY`` or the ``RAPIDAPI_KEY`` env var must be
+        set.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: ``player_name``, ``actual_fp``.  One row per player.  Players
+        with no recorded score (``actual_fp == 0``) are **included** so the
+        caller can decide how to handle zero-point performances.
+
+    Raises
+    ------
+    ValueError
+        If the API returns an empty payload or no player rows can be parsed.
+    RuntimeError
+        If the HTTP request itself fails.
+    """
+    date_key_clean = date_key.replace("-", "")
+    try:
+        dfs_df = fetch_live_dfs(date_key_clean, cfg)
+    except Exception as exc:
+        raise RuntimeError(f"Tank01 actuals API error for {date_key}: {exc}") from exc
+
+    if dfs_df.empty:
+        raise ValueError(f"No actuals returned from Tank01 for {date_key}")
+
+    result = dfs_df[["player_name", "proj"]].copy()
+    result = result.rename(columns={"proj": "actual_fp"})
+    result["actual_fp"] = pd.to_numeric(result["actual_fp"], errors="coerce").fillna(0.0)
+    print(f"[fetch_actuals_from_api] {len(result)} player actuals for {date_key}")
+    return result.reset_index(drop=True)
+
+
 def fetch_injury_updates(date_key: str, cfg: dict) -> list:
     """Fetch player injury/news updates from Tank01 API for a given date.
 
