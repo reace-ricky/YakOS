@@ -41,6 +41,7 @@ from yak_core.live import (  # type: ignore
     fetch_live_opt_pool,
     fetch_injury_updates,
 )
+from yak_core.multislate import parse_dk_contest_csv  # type: ignore
 
 
 # -----------------------------
@@ -238,6 +239,9 @@ def run_optimizer(
     min_salary_used: int,
     proj_col: str = "proj",  # which column to use: 'proj', 'floor', 'ceil', or 'sim85'
     archetype: str = "Balanced",
+    lock_names: list | None = None,
+    exclude_names: list | None = None,
+    bump_map: dict | None = None,
 ) -> Tuple[pd.DataFrame | None, pd.DataFrame | None]:
     # Remap the chosen projection style to 'proj' so the optimizer always reads 'proj'.
     # We work on a copy to leave the caller's DataFrame unchanged.
@@ -261,6 +265,9 @@ def run_optimizer(
         "MAX_EXPOSURE": max_exposure,
         "PROJ_COL": "proj",
         "SOLVER_TIME_LIMIT": 30,
+        "LOCK": lock_names or [],
+        "EXCLUDE": exclude_names or [],
+        "BUMP": bump_map or {},
     }
 
     progress_bar = st.progress(0, text="Optimizing lineups…")
@@ -716,6 +723,58 @@ with tab_optimizer:
                 ),
             )
 
+            # --- Player Pool Overrides ---
+            st.markdown("### 3. Player Pool Overrides")
+            with st.expander("🔒 Lock / Exclude / Bump Players", expanded=False):
+                override_c1, override_c2, override_c3 = st.columns(3)
+                with override_c1:
+                    lock_input = st.text_area(
+                        "🔒 Lock players (one per line)",
+                        placeholder="LeBron James\nSteph Curry",
+                        height=120,
+                        key="opt_lock_input",
+                        help="These players will appear in every lineup.",
+                    )
+                with override_c2:
+                    exclude_input = st.text_area(
+                        "🚫 Exclude players (one per line)",
+                        placeholder="Kevin Durant\nJa Morant",
+                        height=120,
+                        key="opt_exclude_input",
+                        help="These players will be removed from the pool entirely.",
+                    )
+                with override_c3:
+                    bump_input = st.text_area(
+                        "⚡ Bump projections (Name | multiplier)",
+                        placeholder="Nikola Jokic | 1.15\nAnthony Davis | 0.90",
+                        height=120,
+                        key="opt_bump_input",
+                        help=(
+                            "Multiply a player's projection by the given factor. "
+                            "E.g. 1.15 = +15%, 0.90 = -10%."
+                        ),
+                    )
+
+            # Parse override inputs
+            _lock_names = [n.strip() for n in lock_input.splitlines() if n.strip()]
+            _exclude_names = [n.strip() for n in exclude_input.splitlines() if n.strip()]
+            _bump_map: dict = {}
+            for line in bump_input.splitlines():
+                parts = [p.strip() for p in line.split("|")]
+                if len(parts) == 2 and parts[0] and parts[1]:
+                    try:
+                        _bump_map[parts[0]] = float(parts[1])
+                    except ValueError:
+                        pass
+
+            if _lock_names:
+                st.caption(f"🔒 Locked: {', '.join(_lock_names)}")
+            if _exclude_names:
+                st.caption(f"🚫 Excluded: {', '.join(_exclude_names)}")
+            if _bump_map:
+                bump_strs = [f"{n} ×{m:.2f}" for n, m in _bump_map.items()]
+                st.caption(f"⚡ Bumped: {', '.join(bump_strs)}")
+
             # Apply slate filter
             pool_for_opt = apply_slate_filters(pool_df_opt, slate_type_opt, showdown_game_opt)
 
@@ -728,6 +787,9 @@ with tab_optimizer:
                         min_salary_used=min_sal_opt,
                         proj_col=proj_style_opt,
                         archetype=archetype_sel,
+                        lock_names=_lock_names or None,
+                        exclude_names=_exclude_names or None,
+                        bump_map=_bump_map or None,
                     )
                     st.session_state["lineups_df"] = lu_df
                     st.session_state["exposures_df"] = exp_df
@@ -1055,9 +1117,56 @@ with tab_lab:
                         key="bt_download",
                     )
 
-    # ---- Section C: Archetype Config Knobs ----
+    # ---- Section C: DK Contest CSV Ingest ----
     st.markdown("---")
-    st.markdown("### C. 🎛️ Archetype Config Knobs")
+    st.markdown("### C. 📥 DK Contest CSV — Real Ownership Ingest")
+    st.markdown(
+        "Upload a DraftKings contest results CSV to import **real ownership data** "
+        "into the live pool. The actual percentages are more accurate than model estimates "
+        "and sharpen GPP leverage signals."
+    )
+
+    dk_csv_upload = st.file_uploader(
+        "Upload DraftKings contest CSV",
+        type=["csv"],
+        key="lab_dk_contest_csv",
+        help=(
+            "Export from DraftKings: My Contests → contest page → Export CSV. "
+            "Accepted formats: contest results with a 'Lineup' column, or "
+            "a simple Name / Ownership % file."
+        ),
+    )
+
+    if dk_csv_upload is not None:
+        try:
+            dk_contest_df = parse_dk_contest_csv(dk_csv_upload)
+            st.success(f"Parsed {len(dk_contest_df)} players from DK contest CSV.")
+
+            with st.expander("Parsed contest ownership", expanded=True):
+                disp_dk = [c for c in ["player_name", "pos", "team", "salary", "actual_fp", "ownership"] if c in dk_contest_df.columns]
+                st.dataframe(dk_contest_df[disp_dk] if disp_dk else dk_contest_df, use_container_width=True, height=300)
+
+            # Merge ownership into live pool if available
+            live_pool = st.session_state.get("pool_df")
+            if live_pool is not None and not live_pool.empty and "ownership" in dk_contest_df.columns:
+                if st.button("Merge real ownership → Live Pool", key="lab_merge_own_btn"):
+                    merged_pool = live_pool.copy()
+                    own_lkp = dict(zip(dk_contest_df["player_name"], dk_contest_df["ownership"]))
+                    merged_pool["ownership"] = merged_pool["player_name"].map(own_lkp).fillna(merged_pool.get("ownership", 0))
+                    st.session_state["pool_df"] = merged_pool
+                    matched = merged_pool["player_name"].isin(own_lkp).sum()
+                    st.success(
+                        f"Merged real ownership for {matched}/{len(merged_pool)} players. "
+                        "Pool updated — head to the Optimizer to rebuild lineups."
+                    )
+            elif live_pool is None:
+                st.info("Load a player pool in **🏀 Ricky's Slate Room** first to merge ownership.")
+        except Exception as e:
+            st.error(f"Failed to parse DK contest CSV: {e}")
+
+    # ---- Section D: Archetype Config Knobs ----
+    st.markdown("---")
+    st.markdown("### D. 🎛️ Archetype Config Knobs")
 
     with st.expander("Tune DFS Archetype Configurations", expanded=False):
         st.markdown(
@@ -1112,9 +1221,9 @@ with tab_lab:
             })
             st.success(f"Archetype '{arch_sel_knobs}' updated for this session.")
 
-    # ---- Section D: Sim Module ----
+    # ---- Section E: Sim Module ----
     st.markdown("---")
-    st.markdown("### D. 🎲 Sim Module — Live Player Pool")
+    st.markdown("### E. 🎲 Sim Module — Live Player Pool")
     st.markdown(
         "Run Monte Carlo sims on the live player pool. "
         "Apply news / injury updates, then promote high-confidence lineups to Ricky's Slate Room."
