@@ -87,10 +87,6 @@ def blend_proj(
 
 # ---- Historical data loader for model projections ----
 
-import pyarrow as pa
-import pyarrow.parquet as pq
-import pyarrow.lib
-
 def load_historical_pool(current_slate_date, yakos_root):
     import os, glob, re
     import pandas as pd
