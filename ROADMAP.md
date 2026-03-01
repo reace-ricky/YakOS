@@ -67,6 +67,7 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 40 | **Merge player projections into Review & Action table** — `floor`, `ceil` (and `proj_own` if missing) from pool joined into the Review & Action data editor; proj pts before act pts, proj own % before act own %; standalone expander removed | `streamlit_app.py` | latest |
 | 41 | **Calibration KPI Dashboard** — `📊 Calibration KPI Dashboard` section at top of Calibration Lab: strategy KPIs (total lineups, hit rate, avg score), points accuracy (mean error, std, MAE, RMSE, R²) at lineup and player level, proj vs actual scatter chart, salary-bracket error table, ownership bucket calibration, and conditional minutes accuracy metrics | `yak_core/scoring.py`, `streamlit_app.py` | latest |
 | 43 | **Calibration KPI Dashboard cleanup** — removed RAG status badges, `st.metric` circles, bold headers, and caption text from the 4 top-level KPI cards; replaced with clean bordered HTML boxes (label + value); removed `calibration_rag` import; expander titles cleaned of RAG emojis | `streamlit_app.py` | latest |
+| 44 | **Consolidated lineup builder + DK contest CSV** — removed standalone Section B (Ad Hoc Historical Lineup Builder) and Section C (DK Contest CSV Ingest); replaced with two collapsible expanders inside Section A (Calibration Queue): `🏗️ Build Best Lineup for a Slate` and `📊 Compare vs. Contest Lineup`; remaining sections renumbered B/C/D | `streamlit_app.py` | latest |
 
 ---
 
