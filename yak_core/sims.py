@@ -252,6 +252,157 @@ def backtest_sim(
     }
 
 
+def compute_player_anomaly_table(
+    pool_df: pd.DataFrame,
+    lineup_df: pd.DataFrame,
+    n_sims: int = 500,
+    cal_knobs: Optional[Dict[str, Any]] = None,
+) -> pd.DataFrame:
+    """Compute a per-player anomaly / leverage table from Monte Carlo sim results.
+
+    For each player that appears in *lineup_df*, simulates *n_sims* individual
+    outcomes from a normal distribution centred on their projection, then
+    classifies each outcome as a **smash** (``outcome ≥ smash_threshold × proj``)
+    or a **bust** (``outcome ≤ bust_threshold × proj``).
+
+    Leverage Score is defined as ``Smash% / Own%`` (higher means the player is
+    a bigger upside play relative to expected ownership — more leverage in GPP).
+
+    Parameters
+    ----------
+    pool_df : pd.DataFrame
+        Player pool.  Must include a name column (``player_name`` or ``name``)
+        and a ``proj`` column.  Optional: ``salary``,
+        ``ownership`` / ``own%``, ``ceil``, ``floor``.
+    lineup_df : pd.DataFrame
+        Long-format lineup table (as returned by ``run_optimizer``).  Must
+        include a name column so we know which players appear in the lineups.
+    n_sims : int, optional
+        Per-player simulation iterations (default 500).
+    cal_knobs : dict, optional
+        Calibration knobs.  Supported keys:
+
+        * ``ceiling_boost``   (float, default 1.0) — multiply upside outcomes
+        * ``floor_dampen``    (float, default 1.0) — compress downside outcomes
+        * ``smash_threshold`` (float, default 1.3) — smash if outcome ≥ this × proj
+        * ``bust_threshold``  (float, default 0.5) — bust  if outcome ≤ this × proj
+
+    Returns
+    -------
+    pd.DataFrame
+        Sorted by Leverage Score descending.  Columns:
+        ``Player``, ``Proj``, ``Salary``, ``Own%``, ``Smash%``, ``Bust%``,
+        ``Leverage Score``, ``Value Trap``, ``Flag``.
+        Empty DataFrame when inputs are insufficient.
+    """
+    if pool_df.empty or lineup_df.empty:
+        return pd.DataFrame()
+
+    knobs = cal_knobs or {}
+    ceiling_boost = float(knobs.get("ceiling_boost", 1.0))
+    floor_dampen = float(knobs.get("floor_dampen", 1.0))
+    smash_thr = float(knobs.get("smash_threshold", 1.3))
+    bust_thr = float(knobs.get("bust_threshold", 0.5))
+
+    # Normalise pool name column
+    pool = pool_df.copy()
+    if "player_name" in pool.columns and "name" not in pool.columns:
+        pool = pool.rename(columns={"player_name": "name"})
+    if "name" not in pool.columns:
+        return pd.DataFrame()
+
+    # Normalise ownership column
+    for _src in ("ownership", "Own%"):
+        if _src in pool.columns and "own%" not in pool.columns:
+            pool = pool.rename(columns={_src: "own%"})
+            break
+
+    sal_col = "salary" if "salary" in pool.columns else None
+    own_col = "own%" if "own%" in pool.columns else None
+
+    # Find name column in lineup_df
+    lu_name_col = next(
+        (c for c in ("player_name", "name") if c in lineup_df.columns), None
+    )
+    if lu_name_col is None:
+        return pd.DataFrame()
+
+    players_in_lineups = set(lineup_df[lu_name_col].dropna().unique())
+    pool_sub = pool[pool["name"].isin(players_in_lineups)].drop_duplicates(
+        subset=["name"]
+    )
+    if pool_sub.empty:
+        return pd.DataFrame()
+
+    rng = np.random.RandomState(42)
+    rows = []
+    for _, row in pool_sub.iterrows():
+        name = row["name"]
+        proj = float(pd.to_numeric(row.get("proj", 0), errors="coerce") or 0)
+        if proj <= 0:
+            continue
+
+        salary = float(
+            pd.to_numeric(row.get(sal_col) if sal_col else 0, errors="coerce") or 0
+        )
+        own_pct = float(
+            pd.to_numeric(row.get(own_col) if own_col else 0, errors="coerce") or 0
+        )
+
+        # Derive std from ceil/floor when available
+        ceil_raw = pd.to_numeric(row.get("ceil", np.nan), errors="coerce")
+        floor_raw = pd.to_numeric(row.get("floor", np.nan), errors="coerce")
+        ceil_val = float(ceil_raw) if pd.notna(ceil_raw) else proj * 1.3
+        floor_val = float(floor_raw) if pd.notna(floor_raw) else proj * 0.7
+        std = float(np.clip((ceil_val - floor_val) / 4.0, proj * 0.05, proj * 0.6))
+
+        # Simulate per-player outcomes
+        outcomes = rng.normal(loc=proj, scale=std, size=n_sims)
+        outcomes = np.clip(outcomes, 0, None)
+
+        # Apply calibration knobs: ceiling_boost scales upside, floor_dampen scales downside
+        above = outcomes > proj
+        outcomes = np.where(
+            above,
+            proj + (outcomes - proj) * ceiling_boost,
+            proj - (proj - outcomes) * floor_dampen,
+        )
+        outcomes = np.clip(outcomes, 0, None)
+
+        smash_pct = float((outcomes >= smash_thr * proj).mean() * 100.0)
+        bust_pct = float((outcomes <= bust_thr * proj).mean() * 100.0)
+        leverage = smash_pct / own_pct if own_pct > 0 else smash_pct
+
+        rows.append({
+            "Player": name,
+            "Proj": round(proj, 1),
+            "Salary": int(salary),
+            "Own%": round(own_pct, 1),
+            "Smash%": round(smash_pct, 1),
+            "Bust%": round(bust_pct, 1),
+            "Leverage Score": round(leverage, 2),
+        })
+
+    if not rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(rows)
+
+    # Value Trap: Bust% > 40% AND Salary > median salary in the pool
+    if df["Salary"].sum() > 0:
+        median_sal = df["Salary"].median()
+        df["Value Trap"] = (df["Bust%"] > 40.0) & (df["Salary"] > median_sal)
+    else:
+        df["Value Trap"] = False
+
+    # High Leverage flag
+    df["Flag"] = df["Leverage Score"].apply(
+        lambda x: "🔥 HIGH LEVERAGE" if x > 3.0 else ""
+    )
+
+    return df.sort_values("Leverage Score", ascending=False).reset_index(drop=True)
+
+
 def build_sim_player_accuracy_table(
     pool_df: pd.DataFrame,
     actuals_df: pd.DataFrame,
