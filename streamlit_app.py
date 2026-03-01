@@ -219,6 +219,12 @@ def to_csv_bytes(df: pd.DataFrame) -> bytes:
 # to a single sim run.
 _SIM_LEARNING_BOOST = 0.05
 
+# DK NBA lineup score thresholds used in the sim vs actuals comparison table.
+# Cash line: typical 50/50 / double-up cash threshold for an 8-man DK NBA slate.
+# GPP line: approx 99th-percentile score required to finish in the top 1% of a GPP.
+_SIM_CASH_LINE = 280.0
+_SIM_GPP_LINE = 340.0
+
 # Ordered list of projection style options used in the Optimizer selectbox.
 _PROJ_STYLE_OPTIONS = ["proj", "floor", "ceil", "sim85"]
 
@@ -1301,6 +1307,37 @@ with tab_lab:
                         .first()
                     )
                     _queue_display = _queue_display.merge(_pool_merge, on="name", how="left")
+
+                # Overwrite stale historical projections with real pool projections
+                # (pool contains RG FPTS — real consensus projections, not salary proxy)
+                if "proj" in _cal_pool.columns:
+                    _pool_proj_df = (
+                        _cal_pool[["player_name", "proj"]]
+                        .rename(columns={"player_name": "name", "proj": "_pool_proj"})
+                        .drop_duplicates("name")
+                    )
+                    _queue_display = _queue_display.merge(_pool_proj_df, on="name", how="left")
+                    _pool_proj_mask = _queue_display["_pool_proj"].notna()
+                    _queue_display.loc[_pool_proj_mask, "proj"] = _queue_display.loc[_pool_proj_mask, "_pool_proj"]
+                    _queue_display = _queue_display.drop(columns=["_pool_proj"])
+
+                # Populate proj_minutes from pool's MINUTES column when not yet present
+                if "minutes" in _cal_pool.columns:
+                    _pool_min_df = (
+                        _cal_pool[["player_name", "minutes"]]
+                        .rename(columns={"player_name": "name", "minutes": "_pool_minutes"})
+                        .drop_duplicates("name")
+                    )
+                    _queue_display = _queue_display.merge(_pool_min_df, on="name", how="left")
+                    if "proj_minutes" not in _queue_display.columns:
+                        _queue_display["proj_minutes"] = _queue_display["_pool_minutes"]
+                    else:
+                        _pm_mask = (
+                            _queue_display["proj_minutes"].isna()
+                            & _queue_display["_pool_minutes"].notna()
+                        )
+                        _queue_display.loc[_pm_mask, "proj_minutes"] = _queue_display.loc[_pm_mask, "_pool_minutes"]
+                    _queue_display = _queue_display.drop(columns=["_pool_minutes"])
 
             # Compute error columns
             def _safe_col(df: pd.DataFrame, col: str) -> pd.Series:
