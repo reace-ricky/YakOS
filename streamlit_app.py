@@ -4,9 +4,18 @@ import sys
 import os
 from typing import Dict, Any, Tuple
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
+
+# Default timezone — all "today" references use US/Eastern (EST/EDT).
+_EST = ZoneInfo("America/New_York")
+
+
+def _today_est():
+    """Return today's date in US/Eastern (EST/EDT)."""
+    return pd.Timestamp.now(tz=_EST).date()
 
 # Make yak_core importable (works when yak_core is in the repo / installed)
 if "yak_core" not in sys.modules:
@@ -247,6 +256,9 @@ def ensure_session_state():
         st.session_state["ms_result"] = None
     if "rapidapi_key" not in st.session_state:
         st.session_state["rapidapi_key"] = os.environ.get("RAPIDAPI_KEY", "")
+    if "stack_hit_log" not in st.session_state:
+        # list of dicts: {slate_date, team, players, outcome, note}
+        st.session_state["stack_hit_log"] = []
 
 
 def run_optimizer(
@@ -438,70 +450,18 @@ tab_slate, tab_optimizer, tab_lab = st.tabs([
 with tab_slate:
     st.subheader("🏀 Ricky's Slate Room")
 
-    # --- Pool upload ---
-    st.markdown("### 1. Load Today's Player Pool")
-
     if sport == "PGA":
         st.info("PGA support is coming soon. Please select NBA for now.")
     else:
-        load_col_l, load_col_r = st.columns([2, 1])
-
-        with load_col_l:
-            uploaded_file = st.file_uploader(
-                "Upload RotoGrinders (or combined) NBA CSV  *(optional)*",
-                type=["csv"],
-                help=(
-                    "RG projections are optional — upload to calibrate projections. "
-                    "If not uploaded, use 'Fetch from API' or internal YakOS projections."
-                ),
-                key="front_rg_upload",
-            )
-
-        with load_col_r:
-            st.markdown("**— or —**")
-            fetch_date_input = st.date_input(
-                "Slate date (for API fetch)",
-                value=pd.Timestamp.today().date(),
-                key="slate_fetch_date",
-            )
-            if st.button(
-                "🌐 Fetch Pool from API",
-                key="fetch_api_btn",
-                help="Requires Tank01 RapidAPI key set in the sidebar.",
-            ):
-                api_key = st.session_state.get("rapidapi_key", "")
-                if not api_key:
-                    st.error("Set your Tank01 RapidAPI key in the sidebar first.")
-                else:
-                    with st.spinner("Fetching live DK pool from Tank01…"):
-                        try:
-                            live_pool = fetch_live_opt_pool(
-                                str(fetch_date_input),
-                                {"RAPIDAPI_KEY": api_key},
-                            )
-                            # Rename to YakOS schema if needed
-                            if "player_name" not in live_pool.columns and "name" in live_pool.columns:
-                                live_pool = live_pool.rename(columns={"name": "player_name"})
-                            st.session_state["pool_df"] = live_pool
-                            st.success(f"Loaded {len(live_pool)} players from API.")
-                        except Exception as _e:
-                            st.error(f"API fetch failed: {_e}")
-
-        if uploaded_file is not None:
-            raw_df = pd.read_csv(uploaded_file)
-            pool_df = rename_rg_columns_to_yakos(raw_df)
-            st.session_state["pool_df"] = pool_df
-        elif st.session_state.get("pool_df") is None:
-            st.info(
-                "Upload a RotoGrinders NBA CSV **or** click **Fetch Pool from API** to begin. "
-                "RG projections are optional — they are used to calibrate when available."
-            )
-
         pool_df = st.session_state.get("pool_df")
 
-        # --- KPIs ---
-        if pool_df is not None and not pool_df.empty:
-            st.markdown("### 2. Pool KPIs")
+        if pool_df is None or pool_df.empty:
+            st.info(
+                "📋 **No player pool loaded.** Upload your RotoGrinders projection sheet "
+                "in the **🔬 Calibration Lab** tab to get started."
+            )
+        else:
+            # ── KPIs (top) ──────────────────────────────────────────────
             n_players = len(pool_df)
             avg_salary = pool_df["salary"].mean()
             median_proj = pool_df["proj"].median()
@@ -523,11 +483,13 @@ with tab_slate:
                     f"Avg ownership: {avg_own:.1f}% | Slate value leader: {value_leader}"
                 )
 
-            with st.expander("View cleaned pool", expanded=False):
+            with st.expander("View player pool", expanded=False):
                 st.dataframe(pool_df, use_container_width=True, height=350)
 
-            # --- Right Angle Ricky Edge Analysis ---
-            st.markdown("### 3. 📐 Right Angle Ricky — Edge Analysis")
+            st.markdown("---")
+
+            # ── Edge Analysis (middle) ───────────────────────────────────
+            st.markdown("### 📐 Right Angle Ricky — Edge Analysis")
 
             col_edge_l, col_edge_r = st.columns(2)
 
@@ -535,8 +497,44 @@ with tab_slate:
                 st.markdown("#### 🔥 Stack Alerts")
                 stack_alerts = detect_stack_alerts(pool_df)
                 if stack_alerts:
-                    for alert in stack_alerts:
+                    for s_idx, alert in enumerate(stack_alerts):
                         st.markdown(f"- {alert}")
+                    st.markdown("")
+                    with st.expander("📝 Log stack outcome", expanded=False):
+                        log_slate_date = st.date_input(
+                            "Slate date",
+                            value=_today_est(),
+                            key="stack_log_date",
+                        )
+                        log_stack_sel = st.selectbox(
+                            "Which stack?",
+                            stack_alerts,
+                            key="stack_log_sel",
+                        )
+                        log_note = st.text_input(
+                            "Note (optional)",
+                            placeholder="e.g. both went off, Jalen Duren 38 pts",
+                            key="stack_log_note",
+                        )
+                        hit_col, miss_col = st.columns(2)
+                        with hit_col:
+                            if st.button("✅ Hit", key="stack_log_hit"):
+                                st.session_state["stack_hit_log"].append({
+                                    "slate_date": str(log_slate_date),
+                                    "stack": log_stack_sel,
+                                    "outcome": "Hit",
+                                    "note": log_note,
+                                })
+                                st.success("Logged as ✅ Hit")
+                        with miss_col:
+                            if st.button("❌ Miss", key="stack_log_miss"):
+                                st.session_state["stack_hit_log"].append({
+                                    "slate_date": str(log_slate_date),
+                                    "stack": log_stack_sel,
+                                    "outcome": "Miss",
+                                    "note": log_note,
+                                })
+                                st.warning("Logged as ❌ Miss")
                 else:
                     st.info("No strong stack signals detected.")
 
@@ -557,57 +555,10 @@ with tab_slate:
                 else:
                     st.info("No stand-out value plays identified.")
 
-                st.markdown("#### 📋 Quick Notes")
-                # Dynamic notes based on detected pool data
-                quick_notes = []
+            st.markdown("---")
 
-                if stack_alerts:
-                    quick_notes.append(
-                        f"**Stack alerts**: {len(stack_alerts)} team stack(s) detected — "
-                        "prioritise 2-man / 3-man stacks in GPPs for ceiling."
-                    )
-                else:
-                    quick_notes.append(
-                        "**Stack alerts**: No dominant team stacks detected — "
-                        "spread exposure across multiple games."
-                    )
-
-                if pace_notes:
-                    quick_notes.append(
-                        f"**High-paced game**: {len(pace_notes)} high-total game(s) on slate — "
-                        "stack teammates from high-total matchups."
-                    )
-                else:
-                    quick_notes.append(
-                        "**Pace environment**: Game-total data not available — "
-                        "upload a pool with opponent data for environment analysis."
-                    )
-
-                if value_plays:
-                    quick_notes.append(
-                        f"**Value plays**: {len(value_plays)} stand-out value play(s) identified — "
-                        "use as cheap differentiators to free up salary for studs."
-                    )
-                else:
-                    quick_notes.append(
-                        "**Value plays**: No stand-out values detected — "
-                        "consider lowering min projection threshold."
-                    )
-
-                quick_notes.append(
-                    "**Ownership leverage**: In GPPs, fade chalk (>30% own) and target "
-                    "low-own upside plays to differentiate from the field."
-                )
-
-                for qn in quick_notes:
-                    st.markdown(f"- {qn}")
-                st.caption(
-                    "Quick notes update automatically based on the loaded pool. "
-                    "Sims and calibration learnings will sharpen the signals."
-                )
-
-            # --- Calibration Queue Lineups ---
-            st.markdown("### 4. 📥 Lineups from Calibration Queue")
+            # ── Approved Lineups from Calibration (bottom) ──────────────
+            st.markdown("### 📥 Approved Lineups from Calibration")
 
             promoted = st.session_state.get("promoted_lineups", [])
             if promoted:
@@ -615,9 +566,12 @@ with tab_slate:
                     label = entry.get("label", f"Promoted Set {i + 1}")
                     lu_df = entry.get("lineups_df")
                     meta = entry.get("metadata", {})
-                    with st.expander(f"**{label}** — {meta.get('contest_type', '')} | {len(lu_df['lineup_index'].unique()) if lu_df is not None else 0} lineups", expanded=(i == 0)):
+                    with st.expander(
+                        f"**{label}** — {meta.get('contest_type', '')} | "
+                        f"{len(lu_df['lineup_index'].unique()) if lu_df is not None else 0} lineups",
+                        expanded=(i == 0),
+                    ):
                         if lu_df is not None and not lu_df.empty:
-                            # Annotate with Ricky confidence scores
                             annotated = ricky_annotate(lu_df)
                             unique_lu = sorted(annotated["lineup_index"].unique())
                             sel_lu = st.selectbox(
@@ -638,13 +592,10 @@ with tab_slate:
                             st.info("No lineups in this set.")
             else:
                 st.info(
-                    "No lineups have been promoted yet. "
+                    "No lineups approved yet. "
                     "Run sims in the **🔬 Calibration Lab** and use "
                     "**Post to Ricky's Slate Room** to surface high-confidence lineups here."
                 )
-
-        else:
-            st.info("Upload a projection CSV above to see edge analysis and lineups.")
 
 
 # ============================================================
@@ -663,8 +614,8 @@ with tab_optimizer:
         pool_df_opt = st.session_state.get("pool_df")
         if pool_df_opt is None:
             st.warning(
-                "Load a player pool in **🏀 Ricky's Slate Room** first — "
-                "upload an RG CSV or use **Fetch Pool from API**."
+                "Load a player pool in the **🔬 Calibration Lab** first — "
+                "upload an RG projection sheet there to get started."
             )
         else:
             # --- Contest & slate controls ---
@@ -720,6 +671,7 @@ with tab_optimizer:
                 st.caption(f"📌 {arch_desc}")
 
             # --- Optimizer controls ---
+            st.markdown("---")
             st.markdown("### 2. Build Controls")
             ctrl_c1, ctrl_c2, ctrl_c3, ctrl_c4 = st.columns(4)
             with ctrl_c1:
@@ -763,6 +715,7 @@ with tab_optimizer:
             )
 
             # --- Player Pool Overrides ---
+            st.markdown("---")
             st.markdown("### 3. Player Pool Overrides")
             with st.expander("🔒 Lock / Exclude / Bump Players", expanded=False):
                 override_c1, override_c2, override_c3 = st.columns(3)
@@ -817,6 +770,7 @@ with tab_optimizer:
             # Apply slate filter
             pool_for_opt = apply_slate_filters(pool_df_opt, slate_type_opt, showdown_game_opt)
 
+            st.markdown("---")
             if st.button("🚀 Build Lineups", type="primary", key="opt_build_btn"):
                 with st.spinner(f"Optimizing ({dk_contest_sel} / {archetype_sel})..."):
                     lu_df, exp_df = run_optimizer(
@@ -908,15 +862,69 @@ with tab_optimizer:
 # ============================================================
 with tab_lab:
     st.subheader("🔬 Calibration Lab")
+
+    # ── 0. Player Pool / RG Projection Upload ─────────────────────────────
+    st.markdown("### 📂 Load Player Pool")
     st.markdown(
-        "Review prior-day lineups, run sims, tune configs, and promote "
-        "high-confidence lineups to Ricky's Slate Room."
+        "Upload your RotoGrinders projection sheet here. "
+        "This is the primary way to load a pool — it powers the Slate Room, Optimizer, and Sims."
     )
+
+    cal_upload_l, cal_upload_r = st.columns([2, 1])
+    with cal_upload_l:
+        rg_upload_cal = st.file_uploader(
+            "Upload RotoGrinders NBA CSV",
+            type=["csv"],
+            key="cal_rg_upload",
+            help="RG projection export — FPTS, SALARY, OWNERSHIP columns will be mapped automatically.",
+        )
+    with cal_upload_r:
+        st.markdown("**— or fetch from API —**")
+        fetch_slate_date_cal = st.date_input(
+            "Slate date",
+            value=_today_est(),
+            key="cal_fetch_date",
+        )
+        if st.button(
+            "🌐 Fetch Pool from API",
+            key="cal_fetch_api_btn",
+            help="Requires Tank01 RapidAPI key set in the sidebar.",
+        ):
+            api_key = st.session_state.get("rapidapi_key", "")
+            if not api_key:
+                st.error("Set your Tank01 RapidAPI key in the sidebar first.")
+            else:
+                with st.spinner("Fetching live DK pool from Tank01…"):
+                    try:
+                        live_pool = fetch_live_opt_pool(
+                            str(fetch_slate_date_cal),
+                            {"RAPIDAPI_KEY": api_key},
+                        )
+                        if "player_name" not in live_pool.columns and "name" in live_pool.columns:
+                            live_pool = live_pool.rename(columns={"name": "player_name"})
+                        st.session_state["pool_df"] = live_pool
+                        st.success(f"Loaded {len(live_pool)} players from API.")
+                    except Exception as _e:
+                        st.error(f"API fetch failed: {_e}")
+
+    if rg_upload_cal is not None:
+        raw_df = pd.read_csv(rg_upload_cal)
+        pool_df_cal = rename_rg_columns_to_yakos(raw_df)
+        st.session_state["pool_df"] = pool_df_cal
+        st.success(f"✅ Pool loaded — {len(pool_df_cal)} players. Head to **🏀 Ricky's Slate Room** to review.")
+
+    current_pool_df = st.session_state.get("pool_df")
+    if current_pool_df is not None and not current_pool_df.empty:
+        st.caption(f"Active pool: **{len(current_pool_df)} players** loaded.")
+    else:
+        st.info("No pool loaded yet. Upload an RG CSV above to begin.")
+
+    st.markdown("---")
 
     # Load historical data
     hist_df = load_historical_lineups()
 
-    # ---- Section A: Calibration Queue ----
+    # ── Section A: Calibration Queue ─────────────────────────────────────
     st.markdown("### A. Calibration Queue — Prior-Day Lineups")
 
     if hist_df.empty:
@@ -991,6 +999,35 @@ with tab_lab:
                     )
                     st.success("Config suggestions derived from queue analysis.")
                     st.json(suggested)
+
+    # ---- Stack Hit Log ----
+    st.markdown("---")
+    st.markdown("### 📊 Stack Hit Log")
+    st.markdown("Track which stack calls hit so you can calibrate signal accuracy over time.")
+
+    hit_log = st.session_state.get("stack_hit_log", [])
+    if hit_log:
+        hit_df = pd.DataFrame(hit_log)
+        total = len(hit_df)
+        n_hits = (hit_df["outcome"] == "Hit").sum()
+        hit_rate = n_hits / total
+
+        log_kpi1, log_kpi2, log_kpi3 = st.columns(3)
+        log_kpi1.metric("Total Logged", total)
+        log_kpi2.metric("Hits", n_hits)
+        log_kpi3.metric("Hit Rate", f"{hit_rate:.0%}")
+
+        st.dataframe(hit_df, use_container_width=True, height=220)
+
+        if st.button("🗑️ Clear log", key="stack_log_clear"):
+            st.session_state["stack_hit_log"] = []
+            st.rerun()
+    else:
+        st.info(
+            "No stack outcomes logged yet. "
+            "Use the **📝 Log stack outcome** control in **🏀 Ricky's Slate Room** "
+            "after each slate to build a hit-rate history."
+        )
 
     # ---- Section B: Ad Hoc Historical Lineup Builder ----
     st.markdown("---")
@@ -1284,7 +1321,7 @@ with tab_lab:
                         "Pool updated — head to the Optimizer to rebuild lineups."
                     )
             elif live_pool is None:
-                st.info("Load a player pool in **🏀 Ricky's Slate Room** first to merge ownership.")
+                st.info("Load a player pool using the **📂 Load Player Pool** section above to merge ownership.")
         except Exception as e:
             st.error(f"Failed to parse DK contest CSV: {e}")
 
@@ -1356,8 +1393,7 @@ with tab_lab:
     pool_for_sim = st.session_state.get("pool_df")
     if pool_for_sim is None:
         st.info(
-            "Load a player pool in **🏀 Ricky's Slate Room** to enable sims. "
-            "You can upload an RG CSV or fetch the pool from the Tank01 API."
+            "Load a player pool using the **📂 Load Player Pool** section at the top of this tab to enable sims."
         )
     else:
         # News / lineup updates
@@ -1368,7 +1404,7 @@ with tab_lab:
                 st.markdown("**🌐 Fetch from API**")
                 news_slate_date = st.date_input(
                     "Slate date",
-                    value=pd.Timestamp.today().date(),
+                    value=_today_est(),
                     key="sim_news_date",
                 )
                 if st.button(
