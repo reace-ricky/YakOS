@@ -1,0 +1,97 @@
+{
+  "GPP": {
+    "proj_multiplier": 1.0,
+    "ceiling_boost": 0.15,
+    "floor_reduction": -0.1,
+    "high_own_adjustment": 0.05,
+    "position_adjustments": {
+      "PG": 0.0,
+      "SG": 0.0,
+      "SF": 0.0,
+      "PF": 0.0,
+      "C": 0.0
+    },
+    "salary_bracket_adjustments": {
+      "<5K": 0.0,
+      "5-6.5K": 0.0,
+      "6.5-8K": 0.0,
+      ">8K": 0.0
+    }
+  },
+  "50/50": {
+    "proj_multiplier": 1.0,
+    "ceiling_boost": -0.05,
+    "floor_reduction": 0.1,
+    "high_own_adjustment": -0.05,
+    "position_adjustments": {
+      "PG": 0.0,
+      "SG": 0.0,
+      "SF": 0.0,
+      "PF": 0.0,
+      "C": 0.0
+    },
+    "salary_bracket_adjustments": {
+      "<5K": 0.0,
+      "5-6.5K": 0.0,
+      "6.5-8K": 0.0,
+      ">8K": 0.0
+    }
+  },
+  "Single Entry": {
+    "proj_multiplier": 1.0,
+    "ceiling_boost": 0.05,
+    "floor_reduction": 0.0,
+    "high_own_adjustment": 0.0,
+    "position_adjustments": {
+      "PG": 0.0,
+      "SG": 0.0,
+      "SF": 0.0,
+      "PF": 0.0,
+      "C": 0.0
+    },
+    "salary_bracket_adjustments": {
+      "<5K": 0.0,
+      "5-6.5K": 0.0,
+      "6.5-8K": 0.0,
+      ">8K": 0.0
+    }
+  },
+  "MME": {
+    "proj_multiplier": 1.0,
+    "ceiling_boost": 0.1,
+    "floor_reduction": -0.05,
+    "high_own_adjustment": 0.02,
+    "position_adjustments": {
+      "PG": 0.0,
+      "SG": 0.0,
+      "SF": 0.0,
+      "PF": 0.0,
+      "C": 0.0
+    },
+    "salary_bracket_adjustments": {
+      "<5K": 0.0,
+      "5-6.5K": 0.0,
+      "6.5-8K": 0.0,
+      ">8K": 0.0
+    }
+  },
+  "Captain": {
+    "proj_multiplier": 1.0,
+    "ceiling_boost": 0.2,
+    "floor_reduction": -0.15,
+    "high_own_adjustment": 0.1,
+    "position_adjustments": {
+      "PG": 0.0,
+      "SG": 0.0,
+      "SF": 0.0,
+      "PF": 0.0,
+      "C": 0.0
+    },
+    "salary_bracket_adjustments": {
+      "<5K": 0.0,
+      "5-6.5K": 0.0,
+      "6.5-8K": 0.0,
+      ">8K": 0.0
+    }
+  }
+}

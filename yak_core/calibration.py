@@ -11,6 +11,7 @@ This module provides:
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -249,25 +250,40 @@ def apply_archetype(
     return out
 
 
-def load_calibration_config(config_path: str = None) -> Dict[str, Any]:
+# Default path for persistent calibration config (relative to repo root)
+_DEFAULT_CALIB_CONFIG_PATH = (
+    Path(__file__).resolve().parent.parent / "data" / "calibration_config.json"
+)
+
+
+def load_calibration_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     """Load calibration config from JSON file, or return defaults.
-    
+
     Args:
-        config_path: Path to calibration.json. If None, uses default.
-    
+        config_path: Path to calibration.json.
+                     Defaults to ``data/calibration_config.json`` in the repo root.
+
     Returns:
         Calibration config dict
     """
-    if config_path and Path(config_path).exists():
-        with open(config_path, "r") as f:
+    path = Path(config_path) if config_path else _DEFAULT_CALIB_CONFIG_PATH
+    if path.exists():
+        with open(path, "r") as f:
             return json.load(f)
     return DEFAULT_CALIBRATION_CONFIG
 
 
-def save_calibration_config(config: Dict[str, Any], config_path: str) -> None:
-    """Save calibration config to JSON file."""
-    Path(config_path).parent.mkdir(parents=True, exist_ok=True)
-    with open(config_path, "w") as f:
+def save_calibration_config(config: Dict[str, Any], config_path: Optional[str] = None) -> None:
+    """Save calibration config to JSON file.
+
+    Args:
+        config: Calibration config dict.
+        config_path: Destination path.  Defaults to ``data/calibration_config.json``
+                     in the repo root.
+    """
+    path = Path(config_path) if config_path else _DEFAULT_CALIB_CONFIG_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
         json.dump(config, f, indent=2)
 
 
