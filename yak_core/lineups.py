@@ -226,25 +226,33 @@ def build_multiple_lineups_with_exposure(
             for s in DK_POS_SLOTS:
                 x[(i, s)] = pulp.LpVariable(f"x_{i}_{s}_{lu_num}", cat="Binary")
 
-        # Objective: blend projection + ownership leverage
-        if own_weight > 0 and any("leverage" in p for p in players):
-            prob += pulp.lpSum(
-                (
-                    (1 - own_weight) * players[i]["proj"]
-                    + own_weight
-                    * players[i]["proj"]
-                    * players[i].get("leverage", 0.5)
-                )
-                * x[(i, s)]
-                for i in range(n)
-                for s in DK_POS_SLOTS
-            )
-        else:
-            prob += pulp.lpSum(
-                players[i]["proj"] * x[(i, s)]
-                for i in range(n)
-                for s in DK_POS_SLOTS
-            )
+        # Objective: blend projection + ownership leverage + edge scores
+        # stack_weight / value_weight pull in Edge Analysis scores when present.
+        stack_weight = float(cfg.get("STACK_WEIGHT", 0.0))
+        value_weight = float(cfg.get("VALUE_WEIGHT", 0.0))
+        has_stack_scores = any("stack_score" in p for p in players)
+        has_value_scores = any("value_score" in p for p in players)
+
+        def _effective_proj(p):
+            base = float(p.get("proj", 0))
+            # Ownership leverage
+            if own_weight > 0 and "leverage" in p:
+                base = (1 - own_weight) * base + own_weight * base * p.get("leverage", 0.5)
+            # Stack score bonus
+            if stack_weight > 0 and has_stack_scores:
+                ss = float(p.get("stack_score", 50.0) or 50.0) / 100.0  # normalise 0–1
+                base = base * (1 + stack_weight * (ss - 0.5))
+            # Value score bonus
+            if value_weight > 0 and has_value_scores:
+                vs = float(p.get("value_score", 50.0) or 50.0) / 100.0  # normalise 0–1
+                base = base * (1 + value_weight * (vs - 0.5))
+            return base
+
+        prob += pulp.lpSum(
+            _effective_proj(players[i]) * x[(i, s)]
+            for i in range(n)
+            for s in DK_POS_SLOTS
+        )
 
         # Exactly one player per slot
         for s in DK_POS_SLOTS:

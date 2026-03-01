@@ -58,6 +58,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         # Ownership model knobs
     "OWN_WEIGHT": 0.0,         # 0 = pure proj, 0.1-0.3 = mild leverage, 0.5+ = heavy contrarian
     "OWN_SOURCE": "auto",      # "auto" (salary-rank if missing), "salary_rank" (always generate)
+    "STACK_WEIGHT": 0.0,       # 0 = disabled; 0.1-0.3 = use stack_score to boost stacked players
+    "VALUE_WEIGHT": 0.0,       # 0 = disabled; 0.1-0.3 = use value_score to boost value plays
 }
 
 

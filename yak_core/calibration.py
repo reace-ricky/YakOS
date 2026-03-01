@@ -772,3 +772,258 @@ def suggest_config_from_queue(
             )
 
     return suggested
+
+
+# ============================================================
+# APPROVED LINEUPS DATA CONTRACT
+# ============================================================
+
+from dataclasses import dataclass, field, asdict
+from typing import Optional as Opt
+
+
+@dataclass
+class ApprovedLineup:
+    """Canonical approved-lineup record produced by Calibration Lab.
+
+    Calibration Lab is responsible for running the optimizer + sims by
+    archetype, choosing the best lineups (by sim ROI / p90), marking them
+    as "approved", and storing them in ``st.session_state["approved_lineups"]``
+    so that the main Slate Room screen can consume them as a read-only list.
+
+    Fields
+    ------
+    id : str
+        Unique lineup identifier (e.g. "gpp-0", "se-1").
+    contest_archetype : str
+        One of "GPP", "SE", "3-MAX", "50/50", "Showdown".
+    site : str
+        "DK" or "FD".
+    slate : str
+        Slate label (e.g. "NBA 2026-03-01 Main").
+    proj_points : float
+        Projected fantasy points for this lineup.
+    sim_median : float
+        Median simulated score across Monte Carlo iterations.
+    sim_p90 : float
+        90th-percentile simulated score.
+    sim_roi : float
+        Estimated ROI from sims (e.g. 0.12 = 12%).
+    players : list of dict
+        Each entry: {"name", "team", "pos", "salary", "ownership"}.
+    late_swap_window : str or None
+        Optional late-swap window label (e.g. "After 7:30pm games lock").
+    """
+
+    id: str
+    contest_archetype: str
+    site: str
+    slate: str
+    proj_points: float
+    sim_median: float
+    sim_p90: float
+    sim_roi: float
+    players: List[Dict[str, Any]] = field(default_factory=list)
+    late_swap_window: Opt[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialise to a plain dict (JSON-safe)."""
+        return asdict(self)
+
+
+def build_approved_lineups(
+    lineups_df: pd.DataFrame,
+    sim_results: pd.DataFrame,
+    contest_archetype: str = "GPP",
+    site: str = "DK",
+    slate: str = "",
+    late_swap_window: Opt[str] = None,
+    top_n: int = 20,
+) -> List[ApprovedLineup]:
+    """Convert optimizer + sim output into a list of :class:`ApprovedLineup`.
+
+    This is called by Calibration Lab after running the optimizer and sims.
+    It selects the top ``top_n`` lineups by sim ROI (falling back to
+    sim_mean when ROI is unavailable), packages them as
+    :class:`ApprovedLineup` objects, and returns the list so the Slate Room
+    can display them read-only.
+
+    Parameters
+    ----------
+    lineups_df : pd.DataFrame
+        Long-format lineup table with at least ``lineup_index``, ``player_name``,
+        ``team``, ``pos``, ``salary``, ``proj``, and optionally ``ownership``.
+    sim_results : pd.DataFrame
+        Per-lineup sim summary from ``run_monte_carlo_for_lineups``; expected
+        columns: ``lineup_index``, ``sim_mean``, ``smash_prob``,
+        ``median_points``, ``sim_p85``.
+    contest_archetype : str
+        Archetype label for all lineups in this batch.
+    site : str
+        "DK" or "FD".
+    slate : str
+        Human-readable slate label.
+    late_swap_window : str or None
+        Optional late-swap window label.
+    top_n : int
+        Maximum number of approved lineups to return.
+
+    Returns
+    -------
+    list of ApprovedLineup
+    """
+    if lineups_df.empty:
+        return []
+
+    # Merge sim metrics if available
+    if sim_results is not None and not sim_results.empty and "lineup_index" in sim_results.columns:
+        merged = lineups_df.copy().merge(
+            sim_results[["lineup_index", "sim_mean", "median_points", "sim_p85",
+                         "smash_prob"]].drop_duplicates("lineup_index"),
+            on="lineup_index",
+            how="left",
+        )
+    else:
+        merged = lineups_df.copy()
+        merged["sim_mean"] = merged.get("proj", pd.Series(dtype=float))
+        merged["median_points"] = merged.get("proj", pd.Series(dtype=float))
+        merged["sim_p85"] = merged.get("proj", pd.Series(dtype=float))
+        merged["smash_prob"] = 0.0
+
+    # Compute per-lineup summary for ranking
+    lineup_summary = (
+        merged.groupby("lineup_index")
+        .agg(
+            proj_points=("proj", "sum"),
+            sim_median=("median_points", "first"),
+            sim_p90=("sim_p85", "first"),
+            smash_prob=("smash_prob", "first"),
+        )
+        .reset_index()
+    )
+
+    # Estimate sim_roi: use smash_prob as a proxy (actual ROI needs contest entry fee)
+    lineup_summary["sim_roi"] = lineup_summary["smash_prob"].fillna(0.0)
+
+    # Sort by sim_roi desc, take top_n
+    lineup_summary = lineup_summary.sort_values("sim_roi", ascending=False).head(top_n)
+
+    approved: List[ApprovedLineup] = []
+    for i, (_, row) in enumerate(lineup_summary.iterrows()):
+        lu_id = row["lineup_index"]
+        lu_players_df = lineups_df[lineups_df["lineup_index"] == lu_id]
+
+        players = []
+        for _, p in lu_players_df.iterrows():
+            players.append({
+                "name": str(p.get("player_name", "?")),
+                "team": str(p.get("team", "?")),
+                "pos": str(p.get("pos", p.get("slot", "?"))),
+                "salary": int(p.get("salary", 0)),
+                "ownership": float(p.get("ownership", 0.0) or 0.0),
+            })
+
+        approved.append(ApprovedLineup(
+            id=f"{contest_archetype.lower().replace('/', '')}-{i}",
+            contest_archetype=contest_archetype,
+            site=site,
+            slate=slate,
+            proj_points=round(float(row.get("proj_points", 0)), 2),
+            sim_median=round(float(row.get("sim_median", 0) or 0), 2),
+            sim_p90=round(float(row.get("sim_p90", 0) or 0), 2),
+            sim_roi=round(float(row.get("sim_roi", 0) or 0), 4),
+            players=players,
+            late_swap_window=late_swap_window,
+        ))
+
+    return approved
+
+
+def get_approved_lineups_by_archetype(
+    approved_lineups: List[ApprovedLineup],
+) -> Dict[str, List[ApprovedLineup]]:
+    """Group a flat list of :class:`ApprovedLineup` by ``contest_archetype``.
+
+    Parameters
+    ----------
+    approved_lineups : list of ApprovedLineup
+
+    Returns
+    -------
+    dict mapping archetype str → list of ApprovedLineup
+    """
+    result: Dict[str, List[ApprovedLineup]] = {}
+    for lu in approved_lineups:
+        result.setdefault(lu.contest_archetype, []).append(lu)
+    return result
+
+
+def compute_slate_kpis(
+    approved_lineups: List[ApprovedLineup],
+    last_calibration_ts: Opt[str] = None,
+) -> Dict[str, Any]:
+    """Compute KPI values for the Slate Room KPI strip.
+
+    Parameters
+    ----------
+    approved_lineups : list of ApprovedLineup
+        All approved lineups from the latest Calibration Lab run.
+    last_calibration_ts : str or None
+        ISO timestamp of the last calibration run.
+
+    Returns
+    -------
+    dict with keys:
+        slate_ev, approved_count, archetype_counts, max_exposure,
+        simmed_hit_rate, last_updated, color
+    """
+    if not approved_lineups:
+        return {
+            "slate_ev": 0.0,
+            "approved_count": 0,
+            "archetype_counts": {},
+            "max_exposure": 0.0,
+            "simmed_hit_rate": 0.0,
+            "last_updated": last_calibration_ts or "—",
+            "color": "red",
+        }
+
+    slate_ev = sum(lu.sim_roi for lu in approved_lineups)
+    approved_count = len(approved_lineups)
+
+    archetype_counts: Dict[str, int] = {}
+    for lu in approved_lineups:
+        archetype_counts[lu.contest_archetype] = archetype_counts.get(lu.contest_archetype, 0) + 1
+
+    # Max player exposure (fraction appearing across lineups)
+    player_counts: Dict[str, int] = {}
+    for lu in approved_lineups:
+        seen = set()
+        for p in lu.players:
+            name = p.get("name", "")
+            if name and name not in seen:
+                player_counts[name] = player_counts.get(name, 0) + 1
+                seen.add(name)
+    max_exposure = max(player_counts.values()) / approved_count if player_counts else 0.0
+
+    # Simmed hit rate: fraction of lineups with smash_prob-style sim_roi > 0
+    hit_lineups = sum(1 for lu in approved_lineups if lu.sim_roi > 0)
+    simmed_hit_rate = hit_lineups / approved_count if approved_count else 0.0
+
+    # Color rule
+    if simmed_hit_rate >= 0.65 and slate_ev >= 0:
+        color = "green"
+    elif simmed_hit_rate >= 0.50 or slate_ev >= -0.1:
+        color = "yellow"
+    else:
+        color = "red"
+
+    return {
+        "slate_ev": round(slate_ev, 4),
+        "approved_count": approved_count,
+        "archetype_counts": archetype_counts,
+        "max_exposure": round(max_exposure, 3),
+        "simmed_hit_rate": round(simmed_hit_rate, 3),
+        "last_updated": last_calibration_ts or "—",
+        "color": color,
+    }
