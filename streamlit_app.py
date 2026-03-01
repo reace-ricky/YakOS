@@ -76,6 +76,8 @@ from yak_core.right_angle import (  # type: ignore
 from yak_core.sims import (  # type: ignore
     run_monte_carlo_for_lineups,
     simulate_live_updates,
+    SMASH_THRESHOLD as _SIM_SMASH_THRESHOLD,
+    BUST_THRESHOLD as _SIM_BUST_THRESHOLD,
 )
 from yak_core.live import (  # type: ignore
     fetch_live_opt_pool,
@@ -2114,7 +2116,31 @@ with tab_lab:
             sim_kpi[3].metric("Avg bust prob", f"{sim_res['bust_prob'].mean():.1%}")
 
             with st.expander("Lineup-level sim metrics", expanded=True):
-                st.dataframe(sim_res.sort_values("smash_prob", ascending=False), use_container_width=True, height=300)
+                st.markdown(
+                    "**Column guide** — each row is one optimizer lineup simulated across "
+                    "N iterations using per-player normal distributions:\n\n"
+                    "| Column | What it means |\n"
+                    "|--------|---------------|\n"
+                    "| **Lineup #** | Lineup identifier (matches the Optimizer view) |\n"
+                    "| **Avg Score** | Mean total FP across all sim iterations — best single-number estimate of lineup strength |\n"
+                    "| **Std Dev** | Score variability. High = boom-or-bust GPP profile; low = steady cash-game floor |\n"
+                    f"| **Smash %** | Probability of scoring **≥ {_SIM_SMASH_THRESHOLD:.0f} FP** — the GPP \"smash\" threshold. Higher is better for tournaments |\n"
+                    f"| **Bust %** | Probability of scoring **≤ {_SIM_BUST_THRESHOLD:.0f} FP** — likely cash-game miss. Lower is better |\n"
+                    "| **Median Score** | Middle-of-distribution outcome (50th percentile) |\n"
+                    "| **P85 (Upside)** | 85th-percentile score — what the lineup looks like on a good night |\n"
+                    "| **P15 (Floor)** | 15th-percentile score — downside floor on a bad night |"
+                )
+                _sim_display = sim_res.sort_values("smash_prob", ascending=False).rename(columns={
+                    "lineup_index": "Lineup #",
+                    "sim_mean": "Avg Score",
+                    "sim_std": "Std Dev",
+                    "smash_prob": "Smash %",
+                    "bust_prob": "Bust %",
+                    "median_points": "Median Score",
+                    "sim_p85": "P85 (Upside)",
+                    "sim_p15": "P15 (Floor)",
+                })
+                st.dataframe(_sim_display, use_container_width=True, height=300)
 
             # Apply learnings: boost projection of high-sim players for next run
             st.markdown("#### Apply Learnings to Live Slate Logic")
