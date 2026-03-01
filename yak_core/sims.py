@@ -1,5 +1,5 @@
 """Monte Carlo simulation for YakOS DFS optimizer."""
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -249,4 +249,129 @@ def backtest_sim(
         "sim_bias": round(sim_bias, 2),
         "within_range_pct": round(within_range_pct, 1),
         "n_lineups": n,
+    }
+
+
+def build_sim_player_accuracy_table(
+    pool_df: pd.DataFrame,
+    actuals_df: pd.DataFrame,
+    hit_threshold: float = 10.0,
+) -> Dict[str, Any]:
+    """Build a per-player sim projection vs actuals accuracy table.
+
+    Joins the player pool projections to actual fantasy-point results, then
+    computes a set of calibration KPIs to measure how well the sim's input
+    projections matched reality.
+
+    Parameters
+    ----------
+    pool_df : pd.DataFrame
+        Player pool with projections.  Must contain a name column
+        (``player_name`` or ``name``) and a ``proj`` column.
+    actuals_df : pd.DataFrame
+        Actual results.  Must contain a name column (``player_name`` or
+        ``name``) and an actuals column (``actual`` or ``actual_fp``).
+    hit_threshold : float, optional
+        Absolute-error threshold (in fantasy points) used for the hit-rate
+        metric.  A player is a "hit" when ``|error| <= hit_threshold``
+        (default 10.0 FP).
+
+    Returns
+    -------
+    dict
+        ``player_df``   — per-player DataFrame with columns:
+                          ``name``, ``proj``, ``actual``, ``error``,
+                          ``abs_error``, ``pct_error``.
+
+        ``mae``         — Mean Absolute Error: mean(|proj − actual|).
+
+        ``rmse``        — Root Mean Squared Error.
+
+        ``bias``        — Mean error (proj − actual); positive = over-projected.
+
+        ``hit_rate``    — Percentage of players where |error| ≤ ``hit_threshold``.
+
+        ``r2``          — R² between proj and actual (0–1; higher is better).
+
+        ``n_players``   — Number of matched players used in the calculation.
+    """
+    _empty: Dict[str, Any] = {
+        "player_df": pd.DataFrame(),
+        "mae": 0.0,
+        "rmse": 0.0,
+        "bias": 0.0,
+        "hit_rate": 0.0,
+        "r2": 0.0,
+        "n_players": 0,
+    }
+
+    if pool_df.empty or actuals_df.empty:
+        return _empty
+
+    # Normalise pool — accept 'player_name' or 'name'
+    pool = pool_df.copy()
+    if "player_name" in pool.columns and "name" not in pool.columns:
+        pool = pool.rename(columns={"player_name": "name"})
+    if "name" not in pool.columns or "proj" not in pool.columns:
+        return _empty
+
+    # Normalise actuals — accept 'player_name'/'name' and 'actual'/'actual_fp'
+    acts = actuals_df.copy()
+    if "player_name" in acts.columns and "name" not in acts.columns:
+        acts = acts.rename(columns={"player_name": "name"})
+    if "actual_fp" in acts.columns and "actual" not in acts.columns:
+        acts = acts.rename(columns={"actual_fp": "actual"})
+    if "name" not in acts.columns or "actual" not in acts.columns:
+        return _empty
+
+    pool_sub = pool[["name", "proj"]].drop_duplicates(subset=["name"])
+    pool_sub["proj"] = pd.to_numeric(pool_sub["proj"], errors="coerce")
+
+    # Average actuals per player in case the contest-results export lists the
+    # same player multiple times (e.g. duplicate rows in an entry CSV)
+    acts_sub = (
+        acts[["name", "actual"]]
+        .assign(actual=lambda d: pd.to_numeric(d["actual"], errors="coerce"))
+        .groupby("name", as_index=False)["actual"]
+        .mean()
+    )
+
+    merged = pool_sub.merge(acts_sub, on="name", how="inner").dropna(
+        subset=["proj", "actual"]
+    )
+
+    if merged.empty:
+        return _empty
+
+    merged = merged.copy()
+    merged["error"] = merged["proj"] - merged["actual"]
+    merged["abs_error"] = merged["error"].abs()
+    merged["pct_error"] = np.where(
+        merged["actual"] != 0,
+        (merged["error"] / merged["actual"].abs()) * 100.0,
+        np.nan,
+    )
+    merged = merged.reset_index(drop=True)
+
+    errors = merged["error"]
+    n = len(merged)
+
+    mae = float(merged["abs_error"].mean())
+    rmse = float(np.sqrt((errors ** 2).mean()))
+    bias = float(errors.mean())
+    hit_rate = float((merged["abs_error"] <= hit_threshold).mean() * 100.0)
+
+    # R² between proj and actual
+    ss_res = float((errors ** 2).sum())
+    ss_tot = float(((merged["actual"] - merged["actual"].mean()) ** 2).sum())
+    r2 = float(1.0 - ss_res / ss_tot) if ss_tot > 0 else 0.0
+
+    return {
+        "player_df": merged[["name", "proj", "actual", "error", "abs_error", "pct_error"]],
+        "mae": round(mae, 2),
+        "rmse": round(rmse, 2),
+        "bias": round(bias, 2),
+        "hit_rate": round(hit_rate, 1),
+        "r2": round(r2, 3),
+        "n_players": n,
     }
