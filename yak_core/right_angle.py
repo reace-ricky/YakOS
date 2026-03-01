@@ -160,8 +160,8 @@ def detect_stack_alerts(pool_df: pd.DataFrame) -> list:
         )
         top_str = ", ".join(top_names[:2]) if top_names else "—"
         alerts.append(
-            f"🔥 **{team}** stack: {row['team_proj']:.1f} proj pts (top {_STACK_SIZE}) "
-            f"— top: {top_str}"
+            f"🔥 **{team}** stack: {row['team_proj']:.1f} proj pts "
+            f"— {top_str}"
         )
 
     return alerts
