@@ -2597,7 +2597,16 @@ with tab_lab:
                 "Compares the sim's input projections to actual DraftKings fantasy points scored. "
                 "Load actuals above using the 📊 expander."
             )
-            _acc = build_sim_player_accuracy_table(pool_for_sim, _sim_actuals)
+            # Filter pool to only players who appeared in the generated sim lineups
+            _sim_lu_for_acc = st.session_state.get("sim_lineups_df")
+            if _sim_lu_for_acc is not None and not _sim_lu_for_acc.empty:
+                _lu_acc_name_col = "player_name" if "player_name" in _sim_lu_for_acc.columns else "name"
+                _lu_acc_players = set(_sim_lu_for_acc[_lu_acc_name_col].dropna().unique())
+                _pool_acc_name_col = "player_name" if "player_name" in pool_for_sim.columns else "name"
+                _acc_pool = pool_for_sim[pool_for_sim[_pool_acc_name_col].isin(_lu_acc_players)]
+            else:
+                _acc_pool = pool_for_sim
+            _acc = build_sim_player_accuracy_table(_acc_pool, _sim_actuals)
             if _acc["n_players"] > 0:
                 _acc_kpis = st.columns(5)
                 _acc_kpis[0].metric("Players matched", _acc["n_players"])

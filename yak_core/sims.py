@@ -295,7 +295,9 @@ def compute_player_anomaly_table(
         ``Leverage Score``, ``Value Trap``, ``Flag``.
         Empty DataFrame when inputs are insufficient.
     """
-    if pool_df.empty or lineup_df.empty:
+    if pool_df is None:
+        pool_df = pd.DataFrame()
+    if lineup_df.empty:
         return pd.DataFrame()
 
     knobs = cal_knobs or {}
@@ -304,54 +306,81 @@ def compute_player_anomaly_table(
     smash_thr = float(knobs.get("smash_threshold", 1.3))
     bust_thr = float(knobs.get("bust_threshold", 0.5))
 
-    # Normalise pool name column
-    pool = pool_df.copy()
-    if "player_name" in pool.columns and "name" not in pool.columns:
-        pool = pool.rename(columns={"player_name": "name"})
-    if "name" not in pool.columns:
-        return pd.DataFrame()
-
-    # Normalise ownership column
-    for _src in ("ownership", "Own%"):
-        if _src in pool.columns and "own%" not in pool.columns:
-            pool = pool.rename(columns={_src: "own%"})
-            break
-
-    sal_col = "salary" if "salary" in pool.columns else None
-    own_col = "own%" if "own%" in pool.columns else None
-
-    # Find name column in lineup_df
+    # Find name column in lineup_df — this defines which players are in the lineup
     lu_name_col = next(
         (c for c in ("player_name", "name") if c in lineup_df.columns), None
     )
     if lu_name_col is None:
         return pd.DataFrame()
 
-    players_in_lineups = set(lineup_df[lu_name_col].dropna().unique())
-    pool_sub = pool[pool["name"].isin(players_in_lineups)].drop_duplicates(
-        subset=["name"]
+    # Use lineup_df as the authoritative source of players to simulate.
+    # Deduplicate so each player is only simulated once regardless of how many
+    # lineups they appear in.
+    lu_uniq = (
+        lineup_df
+        .drop_duplicates(subset=[lu_name_col])
+        .dropna(subset=[lu_name_col])
+        .copy()
     )
-    if pool_sub.empty:
+    if lu_uniq.empty:
         return pd.DataFrame()
+
+    if lu_name_col != "name":
+        lu_uniq = lu_uniq.rename(columns={lu_name_col: "name"})
+
+    # Build a pool lookup keyed by name to enrich lineup rows with any
+    # supplemental columns (ownership, etc.) not already present in lineup_df.
+    # Only the columns relevant for simulation are kept to minimise memory use.
+    _pool_sim_cols = ("name", "proj", "salary", "own%", "ownership", "Own%", "ceil", "floor")
+    pool_lookup: dict = {}
+    if not pool_df.empty:
+        pool = pool_df.copy()
+        if "player_name" in pool.columns and "name" not in pool.columns:
+            pool = pool.rename(columns={"player_name": "name"})
+        # Normalise ownership column in pool
+        for _src in ("ownership", "Own%"):
+            if _src in pool.columns and "own%" not in pool.columns:
+                pool = pool.rename(columns={_src: "own%"})
+                break
+        if "name" in pool.columns:
+            _keep = [c for c in _pool_sim_cols if c in pool.columns]
+            pool_lookup = (
+                pool[_keep]
+                .drop_duplicates(subset=["name"])
+                .set_index("name")
+                .to_dict("index")
+            )
+
+    # Normalise ownership column in lu_uniq as well
+    for _src in ("ownership", "Own%"):
+        if _src in lu_uniq.columns and "own%" not in lu_uniq.columns:
+            lu_uniq = lu_uniq.rename(columns={_src: "own%"})
+            break
 
     rng = np.random.RandomState(42)
     rows = []
-    for _, row in pool_sub.iterrows():
+    for _, row in lu_uniq.iterrows():
         name = row["name"]
-        proj = float(pd.to_numeric(row.get("proj", 0), errors="coerce") or 0)
+
+        # For each field, prefer the lineup row value; fall back to pool_lookup
+        pool_row = pool_lookup.get(name, {})
+
+        def _get(field: str, default=None):
+            val = row.get(field, None)
+            if val is None or (isinstance(val, float) and np.isnan(val)):
+                val = pool_row.get(field, default)
+            return val
+
+        proj = float(pd.to_numeric(_get("proj", 0), errors="coerce") or 0)
         if proj <= 0:
             continue
 
-        salary = float(
-            pd.to_numeric(row.get(sal_col) if sal_col else 0, errors="coerce") or 0
-        )
-        own_pct = float(
-            pd.to_numeric(row.get(own_col) if own_col else 0, errors="coerce") or 0
-        )
+        salary = float(pd.to_numeric(_get("salary", 0), errors="coerce") or 0)
+        own_pct = float(pd.to_numeric(_get("own%", 0), errors="coerce") or 0)
 
         # Derive std from ceil/floor when available
-        ceil_raw = pd.to_numeric(row.get("ceil", np.nan), errors="coerce")
-        floor_raw = pd.to_numeric(row.get("floor", np.nan), errors="coerce")
+        ceil_raw = pd.to_numeric(_get("ceil", np.nan), errors="coerce")
+        floor_raw = pd.to_numeric(_get("floor", np.nan), errors="coerce")
         ceil_val = float(ceil_raw) if pd.notna(ceil_raw) else proj * 1.3
         floor_val = float(floor_raw) if pd.notna(floor_raw) else proj * 0.7
         std = float(np.clip((ceil_val - floor_val) / 4.0, proj * 0.05, proj * 0.6))

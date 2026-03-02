@@ -61,6 +61,20 @@ class TestComputePlayerAnomalyTableEdgeCases:
         result = compute_player_anomaly_table(_make_pool(), pd.DataFrame())
         assert result.empty
 
+    def test_empty_pool_still_sims_when_lineup_has_proj(self):
+        """When pool is empty but lineup has proj data, sims should still run."""
+        lu = pd.DataFrame([{
+            "player_name": "TestPlayer", "lineup_index": 0, "proj": 35.0,
+            "salary": 7000, "own%": 10.0, "ceil": 50.0, "floor": 20.0,
+        }])
+        df = compute_player_anomaly_table(pd.DataFrame(), lu)
+        assert len(df) == 1
+        assert df.iloc[0]["Player"] == "TestPlayer"
+        assert 0.0 <= df.iloc[0]["Smash%"] <= 100.0
+        assert 0.0 <= df.iloc[0]["Bust%"] <= 100.0
+        assert df.iloc[0]["Proj"] == 35.0
+        assert df.iloc[0]["Salary"] == 7000
+
     def test_accepts_name_column_in_pool(self):
         pool = _make_pool().rename(columns={"player_name": "name"})
         lu = _make_lineups(_make_pool())
@@ -79,6 +93,22 @@ class TestComputePlayerAnomalyTableEdgeCases:
         lu = _make_lineups(pool.head(3))
         df = compute_player_anomaly_table(pool, lu)
         assert len(df) == 3
+
+    def test_pool_player_not_in_lineup_never_simulated(self):
+        """Players that are in the pool but NOT in any lineup must not appear in the result."""
+        pool = _make_pool()  # 5 players
+        # Lineup contains only 2 of the 5 pool players
+        lu = pd.DataFrame([
+            {"player_name": "LeBron James", "lineup_index": 0},
+            {"player_name": "Stephen Curry", "lineup_index": 0},
+        ])
+        df = compute_player_anomaly_table(pool, lu)
+        assert len(df) == 2
+        assert set(df["Player"]) == {"LeBron James", "Stephen Curry"}
+        # Verify pool-only players are absent
+        assert "Nikola Jokic" not in df["Player"].values
+        assert "Kevin Durant" not in df["Player"].values
+        assert "Luka Doncic" not in df["Player"].values
 
     def test_pool_without_salary_column(self):
         pool = _make_pool().drop(columns=["salary"])
