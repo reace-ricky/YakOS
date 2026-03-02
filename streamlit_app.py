@@ -1,5 +1,6 @@
 """YakOS DFS Optimizer - Ricky's Slate Room + Optimizer + Calibration Lab."""
 
+import hmac
 import json
 import sys
 import os
@@ -559,6 +560,8 @@ def ensure_session_state():
     if "injury_cascade" not in st.session_state:
         # list of {out_player, team, out_proj_mins, beneficiaries: [...]}
         st.session_state["injury_cascade"] = []
+    if "is_admin" not in st.session_state:
+        st.session_state["is_admin"] = False
 
 
 def run_optimizer(
@@ -824,7 +827,7 @@ with st.sidebar:
 tab_slate, tab_optimizer, tab_lab = st.tabs([
     "🏀 Ricky's Slate Room",
     "⚡ Optimizer",
-    "📡 Calibration Lab",
+    "🔒 Ricky's Lab",
 ])
 
 # Keep backward-compat alias so all existing `with tab_calib:` blocks still work
@@ -1173,12 +1176,12 @@ with tab_slate:
             st.markdown("---")
 
             # ════════════════════════════════════════════════════════════
-            # LAYER 3 — Ricky's Approved Lineups (read-only from Cal Lab)
+            # LAYER 3 — Ricky's Approved Lineups (read-only from Lab)
             # ════════════════════════════════════════════════════════════
             st.markdown("### 📥 Ricky's Approved Lineups")
             st.caption(
-                "These lineups come from Ricky's Calibration Lab after sims and backtests. "
-                "Rerun Calibration to refresh."
+                "These lineups are published by Ricky from 🔒 Ricky's Lab after sims and backtests. "
+                "Rerun to refresh."
             )
 
             _all_approved = st.session_state.get("approved_lineups", [])
@@ -1249,9 +1252,9 @@ with tab_slate:
                             st.info("No lineups in this set.")
             else:
                 st.info(
-                    "No lineups approved yet. "
-                    "Run sims in the **🔬 Calibration Lab** and use "
-                    "**Post to Ricky's Slate Room** to surface high-confidence lineups here."
+                    "No lineups published yet. "
+                    "Run sims in **🔒 Ricky's Lab** and use "
+                    "**✅ Publish to Slate Room** to surface high-confidence lineups here."
                 )
 
 
@@ -1271,8 +1274,7 @@ with tab_optimizer:
         pool_df_opt = st.session_state.get("pool_df")
         if pool_df_opt is None:
             st.warning(
-                "Load a player pool first — fetch from the Tank01 API in **🏀 Ricky's Slate Room**, "
-                "or upload a CSV in the **🔬 Calibration Lab**."
+                "⏳ Waiting for Ricky to load today's slate. Check back soon."
             )
         else:
             # --- Contest Type picker ---
@@ -1520,10 +1522,36 @@ with tab_optimizer:
 
 
 # ============================================================
-# Tab 3: 🔬 Calibration Lab
+# Tab 3: 🔒 Ricky's Lab (admin-gated)
 # ============================================================
 with tab_lab:
-    st.subheader("📡 Calibration Lab")
+    st.subheader("🔒 Ricky's Lab")
+
+    # ── Admin authentication gate ────────────────────────────────────────────
+    if not st.session_state.get("is_admin", False):
+        st.info("🔒 Admin access required. Enter the password to continue.")
+        _admin_pw_input = st.text_input(
+            "Admin password",
+            type="password",
+            key="admin_pw_input",
+        )
+        if st.button("Unlock Lab", key="admin_unlock_btn"):
+            _expected_pw = ""
+            _secrets_error = False
+            try:
+                _expected_pw = st.secrets["admin_password"]
+            except KeyError:
+                _secrets_error = True
+            except Exception:
+                _secrets_error = True
+            if _secrets_error:
+                st.error("Admin password not configured. Set `admin_password` in .streamlit/secrets.toml.")
+            elif _expected_pw and hmac.compare_digest(_admin_pw_input, _expected_pw):
+                st.session_state["is_admin"] = True
+                st.rerun()
+            else:
+                st.error("Admin access only.")
+        st.stop()
 
     # ── 0. Player Pool / RG Projection Upload ─────────────────────────────
     st.markdown("### 📂 Load Player Pool")
@@ -3106,11 +3134,11 @@ with tab_lab:
                     st.info("No lineups with smash_prob > 10%. Lower threshold or run more lineups.")
 
             # Post to Ricky's Slate Room
-            st.markdown("#### 📤 Post to Ricky's Slate Room")
+            st.markdown("#### 📤 Publish to Slate Room")
             conf_threshold = st.slider(
                 "Minimum confidence to promote", 40.0, 95.0, 65.0, step=5.0, key="sim_conf_thr"
             )
-            if st.button("Post high-confidence lineups → Ricky's Slate Room", type="primary", key="sim_post_btn"):
+            if st.button("✅ Publish to Slate Room", type="primary", key="sim_post_btn"):
                 if "confidence" in sim_lu_df.columns:
                     high_conf_ids = (
                         sim_lu_df.groupby("lineup_index")["confidence"]
@@ -3156,7 +3184,7 @@ with tab_lab:
                     ).strftime("%Y-%m-%d %H:%M ET")
 
                     st.success(
-                        f"Promoted {len(high_conf_ids)} high-confidence lineup(s) "
+                        f"✅ Published {len(high_conf_ids)} high-confidence lineup(s) "
                         "to 🏀 Ricky's Slate Room!"
                     )
                 else:
