@@ -92,6 +92,7 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 71 | **Sprint 1: Fix Data Foundation** — 1.1: Added URL/params logging to `fetch_live_dfs` and `_fetch_actuals_from_box_scores`; `NoGamesScheduledError` raised for off-days (shows "No games scheduled for [date]." in UI); 1.2: `fetch_live_dfs` now extracts player `status` field; both Fetch Pool handlers show combined banner with excluded count + actuals info; 1.3: auto-exclude OUT/IR/Suspended players after fetch (sim_eligible=False), collapsible "Auto-Excluded Players" expander in Slate Room; 1.4: Override slate date already dynamic from `actuals.keys()`; 1.5: Removed "Fetch Actuals from API" tab from Sim Module, replaced with status display + CSV fallback; 1.6: Auto-refresh injury statuses injected into "Run Sims" flow with diff banner; removed "Live News & Lineup Updates" expander; kept Manual Override as small collapsed expander; 7 new tests | `yak_core/live.py`, `streamlit_app.py`, `tests/test_live_actuals.py`, `tests/test_app_imports.py` | latest |
 | 73 | **Sprint 3A: Restructure App into 3 Role-Based Tabs** — Tab 3 renamed from "📡 Calibration Lab" to "🔒 Ricky's Lab"; admin password gate added (checks `st.secrets["admin_password"]`, sets `is_admin` in session state, shows `st.stop()` when not authenticated); Optimizer "no pool" message updated to "Waiting for Ricky to load today's slate. Check back soon."; Slate Room approved lineups caption updated to reference Ricky's Lab; "Post to Slate Room" button renamed to "✅ Publish to Slate Room"; `is_admin` key added to `ensure_session_state()` | `streamlit_app.py` | Sprint 3A |
 | 74 | **Sprint 3B: Lineup Card Display** — `render_lineup_card()` helper added: columns Pos/Team/Player/Salary/Field%/Game/Points, footer with totals, 🟡 for Questionable players; Optimizer tab: replaced `st.number_input("Lineup #")` with ◀ Lineup N of M ▶ arrow navigation, replaced raw `st.dataframe` with `render_lineup_card()`, removed Player Exposures expander and Download Exposures CSV button, consolidated to 2 download columns; Slate Room Approved Lineups: card format for both approved and legacy-promoted paths (legacy uses arrow nav + `render_lineup_card()`); Lab Sim Section: "📋 Lineup Browser" with ◀ ▶ nav and per-lineup "✅ Publish Lineup N to Slate Room" button; `sim_lu_nav` added to session state | `streamlit_app.py` | Sprint 3B |
+| 75 | **Sprint 2B.1 — Load DvP Baseline** — `yak_core/dvp.py` with `parse_dvp_upload`, `save_dvp_table`, `load_dvp_table`, `compute_league_averages`, `dvp_staleness_days`; "🛡️ Upload DvP Table" section added to Ricky's Lab (near Load Player Pool); `dvp_table` + `dvp_league_avgs` persisted in session state and auto-loaded from `data/dvp_baseline.csv` on startup; "Last updated: [date]" indicator; staleness warning if > 7 days old; league averages shown per position; 27 new unit tests in `tests/test_dvp.py`; 7 smoke tests added to `tests/test_app_imports.py` | `yak_core/dvp.py`, `streamlit_app.py`, `tests/test_dvp.py`, `tests/test_app_imports.py` | Sprint 2B.1 |
 
 
 
@@ -157,6 +158,7 @@ YakOS/
 │   ├── multislate.py         # multi-slate discovery, run, compare, DK CSV ingest
 │   ├── contest_ingest.py     # DK contest results CSV → ownership
 │   ├── injury_cascade.py     # Sprint 2 injury cascade: redistribute OUT player minutes to teammates
+│   ├── dvp.py                # Sprint 2B.1: DvP baseline — parse, save, load, compute averages, staleness
 │   └── validation.py         # lineup validity checks
 ├── scripts/
 │   └── train_models.py           # Train FP/Minutes/Ownership models → models/*.pkl
@@ -166,6 +168,7 @@ YakOS/
 │   └── yakos_ownership_model.pkl # Trained ownership projection pipeline
 ├── data/
 │   ├── calibration_config.json  # committed default calibration config
+│   ├── dvp_baseline.csv         # persisted DvP table (uploaded via Ricky's Lab)
 │   ├── NBADK20260227.csv     # sample RG pool file
 │   ├── historical_lineups.csv
 │   └── yakos_projections_2026-02-27.csv
@@ -183,7 +186,8 @@ YakOS/
 │   ├── test_sim_player_accuracy.py      (23 tests)
 │   ├── test_live_actuals.py             (23 tests)
 │   ├── test_sim_eligible.py             (24 tests)
-│   └── test_injury_cascade.py           (28 tests)
+│   ├── test_injury_cascade.py           (28 tests)
+│   └── test_dvp.py                      (27 tests)
 └── requirements.txt
 ```
 
