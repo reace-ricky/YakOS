@@ -242,6 +242,21 @@ class TestFetchActualsFromApi:
             fetch_actuals_from_api(self.DATE, self.CFG)
             mock_dfs.assert_not_called()
 
+    @patch("yak_core.live._fetch_actuals_from_box_scores")
+    def test_no_games_scheduled_reraises_directly(self, mock_box):
+        """NoGamesScheduledError must propagate as-is (not wrapped in RuntimeError)."""
+        from yak_core.live import NoGamesScheduledError
+        mock_box.side_effect = NoGamesScheduledError("No games found for 20260222")
+        with pytest.raises(NoGamesScheduledError):
+            fetch_actuals_from_api(self.DATE, self.CFG)
+
+    @patch("yak_core.live._fetch_actuals_from_box_scores")
+    def test_generic_error_wrapped_as_runtime_error(self, mock_box):
+        """Non-NoGamesScheduledError exceptions are wrapped in RuntimeError."""
+        mock_box.side_effect = ConnectionError("network error")
+        with pytest.raises(RuntimeError, match="Tank01 actuals API error"):
+            fetch_actuals_from_api(self.DATE, self.CFG)
+
 
 # ---------------------------------------------------------------------------
 # fetch_live_dfs — body dict unwrapping
@@ -316,3 +331,55 @@ class TestFetchLiveDfsBodyParsing:
         df = fetch_live_dfs(self.DATE, self.CFG)
         assert df["salary"].dtype in (int, "int64", "int32")
         assert df["salary"].iloc[0] == 7500
+
+    @patch("yak_core.live.requests.get")
+    def test_status_field_extracted(self, mock_get):
+        """injuryStatus field should be mapped to the status column."""
+        players = [
+            {"playerID": "1", "longName": "Alice", "teamAbv": "BOS", "pos": "SF",
+             "salary": "7500", "fantasyPoints": "35.0", "injuryStatus": "OUT"},
+            {"playerID": "2", "longName": "Bob", "teamAbv": "LAL", "pos": "PG",
+             "salary": "8000", "fantasyPoints": "40.0", "injuryStatus": "ACTIVE"},
+        ]
+        mock_get.return_value = _make_dfs_response(
+            {"statusCode": 200, "body": players}
+        )
+        df = fetch_live_dfs(self.DATE, self.CFG)
+        assert "status" in df.columns
+        alice_status = df.loc[df["player_name"] == "Alice", "status"].iloc[0]
+        bob_status = df.loc[df["player_name"] == "Bob", "status"].iloc[0]
+        assert alice_status == "OUT"
+        assert bob_status == "Active"
+
+    @patch("yak_core.live.requests.get")
+    def test_missing_status_defaults_to_active(self, mock_get):
+        """Players with no injuryStatus field default to 'Active'."""
+        mock_get.return_value = _make_dfs_response(
+            {"statusCode": 200, "body": _SAMPLE_PLAYERS}
+        )
+        df = fetch_live_dfs(self.DATE, self.CFG)
+        assert "status" in df.columns
+        assert (df["status"] == "Active").all()
+
+
+# ---------------------------------------------------------------------------
+# NoGamesScheduledError
+# ---------------------------------------------------------------------------
+
+class TestNoGamesScheduledError:
+    CFG = {"RAPIDAPI_KEY": "test-key"}
+    DATE = "20260222"
+
+    @patch("yak_core.live.requests.get")
+    def test_no_games_raises_no_games_scheduled_error(self, mock_get):
+        """Empty games list raises NoGamesScheduledError (subclass of ValueError)."""
+        from yak_core.live import NoGamesScheduledError, _fetch_actuals_from_box_scores
+        mock_get.return_value = _make_response({"statusCode": 200, "body": {"games": []}})
+        with pytest.raises(NoGamesScheduledError):
+            _fetch_actuals_from_box_scores(self.DATE, self.CFG)
+
+    @patch("yak_core.live.requests.get")
+    def test_no_games_is_subclass_of_value_error(self, mock_get):
+        """NoGamesScheduledError is a subclass of ValueError for backwards compat."""
+        from yak_core.live import NoGamesScheduledError
+        assert issubclass(NoGamesScheduledError, ValueError)

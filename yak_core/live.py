@@ -10,6 +10,35 @@ _TANK01_HOST = "tank01-fantasy-stats.p.rapidapi.com"
 _TANK01_DFS_PLAYER_KEYS = ("DraftKings", "DK", "dk", "draftkings", "players", "playerList")
 
 
+# Canonical status mapping from raw Tank01 values
+_STATUS_MAP = {
+    "ACTIVE": "Active",
+    "": "Active",
+    "OUT": "OUT",
+    "IR": "IR",
+    "INJURED RESERVE": "IR",
+    "INJ": "IR",
+    "SUSPENDED": "Suspended",
+    "SUSP": "Suspended",
+    "G-LEAGUE": "G-League",
+    "G_LEAGUE": "G-League",
+    "GLEAGUE": "G-League",
+    "DND": "OUT",
+    "O": "OUT",
+    "QUESTIONABLE": "Questionable",
+    "Q": "Questionable",
+    "GTD": "GTD",
+    "GAME TIME DECISION": "GTD",
+    "DAY-TO-DAY": "GTD",
+    "PROBABLE": "Probable",
+    "P": "Probable",
+}
+
+
+class NoGamesScheduledError(ValueError):
+    """Raised when the API confirms no games are scheduled for a given date."""
+
+
 def _get_rapidapi_key(cfg):
     """Resolve RapidAPI key: cfg > env > raise."""
     key = cfg.get("RAPIDAPI_KEY") or os.environ.get("RAPIDAPI_KEY", "")
@@ -22,11 +51,23 @@ def _headers(api_key):
     return {"x-rapidapi-key": api_key, "x-rapidapi-host": _TANK01_HOST}
 
 
+def _map_status(raw: str) -> str:
+    """Normalise a raw Tank01 status string to a canonical status label."""
+    upper = str(raw).strip().upper()
+    return _STATUS_MAP.get(upper, raw.strip() if raw.strip() else "Active")
+
+
 def fetch_live_dfs(date_key, cfg):
     """Fetch DK DFS salaries+positions+projections from Tank01 getNBADFS."""
     api_key = _get_rapidapi_key(cfg)
     url = "https://" + _TANK01_HOST + "/getNBADFS"
-    resp = requests.get(url, headers=_headers(api_key), params={"date": date_key}, timeout=30)
+    params = {"date": date_key}
+    headers = _headers(api_key)
+    print(
+        f"[fetch_live_dfs] URL={url} params={params} "
+        f"host={headers['x-rapidapi-host']} key=<set>"
+    )
+    resp = requests.get(url, headers=headers, params=params, timeout=30)
     resp.raise_for_status()
     data = resp.json()
     body = data.get("body", data) if isinstance(data, dict) else data
@@ -56,6 +97,8 @@ def fetch_live_dfs(date_key, cfg):
         sal_raw = entry.get("salary", entry.get("dk_salary", 0))
         proj_raw = entry.get("fantasyPoints", entry.get("fpts", entry.get("proj", 0)))
         own_raw = entry.get("ownership", entry.get("own_proj", entry.get("projectedOwnership", None)))
+        # Extract injury/availability status
+        status_raw = entry.get("injuryStatus", entry.get("status", entry.get("active", "")))
         try:
             salary = int(float(sal_raw)) if sal_raw else 0
         except (ValueError, TypeError):
@@ -76,6 +119,7 @@ def fetch_live_dfs(date_key, cfg):
             "opponent": str(opp).upper() if opp else "",
             "pos": str(pos), "salary": salary, "proj": proj,
             "actual_fp": float("nan"), "own_proj": own_proj,
+            "status": _map_status(str(status_raw) if status_raw else ""),
         })
     if not rows:
         raise ValueError("No DFS player rows parsed for " + date_key)
@@ -171,10 +215,17 @@ def _fetch_actuals_from_box_scores(date_key: str, cfg: dict) -> pd.DataFrame:
     formatted = f"{clean[:4]}-{clean[4:6]}-{clean[6:8]}"
 
     # Step 1: retrieve game IDs for the date
+    games_url = "https://" + _TANK01_HOST + "/getNBAGamesForDate"
+    games_params = {"gameDate": formatted}
+    games_headers = _headers(api_key)
+    print(
+        f"[_fetch_actuals_from_box_scores] URL={games_url} params={games_params} "
+        f"host={games_headers['x-rapidapi-host']} key=<set>"
+    )
     games_resp = requests.get(
-        "https://" + _TANK01_HOST + "/getNBAGamesForDate",
-        headers=_headers(api_key),
-        params={"gameDate": formatted},
+        games_url,
+        headers=games_headers,
+        params=games_params,
         timeout=30,
     )
     games_resp.raise_for_status()
@@ -192,7 +243,7 @@ def _fetch_actuals_from_box_scores(date_key: str, cfg: dict) -> pd.DataFrame:
         games_list = []
 
     if not games_list:
-        raise ValueError(f"No games found for {date_key}")
+        raise NoGamesScheduledError(f"No games found for {date_key}")
 
     all_players: list = []
 
@@ -206,10 +257,13 @@ def _fetch_actuals_from_box_scores(date_key: str, cfg: dict) -> pd.DataFrame:
         if not game_id:
             continue
 
+        box_url = "https://" + _TANK01_HOST + "/getNBABoxScore"
+        box_params = {"gameID": str(game_id)}
+        print(f"[_fetch_actuals_from_box_scores] Box score URL={box_url} params={box_params}")
         box_resp = requests.get(
-            "https://" + _TANK01_HOST + "/getNBABoxScore",
+            box_url,
             headers=_headers(api_key),
-            params={"gameID": str(game_id)},
+            params=box_params,
             timeout=30,
         )
         box_resp.raise_for_status()
@@ -299,6 +353,9 @@ def fetch_actuals_from_api(date_key: str, cfg: dict) -> pd.DataFrame:
         df = _fetch_actuals_from_box_scores(date_key_clean, cfg)
         print(f"[fetch_actuals_from_api] {len(df)} player actuals via box scores for {date_key}")
         return df
+    except NoGamesScheduledError:
+        # Re-raise as-is so the UI can show "No games scheduled" rather than "API error"
+        raise
     except Exception as exc:
         raise RuntimeError(f"Tank01 actuals API error for {date_key}: {exc}") from exc
 
