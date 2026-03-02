@@ -1169,11 +1169,21 @@ def build_approved_lineups(
 
     # Merge sim metrics if available
     if sim_results is not None and not sim_results.empty and "lineup_index" in sim_results.columns:
-        merged = lineups_df.copy().merge(
-            sim_results[["lineup_index", "sim_mean", "median_points", "sim_p85",
-                         "smash_prob"]].drop_duplicates("lineup_index"),
-            on="lineup_index",
-            how="left",
+        _sim_pull = ["lineup_index", "sim_mean", "median_points", "sim_p85", "smash_prob"]
+        _available = [c for c in _sim_pull if c in sim_results.columns]
+        # Drop any columns from lineups_df that would cause pandas to add "_x"/"_y" suffixes
+        # (this happens when lineups_df was annotated by ricky_annotate which already merged
+        # sim_mean and sim_p85 from the same sim_results DataFrame).
+        # We explicitly exclude "lineup_index" because it is the merge key — dropping it
+        # from lineups_df would prevent the merge from working at all.
+        _overlap = [c for c in _available if c != "lineup_index" and c in lineups_df.columns]
+        merged = (
+            lineups_df.drop(columns=_overlap, errors="ignore")
+            .merge(
+                sim_results[_available].drop_duplicates("lineup_index"),
+                on="lineup_index",
+                how="left",
+            )
         )
     else:
         merged = lineups_df.copy()

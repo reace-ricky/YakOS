@@ -68,6 +68,25 @@ def _make_sim_results(n: int = 3) -> pd.DataFrame:
     ])
 
 
+def _make_annotated_lineups_df(n: int = 3) -> pd.DataFrame:
+    """Return a lineups_df that already has sim columns merged in (as ricky_annotate produces).
+
+    ricky_annotate renames: smash_prob → sim_smash_prob, median_points → sim_median,
+    bust_prob → sim_bust_prob, but keeps sim_mean and sim_p85 under their original names.
+    This helper replicates that pattern to exercise the overlap-column logic in
+    build_approved_lineups.
+    """
+    base = _make_lineups_df(n)
+    sims = _make_sim_results(n)
+    # Simulate what ricky_annotate does: rename some columns, keep others
+    sim = sims.copy().rename(columns={
+        "smash_prob": "sim_smash_prob",
+        "median_points": "sim_median",
+    })
+    # sim_mean and sim_p85 are kept under their original names (causing the overlap)
+    return base.merge(sim, on="lineup_index", how="left")
+
+
 # ---------------------------------------------------------------------------
 # compute_stack_scores
 # ---------------------------------------------------------------------------
@@ -267,6 +286,28 @@ class TestBuildApprovedLineups:
         result = build_approved_lineups(lineups, None, site="FD", slate="NBA Turbo")
         assert result[0].site == "FD"
         assert result[0].slate == "NBA Turbo"
+
+    def test_annotated_lineups_df_no_column_conflict(self):
+        """build_approved_lineups must not raise when lineups_df is already annotated
+        (i.e. sim_mean / sim_p85 already present from ricky_annotate)."""
+        lineups = _make_annotated_lineups_df(3)
+        sims = _make_sim_results(3)
+        # Must not raise KeyError for 'sim_p85'
+        result = build_approved_lineups(lineups, sims, contest_archetype="GPP")
+        assert isinstance(result, list)
+        assert len(result) > 0
+
+    def test_annotated_lineups_df_per_lineup_publish(self):
+        """Single-lineup publish path: annotated slice + single-row sim_results."""
+        lineups = _make_annotated_lineups_df(2)
+        sims = _make_sim_results(2)
+        # Simulate per-lineup publish (one lineup's rows + one sim row)
+        lu0_rows = lineups[lineups["lineup_index"] == 0]
+        lu0_sim = sims[sims["lineup_index"] == 0]
+        result = build_approved_lineups(lu0_rows, lu0_sim, contest_archetype="GPP")
+        assert len(result) == 1
+        assert result[0].proj_points > 0
+        assert result[0].sim_p90 > 0
 
 
 # ---------------------------------------------------------------------------
