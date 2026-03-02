@@ -1,7 +1,7 @@
 """YakOS Core – configuration constants and helpers."""
 import os
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 # ----- Canonical YakOS root -----
 # Prefer the YAKOS_ROOT environment variable; fall back to the repo root so the
@@ -62,6 +62,116 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "VALUE_WEIGHT": 0.0,       # 0 = disabled; 0.1-0.3 = use value_score to boost value plays
 }
 
+
+# ============================================================
+# CONTEST PRESETS
+# ============================================================
+# Each preset maps a user-facing "Contest Type" label to a config
+# dictionary that fully describes how to build and sim lineups for
+# that contest format.  The public Optimizer tab exposes only this
+# simplified picker; the Admin Lab (Calibration Lab) keeps the full
+# per-archetype knobs for manual override.
+#
+# Keys in each preset:
+#   slate_type        - "Classic" or "Showdown Captain"
+#   archetype         - DFS_ARCHETYPES key to apply by default
+#   internal_contest  - internal calibration key (GPP / 50/50 / etc.)
+#   projection_style  - column to drive the LP objective: proj / floor / ceil
+#   volatility        - sim volatility mode: low / standard / high
+#   correlation_mode  - stack / balanced / none
+#   default_lineups   - suggested lineup count
+#   default_max_exposure - suggested per-player max exposure (0–1)
+#   min_salary        - suggested minimum salary used constraint
+#   description       - one-line caption shown below the Contest Type dropdown
+
+CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
+    "Cash Game": {
+        "description": "Cash Game — high-floor plays, 1 lineup, low volatility",
+        "slate_type": "Classic",
+        "archetype": "Floor Lock",
+        "internal_contest": "50/50",
+        "projection_style": "floor",
+        "volatility": "low",
+        "correlation_mode": "none",
+        "default_lineups": 1,
+        "default_max_exposure": 0.8,
+        "min_salary": 49000,
+    },
+    "Single Entry": {
+        "description": "Single Entry — balanced ceiling/floor, 1 lineup, moderate volatility",
+        "slate_type": "Classic",
+        "archetype": "Balanced",
+        "internal_contest": "Single Entry",
+        "projection_style": "proj",
+        "volatility": "standard",
+        "correlation_mode": "balanced",
+        "default_lineups": 1,
+        "default_max_exposure": 1.0,
+        "min_salary": 48000,
+    },
+    "3-Max Tournament": {
+        "description": "3-Max Tournament — balanced upside, 3 lineups, moderate volatility",
+        "slate_type": "Classic",
+        "archetype": "Balanced",
+        "internal_contest": "GPP",
+        "projection_style": "proj",
+        "volatility": "standard",
+        "correlation_mode": "balanced",
+        "default_lineups": 3,
+        "default_max_exposure": 0.7,
+        "min_salary": 48000,
+    },
+    "20-Max GPP": {
+        "description": "20-Max GPP — ceiling-focused, 20 lineups, high volatility",
+        "slate_type": "Classic",
+        "archetype": "Ceiling Hunter",
+        "internal_contest": "GPP",
+        "projection_style": "ceil",
+        "volatility": "high",
+        "correlation_mode": "stack",
+        "default_lineups": 20,
+        "default_max_exposure": 0.5,
+        "min_salary": 47000,
+    },
+    "MME (150-Max)": {
+        "description": "MME (150-Max) — max upside, 150 lineups, high volatility",
+        "slate_type": "Classic",
+        "archetype": "Ceiling Hunter",
+        "internal_contest": "MME",
+        "projection_style": "ceil",
+        "volatility": "high",
+        "correlation_mode": "stack",
+        "default_lineups": 150,
+        "default_max_exposure": 0.35,
+        "min_salary": 46000,
+    },
+    "Showdown": {
+        "description": "Showdown — single-game Captain mode, 3 lineups, high volatility",
+        "slate_type": "Showdown Captain",
+        "archetype": "Ceiling Hunter",
+        "internal_contest": "Captain",
+        "projection_style": "ceil",
+        "volatility": "high",
+        "correlation_mode": "stack",
+        "default_lineups": 3,
+        "default_max_exposure": 0.6,
+        "min_salary": 45000,
+    },
+}
+
+# Ordered list of contest preset labels (preserves display order)
+CONTEST_PRESET_LABELS: List[str] = list(CONTEST_PRESETS.keys())
+
+# Short archetype labels for each contest preset label.
+# Used when tagging approved lineups / promoted sim sets with a concise contest label.
+CONTEST_PRESET_ARCH_LABELS: Dict[str, str] = {
+    "Cash Game": "50/50",
+    "Single Entry": "SE",
+    "3-Max Tournament": "3-MAX",
+    "20-Max GPP": "GPP",
+    "MME (150-Max)": "MME",
+    "Showdown": "Showdown",
+}
 
 
 # --- Alias map: lowercase/legacy keys -> canonical UPPER keys ---

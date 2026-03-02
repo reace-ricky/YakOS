@@ -102,6 +102,7 @@ from yak_core.projections import (  # type: ignore
     yakos_ensemble,
 )
 from yak_core.scoring import calibration_kpi_summary, quality_color, _QUALITY_BG, _QUALITY_TEXT  # type: ignore
+from yak_core.config import CONTEST_PRESETS, CONTEST_PRESET_LABELS, CONTEST_PRESET_ARCH_LABELS  # type: ignore
 
 # Map internal DK contest type string -> ContestType enum.
 # Keys match values produced by DK_CONTEST_TYPE_MAP in yak_core/calibration.py.
@@ -486,6 +487,8 @@ def ensure_session_state():
         st.session_state["dk_contest_type"] = "Tournament (GPP)"
     if "prev_dk_contest_type" not in st.session_state:
         st.session_state["prev_dk_contest_type"] = st.session_state["dk_contest_type"]
+    if "contest_preset" not in st.session_state:
+        st.session_state["contest_preset"] = "20-Max GPP"
     if "sim_pool_df" not in st.session_state:
         st.session_state["sim_pool_df"] = None
     if "sim_pool_orig_df" not in st.session_state:
@@ -1175,8 +1178,8 @@ with tab_slate:
 with tab_optimizer:
     st.subheader("⚡ Optimizer")
     st.markdown(
-        "Build lineups for today's slate. Choose your DraftKings contest type, "
-        "DFS archetype, and projection style — then let the optimizer do the work."
+        "Build lineups for today's slate. Pick a Contest Type and the optimizer "
+        "will apply the right settings automatically."
     )
 
     if sport == "PGA":
@@ -1189,68 +1192,69 @@ with tab_optimizer:
                 "or upload a CSV in the **🔬 Calibration Lab**."
             )
         else:
-            # --- Contest & slate controls ---
-            st.markdown("### 1. Contest & Slate Context")
-            col_opt_l, col_opt_r = st.columns(2)
+            # --- Contest Type picker ---
+            st.markdown("### 1. Contest Type")
+            _prev_preset = st.session_state.get("contest_preset", "20-Max GPP")
+            contest_preset_sel = st.selectbox(
+                "Contest Type",
+                CONTEST_PRESET_LABELS,
+                index=CONTEST_PRESET_LABELS.index(_prev_preset)
+                if _prev_preset in CONTEST_PRESET_LABELS
+                else 3,
+                key="opt_contest_preset",
+                help=(
+                    "Cash Game = high-floor 50/50 | "
+                    "Single Entry = balanced 1-lineup | "
+                    "3-Max = small GPP | "
+                    "20-Max GPP = tournament | "
+                    "MME = mass multi-entry | "
+                    "Showdown = single-game Captain mode"
+                ),
+            )
+            st.session_state["contest_preset"] = contest_preset_sel
+            _preset = CONTEST_PRESETS[contest_preset_sel]
+            st.caption(f"📌 {_preset['description']}")
 
-            with col_opt_l:
-                slate_type_opt = st.selectbox(
-                    "Slate Type",
-                    ["Classic", "Showdown Captain"],
-                    index=0,
-                    key="opt_slate_type",
-                )
+            # Derive all parameters from the selected preset
+            slate_type_opt = _preset["slate_type"]
+            archetype_sel = _preset["archetype"]
+            internal_contest = _preset["internal_contest"]
+            dk_contest_sel = contest_preset_sel  # label used in spinner / success messages (equals preset name)
+            # Sync legacy session-state keys so downstream code still works
+            st.session_state["archetype"] = archetype_sel
+            st.session_state["dk_contest_type"] = contest_preset_sel
 
-                dk_contest_sel = st.selectbox(
-                    "DraftKings Contest Type",
-                    DK_CONTEST_TYPES,
-                    index=DK_CONTEST_TYPES.index(st.session_state["dk_contest_type"])
-                    if st.session_state["dk_contest_type"] in DK_CONTEST_TYPES
-                    else 0,
-                    key="opt_dk_contest",
-                    help="Mirror of the contest types available in the DraftKings lobby.",
-                )
-                st.session_state["dk_contest_type"] = dk_contest_sel
-                internal_contest = DK_CONTEST_TYPE_MAP.get(dk_contest_sel, "GPP")
-
+            # Showdown game picker — only shown when the Showdown preset is selected
             showdown_game_opt = None
-            with col_opt_r:
-                if slate_type_opt == "Showdown Captain":
-                    games = get_showdown_games(pool_df_opt)
-                    if games:
-                        showdown_game_opt = st.selectbox("Showdown Game", games, key="opt_showdown")
-                    else:
-                        st.warning("No games detected. Upload a valid pool.")
-
-                archetype_sel = st.selectbox(
-                    "DFS Archetype",
-                    list(DFS_ARCHETYPES.keys()),
-                    index=list(DFS_ARCHETYPES.keys()).index(st.session_state["archetype"])
-                    if st.session_state["archetype"] in DFS_ARCHETYPES
-                    else 0,
-                    key="opt_archetype",
-                    help=(
-                        "Ceiling Hunter = max upside (GPP) | "
-                        "Floor Lock = cash game | "
-                        "Contrarian = low ownership | "
-                        "Stacker = team correlation | "
-                        "Balanced = default"
-                    ),
-                )
-                st.session_state["archetype"] = archetype_sel
-                arch_desc = DFS_ARCHETYPES[archetype_sel]["description"]
-                st.caption(f"📌 {arch_desc}")
+            if slate_type_opt == "Showdown Captain":
+                games = get_showdown_games(pool_df_opt)
+                if games:
+                    showdown_game_opt = st.selectbox("Showdown Game", games, key="opt_showdown")
+                else:
+                    st.warning("No games detected. Upload a valid pool.")
 
             # --- Optimizer controls ---
             st.markdown("---")
             st.markdown("### 2. Build Controls")
             ctrl_c1, ctrl_c2, ctrl_c3, ctrl_c4 = st.columns(4)
             with ctrl_c1:
-                num_lu_opt = st.slider("Lineups", 1, 300, num_lineups_user, key="opt_num_lu")
+                num_lu_opt = st.slider(
+                    "Lineups", 1, 300,
+                    int(_preset["default_lineups"]),
+                    key="opt_num_lu",
+                )
             with ctrl_c2:
-                max_exp_opt = st.slider("Max exposure", 0.05, 1.0, max_exposure_user, step=0.05, key="opt_exp")
+                max_exp_opt = st.slider(
+                    "Max exposure", 0.05, 1.0,
+                    float(_preset["default_max_exposure"]),
+                    step=0.05, key="opt_exp",
+                )
             with ctrl_c3:
-                min_sal_opt = st.number_input("Min salary used", 0, 50000, min_salary_used_user, step=500, key="opt_sal")
+                min_sal_opt = st.number_input(
+                    "Min salary used", 0, 50000,
+                    int(_preset["min_salary"]),
+                    step=500, key="opt_sal",
+                )
             with ctrl_c4:
                 max_pair_opt = st.number_input(
                     "Max pair appearances",
@@ -1266,14 +1270,18 @@ with tab_optimizer:
                     ),
                 )
 
-            # Auto-set projection style when contest type changes
-            if dk_contest_sel != st.session_state.get("prev_dk_contest_type"):
-                st.session_state["opt_proj_style"] = _default_proj_style_for_contest(internal_contest)
-                st.session_state["prev_dk_contest_type"] = dk_contest_sel
+            # Projection style driven by preset (still selectable for fine-tuning)
+            _preset_proj_style = _preset["projection_style"]
+            if _preset_proj_style not in _PROJ_STYLE_OPTIONS:
+                _preset_proj_style = "proj"
+            # Re-seed when contest preset changes
+            if contest_preset_sel != st.session_state.get("prev_dk_contest_type"):
+                st.session_state["opt_proj_style"] = _preset_proj_style
+                st.session_state["prev_dk_contest_type"] = contest_preset_sel
 
-            _cur_proj_style = st.session_state.get("opt_proj_style", "proj")
+            _cur_proj_style = st.session_state.get("opt_proj_style", _preset_proj_style)
             if _cur_proj_style not in _PROJ_STYLE_OPTIONS:
-                _cur_proj_style = "proj"
+                _cur_proj_style = _preset_proj_style
             proj_style_opt = st.selectbox(
                 "Projection style (ceiling/floor driver)",
                 _PROJ_STYLE_OPTIONS,
@@ -2283,16 +2291,35 @@ with tab_lab:
         sim_col_l, sim_col_r = st.columns(2)
         with sim_col_l:
             sim_n_lu = st.slider("Lineups to sim", 1, 150, 20, key="sim_n_lu")
-            sim_vol = st.selectbox("Volatility mode", ["standard", "low", "high"], key="sim_vol")
             sim_n_sims = st.slider("Sim iterations", 100, 2000, 500, step=100, key="sim_n_sims")
         with sim_col_r:
-            sim_archetype = st.selectbox(
-                "DFS Archetype", list(DFS_ARCHETYPES.keys()), key="sim_archetype"
+            _sim_prev_preset = st.session_state.get("sim_contest_preset", "20-Max GPP")
+            sim_contest_preset_sel = st.selectbox(
+                "Contest Type",
+                CONTEST_PRESET_LABELS,
+                index=CONTEST_PRESET_LABELS.index(_sim_prev_preset)
+                if _sim_prev_preset in CONTEST_PRESET_LABELS
+                else 3,
+                key="sim_contest_preset",
+                help=(
+                    "Cash Game = high-floor 50/50 | "
+                    "Single Entry = balanced 1-lineup | "
+                    "3-Max = small GPP | "
+                    "20-Max GPP = tournament | "
+                    "MME = mass multi-entry | "
+                    "Showdown = single-game Captain mode"
+                ),
             )
-            sim_dk_contest = st.selectbox(
-                "DraftKings Contest Type", DK_CONTEST_TYPES, key="sim_dk_contest"
+            _sim_preset = CONTEST_PRESETS[sim_contest_preset_sel]
+            st.caption(f"📌 {_sim_preset['description']}")
+            sim_archetype = _sim_preset["archetype"]
+            sim_dk_contest = sim_contest_preset_sel
+            sim_vol = _sim_preset["volatility"]
+            sim_min_sal = st.number_input(
+                "Min salary", 0, 50000,
+                int(_sim_preset["min_salary"]),
+                step=500, key="sim_min_sal",
             )
-            sim_min_sal = st.number_input("Min salary", 0, 50000, 46500, step=500, key="sim_min_sal")
 
         # Actuals upload — for historical slate calibration
         with st.expander("📊 Load Actuals (Historical Slate Calibration)", expanded=_sim_is_historical):
@@ -2561,8 +2588,8 @@ with tab_lab:
                         )
                         if sim_lu_df is not None and not sim_lu_df.empty:
                             _sim_cal_knobs = st.session_state.get("cal_knobs", {})
-                            # Map DK contest type string -> ContestType enum for dynamic thresholds
-                            _internal_ct = DK_CONTEST_TYPE_MAP.get(sim_dk_contest, "GPP")
+                            # Map contest preset -> ContestType enum for dynamic thresholds
+                            _internal_ct = _sim_preset["internal_contest"]
                             _sim_contest_type = _INTERNAL_CT_TO_SIM_TYPE.get(
                                 _internal_ct, _SimContestType.GPP_LARGE
                             )
@@ -3093,14 +3120,7 @@ with tab_lab:
                         st.session_state.get("pool_df", pd.DataFrame()),
                         "attrs", {}
                     ).get("slate", f"NBA {_today_est()}")
-                    _arch_label = {
-                        "Tournament (GPP)": "GPP",
-                        "Single Entry": "SE",
-                        "Max Entry (MME)": "3-MAX",
-                        "50/50": "50/50",
-                        "Double Up": "50/50",
-                        "Showdown Captain": "Showdown",
-                    }.get(sim_dk_contest, sim_dk_contest)
+                    _arch_label = CONTEST_PRESET_ARCH_LABELS.get(sim_dk_contest, sim_dk_contest)
                     _new_approved = build_approved_lineups(
                         lineups_df=promoted_df,
                         sim_results=sim_res,
