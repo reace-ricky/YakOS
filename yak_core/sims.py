@@ -21,6 +21,7 @@ def compute_sim_eligible(
     min_proj_minutes: float = 4.0,
     exclude_out_ir: bool = True,
     today_teams: Optional[List[str]] = None,
+    minutes_col: Optional[str] = None,
 ) -> pd.DataFrame:
     """Compute the ``sim_eligible`` column for every player in the pool.
 
@@ -28,10 +29,10 @@ def compute_sim_eligible(
     ----------
     pool_df : pd.DataFrame
         Player pool.  Expected columns (all optional): ``status``, ``minutes``,
-        ``team``.
+        ``proj_minutes``, ``team``.
     min_proj_minutes : float
         Minimum projected minutes required for ``sim_eligible = True``
-        (default 4.0).  Players with ``minutes ≤ min_proj_minutes`` are
+        (default 4.0).  Players with minutes ≤ min_proj_minutes are
         excluded.  Set to ``0`` to skip the minutes filter.
     exclude_out_ir : bool
         If ``True`` (default), players whose ``status`` matches a known
@@ -39,6 +40,16 @@ def compute_sim_eligible(
     today_teams : list of str, optional
         If provided, players whose ``team`` is **not** in this list are
         excluded.
+    minutes_col : str, optional
+        Explicit column name to use for the minutes filter.  When provided
+        the auto-detection logic is bypassed:
+
+        * ``"proj_minutes"`` — use projected minutes (live slate).
+        * ``"actual_minutes"`` — use actual minutes (historical slate).
+
+        If the specified column is not present in the pool the minutes
+        filter is skipped silently.  When *None* (default) the column is
+        auto-detected: ``"minutes"`` if present, else ``"proj_minutes"``.
 
     Returns
     -------
@@ -67,8 +78,18 @@ def compute_sim_eligible(
         df.loc[norm.isin(_INELIGIBLE_STATUSES), "sim_eligible"] = False
 
     # ── Minutes-based exclusions ──────────────────────────────────────────
-    if "minutes" in df.columns and min_proj_minutes > 0:
-        mins = pd.to_numeric(df["minutes"], errors="coerce").fillna(0)
+    # When minutes_col is explicitly specified use it (live → proj_minutes,
+    # historical → actual_minutes).  Otherwise auto-detect: prefer 'minutes',
+    # fall back to 'proj_minutes' for API-loaded pools.
+    if minutes_col is not None:
+        _minutes_col: Optional[str] = minutes_col if minutes_col in df.columns else None
+    else:
+        _minutes_col = (
+            "minutes" if "minutes" in df.columns
+            else ("proj_minutes" if "proj_minutes" in df.columns else None)
+        )
+    if _minutes_col is not None and min_proj_minutes > 0:
+        mins = pd.to_numeric(df[_minutes_col], errors="coerce").fillna(0)
         df.loc[mins <= min_proj_minutes, "sim_eligible"] = False
 
     # ── Team-based exclusions ─────────────────────────────────────────────
