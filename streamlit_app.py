@@ -509,10 +509,13 @@ def _refresh_injury_statuses(
                 pool.loc[mask, "status"] = new_status
                 changes.append(f"{p_name}: {old_status} → {new_status}")
 
-    # Re-evaluate sim_eligible for any player whose status is ineligible
+    # Drop any player whose status is ineligible so they never appear in sims
     if "status" in pool.columns:
         inelig = pool["status"].fillna("").str.upper().isin(_INELIG_RF)
-        pool.loc[inelig, "sim_eligible"] = False
+        if inelig.any():
+            for _p in pool.loc[inelig, "player_name"].tolist():
+                changes.append(f"{_p}: removed (ineligible status)")
+            pool = pool[~inelig].reset_index(drop=True)
 
     return pool, changes
 
@@ -1031,16 +1034,16 @@ with tab_slate:
                                 if "player_name" not in live_pool.columns and "name" in live_pool.columns:
                                     live_pool = live_pool.rename(columns={"name": "player_name"})
                                 live_pool = _apply_yakos_projections(live_pool, knobs=st.session_state.get("cal_knobs", {}))
-                                # Auto-exclude injured players (OUT / IR / Suspended)
+                                # Apply injury cascade first (OUT players must still be in pool to redistribute minutes)
+                                live_pool, _cascade = apply_injury_cascade(live_pool)
+                                # Remove OUT/IR/ineligible players from pool entirely so they never appear in sims
                                 _auto_excl = []
                                 if "status" in live_pool.columns and "player_name" in live_pool.columns:
                                     from yak_core.sims import _INELIGIBLE_STATUSES as _INELIG
                                     _inelig_mask = live_pool["status"].fillna("").str.upper().isin(_INELIG)
-                                    live_pool.loc[_inelig_mask, "sim_eligible"] = False
                                     _auto_excl = live_pool.loc[_inelig_mask, ["player_name", "status"]].to_dict("records")
+                                    live_pool = live_pool[~_inelig_mask].reset_index(drop=True)
                                 st.session_state["auto_excluded_players"] = _auto_excl
-                                # Apply injury cascade: redistribute OUT player minutes to teammates
-                                live_pool, _cascade = apply_injury_cascade(live_pool)
                                 st.session_state["injury_cascade"] = _cascade
                                 st.session_state["pool_df"] = live_pool
                                 st.session_state["pool_date"] = str(slate_fetch_date)
@@ -1801,16 +1804,16 @@ with tab_lab:
                         if "player_name" not in live_pool.columns and "name" in live_pool.columns:
                             live_pool = live_pool.rename(columns={"name": "player_name"})
                         live_pool = _apply_yakos_projections(live_pool, knobs=st.session_state.get("cal_knobs", {}))
-                        # Auto-exclude injured players (OUT / IR / Suspended)
+                        # Apply injury cascade first (OUT players must still be in pool to redistribute minutes)
+                        live_pool, _cascade = apply_injury_cascade(live_pool)
+                        # Remove OUT/IR/ineligible players from pool entirely so they never appear in sims
                         _cal_auto_excl = []
                         if "status" in live_pool.columns and "player_name" in live_pool.columns:
                             from yak_core.sims import _INELIGIBLE_STATUSES as _INELIG
                             _cal_inelig_mask = live_pool["status"].fillna("").str.upper().isin(_INELIG)
-                            live_pool.loc[_cal_inelig_mask, "sim_eligible"] = False
                             _cal_auto_excl = live_pool.loc[_cal_inelig_mask, ["player_name", "status"]].to_dict("records")
+                            live_pool = live_pool[~_cal_inelig_mask].reset_index(drop=True)
                         st.session_state["auto_excluded_players"] = _cal_auto_excl
-                        # Apply injury cascade: redistribute OUT player minutes to teammates
-                        live_pool, _cascade = apply_injury_cascade(live_pool)
                         st.session_state["injury_cascade"] = _cascade
                         st.session_state["pool_df"] = live_pool
                         st.session_state["pool_date"] = str(fetch_slate_date_cal)

@@ -100,6 +100,7 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 80 | **Fix `build_approved_lineups` column conflict** — when `lineups_df` is the annotated df from `ricky_annotate` (which already merges `sim_mean` and `sim_p85`), merging `sim_results` caused pandas `_x`/`_y` suffixes breaking `.agg(sim_p90=("sim_p85","first"))`; fix drops overlapping columns before merge; 2 regression tests added | `yak_core/calibration.py`, `tests/test_slate_room_features.py` | #72 |
 | 81 | **Fix injury cascade & sim eligibility for all pool types** — (1) `compute_sim_eligible` now checks `proj_minutes` as fallback when `minutes` column absent (API-loaded pools); added `minutes_col` param: live slate passes `"proj_minutes"`, historical slate passes `"actual_minutes"` when available; (2) `apply_injury_cascade` uses `minutes` column as fallback for `proj_minutes` (RG CSV pools); (3) CSV upload cascade condition accepts either `minutes` or `proj_minutes`; (4) actuals CSV upload now captures `actual_minutes` column (RG export `MIN`/`Minutes`); (5) Sim Player Filters section merges actual_minutes from actuals_df and shows caption in historical mode; 15 new regression tests | `yak_core/sims.py`, `yak_core/injury_cascade.py`, `streamlit_app.py`, `tests/test_sim_eligible.py`, `tests/test_injury_cascade.py` | latest |
 | 82 | **Injury refresh on every lineup build** — extracted `_refresh_injury_statuses(pool_df, api_key)` helper: calls Tank01 `getNBAInjuryList`, updates player statuses in the pool, re-marks ineligible players (`sim_eligible=False`), returns change list; silent no-op when API key absent or call fails; called before `run_optimizer` in the Optimizer "🚀 Build Lineups" handler (new) and in the Sims "🎲 Run Sims" handler (refactored from 35-line inline block); status-change banner shown in both tabs | `streamlit_app.py` | latest |
+| 83 | **Drop OUT/IR players at API pool load — not downstream** — root-fix for injury logic: at both "Fetch Pool from API" sites (Slate Room + Cal tab) the cascade now runs first (so OUT-player minutes are redistributed to active teammates), then all rows whose `status` is in `_INELIGIBLE_STATUSES` are hard-deleted from the pool before it is stored in session state; `_refresh_injury_statuses` updated to likewise drop (not just flag) any player whose status becomes ineligible after a late-breaking injury refresh; 7 new `TestCascadeThenDropPattern` regression tests confirm Alex Sarr / Leaky Black-style OUT players are absent from the cleaned pool | `streamlit_app.py`, `tests/test_injury_cascade.py` | latest |
 
 
 
@@ -193,7 +194,7 @@ YakOS/
 │   ├── test_sim_player_accuracy.py      (23 tests)
 │   ├── test_live_actuals.py             (23 tests)
 │   ├── test_sim_eligible.py             (24 tests)
-│   ├── test_injury_cascade.py           (28 tests)
+│   ├── test_injury_cascade.py           (35 tests)
 │   └── test_dvp.py                      (27 tests)
 └── requirements.txt
 ```

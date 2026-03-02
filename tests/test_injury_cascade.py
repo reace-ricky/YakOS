@@ -9,6 +9,21 @@ from yak_core.injury_cascade import (
     apply_injury_cascade,
     find_key_injuries,
 )
+from yak_core.sims import _INELIGIBLE_STATUSES
+
+
+def _cascade_then_drop(pool: pd.DataFrame):
+    """Mirror the API-load pattern: cascade first, then drop ineligible rows.
+
+    Returns (cleaned_pool, cascade_report, removed_players).
+    """
+    updated, report = apply_injury_cascade(pool)
+    removed = []
+    if "status" in updated.columns:
+        mask = updated["status"].fillna("").str.upper().isin(_INELIGIBLE_STATUSES)
+        removed = updated.loc[mask, "player_name"].tolist()
+        updated = updated[~mask].reset_index(drop=True)
+    return updated, report, removed
 
 
 # ---------------------------------------------------------------------------
@@ -326,3 +341,84 @@ class TestApplyInjuryCascadeMinutesFallback:
         updated, _ = apply_injury_cascade(pool)
         gsw = updated[updated["player_name"] == "GSW PG"].iloc[0]
         assert gsw["injury_bump_fp"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Regression: OUT/IR players must be dropped from pool at API load time
+# so they never reach the sim module, regardless of downstream eligibility checks.
+# ---------------------------------------------------------------------------
+
+class TestCascadeThenDropPattern:
+    """Verify the API-load pattern: cascade runs first (so minutes are
+    redistributed), then ineligible players are removed from the pool
+    entirely.  This is the behavior implemented in streamlit_app.py at
+    both 'Fetch Pool from API' sites."""
+
+    def _make_pool(self) -> pd.DataFrame:
+        rows = [
+            {"player_name": "Alex Sarr",   "team": "WAS", "pos": "C",
+             "salary": 7200, "proj": 38.0, "proj_minutes": 28.0, "status": "OUT"},
+            {"player_name": "Leaky Black", "team": "CHA", "pos": "SF",
+             "salary": 4800, "proj": 22.0, "proj_minutes": 24.0, "status": "OUT"},
+            {"player_name": "Backup C",    "team": "WAS", "pos": "C",
+             "salary": 5000, "proj": 18.0, "proj_minutes": 16.0, "status": "Active"},
+            {"player_name": "WAS SF",      "team": "WAS", "pos": "SF",
+             "salary": 5500, "proj": 25.0, "proj_minutes": 22.0, "status": "Active"},
+        ]
+        return pd.DataFrame(rows)
+
+    def test_out_players_not_in_final_pool(self):
+        """Alex Sarr and Leaky Black (both OUT) must be absent from the pool
+        returned after the cascade-then-drop step."""
+        pool = self._make_pool()
+        cleaned, _, removed = _cascade_then_drop(pool)
+        assert "Alex Sarr" not in cleaned["player_name"].values
+        assert "Leaky Black" not in cleaned["player_name"].values
+
+    def test_removed_list_contains_out_players(self):
+        """The removed list must name the OUT players that were dropped."""
+        pool = self._make_pool()
+        _, _, removed = _cascade_then_drop(pool)
+        assert "Alex Sarr" in removed
+        assert "Leaky Black" in removed
+
+    def test_active_players_remain(self):
+        """Active teammates must still be in the cleaned pool."""
+        pool = self._make_pool()
+        cleaned, _, _ = _cascade_then_drop(pool)
+        assert "Backup C" in cleaned["player_name"].values
+        assert "WAS SF" in cleaned["player_name"].values
+
+    def test_cascade_still_runs_before_drop(self):
+        """The cascade report must reference the OUT player even though
+        that player is subsequently removed from the pool."""
+        pool = self._make_pool()
+        cleaned, report, _ = _cascade_then_drop(pool)
+        # Cascade entry for Alex Sarr (WAS, C, OUT, 28 mins)
+        was_entry = next((r for r in report if r["out_player"] == "Alex Sarr"), None)
+        assert was_entry is not None, "Cascade should fire for Alex Sarr"
+        assert was_entry["out_proj_mins"] == 28.0
+
+    def test_backup_bumped_then_out_player_gone(self):
+        """Backup C should have an injury bump AND Alex Sarr must not appear."""
+        pool = self._make_pool()
+        cleaned, _, _ = _cascade_then_drop(pool)
+        backup = cleaned[cleaned["player_name"] == "Backup C"].iloc[0]
+        assert backup["injury_bump_fp"] > 0
+        assert "Alex Sarr" not in cleaned["player_name"].values
+
+    def test_ir_player_also_dropped(self):
+        """IR status players must be dropped just like OUT players."""
+        pool = self._make_pool()
+        pool.loc[pool["player_name"] == "Alex Sarr", "status"] = "IR"
+        cleaned, _, removed = _cascade_then_drop(pool)
+        assert "Alex Sarr" not in cleaned["player_name"].values
+        assert "Alex Sarr" in removed
+
+    def test_no_out_players_nothing_dropped(self):
+        """When no players are ineligible, the pool is returned unchanged."""
+        pool = self._make_pool()
+        pool["status"] = "Active"
+        cleaned, _, removed = _cascade_then_drop(pool)
+        assert removed == []
+        assert len(cleaned) == len(pool)
