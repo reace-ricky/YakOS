@@ -5,3 +5,5 @@ pulp>=2.7
 pyarrow>=14.0
 requests>=2.31
 scikit-learn>=1.3
+scipy>=1.10
+tzdata>=2023.3

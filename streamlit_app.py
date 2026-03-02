@@ -41,9 +41,10 @@ def _save_persisted_api_key(key: str) -> None:
         json.dump({"rapidapi_key": key}, _f)
 
 
-# Make yak_core importable (works when yak_core is in the repo / installed)
-if "yak_core" not in sys.modules:
-    pass
+# Make yak_core importable when running from the repo root (e.g. Streamlit Cloud)
+_repo_root = str(Path(__file__).parent)
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
 
 from yak_core.lineups import build_multiple_lineups_with_exposure, to_dk_upload_format, build_showdown_lineups, to_dk_showdown_upload_format  # type: ignore
 from yak_core.calibration import (  # type: ignore
@@ -613,22 +614,6 @@ def load_historical_lineups() -> pd.DataFrame:
     return pd.DataFrame()
 
 
-@st.cache_data
-def load_rg_pool(filename: str) -> pd.DataFrame:
-    """Load a raw RG projection CSV from repo data/ folder."""
-    csv_path = Path(__file__).parent / "data" / filename
-    if csv_path.exists():
-        df = pd.read_csv(csv_path)
-        return rename_rg_raw_to_yakos(df)
-    return pd.DataFrame()
-
-
-# Map slate dates to RG pool files in data/
-RG_POOL_FILES = {
-    "2026-02-27": "NBADK20260227.csv",
-}
-
-
 # -----------------------------
 # Streamlit App Layout
 # -----------------------------
@@ -640,14 +625,6 @@ st.set_page_config(
 )
 
 ensure_session_state()
-
-# ── Auto-load sample pool on first run so the dashboard shows projections ──
-if st.session_state.get("pool_df") is None:
-    _latest_sample = sorted(RG_POOL_FILES.keys())[-1] if RG_POOL_FILES else None
-    if _latest_sample:
-        _sample_df = load_rg_pool(RG_POOL_FILES[_latest_sample])
-        if not _sample_df.empty:
-            st.session_state["pool_df"] = _apply_proj_fallback(_sample_df)
 
 st.title("YakOS DFS Optimizer")
 
@@ -782,7 +759,7 @@ with tab_slate:
         if pool_df is None or pool_df.empty:
             st.info(
                 "📋 **No player pool loaded.** Use the **Fetch Pool from API** button above "
-                "or upload your RotoGrinders projection sheet in the **🔬 Calibration Lab** tab."
+                "to pull today's slate from Tank01."
             )
 
         else:
@@ -1073,8 +1050,8 @@ with tab_optimizer:
         pool_df_opt = st.session_state.get("pool_df")
         if pool_df_opt is None:
             st.warning(
-                "Load a player pool in the **🔬 Calibration Lab** first — "
-                "upload an RG projection sheet there to get started."
+                "Load a player pool first — fetch from the Tank01 API in **🏀 Ricky's Slate Room**, "
+                "or upload a CSV in the **🔬 Calibration Lab**."
             )
         else:
             # --- Contest & slate controls ---
