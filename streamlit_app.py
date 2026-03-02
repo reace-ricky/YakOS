@@ -102,6 +102,14 @@ from yak_core.projections import (  # type: ignore
 )
 from yak_core.scoring import calibration_kpi_summary, quality_color, _QUALITY_BG, _QUALITY_TEXT  # type: ignore
 
+# Map internal DK contest type string -> ContestType enum.
+# Keys match values produced by DK_CONTEST_TYPE_MAP in yak_core/calibration.py.
+# Used when passing contest_type to run_monte_carlo_for_lineups().
+_INTERNAL_CT_TO_SIM_TYPE: dict = {
+    "50/50": _SimContestType.CASH,
+    "Single Entry": _SimContestType.SE_SMALL,
+}
+
 
 # -----------------------------
 # Core helpers
@@ -236,10 +244,10 @@ _SIM_GPP_LINE = 340.0
 # Ordered list of projection style options used in the Optimizer selectbox.
 _PROJ_STYLE_OPTIONS = ["proj", "floor", "ceil", "sim85"]
 
-# Map internal contest type → suggested default projection style.
+# Map internal contest type -> suggested default projection style.
 # Internal types come from DK_CONTEST_TYPE_MAP in yak_core/calibration.py, e.g.:
-#   "Double Up (50/50)" → "50/50" → "floor"  (cash/variance-minimizing)
-#   "Tournament (GPP)"  → "GPP"   → "ceil"   (upside/ceiling-chasing)
+#   "Double Up (50/50)" -> "50/50" -> "floor"  (cash/variance-minimizing)
+#   "Tournament (GPP)"  -> "GPP"   -> "ceil"   (upside/ceiling-chasing)
 # Any unlisted internal type falls back to "proj".
 _CONTEST_PROJ_DEFAULTS: dict[str, str] = {
     "50/50": "floor",       # cash game — minimize variance
@@ -2283,8 +2291,14 @@ with tab_lab:
                     )
                     if sim_lu_df is not None and not sim_lu_df.empty:
                         _sim_cal_knobs = st.session_state.get("cal_knobs", {})
+                        # Map DK contest type string -> ContestType enum for dynamic thresholds
+                        _internal_ct = DK_CONTEST_TYPE_MAP.get(sim_dk_contest, "GPP")
+                        _sim_contest_type = _INTERNAL_CT_TO_SIM_TYPE.get(
+                            _internal_ct, _SimContestType.GPP_LARGE
+                        )
                         sim_res = run_monte_carlo_for_lineups(
-                            sim_lu_df, n_sims=sim_n_sims, volatility_mode=sim_vol
+                            sim_lu_df, n_sims=sim_n_sims, volatility_mode=sim_vol,
+                            contest_type=_sim_contest_type,
                         )
                         # Annotate with Ricky confidence
                         annotated_sim = ricky_annotate(sim_lu_df, sim_res)
