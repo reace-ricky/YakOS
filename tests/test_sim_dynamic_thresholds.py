@@ -139,17 +139,17 @@ class TestComputeThresholds:
         CONTEST_ABSOLUTE_THRESHOLDS[ContestType.CASH]["smash"] = orig
         assert s.smash_threshold == pytest.approx(200.0 + 0.5 * 20.0)
 
-    def test_cash_bust_uses_absolute_override(self):
-        """CASH bust override is 190.0 → must equal 190.0."""
-        s = self._summary()
+    def test_cash_bust_uses_dynamic_threshold(self):
+        """CASH bust override is now None → uses dynamic p30 (or stdev fallback)."""
+        s = self._summary()  # p30_score=0.0 → stdev fallback: median - 1.0*stdev
         compute_thresholds(s, ContestType.CASH)
-        assert s.bust_threshold == pytest.approx(190.0)
+        assert s.bust_threshold == pytest.approx(200.0 - 1.0 * 20.0)
 
-    def test_se_small_smash_uses_absolute_if_set(self):
-        s = self._summary()
+    def test_se_small_smash_uses_dynamic_threshold(self):
+        """SE_SMALL smash override is now None → uses dynamic p90 (or stdev fallback)."""
+        s = self._summary()  # p90_score=0.0 → stdev fallback: median + 1.0*stdev
         compute_thresholds(s, ContestType.SE_SMALL)
-        # SE_SMALL has smash override = 250.0
-        assert s.smash_threshold == pytest.approx(250.0)
+        assert s.smash_threshold == pytest.approx(200.0 + 1.0 * 20.0)
 
     def test_gpp_large_uses_dynamic_thresholds(self):
         """GPP_LARGE no longer has hardcoded 260/200 overrides; uses dynamic distribution."""
@@ -277,21 +277,20 @@ class TestRunMonteCarloContestType:
         assert np.allclose(result["smash_prob"], result["smash_pct"])
         assert np.allclose(result["bust_prob"], result["bust_pct"])
 
-    def test_smash_threshold_differs_by_contest_type(self):
-        """Different contest types should generally produce different thresholds.
-        GPP_LARGE uses p90 (dynamic); CASH smash is also dynamic (median + 0.5*stdev
-        when p90_score=0, or p90 when populated by summarize_lineup_sims).
-        They should differ for a typical lineup since p90 ≠ median + 0.5*stdev."""
-        df = _make_lineups_df()
-        gpp = run_monte_carlo_for_lineups(df, contest_type=ContestType.GPP_LARGE)
-        cash = run_monte_carlo_for_lineups(df, contest_type=ContestType.CASH)
-        # GPP_LARGE uses p90 (top 10%); CASH smash is also p90 via summarize_lineup_sims
-        # but CASH bust uses an absolute override of 190.0 → thresholds differ
-        # At minimum, bust thresholds will differ (CASH=190 absolute; GPP=p30 dynamic)
-        assert not (
-            (gpp["smash_threshold"] == cash["smash_threshold"]) &
-            (gpp["bust_threshold"] == cash["bust_threshold"])
-        ).all()
+    def test_per_lineup_thresholds_differ_from_high_to_low_scoring(self):
+        """With fully dynamic (p90/p30) thresholds, a high-scoring lineup gets a
+        higher smash threshold than a low-scoring one, regardless of contest type."""
+        rows = []
+        for p in range(8):
+            rows.append({"lineup_index": 0, "player_name": f"P{p}", "proj": 10.0})
+        for p in range(8):
+            rows.append({"lineup_index": 1, "player_name": f"P{p}", "proj": 50.0})
+        df = pd.DataFrame(rows)
+        for ct in ContestType:
+            result = run_monte_carlo_for_lineups(df, contest_type=ct)
+            low_smash = result.loc[result["lineup_index"] == 0, "smash_threshold"].iloc[0]
+            high_smash = result.loc[result["lineup_index"] == 1, "smash_threshold"].iloc[0]
+            assert low_smash < high_smash, f"failed for {ct}"
 
     def test_per_lineup_thresholds_can_vary(self):
         """Each lineup gets its own threshold computed from its own distribution."""

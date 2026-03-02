@@ -112,16 +112,15 @@ class LineupSimSummary:
     p30_score: float = 0.0  # 30th-percentile score; used as bust bar (bottom 30% of distribution)
 
 
-# Optional contest-calibrated absolute overrides.
-# Set a value to ``None`` to use the dynamic (distribution-relative) formula.
-# Absolute values are calibrated to historical NBA DK cash-line / GPP win-line data:
-#   CASH  bust 190 ≈ approximate 50/50 break-even floor (NBA 8-man classic)
-#   SE_SMALL smash 250 ≈ typical single-entry GPP min-cash line
-#   GPP_LARGE uses fully dynamic percentile-based thresholds (p90 smash, p30 bust)
+# Contest-calibrated absolute overrides.
+# All values are ``None`` so every contest type uses fully dynamic,
+# lineup-specific percentile-based thresholds (p90 = smash bar, p30 = bust bar).
+# This ensures each lineup's thresholds reflect its own simulated distribution
+# rather than a single fixed score that applies to every lineup equally.
 CONTEST_ABSOLUTE_THRESHOLDS: Dict[ContestType, Dict[str, Optional[float]]] = {
-    ContestType.CASH:      {"smash": None,  "bust": 190.0},
-    ContestType.SE_SMALL:  {"smash": 250.0, "bust": 190.0},
-    ContestType.GPP_LARGE: {"smash": None,  "bust": None},
+    ContestType.CASH:      {"smash": None, "bust": None},
+    ContestType.SE_SMALL:  {"smash": None, "bust": None},
+    ContestType.GPP_LARGE: {"smash": None, "bust": None},
 }
 
 
