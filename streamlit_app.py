@@ -468,6 +468,55 @@ def _apply_yakos_projections(pool: pd.DataFrame, knobs: dict = None) -> pd.DataF
     return pool
 
 
+def _refresh_injury_statuses(
+    pool_df: pd.DataFrame, api_key: str
+) -> tuple[pd.DataFrame, list[str]]:
+    """Fetch the latest Tank01 injury updates and apply them to *pool_df*.
+
+    Returns the updated pool and a list of ``"Name: old → new"`` change strings.
+    Safe to call unconditionally — silently no-ops when *api_key* is blank or
+    the API call fails.
+    """
+    if not api_key:
+        return pool_df, []
+    from yak_core.sims import _INELIGIBLE_STATUSES as _INELIG_RF
+
+    try:
+        updates = fetch_injury_updates(
+            _today_est().strftime("%Y%m%d"),
+            {"RAPIDAPI_KEY": api_key},
+        )
+    except Exception:
+        return pool_df, []
+
+    pool = pool_df.copy()
+    changes: list[str] = []
+    if updates and "player_name" in pool.columns:
+        for upd in updates:
+            p_name = upd.get("player_name", "")
+            new_status = upd.get("status", "")
+            if not p_name or not new_status:
+                continue
+            mask = pool["player_name"] == p_name
+            if not mask.any():
+                continue
+            old_status = (
+                pool.loc[mask, "status"].iloc[0]
+                if "status" in pool.columns
+                else "Active"
+            )
+            if str(old_status) != str(new_status):
+                pool.loc[mask, "status"] = new_status
+                changes.append(f"{p_name}: {old_status} → {new_status}")
+
+    # Re-evaluate sim_eligible for any player whose status is ineligible
+    if "status" in pool.columns:
+        inelig = pool["status"].fillna("").str.upper().isin(_INELIG_RF)
+        pool.loc[inelig, "sim_eligible"] = False
+
+    return pool, changes
+
+
 def ensure_session_state():
     if "lineups_df" not in st.session_state:
         st.session_state["lineups_df"] = None
@@ -1579,6 +1628,22 @@ with tab_optimizer:
             st.markdown("---")
             if st.button("🚀 Build Lineups", type="primary", key="opt_build_btn"):
                 with st.spinner(f"Optimizing ({dk_contest_sel} / {archetype_sel})..."):
+                    # Refresh injury statuses from Tank01 before every lineup build
+                    _opt_api_key = st.session_state.get("rapidapi_key", "")
+                    _refreshed_opt, _opt_changes = _refresh_injury_statuses(
+                        pool_df_opt, _opt_api_key
+                    )
+                    # Always build lineups from the refreshed pool
+                    pool_for_opt = apply_slate_filters(
+                        _refreshed_opt, slate_type_opt, showdown_game_opt
+                    )
+                    if _opt_changes:
+                        st.session_state["pool_df"] = _refreshed_opt
+                        st.info(
+                            "**Injury refresh:** "
+                            + " | ".join(_opt_changes[:8])
+                            + (" …" if len(_opt_changes) > 8 else "")
+                        )
                     lu_df, exp_df = run_optimizer(
                         pool_for_opt,
                         num_lineups=num_lu_opt,
@@ -2832,44 +2897,19 @@ with tab_lab:
             with st.spinner("Building lineups + running Monte Carlo sims..."):
                 try:
                     # Auto-refresh injury statuses before running sims
-                    _refresh_api_key = st.session_state.get("rapidapi_key", "")
-                    if _refresh_api_key and not _sim_is_historical:
-                        try:
-                            _refresh_updates = fetch_injury_updates(
-                                _today_est().strftime("%Y%m%d"),
-                                {"RAPIDAPI_KEY": _refresh_api_key},
+                    if not _sim_is_historical:
+                        _refresh_api_key = st.session_state.get("rapidapi_key", "")
+                        active_sim_pool, _refresh_changes = _refresh_injury_statuses(
+                            active_sim_pool, _refresh_api_key
+                        )
+                        if _refresh_changes:
+                            _src_refresh = "sim_pool_df" if st.session_state.get("sim_pool_df") is not None else "pool_df"
+                            st.session_state[_src_refresh] = active_sim_pool
+                            st.info(
+                                "**Status refresh:** "
+                                + " | ".join(_refresh_changes[:8])
+                                + (" …" if len(_refresh_changes) > 8 else "")
                             )
-                            if _refresh_updates:
-                                _refresh_changes = []
-                                for _ru in _refresh_updates:
-                                    _rp_name = _ru.get("player_name", "")
-                                    _new_status = _ru.get("status", "")
-                                    if "player_name" in active_sim_pool.columns and _rp_name:
-                                        _row = active_sim_pool[active_sim_pool["player_name"] == _rp_name]
-                                        if not _row.empty:
-                                            _old_status = _row["status"].iloc[0] if "status" in _row.columns else "Active"
-                                            if str(_old_status) != str(_new_status):
-                                                active_sim_pool.loc[
-                                                    active_sim_pool["player_name"] == _rp_name, "status"
-                                                ] = _new_status
-                                                _refresh_changes.append(
-                                                    f"{_rp_name}: {_old_status} → {_new_status}"
-                                                )
-                                # Re-run eligibility after status updates
-                                from yak_core.sims import _INELIGIBLE_STATUSES as _INELIG_RS
-                                if "status" in active_sim_pool.columns:
-                                    _inelig_rs = active_sim_pool["status"].fillna("").str.upper().isin(_INELIG_RS)
-                                    active_sim_pool.loc[_inelig_rs, "sim_eligible"] = False
-                                _src_refresh = "sim_pool_df" if st.session_state.get("sim_pool_df") is not None else "pool_df"
-                                st.session_state[_src_refresh] = active_sim_pool
-                                if _refresh_changes:
-                                    st.info(
-                                        "**Status refresh:** "
-                                        + " | ".join(_refresh_changes[:8])
-                                        + (" …" if len(_refresh_changes) > 8 else "")
-                                    )
-                        except Exception as _refresh_err:
-                            st.caption(f"Injury refresh skipped: {_refresh_err}")
                     # Filter to sim-eligible players only
                     pool_for_sim_run = active_sim_pool[active_sim_pool["sim_eligible"]].copy() if "sim_eligible" in active_sim_pool.columns else active_sim_pool.copy()
                     _required_roster = 8
