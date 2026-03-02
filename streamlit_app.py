@@ -562,6 +562,8 @@ def ensure_session_state():
         st.session_state["injury_cascade"] = []
     if "is_admin" not in st.session_state:
         st.session_state["is_admin"] = False
+    if "sim_lu_nav" not in st.session_state:
+        st.session_state["sim_lu_nav"] = 0
 
 
 def run_optimizer(
@@ -637,6 +639,92 @@ def run_optimizer(
 
     progress_bar.empty()
     return lineups_df, exposures_df
+
+
+def render_lineup_card(rows: pd.DataFrame, pool_df: "pd.DataFrame | None" = None) -> None:
+    """Render a single lineup as a formatted card.
+
+    Columns shown: Pos, Team, Player, Salary, Field%, Game, Points.
+    Questionable players get a 🟡 indicator.  Footer shows totals.
+
+    Parameters
+    ----------
+    rows :
+        DataFrame slice for a single lineup (filtered by lineup_index).
+    pool_df :
+        Optional full player pool used to look up ``opponent`` / ``status``
+        when those columns are absent from *rows*.
+    """
+    disp_rows = []
+    for _, r in rows.iterrows():
+        pos = str(r.get("slot", r.get("pos", "?")))
+        team = str(r.get("team", ""))
+        name = str(r.get("player_name", r.get("name", "")))
+        salary = int(r.get("salary", 0))
+
+        # Ownership: prefer proj_own, fall back to ownership
+        own_val = None
+        for _ocol in ["proj_own", "ownership"]:
+            _v = r.get(_ocol)
+            if _v is not None and pd.notna(_v):
+                try:
+                    own_val = float(_v)
+                    break
+                except (ValueError, TypeError):
+                    pass
+        own_str = f"{own_val:.1f}%" if own_val is not None else "—"
+
+        # Game: "team @ opponent"
+        opp = str(r.get("opponent", r.get("opp", "")))
+        if (not opp or opp in ("nan", "")) and pool_df is not None:
+            _nc = "player_name" if "player_name" in pool_df.columns else "name"
+            _m = pool_df[pool_df[_nc] == name]
+            if not _m.empty:
+                opp = str(_m.iloc[0].get("opponent", _m.iloc[0].get("opp", "")))
+        game_str = f"{team} @ {opp}" if opp and opp not in ("nan", "") else team
+
+        proj = float(r.get("proj", 0))
+
+        # Injury flag (Q = yellow dot)
+        status = str(r.get("status", "")).strip()
+        if (not status or status in ("nan", "-", "")) and pool_df is not None:
+            _nc = "player_name" if "player_name" in pool_df.columns else "name"
+            _m = pool_df[pool_df[_nc] == name]
+            if not _m.empty:
+                status = str(_m.iloc[0].get("status", "")).strip()
+        inj = ""
+        if status.upper() == "Q":
+            inj = " 🟡"
+
+        disp_rows.append({
+            "Pos": pos,
+            "Team": team,
+            "Player": name + inj,
+            "Salary": f"${salary:,}",
+            "Field%": own_str,
+            "Game": game_str,
+            "Points": round(proj, 2),
+        })
+
+    if disp_rows:
+        st.dataframe(pd.DataFrame(disp_rows), use_container_width=True, hide_index=True)
+
+    # Footer totals
+    total_salary = int(pd.to_numeric(rows["salary"], errors="coerce").fillna(0).sum())
+    proj_series = pd.to_numeric(rows["proj"], errors="coerce").fillna(0) if "proj" in rows.columns else pd.Series([0.0])
+    total_proj = float(proj_series.sum())
+    total_own = None
+    for _ocol in ["proj_own", "ownership"]:
+        if _ocol in rows.columns:
+            _s = pd.to_numeric(rows[_ocol], errors="coerce")
+            if _s.notna().any():
+                total_own = float(_s.sum())
+                break
+    footer_parts = [f"**${total_salary:,}**"]
+    if total_own is not None:
+        footer_parts.append(f"**{total_own:.1f}%** field")
+    footer_parts.append(f"**{total_proj:.2f} pts**")
+    st.caption(" · ".join(footer_parts))
 
 
 @st.cache_data
@@ -1213,10 +1301,29 @@ with tab_slate:
                                         st.info(f"🕐 Late-swap window: {_alu.late_swap_window}")
                                     _p_df = pd.DataFrame(_alu.players)
                                     if not _p_df.empty:
-                                        st.dataframe(
-                                            _p_df,
-                                            use_container_width=True,
-                                            hide_index=True,
+                                        _card_rows = []
+                                        for _, _pr in _p_df.iterrows():
+                                            _ov = _pr.get("ownership")
+                                            try:
+                                                _ov_flt = float(_ov) if _ov is not None and pd.notna(_ov) else None
+                                            except (ValueError, TypeError):
+                                                _ov_flt = None
+                                            _card_rows.append({
+                                                "Pos": str(_pr.get("pos", "?")),
+                                                "Team": str(_pr.get("team", "")),
+                                                "Player": str(_pr.get("name", "")),
+                                                "Salary": f"${int(_pr.get('salary', 0)):,}",
+                                                "Field%": f"{_ov_flt:.1f}%" if _ov_flt is not None else "—",
+                                            })
+                                        st.dataframe(pd.DataFrame(_card_rows), use_container_width=True, hide_index=True)
+                                        _tot_sal = int(sum(p.get("salary", 0) for p in _alu.players))
+                                        try:
+                                            _tot_own = sum(float(p.get("ownership") or 0) for p in _alu.players)
+                                        except (ValueError, TypeError):
+                                            _tot_own = 0.0
+                                        st.caption(
+                                            f"**${_tot_sal:,}** · **{_tot_own:.1f}%** field · "
+                                            f"**{_alu.proj_points:.2f} pts**"
                                         )
                                     else:
                                         st.info("No player data.")
@@ -1234,20 +1341,32 @@ with tab_slate:
                         if lu_df is not None and not lu_df.empty:
                             annotated = ricky_annotate(lu_df)
                             unique_lu = sorted(annotated["lineup_index"].unique())
-                            sel_lu = st.selectbox(
-                                "Select lineup",
-                                range(1, len(unique_lu) + 1),
-                                key=f"promoted_lu_{i}",
-                            )
-                            lu_rows = annotated[annotated["lineup_index"] == unique_lu[sel_lu - 1]].copy()
+                            _nav_key = f"promoted_nav_{i}"
+                            if _nav_key not in st.session_state:
+                                st.session_state[_nav_key] = 0
+                            _lp_pos = max(0, min(len(unique_lu) - 1, st.session_state[_nav_key]))
+                            _lp_c1, _lp_c2, _lp_c3 = st.columns([1, 4, 1])
+                            with _lp_c1:
+                                if st.button("◀", key=f"leg_lu_prev_{i}", disabled=(_lp_pos == 0)):
+                                    st.session_state[_nav_key] = _lp_pos - 1
+                                    st.rerun()
+                            with _lp_c2:
+                                st.markdown(
+                                    f"<div style='text-align:center'>Lineup {_lp_pos + 1} of {len(unique_lu)}</div>",
+                                    unsafe_allow_html=True,
+                                )
+                            with _lp_c3:
+                                if st.button("▶", key=f"leg_lu_next_{i}", disabled=(_lp_pos == len(unique_lu) - 1)):
+                                    st.session_state[_nav_key] = _lp_pos + 1
+                                    st.rerun()
+                            lu_rows = annotated[annotated["lineup_index"] == unique_lu[_lp_pos]].copy()
                             conf = lu_rows["confidence"].iloc[0] if "confidence" in lu_rows.columns else "—"
                             tag = lu_rows["tag"].iloc[0] if "tag" in lu_rows.columns else "—"
                             st.markdown(
-                                f"**Confidence**: {conf} | **Tag**: {tag} | "
-                                f"Salary: {int(lu_rows['salary'].sum()):,} | Proj: {lu_rows['proj'].sum():.1f}"
+                                f"**Lineup {_lp_pos + 1} — ${int(lu_rows['salary'].sum()):,} | "
+                                f"{lu_rows['proj'].sum():.2f} pts** · Conf: {conf} · Tag: {tag}"
                             )
-                            disp_cols = [c for c in ["slot", "team", "player_name", "salary", "proj", "confidence", "tag"] if c in lu_rows.columns]
-                            st.dataframe(lu_rows[disp_cols], use_container_width=True, height=240)
+                            render_lineup_card(lu_rows, pool_df=st.session_state.get("pool_df"))
                         else:
                             st.info("No lineups in this set.")
             else:
@@ -1461,42 +1580,43 @@ with tab_optimizer:
                 unique_lu = sorted(lineups_df["lineup_index"].unique())
                 st.success(f"Generated {len(unique_lu)} lineups ({dk_contest_sel} / {archetype_sel})")
 
-                lu_idx = st.number_input("Lineup #", 1, len(unique_lu), 1, step=1, key="opt_lu_idx")
-                cur_idx = unique_lu[lu_idx - 1]
+                # ── Arrow navigation ──────────────────────────────────────
+                _lu_pos = max(0, min(len(unique_lu) - 1, st.session_state["current_lineup_index"]))
+                _nav_c1, _nav_c2, _nav_c3 = st.columns([1, 4, 1])
+                with _nav_c1:
+                    if st.button("◀", key="opt_lu_prev", disabled=(_lu_pos == 0)):
+                        st.session_state["current_lineup_index"] = _lu_pos - 1
+                        st.rerun()
+                with _nav_c2:
+                    st.markdown(
+                        f"<div style='text-align:center;font-size:1.05em'>"
+                        f"Lineup {_lu_pos + 1} of {len(unique_lu)}</div>",
+                        unsafe_allow_html=True,
+                    )
+                with _nav_c3:
+                    if st.button("▶", key="opt_lu_next", disabled=(_lu_pos == len(unique_lu) - 1)):
+                        st.session_state["current_lineup_index"] = _lu_pos + 1
+                        st.rerun()
+
+                cur_idx = unique_lu[_lu_pos]
+                lu_idx = _lu_pos + 1
                 rows = lineups_df[lineups_df["lineup_index"] == cur_idx].copy()
                 st.markdown(
-                    f"**Lineup {lu_idx}** — Salary: {int(rows['salary'].sum()):,} | "
-                    f"Proj: {rows['proj'].sum():.2f}"
+                    f"**Lineup {lu_idx} — ${int(rows['salary'].sum()):,} | "
+                    f"{rows['proj'].sum():.2f} pts**"
                 )
-                disp_cols = [c for c in ["slot", "team", "player_name", "salary", "proj"] if c in rows.columns]
-                lu_display = rows[disp_cols].copy()
-                if "salary" in lu_display.columns:
-                    lu_display["salary"] = lu_display["salary"].astype(int)
-                st.dataframe(lu_display, use_container_width=True, height=260)
+                render_lineup_card(rows, pool_df=st.session_state.get("pool_df"))
 
-                if exposures_df is not None and not exposures_df.empty:
-                    with st.expander("Player Exposures", expanded=False):
-                        st.dataframe(exposures_df, use_container_width=True, height=400)
-
-                dl1, dl2, dl3 = st.columns(3)
+                dl1, dl2 = st.columns(2)
                 with dl1:
                     st.download_button(
-                        "Download lineups CSV",
+                        "📥 Download lineups CSV",
                         data=to_csv_bytes(lineups_df),
                         file_name="yakos_lineups.csv",
                         mime="text/csv",
                         key="opt_dl_lu",
                     )
                 with dl2:
-                    if exposures_df is not None and not exposures_df.empty:
-                        st.download_button(
-                            "Download exposures CSV",
-                            data=to_csv_bytes(exposures_df),
-                            file_name="yakos_exposures.csv",
-                            mime="text/csv",
-                            key="opt_dl_exp",
-                        )
-                with dl3:
                     if slate_type_opt == "Showdown Captain":
                         dk_upload_df = to_dk_showdown_upload_format(lineups_df)
                         dk_help = (
@@ -2710,6 +2830,69 @@ with tab_lab:
                     "contest_type": "Contest Type",
                 })
                 st.dataframe(_sim_display, use_container_width=True, height=300)
+
+            # ── Sim Lineup Browser ────────────────────────────────────────────
+            st.markdown("#### 📋 Lineup Browser")
+            st.caption("Browse generated lineups one at a time. Use ◀ ▶ to navigate.")
+            _sim_unique_lu = sorted(sim_lu_df["lineup_index"].unique())
+            _sim_lu_pos = max(0, min(len(_sim_unique_lu) - 1, st.session_state.get("sim_lu_nav", 0)))
+            _slb_c1, _slb_c2, _slb_c3 = st.columns([1, 4, 1])
+            with _slb_c1:
+                if st.button("◀", key="sim_lu_prev", disabled=(_sim_lu_pos == 0)):
+                    st.session_state["sim_lu_nav"] = _sim_lu_pos - 1
+                    st.rerun()
+            with _slb_c2:
+                st.markdown(
+                    f"<div style='text-align:center;font-size:1.05em'>"
+                    f"Lineup {_sim_lu_pos + 1} of {len(_sim_unique_lu)}</div>",
+                    unsafe_allow_html=True,
+                )
+            with _slb_c3:
+                if st.button("▶", key="sim_lu_next", disabled=(_sim_lu_pos == len(_sim_unique_lu) - 1)):
+                    st.session_state["sim_lu_nav"] = _sim_lu_pos + 1
+                    st.rerun()
+
+            _sim_cur_id = _sim_unique_lu[_sim_lu_pos]
+            _sim_cur_rows = sim_lu_df[sim_lu_df["lineup_index"] == _sim_cur_id].copy()
+            _sim_cur_res = sim_res[sim_res["lineup_index"] == _sim_cur_id]
+            _sim_smash = (
+                float(pd.to_numeric(_sim_cur_res["smash_prob"].iloc[0], errors="coerce") or 0)
+                if not _sim_cur_res.empty else 0.0
+            )
+            st.markdown(
+                f"**Lineup {_sim_lu_pos + 1} — ${int(_sim_cur_rows['salary'].sum()):,} | "
+                f"{_sim_cur_rows['proj'].sum():.2f} pts** · Smash {_sim_smash:.1%}"
+            )
+            render_lineup_card(_sim_cur_rows, pool_df=active_sim_pool)
+
+            # Per-lineup Publish to Slate Room button
+            if st.button(
+                f"✅ Publish Lineup {_sim_lu_pos + 1} to Slate Room",
+                key=f"sim_pub_lu_{_sim_lu_pos}",
+            ):
+                if _sim_cur_res.empty:
+                    st.warning("Sim results not available for this lineup — cannot publish.")
+                else:
+                    _pub_slate = getattr(
+                        st.session_state.get("pool_df", pd.DataFrame()),
+                        "attrs", {}
+                    ).get("slate", f"NBA {_today_est()}")
+                    _pub_arch = CONTEST_PRESET_ARCH_LABELS.get(sim_dk_contest, sim_dk_contest)
+                    _pub_approved = build_approved_lineups(
+                        lineups_df=_sim_cur_rows,
+                        sim_results=_sim_cur_res,
+                        contest_archetype=_pub_arch,
+                        site="DK",
+                        slate=_pub_slate,
+                    )
+                    st.session_state["approved_lineups"].extend(_pub_approved)
+                    entry_pub = {
+                        "label": f"Lineup {_sim_lu_pos + 1} — {sim_dk_contest} / {sim_archetype}",
+                        "lineups_df": _sim_cur_rows,
+                        "metadata": {"contest_type": sim_dk_contest, "archetype": sim_archetype, "n_lineups": 1},
+                    }
+                    st.session_state["promoted_lineups"].append(entry_pub)
+                    st.success(f"Lineup {_sim_lu_pos + 1} published to Slate Room ✅")
 
             # ── Sim Anomaly Detection ─────────────────────────────────────────
             _sim_anomaly = st.session_state.get("sim_anomaly_df")
