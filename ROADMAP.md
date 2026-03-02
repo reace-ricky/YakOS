@@ -87,6 +87,8 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 65 | **Calibration Lab 3-step guided workflow** — Section A redesigned from queue table + error diagnosis into: Step 1 "Run Calibration Check" button → traffic-light scorecard (FP MAE / Min MAE / Own MAE with ✅/⚠️/❌); Step 2 "Suggested Fixes" with inline Apply buttons that auto-adjust knobs in session state; Step 3 "Re-project & Compare" → before/after MAE comparison via `st.metric`; big player queue table moved to collapsed "Player Details" expander; `_diagnose_errors()` and `_generate_suggestions()` helper functions added | `streamlit_app.py` | latest |
 | 66 | **Dynamic smash/bust thresholds per contest type** — removed hardcoded `SMASH_THRESHOLD=300`/`BUST_THRESHOLD=230` globals; added `ContestType` enum (CASH, SE_SMALL, GPP_LARGE), `LineupSimSummary` dataclass, `CONTEST_ABSOLUTE_THRESHOLDS` config, `summarize_lineup_sims()`, `compute_thresholds()`, `compute_smash_bust_rates()` helpers; `run_monte_carlo_for_lineups()` now accepts `contest_type` param and returns `smash_threshold`, `bust_threshold`, `smash_pct`, `bust_pct`, `contest_type` columns per lineup; `smash_prob`/`bust_prob` kept as backward-compatible aliases; streamlit display updated; 31 new unit tests; **wired `sim_dk_contest` → `ContestType` mapping so sim uses correct thresholds for CASH/SE/GPP contests** | `yak_core/sims.py`, `streamlit_app.py`, `tests/test_sim_dynamic_thresholds.py` | latest |
 
+| 67 | **sim_eligible flag + Sim Player Filters** — `compute_sim_eligible()` added to `yak_core/sims.py` (status/minutes/team rules); `INJURY`→`status` mapping in `rename_rg_columns_to_yakos()`; `sim_eligible` computed on every pool load; "Sim Player Filters" collapsible UI (exclude OUT/IR checkbox, min-minutes slider, team filter, N/M eligible summary); manual include/exclude `st.data_editor`; sim engine filters to `sim_eligible` with roster-size guard; historical actuals sanity check (0-FP players de-activated); post-sim diagnostics (exposure bar chart + eligibility table with warning banners); Live News auto-eligibility toggle; 24 new unit tests in `tests/test_sim_eligible.py` | `yak_core/sims.py`, `streamlit_app.py`, `tests/test_sim_eligible.py` | latest |
+
 ---
 
 ## What's Remaining 🔲
@@ -143,7 +145,7 @@ YakOS/
 │   ├── projections.py        # salary_implied, regression, blend, proj_model, yakos_fp_projection, yakos_minutes_projection, yakos_ownership_projection, yakos_ensemble
 │   ├── calibration.py        # archetypes, queue, backtest, config knobs, persistent calibration_config.json
 │   ├── right_angle.py        # stack/pace/value edge analysis + lineup tagging
-│   ├── sims.py               # Monte Carlo, live update, promote logic, player accuracy table
+│   ├── sims.py               # Monte Carlo, live update, promote logic, player accuracy table, compute_sim_eligible
 │   ├── live.py               # Tank01 API (live pool + injury updates)
 │   ├── ownership.py          # salary-rank ownership, leverage
 │   ├── scoring.py            # KPIs, hit rate, projection %, backtest summary
@@ -174,7 +176,8 @@ YakOS/
 │   ├── test_slate_room_features.py      (40 tests)
 │   ├── test_sim_backtest.py             (19 tests)
 │   ├── test_sim_player_accuracy.py      (23 tests)
-│   └── test_live_actuals.py             (23 tests)
+│   ├── test_live_actuals.py             (23 tests)
+│   └── test_sim_eligible.py             (24 tests)
 └── requirements.txt
 ```
 
