@@ -520,6 +520,8 @@ def ensure_session_state():
         st.session_state["sim_custom_lineup"] = []
     if "sim_anomaly_df" not in st.session_state:
         st.session_state["sim_anomaly_df"] = None
+    if "sim_lineup_scores" not in st.session_state:
+        st.session_state["sim_lineup_scores"] = None
     if "ms_result" not in st.session_state:
         st.session_state["ms_result"] = None
     if "rapidapi_key" not in st.session_state:
@@ -2860,14 +2862,16 @@ with tab_lab:
                             _sim_contest_type = _INTERNAL_CT_TO_SIM_TYPE.get(
                                 _internal_ct, _SimContestType.GPP_LARGE
                             )
-                            sim_res = run_monte_carlo_for_lineups(
+                            sim_res, _sim_lineup_scores = run_monte_carlo_for_lineups(
                                 sim_lu_df, n_sims=sim_n_sims, volatility_mode=sim_vol,
                                 contest_type=_sim_contest_type,
+                                _return_scores=True,
                             )
                             # Annotate with Ricky confidence
                             annotated_sim = ricky_annotate(sim_lu_df, sim_res)
                             st.session_state["sim_lineups_df"] = annotated_sim
                             st.session_state["sim_results_df"] = sim_res
+                            st.session_state["sim_lineup_scores"] = _sim_lineup_scores
                             # Ensure ownership is populated in the pool before anomaly calc
                             _anomaly_pool = apply_ownership(pool_for_sim_run.copy())
                             # Compute per-player anomaly table using cal_knobs
@@ -2909,8 +2913,8 @@ with tab_lab:
                     "| **Lineup #** | Lineup identifier (matches the Optimizer view) |\n"
                     "| **Avg Score** | Mean total FP across all sim iterations — best single-number estimate of lineup strength |\n"
                     "| **Std Dev** | Score variability. High = boom-or-bust GPP profile; low = steady cash-game floor |\n"
-                    f"| **Smash %** | Probability of scoring **≥ dynamic smash threshold** (median + stdev multiplier per contest type) — higher is better for tournaments |\n"
-                    f"| **Bust %** | Probability of scoring **≤ dynamic bust threshold** (median − stdev multiplier per contest type) — lower is better |\n"
+                    "| **Smash %** | Fraction of sims where this lineup scored ≥ contest smash threshold (p90 of full field) — varies naturally across lineups |\n"
+                    "| **Bust %** | Fraction of sims where this lineup scored ≤ contest bust threshold (p30 of full field) — varies naturally across lineups |\n"
                     "| **Median Score** | Middle-of-distribution outcome (50th percentile) |\n"
                     "| **P85 (Upside)** | 85th-percentile score — what the lineup looks like on a good night |\n"
                     "| **P15 (Floor)** | 15th-percentile score — downside floor on a bad night |"
@@ -2996,31 +3000,42 @@ with tab_lab:
             # ── Sim Anomaly Detection ─────────────────────────────────────────
             _sim_anomaly = st.session_state.get("sim_anomaly_df")
             if _sim_anomaly is not None and not _sim_anomaly.empty:
-                _high_lev = _sim_anomaly[_sim_anomaly["Flag"] == "🔥 HIGH LEVERAGE"]
-                _val_traps = _sim_anomaly[_sim_anomaly["Value Trap"]]
+                high_leverage_count = int((_sim_anomaly["Flag"] == "🔥 HIGH LEVERAGE").sum())
+                value_trap_count = int(_sim_anomaly["Value Trap"].sum())
                 _top_play = _sim_anomaly.iloc[0] if len(_sim_anomaly) > 0 else None
                 _summary_parts = [
                     f"Sim ran **{sim_n_sims}** iterations across **{sim_n_lu}** lineups.",
-                    f"Found **{len(_high_lev)}** high-leverage player(s) (smash rate > own%).",
-                    f"Found **{len(_val_traps)}** value trap(s) (bust rate > 40% despite high salary).",
+                    f"Found **{high_leverage_count}** high-leverage players, **{value_trap_count}** value traps.",
                 ]
                 if _top_play is not None:
+                    _lev_val = _top_play["Leverage Score"]
+                    _lev_str = f"{_lev_val:.2f}" if not (isinstance(_lev_val, float) and __import__("math").isnan(_lev_val)) else "N/A"
                     _summary_parts.append(
                         f"Top leverage play: **{_top_play['Player']}** "
-                        f"({_top_play['Smash%']:.1f}% smash, {_top_play['Own%']:.1f}% owned)."
+                        f"({_top_play['Smash%']:.1f}% smash, {_top_play['Own%']:.1f}% owned, leverage {_lev_str}x)."
                     )
                 st.info("  \n".join(_summary_parts))
 
                 st.markdown("#### 🔍 Sim Anomalies — Leverage Spots")
                 st.caption(
                     "Per-player simulation breakdown. "
-                    "Leverage Score = Smash% / Own% — higher means more upside relative to expected ownership. "
-                    "🔥 HIGH LEVERAGE = score > 3.0. ⚠️ Value Trap = busts frequently despite high salary."
+                    "Smash%/Bust% are computed against the contest-level field threshold — "
+                    "values vary naturally across players (not locked at 10%/30% by construction). "
+                    "Leverage Score = Smash% / Own% (NaN when Own% < 0.1). "
+                    "🔥 HIGH LEVERAGE = score ≥ 3 and Own% ≤ 15. ⚠️ Value Trap = bust rate > 40% despite high salary."
                 )
                 _anomaly_display = _sim_anomaly.copy()
                 _anomaly_display["Value Trap"] = _anomaly_display["Value Trap"].apply(
                     lambda x: "⚠️ VALUE TRAP" if x else ""
                 )
+                # Allow click-to-filter: show high-leverage or value-trap filter buttons
+                _af_col1, _af_col2, _af_col3 = st.columns([1, 1, 2])
+                _show_hl = _af_col1.checkbox("🔥 Show only High Leverage", key="sim_filter_hl")
+                _show_vt = _af_col2.checkbox("⚠️ Show only Value Traps", key="sim_filter_vt")
+                if _show_hl:
+                    _anomaly_display = _anomaly_display[_sim_anomaly["Flag"] == "🔥 HIGH LEVERAGE"]
+                elif _show_vt:
+                    _anomaly_display = _anomaly_display[_sim_anomaly["Value Trap"]]
                 st.dataframe(_anomaly_display, use_container_width=True, height=350)
 
             # ── Sim Diagnostics — Exposure & Eligibility ──────────────────────
@@ -3098,6 +3113,74 @@ with tab_lab:
                             )
 
                         st.dataframe(_diag_merged, use_container_width=True, height=300)
+
+            # ── Sim Diagnostics accordion ─────────────────────────────────────
+            if sim_res is not None and not sim_res.empty:
+                with st.expander("🔬 Sim Diagnostics", expanded=False):
+                    _d_smash = float(sim_res["contest_smash_score"].iloc[0]) if "contest_smash_score" in sim_res.columns else float(sim_res["smash_threshold"].iloc[0])
+                    _d_bust = float(sim_res["contest_bust_score"].iloc[0]) if "contest_bust_score" in sim_res.columns else float(sim_res["bust_threshold"].iloc[0])
+                    _d_ct = sim_res["contest_type"].iloc[0] if "contest_type" in sim_res.columns else "—"
+
+                    st.markdown("**Contest-Level Thresholds** (compare to historical cash lines during calibration)")
+                    _th_col1, _th_col2, _th_col3 = st.columns(3)
+                    _th_col1.metric("Contest Type", _d_ct)
+                    _th_col2.metric("Smash Threshold (p90 field)", f"{_d_smash:.1f}")
+                    _th_col3.metric("Bust Threshold (p30 field)", f"{_d_bust:.1f}")
+
+                    # Sanity checks — sim_res["smash_pct"] is in [0,1] range
+                    _avg_smash_pct = sim_res["smash_pct"].mean()
+                    _avg_bust_pct = sim_res["bust_pct"].mean()
+                    st.markdown("**Sanity Checks**")
+                    _sc_col1, _sc_col2 = st.columns(2)
+                    _sc_col1.metric(
+                        "Avg Smash% across field",
+                        f"{_avg_smash_pct:.1%}",
+                        help="Expected ≈ 10% (p90 threshold means ~10% of field scores exceed it)",
+                    )
+                    _sc_col2.metric(
+                        "Avg Bust% across field",
+                        f"{_avg_bust_pct:.1%}",
+                        help="Expected ≈ 30% (p30 threshold means ~30% of field scores fall below it)",
+                    )
+                    _smash_spread = sim_res["smash_pct"].std()
+                    st.caption(
+                        f"Smash% std dev across your {len(sim_res)} lineups: **{_smash_spread:.1%}** "
+                        "(wider spread means the model differentiates well between lineups)."
+                    )
+
+                    # Histogram of sim scores for the currently-browsed lineup
+                    _sim_scores_store = st.session_state.get("sim_lineup_scores")
+                    if _sim_scores_store:
+                        _diag_lu_ids = sorted(_sim_scores_store.keys())
+                        _diag_lu_sel = st.selectbox(
+                            "Select lineup for score histogram",
+                            _diag_lu_ids,
+                            format_func=lambda x: f"Lineup {x}",
+                            key="diag_lineup_sel",
+                        )
+                        _diag_scores = _sim_scores_store.get(_diag_lu_sel)
+                        if _diag_scores is not None and len(_diag_scores) > 0:
+                            _hist_df = pd.DataFrame({"Score": _diag_scores})
+                            try:
+                                import altair as alt
+                                _hist_base = alt.Chart(_hist_df).mark_bar(opacity=0.7).encode(
+                                    x=alt.X("Score:Q", bin=alt.Bin(maxbins=40), title="Simulated Score"),
+                                    y=alt.Y("count():Q", title="# Sims"),
+                                    tooltip=["count():Q"],
+                                ).properties(height=220, title=f"Lineup {_diag_lu_sel} — score distribution")
+                                _smash_rule = alt.Chart(pd.DataFrame({"x": [_d_smash]})).mark_rule(
+                                    color="#2ecc71", strokeWidth=2, strokeDash=[4, 2]
+                                ).encode(x="x:Q")
+                                _bust_rule = alt.Chart(pd.DataFrame({"x": [_d_bust]})).mark_rule(
+                                    color="#e74c3c", strokeWidth=2, strokeDash=[4, 2]
+                                ).encode(x="x:Q")
+                                st.altair_chart(_hist_base + _smash_rule + _bust_rule, use_container_width=True)
+                                st.caption(
+                                    f"Green dashed line = contest smash threshold ({_d_smash:.1f}). "
+                                    f"Red dashed line = contest bust threshold ({_d_bust:.1f})."
+                                )
+                            except Exception:
+                                st.bar_chart(_hist_df["Score"].value_counts().sort_index())
 
             # ── Custom Lineup Builder ─────────────────────────────────────────
             st.markdown("---")

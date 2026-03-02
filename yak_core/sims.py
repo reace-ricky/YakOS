@@ -123,6 +123,17 @@ CONTEST_ABSOLUTE_THRESHOLDS: Dict[ContestType, Dict[str, Optional[float]]] = {
     ContestType.GPP_LARGE: {"smash": None, "bust": None},
 }
 
+# Percentile levels used to derive contest-level smash/bust thresholds from the
+# pooled field of simulated lineup totals.  p90 → top 10% finish; p30 → losing
+# region / min-cash boundary.  Adjust during calibration sprints.
+CONTEST_SMASH_PERCENTILE: int = 90
+CONTEST_BUST_PERCENTILE: int = 30
+
+# Minimum ownership (%) required to compute a Leverage Score.  Below this value
+# the score is set to ``NaN`` to avoid spurious infinity-like values from near-zero
+# denominators.
+MIN_OWNERSHIP_FOR_LEVERAGE: float = 0.1
+
 
 def summarize_lineup_sims(scores: List[float]) -> LineupSimSummary:
     """Compute distribution statistics for a list of simulated lineup totals.
@@ -232,14 +243,19 @@ def run_monte_carlo_for_lineups(
     n_sims: int = 500,
     volatility_mode: str = "standard",
     contest_type: ContestType = ContestType.GPP_LARGE,
-) -> pd.DataFrame:
+    _return_scores: bool = False,
+) -> "pd.DataFrame | Tuple[pd.DataFrame, Dict[Any, np.ndarray]]":
     """Run Monte Carlo simulations on lineup projections.
 
     For each lineup, simulates ``n_sims`` outcomes by sampling from
     per-player normal distributions (mean=proj, std derived from
     ceil/floor when available).  Smash and bust thresholds are computed
-    dynamically from each lineup's own sim distribution using
-    :func:`summarize_lineup_sims` and :func:`compute_thresholds`.
+    at the **contest level** — pooling all simulated lineup totals across
+    the entire field, then taking the 90th percentile as the smash bar and
+    the 30th percentile as the bust bar.  Every lineup in the same run
+    shares the same contest-level thresholds so that Smash% / Bust% vary
+    naturally across lineups (instead of being ``≈ 10% / 30%`` by
+    construction).
 
     Parameters
     ----------
@@ -252,28 +268,41 @@ def run_monte_carlo_for_lineups(
         ``"low"`` / ``"standard"`` / ``"high"`` — scales default variance when
         ceil/floor are unavailable.
     contest_type : ContestType, optional
-        Contest archetype used to derive per-lineup smash/bust thresholds
-        (default ``ContestType.GPP_LARGE``).
+        Contest archetype (default ``ContestType.GPP_LARGE``).
+    _return_scores : bool, optional
+        When ``True`` the function returns a ``(DataFrame, scores_dict)`` tuple
+        where ``scores_dict`` maps each ``lineup_index`` to its raw 1-D array of
+        ``n_sims`` simulated totals.  Useful for downstream histogram rendering.
 
     Returns
     -------
-    pd.DataFrame
+    pd.DataFrame or (pd.DataFrame, dict)
         Per-lineup summary with columns:
         ``lineup_index``, ``sim_mean``, ``sim_std``,
         ``median_points``, ``sim_p85``, ``sim_p15``,
         ``smash_threshold``, ``bust_threshold``,
+        ``contest_smash_score``, ``contest_bust_score``,
         ``smash_pct``, ``bust_pct``, ``contest_type``.
-        ``smash_prob`` and ``bust_prob`` are retained as aliases for
-        ``smash_pct`` and ``bust_pct`` for backwards compatibility.
+        ``smash_prob`` and ``bust_prob`` are kept as aliases for
+        ``smash_pct`` / ``bust_pct`` for backwards compatibility.
+
+        ``smash_threshold`` / ``bust_threshold`` are the contest-level values
+        (identical for all rows in a single run).  Per-lineup distribution
+        statistics (Avg, Std Dev, Median, P85, P15) remain as read-only
+        diagnostic columns.
     """
     if lineups_df.empty or "lineup_index" not in lineups_df.columns:
+        if _return_scores:
+            return pd.DataFrame(), {}
         return pd.DataFrame()
 
     vol_map = {"low": 0.10, "standard": 0.18, "high": 0.28}
     default_vol = vol_map.get(volatility_mode, 0.18)
 
     rng = np.random.RandomState(42)
-    results = []
+
+    # ── Phase 1: run all lineup sims, collect totals ─────────────────────────
+    per_lineup: List[Tuple[Any, np.ndarray, "LineupSimSummary"]] = []
 
     for lu_id, grp in lineups_df.groupby("lineup_index"):
         projs = grp["proj"].fillna(0).values.astype(float)
@@ -297,14 +326,28 @@ def run_monte_carlo_for_lineups(
         )
         sim_matrix = np.clip(sim_matrix, 0, None)
         totals = sim_matrix.sum(axis=1)
-
-        # Dynamic thresholds from this lineup's own distribution
         summary = summarize_lineup_sims(totals.tolist())
-        compute_thresholds(summary, contest_type)
-        smash_pct, bust_pct = compute_smash_bust_rates(
-            totals.tolist(), summary.smash_threshold, summary.bust_threshold
-        )
+        summary.lineup_id = lu_id
+        per_lineup.append((lu_id, totals, summary))
 
+    if not per_lineup:
+        if _return_scores:
+            return pd.DataFrame(), {}
+        return pd.DataFrame()
+
+    # ── Phase 2: contest-level thresholds from the pooled field ──────────────
+    all_arr = np.concatenate([totals for _, totals, _ in per_lineup])
+    contest_smash = float(np.percentile(all_arr, CONTEST_SMASH_PERCENTILE))
+    contest_bust = float(np.percentile(all_arr, CONTEST_BUST_PERCENTILE))
+
+    # ── Phase 3: per-lineup results against contest-level thresholds ─────────
+    results = []
+    scores_dict: Dict[Any, np.ndarray] = {}
+
+    for lu_id, totals, summary in per_lineup:
+        smash_pct, bust_pct = compute_smash_bust_rates(
+            totals.tolist(), contest_smash, contest_bust
+        )
         results.append({
             "lineup_index": lu_id,
             "sim_mean": round(float(totals.mean()), 2),
@@ -312,8 +355,11 @@ def run_monte_carlo_for_lineups(
             "median_points": round(summary.median_score, 2),
             "sim_p85": round(summary.p85_score, 2),
             "sim_p15": round(summary.p15_score, 2),
-            "smash_threshold": round(summary.smash_threshold, 2),
-            "bust_threshold": round(summary.bust_threshold, 2),
+            # Contest-level thresholds (same for all lineups in this run)
+            "smash_threshold": round(contest_smash, 2),
+            "bust_threshold": round(contest_bust, 2),
+            "contest_smash_score": round(contest_smash, 2),
+            "contest_bust_score": round(contest_bust, 2),
             "smash_pct": round(smash_pct, 3),
             "bust_pct": round(bust_pct, 3),
             # Backwards-compatible aliases
@@ -321,8 +367,13 @@ def run_monte_carlo_for_lineups(
             "bust_prob": round(bust_pct, 3),
             "contest_type": contest_type.value,
         })
+        if _return_scores:
+            scores_dict[lu_id] = totals
 
-    return pd.DataFrame(results)
+    df = pd.DataFrame(results)
+    if _return_scores:
+        return df, scores_dict
+    return df
 
 
 def simulate_live_updates(
@@ -496,34 +547,43 @@ def compute_player_anomaly_table(
 ) -> pd.DataFrame:
     """Compute a per-player anomaly / leverage table from Monte Carlo sim results.
 
-    For each player that appears in *lineup_df*, simulates *n_sims* individual
-    outcomes from a normal distribution centred on their projection, then
-    classifies each outcome as a **smash** (``outcome ≥ smash_threshold × proj``)
-    or a **bust** (``outcome ≤ bust_threshold × proj``).
+    For each player that appears in *lineup_df*, runs **lineup-level** Monte Carlo
+    simulations (one sim per complete lineup, not per individual player), computes
+    contest-level smash/bust thresholds from the pooled field distribution, then
+    calculates each player's Smash% and Bust% as the fraction of contest sims where
+    a lineup containing that player exceeds or falls below those thresholds.
+
+    This produces Smash% / Bust% values that **vary naturally** across players —
+    players in high-quality lineups will have Smash% > 10%, low-quality lineups
+    Smash% < 10% — rather than being locked at the field average by construction.
 
     Leverage Score is defined as ``Smash% / Own%`` (higher means the player is
     a bigger upside play relative to expected ownership — more leverage in GPP).
+    When ``Own%`` is below 0.1 the score is set to ``NaN`` to avoid spurious
+    infinity-like values.
 
     Parameters
     ----------
     pool_df : pd.DataFrame
         Player pool.  Must include a name column (``player_name`` or ``name``)
         and a ``proj`` column.  Optional: ``salary``,
-        ``ownership`` / ``own%``, ``ceil``, ``floor``.
+        ``ownership`` / ``own%`` / ``proj_own``, ``ceil``, ``floor``.
     lineup_df : pd.DataFrame
         Long-format lineup table (as returned by ``run_optimizer``).  Must
-        include a name column so we know which players appear in the lineups.
+        include a name column and ``lineup_index``.
     n_sims : int, optional
-        Per-player simulation iterations (default 500).
+        Lineup-level simulation iterations (default 500).
     cal_knobs : dict, optional
         Calibration knobs.  Supported keys:
 
-        * ``ceiling_boost``   (float, default 1.0) — multiply upside outcomes
+        * ``ceiling_boost``   (float, default 1.0) — scale upside player outcomes
         * ``floor_dampen``    (float, default 1.0) — compress downside outcomes
-        * ``smash_threshold`` (float, optional) — ratio multiplier: smash if outcome ≥ this × proj.
-          When absent, the 90th percentile of each player's sim outcomes is used (top 10%).
-        * ``bust_threshold``  (float, optional) — ratio multiplier: bust if outcome ≤ this × proj.
-          When absent, the 30th percentile of each player's sim outcomes is used (bottom 30%).
+        * ``smash_threshold`` (float, optional) — ratio override: contest smash =
+          this × mean lineup projection.  When absent, the 90th percentile of
+          the pooled field scores is used (≈ top 10% of field).
+        * ``bust_threshold``  (float, optional) — ratio override: contest bust =
+          this × mean lineup projection.  When absent, the 30th percentile is
+          used (≈ bottom 30% of field).
 
     Returns
     -------
@@ -541,45 +601,37 @@ def compute_player_anomaly_table(
     knobs = cal_knobs or {}
     ceiling_boost = float(knobs.get("ceiling_boost", 1.0))
     floor_dampen = float(knobs.get("floor_dampen", 1.0))
-    # smash_threshold / bust_threshold in cal_knobs are ratio multipliers (e.g. 1.3 = 130% of proj).
-    # When absent (None), percentile-based defaults are used instead:
-    #   smash = p90 of player's sim outcomes (top 10%)
-    #   bust  = p30 of player's sim outcomes (bottom 30%)
-    smash_thr = knobs.get("smash_threshold")   # None → use p90
-    bust_thr = knobs.get("bust_threshold")     # None → use p30
+    # When set, these override the contest threshold with: threshold = ratio × mean_lineup_proj
+    smash_thr_ratio = knobs.get("smash_threshold")   # None → use p90 of field
+    bust_thr_ratio = knobs.get("bust_threshold")     # None → use p30 of field
 
-    # Find name column in lineup_df — this defines which players are in the lineup
+    # Find name column in lineup_df
     lu_name_col = next(
         (c for c in ("player_name", "name") if c in lineup_df.columns), None
     )
     if lu_name_col is None:
         return pd.DataFrame()
 
-    # Use lineup_df as the authoritative source of players to simulate.
-    # Deduplicate so each player is only simulated once regardless of how many
-    # lineups they appear in.
-    lu_uniq = (
-        lineup_df
-        .drop_duplicates(subset=[lu_name_col])
-        .dropna(subset=[lu_name_col])
-        .copy()
-    )
-    if lu_uniq.empty:
+    # Normalise lineup_df to have "player_name" column
+    lu = lineup_df.copy()
+    if lu_name_col != "player_name":
+        lu = lu.rename(columns={lu_name_col: "player_name"})
+    # Normalise ownership column in lineup if present
+    for _src in ("ownership", "Own%", "proj_own"):
+        if _src in lu.columns and "own%" not in lu.columns:
+            lu = lu.rename(columns={_src: "own%"})
+            break
+
+    if "lineup_index" not in lu.columns:
         return pd.DataFrame()
 
-    if lu_name_col != "name":
-        lu_uniq = lu_uniq.rename(columns={lu_name_col: "name"})
-
-    # Build a pool lookup keyed by name to enrich lineup rows with any
-    # supplemental columns (ownership, etc.) not already present in lineup_df.
-    # Only the columns relevant for simulation are kept to minimise memory use.
+    # Build pool lookup keyed by name
     _pool_sim_cols = ("name", "proj", "salary", "own%", "ownership", "Own%", "proj_own", "ceil", "floor")
     pool_lookup: dict = {}
     if not pool_df.empty:
         pool = pool_df.copy()
         if "player_name" in pool.columns and "name" not in pool.columns:
             pool = pool.rename(columns={"player_name": "name"})
-        # Normalise ownership column in pool — prefer own%, then ownership/Own%, then proj_own
         for _src in ("ownership", "Own%", "proj_own"):
             if _src in pool.columns and "own%" not in pool.columns:
                 pool = pool.rename(columns={_src: "own%"})
@@ -593,77 +645,134 @@ def compute_player_anomaly_table(
                 .to_dict("index")
             )
 
-    # Normalise ownership column in lu_uniq as well
-    for _src in ("ownership", "Own%", "proj_own"):
-        if _src in lu_uniq.columns and "own%" not in lu_uniq.columns:
-            lu_uniq = lu_uniq.rename(columns={_src: "own%"})
-            break
-
     rng = np.random.RandomState(42)
-    rows = []
-    for _, row in lu_uniq.iterrows():
-        name = row["name"]
+    default_vol = 0.18
 
-        # For each field, prefer the lineup row value; fall back to pool_lookup
-        pool_row = pool_lookup.get(name, {})
+    # ── Phase 1: lineup-level simulations ────────────────────────────────────
+    lineup_totals: Dict[Any, np.ndarray] = {}  # lineup_index → (n_sims,) array
 
-        def _get(field: str, default=None):
-            val = row.get(field, None)
-            if val is None or (isinstance(val, float) and np.isnan(val)):
-                val = pool_row.get(field, default)
-            return val
+    for lu_id, grp in lu.groupby("lineup_index"):
+        projs_list: List[float] = []
+        stds_list: List[float] = []
 
-        proj = float(pd.to_numeric(_get("proj", 0), errors="coerce") or 0)
-        if proj <= 0:
+        for _, player_row in grp.iterrows():
+            pname = player_row["player_name"]
+            pool_row = pool_lookup.get(pname, {})
+
+            def _get_field(field: str, default=None, _pr=player_row, _pool=pool_row):
+                val = _pr.get(field, None)
+                if val is None or (isinstance(val, float) and np.isnan(val)):
+                    val = _pool.get(field, default)
+                return val
+
+            proj = float(pd.to_numeric(_get_field("proj", 0), errors="coerce") or 0)
+            ceil_raw = pd.to_numeric(_get_field("ceil", np.nan), errors="coerce")
+            floor_raw = pd.to_numeric(_get_field("floor", np.nan), errors="coerce")
+            ceil_val = float(ceil_raw) if pd.notna(ceil_raw) else proj * 1.3
+            floor_val = float(floor_raw) if pd.notna(floor_raw) else proj * 0.7
+            if proj > 0:
+                std = float(np.clip((ceil_val - floor_val) / 4.0, proj * 0.05, proj * 0.6))
+            else:
+                std = default_vol
+            projs_list.append(proj)
+            stds_list.append(std)
+
+        if not projs_list or all(p == 0 for p in projs_list):
             continue
 
-        salary = float(pd.to_numeric(_get("salary", 0), errors="coerce") or 0)
-        own_pct = float(pd.to_numeric(_get("own%", 0), errors="coerce") or 0)
+        projs_arr = np.array(projs_list)
+        stds_arr = np.array(stds_list)
 
-        # Derive std from ceil/floor when available
-        ceil_raw = pd.to_numeric(_get("ceil", np.nan), errors="coerce")
-        floor_raw = pd.to_numeric(_get("floor", np.nan), errors="coerce")
-        ceil_val = float(ceil_raw) if pd.notna(ceil_raw) else proj * 1.3
-        floor_val = float(floor_raw) if pd.notna(floor_raw) else proj * 0.7
-        std = float(np.clip((ceil_val - floor_val) / 4.0, proj * 0.05, proj * 0.6))
-
-        # Simulate per-player outcomes
-        outcomes = rng.normal(loc=proj, scale=std, size=n_sims)
-        outcomes = np.clip(outcomes, 0, None)
-
-        # Apply calibration knobs: ceiling_boost scales upside, floor_dampen scales downside
-        above = outcomes > proj
-        outcomes = np.where(
-            above,
-            proj + (outcomes - proj) * ceiling_boost,
-            proj - (proj - outcomes) * floor_dampen,
+        sim_matrix = rng.normal(
+            loc=projs_arr[None, :],
+            scale=stds_arr[None, :],
+            size=(n_sims, len(projs_arr)),
         )
-        outcomes = np.clip(outcomes, 0, None)
+        sim_matrix = np.clip(sim_matrix, 0, None)
 
-        # Smash/bust thresholds: use ratio multiplier when explicitly provided via
-        # cal_knobs, otherwise use percentile-based thresholds (top 10% / bottom 30%).
-        if smash_thr is not None:
-            smash_threshold_val = float(smash_thr) * proj
+        # Apply calibration knobs
+        above = sim_matrix > projs_arr[None, :]
+        sim_matrix = np.where(
+            above,
+            projs_arr[None, :] + (sim_matrix - projs_arr[None, :]) * ceiling_boost,
+            projs_arr[None, :] - (projs_arr[None, :] - sim_matrix) * floor_dampen,
+        )
+        sim_matrix = np.clip(sim_matrix, 0, None)
+        lineup_totals[lu_id] = sim_matrix.sum(axis=1)
+
+    if not lineup_totals:
+        return pd.DataFrame()
+
+    # ── Phase 2: contest-level thresholds from the pooled field ──────────────
+    all_totals = np.concatenate(list(lineup_totals.values()))
+    mean_lineup_proj = float(np.mean([lt.mean() for lt in lineup_totals.values()]))
+
+    if smash_thr_ratio is not None:
+        contest_smash = float(smash_thr_ratio) * mean_lineup_proj
+    else:
+        contest_smash = float(np.percentile(all_totals, CONTEST_SMASH_PERCENTILE))
+
+    if bust_thr_ratio is not None:
+        contest_bust = float(bust_thr_ratio) * mean_lineup_proj
+    else:
+        contest_bust = float(np.percentile(all_totals, CONTEST_BUST_PERCENTILE))
+
+    # ── Phase 3: per-player metrics from lineup scores ────────────────────────
+    # Map each player → list of lineup_ids they appear in
+    player_to_lineups: Dict[str, List[Any]] = {}
+    for lu_id, grp in lu.groupby("lineup_index"):
+        if lu_id not in lineup_totals:
+            continue
+        for pname in grp["player_name"].dropna().tolist():
+            player_to_lineups.setdefault(pname, []).append(lu_id)
+
+    # Collect player metadata from any lineup row (first occurrence)
+    player_meta: Dict[str, dict] = {}
+    for _, row in lu.drop_duplicates(subset=["player_name"]).iterrows():
+        pname = row["player_name"]
+        pool_row = pool_lookup.get(pname, {})
+
+        def _get_meta(field: str, default=None, _r=row, _pool=pool_row):
+            val = _r.get(field, None)
+            if val is None or (isinstance(val, float) and np.isnan(val)):
+                val = _pool.get(field, default)
+            return val
+
+        player_meta[pname] = {
+            "proj": float(pd.to_numeric(_get_meta("proj", 0), errors="coerce") or 0),
+            "salary": float(pd.to_numeric(_get_meta("salary", 0), errors="coerce") or 0),
+            "own_pct": float(pd.to_numeric(_get_meta("own%", 0), errors="coerce") or 0),
+        }
+
+    rows = []
+    for pname, lu_ids in player_to_lineups.items():
+        meta = player_meta.get(pname, {})
+        proj = meta.get("proj", 0.0)
+        if proj <= 0:
+            continue
+        salary = meta.get("salary", 0.0)
+        own_pct = meta.get("own_pct", 0.0)
+
+        # Pool all contest sims for lineups containing this player
+        player_scores = np.concatenate([lineup_totals[li] for li in lu_ids])
+
+        smash_pct = float((player_scores >= contest_smash).mean() * 100.0)
+        bust_pct = float((player_scores <= contest_bust).mean() * 100.0)
+
+        # Leverage: NaN when Own% < MIN_OWNERSHIP_FOR_LEVERAGE to avoid spurious infinity-like values
+        if own_pct >= MIN_OWNERSHIP_FOR_LEVERAGE:
+            leverage: float = smash_pct / own_pct
         else:
-            smash_threshold_val = float(np.percentile(outcomes, 90))
-
-        if bust_thr is not None:
-            bust_threshold_val = float(bust_thr) * proj
-        else:
-            bust_threshold_val = float(np.percentile(outcomes, 30))
-
-        smash_pct = float((outcomes >= smash_threshold_val).mean() * 100.0)
-        bust_pct = float((outcomes <= bust_threshold_val).mean() * 100.0)
-        leverage = smash_pct / own_pct if own_pct > 0 else smash_pct
+            leverage = float("nan")
 
         rows.append({
-            "Player": name,
+            "Player": pname,
             "Proj": round(proj, 1),
             "Salary": int(salary),
             "Own%": round(own_pct, 1),
             "Smash%": round(smash_pct, 1),
             "Bust%": round(bust_pct, 1),
-            "Leverage Score": round(leverage, 2),
+            "Leverage Score": round(leverage, 2) if not np.isnan(leverage) else float("nan"),
         })
 
     if not rows:
@@ -671,19 +780,23 @@ def compute_player_anomaly_table(
 
     df = pd.DataFrame(rows)
 
-    # Value Trap: Bust% > 40% AND Salary > median salary in the pool
+    # Value Trap: Bust% > 40% AND Salary > median salary
     if df["Salary"].sum() > 0:
         median_sal = df["Salary"].median()
         df["Value Trap"] = (df["Bust%"] > 40.0) & (df["Salary"] > median_sal)
     else:
         df["Value Trap"] = False
 
-    # High Leverage flag
-    df["Flag"] = df["Leverage Score"].apply(
-        lambda x: "🔥 HIGH LEVERAGE" if x > 3.0 else ""
-    )
+    # High Leverage flag: LeverageScore >= 3 AND Own% <= 15
+    def _flag(r: "pd.Series") -> str:
+        lev = r["Leverage Score"]
+        if not np.isnan(lev) and lev >= 3.0 and r["Own%"] <= 15.0:
+            return "🔥 HIGH LEVERAGE"
+        return ""
 
-    return df.sort_values("Leverage Score", ascending=False).reset_index(drop=True)
+    df["Flag"] = df.apply(_flag, axis=1)
+
+    return df.sort_values("Leverage Score", ascending=False, na_position="last").reset_index(drop=True)
 
 
 def build_sim_player_accuracy_table(
