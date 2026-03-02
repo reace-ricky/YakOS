@@ -542,6 +542,12 @@ def ensure_session_state():
         st.session_state["cal_check_errors"] = None
     if "cal_check_errors_before" not in st.session_state:
         st.session_state["cal_check_errors_before"] = None
+    if "actuals" not in st.session_state:
+        # dict: slate_date_str → pd.DataFrame with columns player_name, actual_fp
+        st.session_state["actuals"] = {}
+    if "pool_date" not in st.session_state:
+        # tracks the last date used when fetching the player pool
+        st.session_state["pool_date"] = None
 
 
 def run_optimizer(
@@ -852,7 +858,32 @@ with tab_slate:
                                     live_pool = live_pool.rename(columns={"name": "player_name"})
                                 live_pool = _apply_yakos_projections(live_pool, knobs=st.session_state.get("cal_knobs", {}))
                                 st.session_state["pool_df"] = live_pool
-                                st.success(f"Loaded {len(live_pool)} players from API.")
+                                st.session_state["pool_date"] = str(slate_fetch_date)
+                                # Auto-fetch actuals for past dates
+                                _date_str = str(slate_fetch_date)
+                                if slate_fetch_date < _today_est():
+                                    try:
+                                        _acts = fetch_actuals_from_api(
+                                            slate_fetch_date.strftime("%Y%m%d"),
+                                            {"RAPIDAPI_KEY": api_key},
+                                        )
+                                        st.session_state["actuals"][_date_str] = _acts
+                                        st.session_state["sim_actuals_df"] = _acts
+                                        st.success(
+                                            f"✅ Loaded {len(live_pool)} players + "
+                                            f"actuals for {len(_acts)} players ({_date_str})."
+                                        )
+                                    except Exception as _ae:
+                                        st.success(f"✅ Loaded {len(live_pool)} players.")
+                                        st.warning(
+                                            f"Actuals API returned no data. This may be an off-day "
+                                            f"or an API issue. ({_ae})"
+                                        )
+                                else:
+                                    st.success(
+                                        f"✅ Loaded {len(live_pool)} players. "
+                                        "Actuals not yet available (games not completed)."
+                                    )
                             except Exception as _e:
                                 st.error(f"API fetch failed: {_e}")
 
@@ -1444,7 +1475,32 @@ with tab_lab:
                             live_pool = live_pool.rename(columns={"name": "player_name"})
                         live_pool = _apply_yakos_projections(live_pool, knobs=st.session_state.get("cal_knobs", {}))
                         st.session_state["pool_df"] = live_pool
-                        st.success(f"Loaded {len(live_pool)} players from API.")
+                        st.session_state["pool_date"] = str(fetch_slate_date_cal)
+                        # Auto-fetch actuals for past dates
+                        _cal_date_str = str(fetch_slate_date_cal)
+                        if fetch_slate_date_cal < _today_est():
+                            try:
+                                _acts = fetch_actuals_from_api(
+                                    fetch_slate_date_cal.strftime("%Y%m%d"),
+                                    {"RAPIDAPI_KEY": api_key},
+                                )
+                                st.session_state["actuals"][_cal_date_str] = _acts
+                                st.session_state["sim_actuals_df"] = _acts
+                                st.success(
+                                    f"✅ Loaded {len(live_pool)} players + "
+                                    f"actuals for {len(_acts)} players ({_cal_date_str})."
+                                )
+                            except Exception as _ae:
+                                st.success(f"✅ Loaded {len(live_pool)} players.")
+                                st.warning(
+                                    f"Actuals API returned no data. This may be an off-day "
+                                    f"or an API issue. ({_ae})"
+                                )
+                        else:
+                            st.success(
+                                f"✅ Loaded {len(live_pool)} players. "
+                                "Actuals not yet available (games not completed)."
+                            )
                     except Exception as _e:
                         st.error(f"API fetch failed: {_e}")
 
@@ -1549,295 +1605,315 @@ with tab_lab:
     # ── Section A: 3-Step Calibration Workflow ───────────────────────────────
     st.markdown("### A. 📡 Calibration Check")
 
-    if hist_df.empty:
-        st.warning(
-            "No historical data found. Add `data/historical_lineups.csv` to the repo "
-            "with columns: slate_date, contest_name, pos, team, name, "
-            "salary, proj, proj_own, own, actual."
+    # Populate dropdown from actuals dict (dates where actuals have been fetched)
+    _loaded_actuals_dict = st.session_state.get("actuals", {})
+    _actuals_dates = sorted(_loaded_actuals_dict.keys(), reverse=True)
+
+    _step1_col, _step1_override = st.columns([2, 1])
+    with _step1_col:
+        _run_check = st.button(
+            "🔍 Run Calibration Check",
+            type="primary",
+            key="run_cal_check_btn",
+            help="Diagnose projection errors for the most recent completed slate.",
         )
-    else:
-        queue_df = get_calibration_queue(hist_df, prior_dates=3)
-        if st.session_state.get("cal_queue_df") is None:
-            st.session_state["cal_queue_df"] = queue_df
+    with _step1_override:
+        if _actuals_dates:
+            _override_date = st.selectbox(
+                "Override slate date",
+                _actuals_dates,
+                index=0,
+                key="cal_check_date_override",
+            )
+        else:
+            st.info(
+                "No actuals loaded. Fetch a past-date pool above to enable calibration."
+            )
+            _override_date = None
 
-        cal_queue = st.session_state["cal_queue_df"]
+    if _run_check:
+        if _override_date is None or _override_date not in _loaded_actuals_dict:
+            st.warning(
+                "No actuals for this date. Go to **Load Player Pool** and fetch a past date first."
+            )
+        else:
+            _cal_pool_check = st.session_state.get("pool_df")
+            if _cal_pool_check is None or _cal_pool_check.empty:
+                st.warning("No pool loaded. Fetch a player pool first.")
+            else:
+                # Build check slice from API actuals + pool projections
+                _acts_df = _loaded_actuals_dict[_override_date].copy()
+                # Normalise to 'name' / 'actual' columns expected by _diagnose_errors
+                if "player_name" in _acts_df.columns:
+                    _acts_df = _acts_df.rename(columns={"player_name": "name"})
+                if "actual_fp" in _acts_df.columns:
+                    _acts_df = _acts_df.rename(columns={"actual_fp": "actual"})
+                _check_slice = _acts_df.copy()
 
-        if cal_queue is not None and not cal_queue.empty:
-            # ── Step 1: Auto-Diagnose ────────────────────────────────────────
-            available_dates = sorted(cal_queue["slate_date"].unique(), reverse=True)
-
-            _step1_col, _step1_override = st.columns([2, 1])
-            with _step1_col:
-                _run_check = st.button(
-                    "🔍 Run Calibration Check",
-                    type="primary",
-                    key="run_cal_check_btn",
-                    help="Diagnose projection errors for the most recent completed slate.",
-                )
-            with _step1_override:
-                _override_date = st.selectbox(
-                    "Override slate date",
-                    available_dates,
-                    index=0,
-                    key="cal_check_date_override",
-                )
-
-            if _run_check:
-                _check_date = _override_date
-                _check_slice = cal_queue[cal_queue["slate_date"] == _check_date].copy()
-
-                # Merge pool projections/minutes into the slice
-                _cal_pool_check = st.session_state.get("pool_df")
-                if _cal_pool_check is not None and not _cal_pool_check.empty:
-                    if "proj" in _cal_pool_check.columns:
-                        _pp = (
-                            _cal_pool_check[["player_name", "proj"]]
-                            .rename(columns={"player_name": "name", "proj": "_pp"})
-                            .drop_duplicates("name")
-                        )
-                        _check_slice = _check_slice.merge(_pp, on="name", how="left")
-                        _mask = _check_slice["_pp"].notna()
-                        _check_slice.loc[_mask, "proj"] = _check_slice.loc[_mask, "_pp"]
-                        _check_slice = _check_slice.drop(columns=["_pp"])
-                    if "minutes" in _cal_pool_check.columns:
-                        _pm = (
-                            _cal_pool_check[["player_name", "minutes"]]
-                            .rename(columns={"player_name": "name", "minutes": "_pm"})
-                            .drop_duplicates("name")
-                        )
-                        _check_slice = _check_slice.merge(_pm, on="name", how="left")
-                        if "proj_minutes" not in _check_slice.columns:
-                            _check_slice["proj_minutes"] = _check_slice["_pm"]
-                        else:
-                            _pmm = _check_slice["proj_minutes"].isna() & _check_slice["_pm"].notna()
-                            _check_slice.loc[_pmm, "proj_minutes"] = _check_slice.loc[_pmm, "_pm"]
-                        _check_slice = _check_slice.drop(columns=["_pm"])
+                # Merge pool projections/minutes/ownership into the slice
+                if "proj" in _cal_pool_check.columns:
+                    _pp = (
+                        _cal_pool_check[["player_name", "proj"]]
+                        .rename(columns={"player_name": "name", "proj": "_pp"})
+                        .drop_duplicates("name")
+                    )
+                    _check_slice = _check_slice.merge(_pp, on="name", how="left")
+                    _mask = _check_slice["_pp"].notna()
+                    _check_slice.loc[_mask, "proj"] = _check_slice.loc[_mask, "_pp"]
+                    _check_slice = _check_slice.drop(columns=["_pp"])
+                if "minutes" in _cal_pool_check.columns:
+                    _pm = (
+                        _cal_pool_check[["player_name", "minutes"]]
+                        .rename(columns={"player_name": "name", "minutes": "_pm"})
+                        .drop_duplicates("name")
+                    )
+                    _check_slice = _check_slice.merge(_pm, on="name", how="left")
+                    if "proj_minutes" not in _check_slice.columns:
+                        _check_slice["proj_minutes"] = _check_slice["_pm"]
+                    else:
+                        _pmm = _check_slice["proj_minutes"].isna() & _check_slice["_pm"].notna()
+                        _check_slice.loc[_pmm, "proj_minutes"] = _check_slice.loc[_pmm, "_pm"]
+                    _check_slice = _check_slice.drop(columns=["_pm"])
 
                 _errors = _diagnose_errors(_check_slice)
                 st.session_state["cal_check_errors"] = _errors
                 st.session_state["cal_check_errors_before"] = _errors.copy()
 
-            _errors = st.session_state.get("cal_check_errors")
+    _errors = st.session_state.get("cal_check_errors")
 
-            if _errors is not None:
-                # Traffic-light scorecard
-                _SCORECARD_TARGETS = [
-                    ("FP MAE", _errors["fp_mae"], 6, "pts"),
-                    ("Min MAE", _errors["min_mae"], 3, "min"),
-                    ("Own MAE", _errors["own_mae"], 3, "%"),
-                ]
-                _sc_cols = st.columns(3)
-                for _sc_col, (_metric, _val, _target, _unit) in zip(_sc_cols, _SCORECARD_TARGETS):
-                    if _val == 0.0:
-                        _status = "—"
-                        _card_bg = "#1e1e1e"
-                        _card_color = "#888"
-                    elif _val <= _target:
-                        _status = "✅"
-                        _card_bg = "#0d2d0d"
-                        _card_color = "#4caf50"
-                    elif _val <= _target * 1.5:
-                        _status = "⚠️"
-                        _card_bg = "#2d2200"
-                        _card_color = "#ff9800"
-                    else:
-                        _status = "❌"
-                        _card_bg = "#2d0d0d"
-                        _card_color = "#f44336"
-                    _sc_col.markdown(
-                        f'<div style="border:1px solid #3a3a3a;border-radius:6px;'
-                        f'padding:10px 8px;text-align:center;background:{_card_bg};">'
-                        f'<div style="font-size:0.72rem;text-transform:uppercase;'
-                        f'letter-spacing:0.06em;color:#aaa;margin-bottom:4px;">'
-                        f'{_status} {_metric}</div>'
-                        f'<div style="font-size:1.5rem;font-weight:700;color:{_card_color};">'
-                        f'{_val:.2f} {_unit}</div>'
-                        f'<div style="font-size:0.65rem;color:#888;margin-top:3px;">'
-                        f'target ≤ {_target} {_unit}</div>'
-                        f'</div>',
-                        unsafe_allow_html=True,
-                    )
+    if _errors is not None:
+        # Traffic-light scorecard
+        _SCORECARD_TARGETS = [
+            ("FP MAE", _errors["fp_mae"], 6, "pts"),
+            ("Min MAE", _errors["min_mae"], 3, "min"),
+            ("Own MAE", _errors["own_mae"], 3, "%"),
+        ]
+        _sc_cols = st.columns(3)
+        for _sc_col, (_metric, _val, _target, _unit) in zip(_sc_cols, _SCORECARD_TARGETS):
+            if _val == 0.0:
+                _status = "—"
+                _card_bg = "#1e1e1e"
+                _card_color = "#888"
+            elif _val <= _target:
+                _status = "✅"
+                _card_bg = "#0d2d0d"
+                _card_color = "#4caf50"
+            elif _val <= _target * 1.5:
+                _status = "⚠️"
+                _card_bg = "#2d2200"
+                _card_color = "#ff9800"
+            else:
+                _status = "❌"
+                _card_bg = "#2d0d0d"
+                _card_color = "#f44336"
+            _sc_col.markdown(
+                f'<div style="border:1px solid #3a3a3a;border-radius:6px;'
+                f'padding:10px 8px;text-align:center;background:{_card_bg};">'
+                f'<div style="font-size:0.72rem;text-transform:uppercase;'
+                f'letter-spacing:0.06em;color:#aaa;margin-bottom:4px;">'
+                f'{_status} {_metric}</div>'
+                f'<div style="font-size:1.5rem;font-weight:700;color:{_card_color};">'
+                f'{_val:.2f} {_unit}</div>'
+                f'<div style="font-size:0.65rem;color:#888;margin-top:3px;">'
+                f'target ≤ {_target} {_unit}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
-                st.markdown("")
+        st.markdown("")
 
-                # ── Step 2: Suggested Fixes ──────────────────────────────────
-                st.markdown("#### 💊 Suggested Fixes")
-                _current_knobs = st.session_state.get("cal_knobs", {})
-                _suggestions = _generate_suggestions(_errors, _current_knobs)
+        # ── Step 2: Suggested Fixes ──────────────────────────────────
+        st.markdown("#### 💊 Suggested Fixes")
+        _current_knobs = st.session_state.get("cal_knobs", {})
+        _suggestions = _generate_suggestions(_errors, _current_knobs)
 
-                if not _suggestions:
-                    st.success("✅ No urgent knob changes recommended — projection accuracy looks good!")
-                else:
-                    for _s in _suggestions:
-                        _fix_col1, _fix_col2 = st.columns([4, 1])
-                        _fix_col1.markdown(
-                            f"**`{_s['knob']}`**: `{_s['current']}` → `{_s['suggested']}`  \n"
-                            f"_{_s['reason']}_"
+        if not _suggestions:
+            st.success("✅ No urgent knob changes recommended — projection accuracy looks good!")
+        else:
+            for _s in _suggestions:
+                _fix_col1, _fix_col2 = st.columns([4, 1])
+                _fix_col1.markdown(
+                    f"**`{_s['knob']}`**: `{_s['current']}` → `{_s['suggested']}`  \n"
+                    f"_{_s['reason']}_"
+                )
+                if _fix_col2.button("Apply", key=f"apply_sug_{_s['knob']}"):
+                    _knobs_updated = dict(st.session_state.get("cal_knobs", {}))
+                    _knobs_updated[_s["knob"]] = _s["suggested"]
+                    st.session_state["cal_knobs"] = _knobs_updated
+                    st.rerun()
+
+        # ── Step 3: Re-project & Compare ────────────────────────────
+        st.markdown("")
+        if st.button("🔄 Re-project & Compare", key="reproj_compare_btn", type="secondary"):
+            _reproj_pool = st.session_state.get("pool_df")
+            if _reproj_pool is None or _reproj_pool.empty:
+                st.warning("No pool loaded. Load a player pool first.")
+            else:
+                _active_knobs = st.session_state.get("cal_knobs", {})
+                _reproj_pool = _apply_yakos_projections(_reproj_pool, knobs=_active_knobs)
+                st.session_state["pool_df"] = _reproj_pool
+                # Re-compute errors using same actuals
+                _check_date2 = st.session_state.get("cal_check_date_override", _actuals_dates[0] if _actuals_dates else None)
+                if _check_date2 and _check_date2 in _loaded_actuals_dict:
+                    _acts_df2 = _loaded_actuals_dict[_check_date2].copy()
+                    if "player_name" in _acts_df2.columns:
+                        _acts_df2 = _acts_df2.rename(columns={"player_name": "name"})
+                    if "actual_fp" in _acts_df2.columns:
+                        _acts_df2 = _acts_df2.rename(columns={"actual_fp": "actual"})
+                    _check_slice2 = _acts_df2.copy()
+                    if "proj" in _reproj_pool.columns:
+                        _pp2 = (
+                            _reproj_pool[["player_name", "proj"]]
+                            .rename(columns={"player_name": "name", "proj": "_pp2"})
+                            .drop_duplicates("name")
                         )
-                        if _fix_col2.button("Apply", key=f"apply_sug_{_s['knob']}"):
-                            _knobs_updated = dict(st.session_state.get("cal_knobs", {}))
-                            _knobs_updated[_s["knob"]] = _s["suggested"]
-                            st.session_state["cal_knobs"] = _knobs_updated
-                            st.rerun()
+                        _check_slice2 = _check_slice2.merge(_pp2, on="name", how="left")
+                        _m2 = _check_slice2["_pp2"].notna()
+                        _check_slice2.loc[_m2, "proj"] = _check_slice2.loc[_m2, "_pp2"]
+                        _check_slice2 = _check_slice2.drop(columns=["_pp2"])
+                    _new_errors = _diagnose_errors(_check_slice2)
+                    st.session_state["cal_check_errors"] = _new_errors
 
-                # ── Step 3: Re-project & Compare ────────────────────────────
-                st.markdown("")
-                if st.button("🔄 Re-project & Compare", key="reproj_compare_btn", type="secondary"):
-                    _reproj_pool = st.session_state.get("pool_df")
-                    if _reproj_pool is None or _reproj_pool.empty:
-                        st.warning("No pool loaded. Load a player pool first.")
-                    else:
-                        _active_knobs = st.session_state.get("cal_knobs", {})
-                        _reproj_pool = _apply_yakos_projections(_reproj_pool, knobs=_active_knobs)
-                        st.session_state["pool_df"] = _reproj_pool
-                        # Re-compute errors with new projections
-                        _check_date2 = st.session_state.get("cal_check_date_override", available_dates[0])
-                        _check_slice2 = cal_queue[cal_queue["slate_date"] == _check_date2].copy()
-                        if "proj" in _reproj_pool.columns:
-                            _pp2 = (
-                                _reproj_pool[["player_name", "proj"]]
-                                .rename(columns={"player_name": "name", "proj": "_pp2"})
-                                .drop_duplicates("name")
+                    # Before/after comparison
+                    _before = st.session_state.get("cal_check_errors_before", {})
+                    st.markdown("##### 📊 Before vs After")
+                    _ba_cols = st.columns(3)
+                    for _ba_col, (_metric, _bkey, _unit) in zip(
+                        _ba_cols,
+                        [("FP MAE", "fp_mae", "pts"), ("Min MAE", "min_mae", "min"), ("Own MAE", "own_mae", "%")],
+                    ):
+                        _b_val = _before.get(_bkey, 0.0)
+                        _a_val = _new_errors.get(_bkey, 0.0)
+                        _delta = _a_val - _b_val
+                        _delta_str = f"{_delta:+.2f} {_unit}"
+                        _ba_col.metric(
+                            _metric,
+                            f"{_a_val:.2f} {_unit}",
+                            delta=_delta_str,
+                            delta_color="inverse",
+                        )
+
+    # ── Queue Details from historical CSV (if available) ────────────────────
+    if not hist_df.empty:
+        queue_df = get_calibration_queue(hist_df, prior_dates=3)
+        if st.session_state.get("cal_queue_df") is None:
+            st.session_state["cal_queue_df"] = queue_df
+        cal_queue = st.session_state["cal_queue_df"]
+
+        if cal_queue is not None and not cal_queue.empty:
+            available_dates = sorted(cal_queue["slate_date"].unique(), reverse=True)
+            with st.expander("📋 Player Details — Full Queue Table", expanded=False):
+                queue_date_sel = st.selectbox(
+                    "Queue slate date",
+                    available_dates,
+                    key="queue_date",
+                )
+                date_queue = cal_queue[cal_queue["slate_date"] == queue_date_sel]
+
+                # Merge current pool projections into display
+                _cal_pool = st.session_state.get("pool_df")
+                _queue_display = date_queue.copy()
+                if _cal_pool is not None and not _cal_pool.empty:
+                    _pool_extra_cols = [
+                        c for c in ["floor", "ceil"]
+                        if c in _cal_pool.columns and c not in _queue_display.columns
+                    ]
+                    if "proj_own" not in _queue_display.columns and "ownership" in _cal_pool.columns:
+                        _pool_extra_cols.append("ownership")
+                    if _pool_extra_cols:
+                        _pool_merge = (
+                            _cal_pool[["player_name"] + _pool_extra_cols]
+                            .rename(columns={"player_name": "name", "ownership": "proj_own"})
+                            .groupby("name", as_index=False)
+                            .first()
+                        )
+                        _queue_display = _queue_display.merge(_pool_merge, on="name", how="left")
+
+                    if "proj" in _cal_pool.columns:
+                        _pool_proj_df = (
+                            _cal_pool[["player_name", "proj"]]
+                            .rename(columns={"player_name": "name", "proj": "_pool_proj"})
+                            .drop_duplicates("name")
+                        )
+                        _queue_display = _queue_display.merge(_pool_proj_df, on="name", how="left")
+                        _pool_proj_mask = _queue_display["_pool_proj"].notna()
+                        _queue_display.loc[_pool_proj_mask, "proj"] = _queue_display.loc[_pool_proj_mask, "_pool_proj"]
+                        _queue_display = _queue_display.drop(columns=["_pool_proj"])
+
+                    if "minutes" in _cal_pool.columns:
+                        _pool_min_df = (
+                            _cal_pool[["player_name", "minutes"]]
+                            .rename(columns={"player_name": "name", "minutes": "_pool_minutes"})
+                            .drop_duplicates("name")
+                        )
+                        _queue_display = _queue_display.merge(_pool_min_df, on="name", how="left")
+                        if "proj_minutes" not in _queue_display.columns:
+                            _queue_display["proj_minutes"] = _queue_display["_pool_minutes"]
+                        else:
+                            _pm_mask = (
+                                _queue_display["proj_minutes"].isna()
+                                & _queue_display["_pool_minutes"].notna()
                             )
-                            _check_slice2 = _check_slice2.merge(_pp2, on="name", how="left")
-                            _m2 = _check_slice2["_pp2"].notna()
-                            _check_slice2.loc[_m2, "proj"] = _check_slice2.loc[_m2, "_pp2"]
-                            _check_slice2 = _check_slice2.drop(columns=["_pp2"])
-                        _new_errors = _diagnose_errors(_check_slice2)
-                        st.session_state["cal_check_errors"] = _new_errors
+                            _queue_display.loc[_pm_mask, "proj_minutes"] = _queue_display.loc[_pm_mask, "_pool_minutes"]
+                        _queue_display = _queue_display.drop(columns=["_pool_minutes"])
 
-                        # Before/after comparison
-                        _before = st.session_state.get("cal_check_errors_before", {})
-                        st.markdown("##### 📊 Before vs After")
-                        _ba_cols = st.columns(3)
-                        for _ba_col, (_metric, _bkey, _unit) in zip(
-                            _ba_cols,
-                            [("FP MAE", "fp_mae", "pts"), ("Min MAE", "min_mae", "min"), ("Own MAE", "own_mae", "%")],
-                        ):
-                            _b_val = _before.get(_bkey, 0.0)
-                            _a_val = _new_errors.get(_bkey, 0.0)
-                            _delta = _a_val - _b_val
-                            _delta_str = f"{_delta:+.2f} {_unit}"
-                            _ba_col.metric(
-                                _metric,
-                                f"{_a_val:.2f} {_unit}",
-                                delta=_delta_str,
-                                delta_color="inverse",
-                            )
+                def _safe_col(df: pd.DataFrame, col: str) -> pd.Series:
+                    return pd.to_numeric(df[col], errors="coerce").fillna(0) if col in df.columns else pd.Series(0.0, index=df.index)
 
-                # ── Queue Details (expandable) ───────────────────────────────
-                with st.expander("📋 Player Details — Full Queue Table", expanded=False):
-                    queue_date_sel = st.selectbox(
-                        "Queue slate date",
-                        available_dates,
-                        key="queue_date",
-                    )
-                    date_queue = cal_queue[cal_queue["slate_date"] == queue_date_sel]
+                _qd = _queue_display.copy()
+                _qd["pts_error"] = _safe_col(_qd, "actual") - _safe_col(_qd, "proj")
+                _qd["min_error"] = _safe_col(_qd, "actual_minutes") - _safe_col(_qd, "proj_minutes")
+                _qd["own_error"] = _safe_col(_qd, "own") - _safe_col(_qd, "proj_own")
+                _qd["Flag"] = (
+                    _qd["pts_error"].abs().gt(6)
+                    | _qd["min_error"].abs().gt(3)
+                    | _qd["own_error"].abs().gt(3)
+                )
 
-                    # Merge current pool projections into display
-                    _cal_pool = st.session_state.get("pool_df")
-                    _queue_display = date_queue.copy()
-                    if _cal_pool is not None and not _cal_pool.empty:
-                        _pool_extra_cols = [
-                            c for c in ["floor", "ceil"]
-                            if c in _cal_pool.columns and c not in _queue_display.columns
-                        ]
-                        if "proj_own" not in _queue_display.columns and "ownership" in _cal_pool.columns:
-                            _pool_extra_cols.append("ownership")
-                        if _pool_extra_cols:
-                            _pool_merge = (
-                                _cal_pool[["player_name"] + _pool_extra_cols]
-                                .rename(columns={"player_name": "name", "ownership": "proj_own"})
-                                .groupby("name", as_index=False)
-                                .first()
-                            )
-                            _queue_display = _queue_display.merge(_pool_merge, on="name", how="left")
+                _player_col = []
+                for _, _r in _qd.iterrows():
+                    parts = [str(_r.get("name", ""))]
+                    tp = " / ".join(filter(None, [str(_r.get("team", "")), str(_r.get("pos", ""))]))
+                    if tp:
+                        parts.append(f"({tp})")
+                    _player_col.append(" ".join(parts))
+                _qd["Player"] = _player_col
 
-                        if "proj" in _cal_pool.columns:
-                            _pool_proj_df = (
-                                _cal_pool[["player_name", "proj"]]
-                                .rename(columns={"player_name": "name", "proj": "_pool_proj"})
-                                .drop_duplicates("name")
-                            )
-                            _queue_display = _queue_display.merge(_pool_proj_df, on="name", how="left")
-                            _pool_proj_mask = _queue_display["_pool_proj"].notna()
-                            _queue_display.loc[_pool_proj_mask, "proj"] = _queue_display.loc[_pool_proj_mask, "_pool_proj"]
-                            _queue_display = _queue_display.drop(columns=["_pool_proj"])
+                _focused_cols_map = {
+                    "Player": "Player",
+                    "salary": "Salary",
+                    "proj": "Proj FP",
+                    "actual": "Act FP",
+                    "pts_error": "Error (pts)",
+                    "proj_minutes": "Proj Mins",
+                    "actual_minutes": "Act Mins",
+                    "min_error": "Min Error",
+                    "proj_own": "Proj Own %",
+                    "own": "Act Own %",
+                    "own_error": "Own Error",
+                    "Flag": "Flag",
+                }
+                _focused_avail = [c for c in _focused_cols_map if c in _qd.columns or c == "Player"]
+                _queue_focused = _qd[_focused_avail].rename(columns=_focused_cols_map)
 
-                        if "minutes" in _cal_pool.columns:
-                            _pool_min_df = (
-                                _cal_pool[["player_name", "minutes"]]
-                                .rename(columns={"player_name": "name", "minutes": "_pool_minutes"})
-                                .drop_duplicates("name")
-                            )
-                            _queue_display = _queue_display.merge(_pool_min_df, on="name", how="left")
-                            if "proj_minutes" not in _queue_display.columns:
-                                _queue_display["proj_minutes"] = _queue_display["_pool_minutes"]
-                            else:
-                                _pm_mask = (
-                                    _queue_display["proj_minutes"].isna()
-                                    & _queue_display["_pool_minutes"].notna()
-                                )
-                                _queue_display.loc[_pm_mask, "proj_minutes"] = _queue_display.loc[_pm_mask, "_pool_minutes"]
-                            _queue_display = _queue_display.drop(columns=["_pool_minutes"])
-
-                    def _safe_col(df: pd.DataFrame, col: str) -> pd.Series:
-                        return pd.to_numeric(df[col], errors="coerce").fillna(0) if col in df.columns else pd.Series(0.0, index=df.index)
-
-                    _qd = _queue_display.copy()
-                    _qd["pts_error"] = _safe_col(_qd, "actual") - _safe_col(_qd, "proj")
-                    _qd["min_error"] = _safe_col(_qd, "actual_minutes") - _safe_col(_qd, "proj_minutes")
-                    _qd["own_error"] = _safe_col(_qd, "own") - _safe_col(_qd, "proj_own")
-                    _qd["Flag"] = (
-                        _qd["pts_error"].abs().gt(6)
-                        | _qd["min_error"].abs().gt(3)
-                        | _qd["own_error"].abs().gt(3)
-                    )
-
-                    _player_col = []
-                    for _, _r in _qd.iterrows():
-                        parts = [str(_r.get("name", ""))]
-                        tp = " / ".join(filter(None, [str(_r.get("team", "")), str(_r.get("pos", ""))]))
-                        if tp:
-                            parts.append(f"({tp})")
-                        _player_col.append(" ".join(parts))
-                    _qd["Player"] = _player_col
-
-                    _focused_cols_map = {
-                        "Player": "Player",
-                        "salary": "Salary",
-                        "proj": "Proj FP",
-                        "actual": "Act FP",
-                        "pts_error": "Error (pts)",
-                        "proj_minutes": "Proj Mins",
-                        "actual_minutes": "Act Mins",
-                        "min_error": "Min Error",
-                        "proj_own": "Proj Own %",
-                        "own": "Act Own %",
-                        "own_error": "Own Error",
-                        "Flag": "Flag",
-                    }
-                    _focused_avail = [c for c in _focused_cols_map if c in _qd.columns or c == "Player"]
-                    _queue_focused = _qd[_focused_avail].rename(columns=_focused_cols_map)
-
-                    st.dataframe(
-                        _queue_focused,
-                        column_config={
-                            "Salary": st.column_config.NumberColumn("Salary", format="$%d"),
-                            "Proj FP": st.column_config.NumberColumn("Proj FP", format="%.1f"),
-                            "Act FP": st.column_config.NumberColumn("Act FP", format="%.1f"),
-                            "Error (pts)": st.column_config.NumberColumn("Error (pts)", format="%+.1f"),
-                            "Proj Mins": st.column_config.NumberColumn("Proj Mins", format="%.1f"),
-                            "Act Mins": st.column_config.NumberColumn("Act Mins", format="%.1f"),
-                            "Min Error": st.column_config.NumberColumn("Min Error", format="%+.1f"),
-                            "Proj Own %": st.column_config.NumberColumn("Proj Own %", format="%.1f"),
-                            "Act Own %": st.column_config.NumberColumn("Act Own %", format="%.1f"),
-                            "Own Error": st.column_config.NumberColumn("Own Error", format="%+.1f"),
-                            "Flag": st.column_config.CheckboxColumn("Flag", disabled=True),
-                        },
-                        use_container_width=True,
-                        hide_index=True,
-                    )
+                st.dataframe(
+                    _queue_focused,
+                    column_config={
+                        "Salary": st.column_config.NumberColumn("Salary", format="$%d"),
+                        "Proj FP": st.column_config.NumberColumn("Proj FP", format="%.1f"),
+                        "Act FP": st.column_config.NumberColumn("Act FP", format="%.1f"),
+                        "Error (pts)": st.column_config.NumberColumn("Error (pts)", format="%+.1f"),
+                        "Proj Mins": st.column_config.NumberColumn("Proj Mins", format="%.1f"),
+                        "Act Mins": st.column_config.NumberColumn("Act Mins", format="%.1f"),
+                        "Min Error": st.column_config.NumberColumn("Min Error", format="%+.1f"),
+                        "Proj Own %": st.column_config.NumberColumn("Proj Own %", format="%.1f"),
+                        "Act Own %": st.column_config.NumberColumn("Act Own %", format="%.1f"),
+                        "Own Error": st.column_config.NumberColumn("Own Error", format="%+.1f"),
+                        "Flag": st.column_config.CheckboxColumn("Flag", disabled=True),
+                    },
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
     # ---- Section B: Archetype Config Knobs ----
     st.markdown("---")
@@ -2232,7 +2308,15 @@ with tab_lab:
                     "Fetch actual player DK scores for a completed slate directly from the "
                     "Tank01 API.  Requires your RapidAPI key set in the sidebar."
                 )
-                _api_acts_default = st.session_state["sim_hist_date"] if _sim_is_historical else _today_est()
+                _api_acts_default = (
+                    st.session_state["sim_hist_date"]
+                    if _sim_is_historical
+                    else (
+                        pd.to_datetime(st.session_state["pool_date"]).date()
+                        if st.session_state.get("pool_date")
+                        else _today_est()
+                    )
+                )
                 _api_acts_date = st.date_input(
                     "Slate date (past game day)",
                     value=_api_acts_default,
@@ -2250,7 +2334,9 @@ with tab_lab:
                                     _api_acts_date.strftime("%Y%m%d"),
                                     {"RAPIDAPI_KEY": _api_key},
                                 )
+                                _api_date_str = str(_api_acts_date)
                                 st.session_state["sim_actuals_df"] = _api_acts_df
+                                st.session_state["actuals"][_api_date_str] = _api_acts_df
                                 st.success(
                                     f"✅ Loaded actuals for {len(_api_acts_df)} players "
                                     f"({_api_acts_date})."
