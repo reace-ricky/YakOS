@@ -108,6 +108,8 @@ class LineupSimSummary:
     p85_score: float
     smash_threshold: float = 0.0
     bust_threshold: float = 0.0
+    p90_score: float = 0.0  # 90th-percentile score; used as smash bar (top 10% of distribution)
+    p30_score: float = 0.0  # 30th-percentile score; used as bust bar (bottom 30% of distribution)
 
 
 # Optional contest-calibrated absolute overrides.
@@ -115,11 +117,11 @@ class LineupSimSummary:
 # Absolute values are calibrated to historical NBA DK cash-line / GPP win-line data:
 #   CASH  bust 190 ≈ approximate 50/50 break-even floor (NBA 8-man classic)
 #   SE_SMALL smash 250 ≈ typical single-entry GPP min-cash line
-#   GPP_LARGE smash 260 / bust 200 ≈ large-field tournament cash / min-cash targets
+#   GPP_LARGE uses fully dynamic percentile-based thresholds (p90 smash, p30 bust)
 CONTEST_ABSOLUTE_THRESHOLDS: Dict[ContestType, Dict[str, Optional[float]]] = {
     ContestType.CASH:      {"smash": None,  "bust": 190.0},
     ContestType.SE_SMALL:  {"smash": 250.0, "bust": 190.0},
-    ContestType.GPP_LARGE: {"smash": 260.0, "bust": 200.0},
+    ContestType.GPP_LARGE: {"smash": None,  "bust": None},
 }
 
 
@@ -134,7 +136,8 @@ def summarize_lineup_sims(scores: List[float]) -> LineupSimSummary:
     Returns
     -------
     LineupSimSummary
-        Contains ``median_score``, ``stdev_score``, ``p15_score``, ``p85_score``.
+        Contains ``median_score``, ``stdev_score``, ``p15_score``, ``p85_score``,
+        ``p90_score``, and ``p30_score``.
         The ``smash_threshold`` and ``bust_threshold`` fields are initialised to
         ``0.0`` and should be populated by :func:`compute_thresholds`.
     """
@@ -145,6 +148,8 @@ def summarize_lineup_sims(scores: List[float]) -> LineupSimSummary:
         stdev_score=float(arr.std()),
         p15_score=float(np.percentile(arr, 15)),
         p85_score=float(np.percentile(arr, 85)),
+        p90_score=float(np.percentile(arr, 90)),
+        p30_score=float(np.percentile(arr, 30)),
     )
 
 
@@ -157,7 +162,12 @@ def compute_thresholds(
     Uses distribution-relative formulas scaled per contest type, with optional
     absolute overrides from :data:`CONTEST_ABSOLUTE_THRESHOLDS`.
 
-    Dynamic formulas (applied when the override value is ``None``):
+    When ``p90_score`` and ``p30_score`` are present on *summary* (populated by
+    :func:`summarize_lineup_sims`), the dynamic path uses them directly so that
+    smash = top 10 % and bust = bottom 30 % of each lineup's own sim distribution.
+    Otherwise falls back to the stdev-multiplier formulas below.
+
+    Fallback dynamic formulas (applied when p90/p30 are absent and override is ``None``):
 
     * ``CASH``      — smash = median + 0.5 × stdev, bust = median − 1.0 × stdev
     * ``SE_SMALL``  — smash = median + 1.0 × stdev, bust = median − 1.0 × stdev
@@ -170,8 +180,16 @@ def compute_thresholds(
     }
     smash_mult, bust_mult = _multipliers.get(contest_type, (1.5, 1.0))
 
-    dynamic_smash = summary.median_score + smash_mult * summary.stdev_score
-    dynamic_bust = summary.median_score - bust_mult * summary.stdev_score
+    # Prefer percentile-based when populated by summarize_lineup_sims (p90/p30 > 0)
+    if summary.p90_score > 0:
+        dynamic_smash = summary.p90_score
+    else:
+        dynamic_smash = summary.median_score + smash_mult * summary.stdev_score
+
+    if summary.p30_score > 0:
+        dynamic_bust = summary.p30_score
+    else:
+        dynamic_bust = summary.median_score - bust_mult * summary.stdev_score
 
     overrides = CONTEST_ABSOLUTE_THRESHOLDS.get(contest_type, {})
     smash_override = overrides.get("smash")
@@ -503,8 +521,10 @@ def compute_player_anomaly_table(
 
         * ``ceiling_boost``   (float, default 1.0) — multiply upside outcomes
         * ``floor_dampen``    (float, default 1.0) — compress downside outcomes
-        * ``smash_threshold`` (float, default 1.3) — smash if outcome ≥ this × proj
-        * ``bust_threshold``  (float, default 0.5) — bust  if outcome ≤ this × proj
+        * ``smash_threshold`` (float, optional) — ratio multiplier: smash if outcome ≥ this × proj.
+          When absent, the 90th percentile of each player's sim outcomes is used (top 10%).
+        * ``bust_threshold``  (float, optional) — ratio multiplier: bust if outcome ≤ this × proj.
+          When absent, the 30th percentile of each player's sim outcomes is used (bottom 30%).
 
     Returns
     -------
@@ -522,8 +542,12 @@ def compute_player_anomaly_table(
     knobs = cal_knobs or {}
     ceiling_boost = float(knobs.get("ceiling_boost", 1.0))
     floor_dampen = float(knobs.get("floor_dampen", 1.0))
-    smash_thr = float(knobs.get("smash_threshold", 1.3))
-    bust_thr = float(knobs.get("bust_threshold", 0.5))
+    # smash_threshold / bust_threshold in cal_knobs are ratio multipliers (e.g. 1.3 = 130% of proj).
+    # When absent (None), percentile-based defaults are used instead:
+    #   smash = p90 of player's sim outcomes (top 10%)
+    #   bust  = p30 of player's sim outcomes (bottom 30%)
+    smash_thr = knobs.get("smash_threshold")   # None → use p90
+    bust_thr = knobs.get("bust_threshold")     # None → use p30
 
     # Find name column in lineup_df — this defines which players are in the lineup
     lu_name_col = next(
@@ -550,14 +574,14 @@ def compute_player_anomaly_table(
     # Build a pool lookup keyed by name to enrich lineup rows with any
     # supplemental columns (ownership, etc.) not already present in lineup_df.
     # Only the columns relevant for simulation are kept to minimise memory use.
-    _pool_sim_cols = ("name", "proj", "salary", "own%", "ownership", "Own%", "ceil", "floor")
+    _pool_sim_cols = ("name", "proj", "salary", "own%", "ownership", "Own%", "proj_own", "ceil", "floor")
     pool_lookup: dict = {}
     if not pool_df.empty:
         pool = pool_df.copy()
         if "player_name" in pool.columns and "name" not in pool.columns:
             pool = pool.rename(columns={"player_name": "name"})
-        # Normalise ownership column in pool
-        for _src in ("ownership", "Own%"):
+        # Normalise ownership column in pool — prefer own%, then ownership/Own%, then proj_own
+        for _src in ("ownership", "Own%", "proj_own"):
             if _src in pool.columns and "own%" not in pool.columns:
                 pool = pool.rename(columns={_src: "own%"})
                 break
@@ -571,7 +595,7 @@ def compute_player_anomaly_table(
             )
 
     # Normalise ownership column in lu_uniq as well
-    for _src in ("ownership", "Own%"):
+    for _src in ("ownership", "Own%", "proj_own"):
         if _src in lu_uniq.columns and "own%" not in lu_uniq.columns:
             lu_uniq = lu_uniq.rename(columns={_src: "own%"})
             break
@@ -617,8 +641,20 @@ def compute_player_anomaly_table(
         )
         outcomes = np.clip(outcomes, 0, None)
 
-        smash_pct = float((outcomes >= smash_thr * proj).mean() * 100.0)
-        bust_pct = float((outcomes <= bust_thr * proj).mean() * 100.0)
+        # Smash/bust thresholds: use ratio multiplier when explicitly provided via
+        # cal_knobs, otherwise use percentile-based thresholds (top 10% / bottom 30%).
+        if smash_thr is not None:
+            smash_threshold_val = float(smash_thr) * proj
+        else:
+            smash_threshold_val = float(np.percentile(outcomes, 90))
+
+        if bust_thr is not None:
+            bust_threshold_val = float(bust_thr) * proj
+        else:
+            bust_threshold_val = float(np.percentile(outcomes, 30))
+
+        smash_pct = float((outcomes >= smash_threshold_val).mean() * 100.0)
+        bust_pct = float((outcomes <= bust_threshold_val).mean() * 100.0)
         leverage = smash_pct / own_pct if own_pct > 0 else smash_pct
 
         rows.append({

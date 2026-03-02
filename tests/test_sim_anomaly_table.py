@@ -124,6 +124,31 @@ class TestComputePlayerAnomalyTableEdgeCases:
         assert not df.empty
         assert (df["Own%"] == 0).all()
 
+    def test_proj_own_column_used_when_own_pct_absent(self):
+        """Pool with proj_own (not own%) should still populate Own% via column normalisation."""
+        pool = _make_pool().drop(columns=["own%"])
+        pool["proj_own"] = [15.0, 5.0, 40.0, 12.0, 25.0]
+        lu = _make_lineups(_make_pool())
+        df = compute_player_anomaly_table(pool, lu)
+        assert not df.empty
+        # At least one player should have non-zero ownership from proj_own
+        assert (df["Own%"] > 0).any()
+
+    def test_proj_own_leverages_low_ownership_player(self):
+        """Player with low proj_own should have higher leverage than high-proj_own player."""
+        pool = pd.DataFrame([
+            {"player_name": "LowOwn", "proj": 35.0, "salary": 6500, "proj_own": 2.0},
+            {"player_name": "HighOwn", "proj": 35.0, "salary": 8500, "proj_own": 30.0},
+        ])
+        lu = pd.DataFrame([
+            {"player_name": "LowOwn", "lineup_index": 1},
+            {"player_name": "HighOwn", "lineup_index": 1},
+        ])
+        df = compute_player_anomaly_table(pool, lu, n_sims=500)
+        low_own_row = df[df["Player"] == "LowOwn"].iloc[0]
+        high_own_row = df[df["Player"] == "HighOwn"].iloc[0]
+        assert low_own_row["Leverage Score"] > high_own_row["Leverage Score"]
+
 
 class TestComputePlayerAnomalyTableMetrics:
     def test_smash_pct_between_0_and_100(self):
@@ -186,11 +211,16 @@ class TestComputePlayerAnomalyTableMetrics:
         assert trap_row["Value Trap"] != cheap_row["Value Trap"]
 
     def test_cal_knobs_ceiling_boost_increases_smash(self):
-        """ceiling_boost > 1 should increase Smash% compared to boost=1."""
+        """ceiling_boost > 1 should increase Smash% when an explicit ratio threshold is used."""
         pool = pd.DataFrame([{"player_name": "P1", "proj": 30.0, "salary": 7000, "own%": 20.0}])
         lu = pd.DataFrame([{"player_name": "P1", "lineup_index": 1}])
-        baseline = compute_player_anomaly_table(pool, lu, n_sims=1000, cal_knobs={"ceiling_boost": 1.0})
-        boosted = compute_player_anomaly_table(pool, lu, n_sims=1000, cal_knobs={"ceiling_boost": 2.0})
+        # Use an explicit ratio threshold so ceiling_boost affects the smash probability
+        baseline = compute_player_anomaly_table(
+            pool, lu, n_sims=1000, cal_knobs={"ceiling_boost": 1.0, "smash_threshold": 1.2}
+        )
+        boosted = compute_player_anomaly_table(
+            pool, lu, n_sims=1000, cal_knobs={"ceiling_boost": 2.0, "smash_threshold": 1.2}
+        )
         assert boosted.iloc[0]["Smash%"] >= baseline.iloc[0]["Smash%"]
 
     def test_cal_knobs_smash_threshold_reduces_smash(self):
@@ -222,3 +252,27 @@ class TestComputePlayerAnomalyTableMetrics:
         lu = _make_lineups(pool)
         df = compute_player_anomaly_table(pool, lu, cal_knobs={})
         assert not df.empty
+
+    def test_default_smash_pct_near_ten_percent(self):
+        """Default (percentile-based) smash threshold produces ~10% smash rate."""
+        pool = pd.DataFrame([
+            {"player_name": "P1", "proj": 30.0, "salary": 7000, "own%": 20.0,
+             "ceil": 42.0, "floor": 18.0},
+        ])
+        lu = pd.DataFrame([{"player_name": "P1", "lineup_index": 1}])
+        df = compute_player_anomaly_table(pool, lu, n_sims=2000, cal_knobs={})
+        # p90 threshold → smash_pct should be very close to 10%
+        smash = df.iloc[0]["Smash%"]
+        assert 7.0 <= smash <= 13.0, f"expected ~10% smash, got {smash}"
+
+    def test_default_bust_pct_near_thirty_percent(self):
+        """Default (percentile-based) bust threshold produces ~30% bust rate."""
+        pool = pd.DataFrame([
+            {"player_name": "P1", "proj": 30.0, "salary": 7000, "own%": 20.0,
+             "ceil": 42.0, "floor": 18.0},
+        ])
+        lu = pd.DataFrame([{"player_name": "P1", "lineup_index": 1}])
+        df = compute_player_anomaly_table(pool, lu, n_sims=2000, cal_knobs={})
+        # p30 threshold → bust_pct should be very close to 30%
+        bust = df.iloc[0]["Bust%"]
+        assert 26.0 <= bust <= 35.0, f"expected ~30% bust, got {bust}"
