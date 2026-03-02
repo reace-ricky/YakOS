@@ -167,6 +167,10 @@ class TestLiveImports:
         mod = importlib.import_module("yak_core.live")
         assert hasattr(mod, "fetch_actuals_from_api")
 
+    def test_no_games_scheduled_error(self):
+        mod = importlib.import_module("yak_core.live")
+        assert hasattr(mod, "NoGamesScheduledError")
+
 
 class TestMultislateImports:
     def test_parse_dk_contest_csv(self):

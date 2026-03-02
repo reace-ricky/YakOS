@@ -86,6 +86,7 @@ from yak_core.live import (  # type: ignore
     fetch_live_opt_pool,
     fetch_injury_updates,
     fetch_actuals_from_api,
+    NoGamesScheduledError,
 )
 from yak_core.multislate import (  # type: ignore
     parse_dk_contest_csv,
@@ -551,6 +552,9 @@ def ensure_session_state():
     if "pool_date" not in st.session_state:
         # tracks the last date used when fetching the player pool
         st.session_state["pool_date"] = None
+    if "auto_excluded_players" not in st.session_state:
+        # list of dicts: {player_name, status} auto-excluded due to injury/status
+        st.session_state["auto_excluded_players"] = []
 
 
 def run_optimizer(
@@ -860,10 +864,20 @@ with tab_slate:
                                 if "player_name" not in live_pool.columns and "name" in live_pool.columns:
                                     live_pool = live_pool.rename(columns={"name": "player_name"})
                                 live_pool = _apply_yakos_projections(live_pool, knobs=st.session_state.get("cal_knobs", {}))
+                                # Auto-exclude injured players (OUT / IR / Suspended)
+                                _auto_excl = []
+                                if "status" in live_pool.columns and "player_name" in live_pool.columns:
+                                    from yak_core.sims import _INELIGIBLE_STATUSES as _INELIG
+                                    _inelig_mask = live_pool["status"].fillna("").str.upper().isin(_INELIG)
+                                    live_pool.loc[_inelig_mask, "sim_eligible"] = False
+                                    _auto_excl = live_pool.loc[_inelig_mask, ["player_name", "status"]].to_dict("records")
+                                st.session_state["auto_excluded_players"] = _auto_excl
                                 st.session_state["pool_df"] = live_pool
                                 st.session_state["pool_date"] = str(slate_fetch_date)
                                 # Auto-fetch actuals for past dates
                                 _date_str = str(slate_fetch_date)
+                                _n_excl = len(_auto_excl)
+                                _excl_note = f" {_n_excl} excluded (OUT/IR)." if _n_excl else ""
                                 if slate_fetch_date < _today_est():
                                     try:
                                         _acts = fetch_actuals_from_api(
@@ -873,19 +887,19 @@ with tab_slate:
                                         st.session_state["actuals"][_date_str] = _acts
                                         st.session_state["sim_actuals_df"] = _acts
                                         st.success(
-                                            f"✅ Loaded {len(live_pool)} players + "
-                                            f"actuals for {len(_acts)} players ({_date_str})."
+                                            f"✅ Loaded {len(live_pool)} players.{_excl_note} "
+                                            f"Actuals loaded for {_date_str} ({len(_acts)} players)."
                                         )
+                                    except NoGamesScheduledError:
+                                        st.success(f"✅ Loaded {len(live_pool)} players.{_excl_note}")
+                                        st.info(f"No games scheduled for {_date_str}.")
                                     except Exception as _ae:
-                                        st.success(f"✅ Loaded {len(live_pool)} players.")
-                                        st.warning(
-                                            f"Actuals API returned no data. This may be an off-day "
-                                            f"or an API issue. ({_ae})"
-                                        )
+                                        st.success(f"✅ Loaded {len(live_pool)} players.{_excl_note}")
+                                        st.warning(f"Actuals API error: {_ae}")
                                 else:
                                     st.success(
-                                        f"✅ Loaded {len(live_pool)} players. "
-                                        "Actuals not yet available (games not completed)."
+                                        f"✅ Loaded {len(live_pool)} players.{_excl_note} "
+                                        "Live slate — no actuals yet."
                                     )
                             except Exception as _e:
                                 st.error(f"API fetch failed: {_e}")
@@ -893,6 +907,21 @@ with tab_slate:
         pool_df = st.session_state.get("pool_df")
         approved_lineups = st.session_state.get("approved_lineups", [])
         last_cal_ts = st.session_state.get("last_calibration_ts")
+
+        # Auto-Excluded Players panel (shown when pool is loaded)
+        _auto_excl_list = st.session_state.get("auto_excluded_players", [])
+        if _auto_excl_list:
+            with st.expander(
+                f"⚠️ Auto-Excluded Players ({len(_auto_excl_list)} — OUT/IR/Suspended)",
+                expanded=False,
+            ):
+                st.markdown(
+                    "These players were automatically excluded from sims and the optimizer "
+                    "based on their injury/availability status. Use the **Manual Player "
+                    "Eligibility Overrides** table in the Sim Module to re-enable any player."
+                )
+                _excl_df = pd.DataFrame(_auto_excl_list)
+                st.dataframe(_excl_df, use_container_width=True, hide_index=True)
 
         if pool_df is None or pool_df.empty:
             st.info(
@@ -1482,10 +1511,20 @@ with tab_lab:
                         if "player_name" not in live_pool.columns and "name" in live_pool.columns:
                             live_pool = live_pool.rename(columns={"name": "player_name"})
                         live_pool = _apply_yakos_projections(live_pool, knobs=st.session_state.get("cal_knobs", {}))
+                        # Auto-exclude injured players (OUT / IR / Suspended)
+                        _cal_auto_excl = []
+                        if "status" in live_pool.columns and "player_name" in live_pool.columns:
+                            from yak_core.sims import _INELIGIBLE_STATUSES as _INELIG
+                            _cal_inelig_mask = live_pool["status"].fillna("").str.upper().isin(_INELIG)
+                            live_pool.loc[_cal_inelig_mask, "sim_eligible"] = False
+                            _cal_auto_excl = live_pool.loc[_cal_inelig_mask, ["player_name", "status"]].to_dict("records")
+                        st.session_state["auto_excluded_players"] = _cal_auto_excl
                         st.session_state["pool_df"] = live_pool
                         st.session_state["pool_date"] = str(fetch_slate_date_cal)
                         # Auto-fetch actuals for past dates
                         _cal_date_str = str(fetch_slate_date_cal)
+                        _cal_n_excl = len(_cal_auto_excl)
+                        _cal_excl_note = f" {_cal_n_excl} excluded (OUT/IR)." if _cal_n_excl else ""
                         if fetch_slate_date_cal < _today_est():
                             try:
                                 _acts = fetch_actuals_from_api(
@@ -1495,19 +1534,19 @@ with tab_lab:
                                 st.session_state["actuals"][_cal_date_str] = _acts
                                 st.session_state["sim_actuals_df"] = _acts
                                 st.success(
-                                    f"✅ Loaded {len(live_pool)} players + "
-                                    f"actuals for {len(_acts)} players ({_cal_date_str})."
+                                    f"✅ Loaded {len(live_pool)} players.{_cal_excl_note} "
+                                    f"Actuals loaded for {_cal_date_str} ({len(_acts)} players)."
                                 )
+                            except NoGamesScheduledError:
+                                st.success(f"✅ Loaded {len(live_pool)} players.{_cal_excl_note}")
+                                st.info(f"No games scheduled for {_cal_date_str}.")
                             except Exception as _ae:
-                                st.success(f"✅ Loaded {len(live_pool)} players.")
-                                st.warning(
-                                    f"Actuals API returned no data. This may be an off-day "
-                                    f"or an API issue. ({_ae})"
-                                )
+                                st.success(f"✅ Loaded {len(live_pool)} players.{_cal_excl_note}")
+                                st.warning(f"Actuals API error: {_ae}")
                         else:
                             st.success(
-                                f"✅ Loaded {len(live_pool)} players. "
-                                "Actuals not yet available (games not completed)."
+                                f"✅ Loaded {len(live_pool)} players.{_cal_excl_note} "
+                                "Live slate — no actuals yet."
                             )
                     except Exception as _e:
                         st.error(f"API fetch failed: {_e}")
@@ -2158,134 +2197,52 @@ with tab_lab:
             "Load a player pool using the **📂 Load Player Pool** section at the top of this tab to enable sims."
         )
     else:
-        # News / lineup updates
-        with st.expander("📰 Live News & Lineup Updates", expanded=False):
-            _news_auto_toggle = st.checkbox(
-                "Let news auto-update sim eligibility",
-                value=st.session_state.get("sim_news_auto_eligible", True),
-                key="sim_news_auto_eligible",
-                help="When ON, players marked OUT in a news update are automatically set sim_eligible=False.",
+        # Manual override (advanced) — compact collapsed section
+        with st.expander("✏️ Manual Override (advanced)", expanded=False):
+            st.markdown(
+                "One per row: `PlayerName | STATUS | proj_adj | minutes_change`\n\n"
+                "Example: `Zion Williamson | OUT | | ` or `Jayson Tatum | UPGRADED | | +4`"
             )
-            # --- API fetch ---
-            api_news_col, manual_news_col = st.columns([1, 2])
-            with api_news_col:
-                st.markdown("**🌐 Fetch from API**")
-                _news_default_date = st.session_state["sim_hist_date"] if _sim_is_historical else _today_est()
-                news_slate_date = st.date_input(
-                    "Slate date",
-                    value=_news_default_date,
-                    key="sim_news_date",
-                )
-                if st.button(
-                    "Fetch Live Injury Updates",
-                    key="sim_fetch_injuries_btn",
-                    help="Pulls today's injury/status list from Tank01 API.",
-                ):
-                    api_key = st.session_state.get("rapidapi_key", "")
-                    if not api_key:
-                        st.error("Set your Tank01 RapidAPI key in the sidebar first.")
-                    else:
-                        with st.spinner("Fetching injury updates…"):
-                            try:
-                                api_updates = fetch_injury_updates(
-                                    news_slate_date.strftime("%Y%m%d"),
-                                    {"RAPIDAPI_KEY": api_key},
-                                )
-                                if api_updates:
-                                    sim_pool_api = simulate_live_updates(
-                                        pool_for_sim, api_updates
-                                    )
-                                    if _news_auto_toggle:
-                                        out_names = [
-                                            u["player_name"] for u in api_updates
-                                            if u.get("status", "").upper() in {"OUT", "IR", "SUSPENDED", "G-LEAGUE"}
-                                        ]
-                                        if out_names and "player_name" in sim_pool_api.columns:
-                                            sim_pool_api.loc[
-                                                sim_pool_api["player_name"].isin(out_names), "sim_eligible"
-                                            ] = False
-                                    st.session_state["sim_pool_df"] = sim_pool_api
-                                    st.session_state["sim_pool_orig_df"] = sim_pool_api
-                                    st.success(
-                                        f"Applied {len(api_updates)} injury update(s) "
-                                        "from API."
-                                    )
-                                    out_players = [
-                                        u["player_name"]
-                                        for u in api_updates
-                                        if u.get("status") == "OUT"
-                                    ]
-                                    if out_players:
-                                        st.warning(
-                                            "**OUT**: "
-                                            + ", ".join(out_players[:10])
-                                            + (" …" if len(out_players) > 10 else "")
-                                        )
-                                else:
-                                    st.info("No injury updates found for this date.")
-                            except Exception as _e:
-                                st.error(f"Injury API error: {_e}")
+            news_text = st.text_area(
+                "Manual updates",
+                placeholder="Zion Williamson | OUT | |\nJayson Tatum | UPGRADED | | 4",
+                height=100,
+                key="sim_news_text",
+            )
 
-            with manual_news_col:
-                st.markdown("**✏️ Manual Updates**")
-                st.markdown(
-                    "One per row: `PlayerName | STATUS | proj_adj | minutes_change`\n\n"
-                    "Example: `Zion Williamson | OUT | | ` or `Jayson Tatum | UPGRADED | | +4`"
-                )
-                news_text = st.text_area(
-                    "News updates",
-                    placeholder="Zion Williamson | OUT | |\nJayson Tatum | UPGRADED | | 4",
-                    height=120,
-                    key="sim_news_text",
-                )
+        news_updates = []
+        if news_text.strip():
+            for line in news_text.strip().splitlines():
+                parts = [p.strip() for p in line.split("|")]
+                if not parts[0]:
+                    continue
+                update = {"player_name": parts[0]}
+                if len(parts) > 1 and parts[1]:
+                    update["status"] = parts[1]
+                if len(parts) > 2 and parts[2]:
+                    try:
+                        update["proj_adj"] = float(parts[2])
+                    except ValueError:
+                        pass
+                if len(parts) > 3 and parts[3]:
+                    try:
+                        update["minutes_change"] = float(parts[3])
+                    except ValueError:
+                        pass
+                news_updates.append(update)
 
-            news_updates = []
-            if news_text.strip():
-                for line in news_text.strip().splitlines():
-                    parts = [p.strip() for p in line.split("|")]
-                    if not parts[0]:
-                        continue
-                    update = {"player_name": parts[0]}
-                    if len(parts) > 1 and parts[1]:
-                        update["status"] = parts[1]
-                    if len(parts) > 2 and parts[2]:
-                        try:
-                            update["proj_adj"] = float(parts[2])
-                        except ValueError:
-                            pass
-                    if len(parts) > 3 and parts[3]:
-                        try:
-                            update["minutes_change"] = float(parts[3])
-                        except ValueError:
-                            pass
-                    news_updates.append(update)
-
-                if news_updates:
-                    sim_pool = simulate_live_updates(pool_for_sim, news_updates)
-                    if _news_auto_toggle:
-                        out_names_manual = [
-                            u["player_name"] for u in news_updates
-                            if u.get("status", "").upper() in {"OUT", "IR", "SUSPENDED", "G-LEAGUE"}
-                        ]
-                        if out_names_manual and "player_name" in sim_pool.columns:
-                            sim_pool.loc[
-                                sim_pool["player_name"].isin(out_names_manual), "sim_eligible"
-                            ] = False
-                    st.session_state["sim_pool_df"] = sim_pool
-                    st.session_state["sim_pool_orig_df"] = sim_pool
-                    changed = []
-                    st.info(f"Applied {len(news_updates)} update(s) to player pool.")
-                    for u in news_updates:
-                        orig = pool_for_sim[pool_for_sim["player_name"] == u["player_name"]]
-                        upd = sim_pool[sim_pool["player_name"] == u["player_name"]]
-                        if not orig.empty and not upd.empty:
-                            orig_p = orig["proj"].iloc[0]
-                            upd_p = upd["proj"].iloc[0]
-                            changed.append(f"{u['player_name']}: {orig_p:.1f} → {upd_p:.1f}")
-                    if changed:
-                        st.write("**Projection changes:**")
-                        for c in changed:
-                            st.markdown(f"- {c}")
+            if news_updates:
+                sim_pool = simulate_live_updates(pool_for_sim, news_updates)
+                out_names_manual = [
+                    u["player_name"] for u in news_updates
+                    if u.get("status", "").upper() in {"OUT", "IR", "SUSPENDED", "G-LEAGUE"}
+                ]
+                if out_names_manual and "player_name" in sim_pool.columns:
+                    sim_pool.loc[
+                        sim_pool["player_name"].isin(out_names_manual), "sim_eligible"
+                    ] = False
+                st.session_state["sim_pool_df"] = sim_pool
+                st.session_state["sim_pool_orig_df"] = sim_pool
 
         # Sim controls
         sim_col_l, sim_col_r = st.columns(2)
@@ -2323,101 +2280,64 @@ with tab_lab:
 
         # Actuals upload — for historical slate calibration
         with st.expander("📊 Load Actuals (Historical Slate Calibration)", expanded=_sim_is_historical):
-            st.markdown(
-                "Load actual DraftKings fantasy points to compare sim projections against real "
-                "outcomes.  Choose **API** (fastest — pulls directly from Tank01) or **CSV** "
-                "(manual upload of a RotoGrinders export)."
+            # Show status of already-loaded actuals (auto-loaded when pool was fetched)
+            _loaded_actuals_status = st.session_state.get("sim_actuals_df")
+            _pool_date_str = st.session_state.get("pool_date", "")
+            if _loaded_actuals_status is not None and not _loaded_actuals_status.empty:
+                st.info(
+                    f"Actuals loaded for {_pool_date_str}: "
+                    f"**{len(_loaded_actuals_status)} players with box scores.** "
+                    "Actuals are auto-loaded when you fetch a past-date pool."
+                )
+            else:
+                st.info(
+                    "No actuals loaded. Fetch a past-date pool via **'Fetch Pool from API'** "
+                    "to auto-load actuals, or upload a CSV below."
+                )
+
+            st.markdown("**📂 Upload actuals CSV** (fallback — RotoGrinders export or custom)")
+            _actuals_upload = st.file_uploader(
+                "Upload actuals CSV",
+                type=["csv"],
+                key="sim_actuals_upload",
+                help="RotoGrinders contest export or any CSV with player names and actual FP scored.",
             )
-            _acts_tab_api, _acts_tab_csv = st.tabs(["🌐 Fetch from API", "📂 Upload CSV"])
-
-            with _acts_tab_api:
-                st.markdown(
-                    "Fetch actual player DK scores for a completed slate directly from the "
-                    "Tank01 API.  Requires your RapidAPI key set in the sidebar."
-                )
-                _api_acts_default = (
-                    st.session_state["sim_hist_date"]
-                    if _sim_is_historical
-                    else (
-                        pd.to_datetime(st.session_state["pool_date"]).date()
-                        if st.session_state.get("pool_date")
-                        else _today_est()
-                    )
-                )
-                _api_acts_date = st.date_input(
-                    "Slate date (past game day)",
-                    value=_api_acts_default,
-                    key="sim_actuals_api_date",
-                    help="Choose the game day you want actuals for.",
-                )
-                if st.button("Fetch Actuals from API", key="sim_fetch_actuals_btn"):
-                    _api_key = st.session_state.get("rapidapi_key", "")
-                    if not _api_key:
-                        st.error("Set your Tank01 RapidAPI key in the sidebar first.")
+            if _actuals_upload is not None:
+                try:
+                    _acts_raw = pd.read_csv(_actuals_upload)
+                    # Normalise column names — apply only the first match found so
+                    # we don't create duplicate target columns when, e.g., both
+                    # "PLAYER" and "Player" happen to be present.
+                    _col_renames: dict = {}
+                    for _src in ("PLAYER", "Player"):
+                        if _src in _acts_raw.columns and "player_name" not in _acts_raw.columns:
+                            _col_renames[_src] = "player_name"
+                            break
+                    for _src in ("FPTS", "fpts"):
+                        if _src in _acts_raw.columns and "actual_fp" not in _acts_raw.columns:
+                            _col_renames[_src] = "actual_fp"
+                            break
+                    _acts_norm = _acts_raw.rename(columns=_col_renames)
+                    # Accept 'actual' column directly too
+                    if "actual" in _acts_norm.columns and "actual_fp" not in _acts_norm.columns:
+                        _acts_norm = _acts_norm.rename(columns={"actual": "actual_fp"})
+                    if "name" in _acts_norm.columns and "player_name" not in _acts_norm.columns:
+                        _acts_norm = _acts_norm.rename(columns={"name": "player_name"})
+                    _name_col = "player_name" if "player_name" in _acts_norm.columns else None
+                    _fp_col = "actual_fp" if "actual_fp" in _acts_norm.columns else None
+                    if _name_col and _fp_col:
+                        _acts_clean = _acts_norm[[_name_col, _fp_col]].copy()
+                        _acts_clean[_fp_col] = pd.to_numeric(_acts_clean[_fp_col], errors="coerce")
+                        _acts_clean = _acts_clean.dropna(subset=[_fp_col])
+                        st.session_state["sim_actuals_df"] = _acts_clean
+                        st.success(f"✅ Loaded actuals for {len(_acts_clean)} players.")
                     else:
-                        with st.spinner("Fetching actuals from Tank01…"):
-                            try:
-                                _api_acts_df = fetch_actuals_from_api(
-                                    _api_acts_date.strftime("%Y%m%d"),
-                                    {"RAPIDAPI_KEY": _api_key},
-                                )
-                                _api_date_str = str(_api_acts_date)
-                                st.session_state["sim_actuals_df"] = _api_acts_df
-                                st.session_state["actuals"][_api_date_str] = _api_acts_df
-                                st.success(
-                                    f"✅ Loaded actuals for {len(_api_acts_df)} players "
-                                    f"({_api_acts_date})."
-                                )
-                            except Exception as _api_err:
-                                st.error(f"API actuals fetch failed: {_api_err}")
-
-            with _acts_tab_csv:
-                st.markdown(
-                    "Upload an actuals CSV — RotoGrinders contest export (`FPTS` / `PLAYER` "
-                    "columns) or any CSV with `name`/`player_name` and `actual`/`actual_fp`."
-                )
-                _actuals_upload = st.file_uploader(
-                    "Upload actuals CSV",
-                    type=["csv"],
-                    key="sim_actuals_upload",
-                    help="RotoGrinders contest export or any CSV with player names and actual FP scored.",
-                )
-                if _actuals_upload is not None:
-                    try:
-                        _acts_raw = pd.read_csv(_actuals_upload)
-                        # Normalise column names — apply only the first match found so
-                        # we don't create duplicate target columns when, e.g., both
-                        # "PLAYER" and "Player" happen to be present.
-                        _col_renames: dict = {}
-                        for _src in ("PLAYER", "Player"):
-                            if _src in _acts_raw.columns and "player_name" not in _acts_raw.columns:
-                                _col_renames[_src] = "player_name"
-                                break
-                        for _src in ("FPTS", "fpts"):
-                            if _src in _acts_raw.columns and "actual_fp" not in _acts_raw.columns:
-                                _col_renames[_src] = "actual_fp"
-                                break
-                        _acts_norm = _acts_raw.rename(columns=_col_renames)
-                        # Accept 'actual' column directly too
-                        if "actual" in _acts_norm.columns and "actual_fp" not in _acts_norm.columns:
-                            _acts_norm = _acts_norm.rename(columns={"actual": "actual_fp"})
-                        if "name" in _acts_norm.columns and "player_name" not in _acts_norm.columns:
-                            _acts_norm = _acts_norm.rename(columns={"name": "player_name"})
-                        _name_col = "player_name" if "player_name" in _acts_norm.columns else None
-                        _fp_col = "actual_fp" if "actual_fp" in _acts_norm.columns else None
-                        if _name_col and _fp_col:
-                            _acts_clean = _acts_norm[[_name_col, _fp_col]].copy()
-                            _acts_clean[_fp_col] = pd.to_numeric(_acts_clean[_fp_col], errors="coerce")
-                            _acts_clean = _acts_clean.dropna(subset=[_fp_col])
-                            st.session_state["sim_actuals_df"] = _acts_clean
-                            st.success(f"✅ Loaded actuals for {len(_acts_clean)} players.")
-                        else:
-                            st.error(
-                                "Could not find required columns. Expected `PLAYER`/`name`/`player_name` "
-                                "and `FPTS`/`actual`/`actual_fp`."
-                            )
-                    except Exception as _e:
-                        st.error(f"Error reading actuals file: {_e}")
+                        st.error(
+                            "Could not find required columns. Expected `PLAYER`/`name`/`player_name` "
+                            "and `FPTS`/`actual`/`actual_fp`."
+                        )
+                except Exception as _e:
+                    st.error(f"Error reading actuals file: {_e}")
 
             _loaded_actuals = st.session_state.get("sim_actuals_df")
             if _loaded_actuals is not None and not _loaded_actuals.empty:
@@ -2568,6 +2488,45 @@ with tab_lab:
         if st.button("🎲 Run Sims", type="primary", key="sim_run_btn"):
             with st.spinner("Building lineups + running Monte Carlo sims..."):
                 try:
+                    # Auto-refresh injury statuses before running sims
+                    _refresh_api_key = st.session_state.get("rapidapi_key", "")
+                    if _refresh_api_key and not _sim_is_historical:
+                        try:
+                            _refresh_updates = fetch_injury_updates(
+                                _today_est().strftime("%Y%m%d"),
+                                {"RAPIDAPI_KEY": _refresh_api_key},
+                            )
+                            if _refresh_updates:
+                                _refresh_changes = []
+                                for _ru in _refresh_updates:
+                                    _rp_name = _ru.get("player_name", "")
+                                    _new_status = _ru.get("status", "")
+                                    if "player_name" in active_sim_pool.columns and _rp_name:
+                                        _row = active_sim_pool[active_sim_pool["player_name"] == _rp_name]
+                                        if not _row.empty:
+                                            _old_status = _row["status"].iloc[0] if "status" in _row.columns else "Active"
+                                            if str(_old_status) != str(_new_status):
+                                                active_sim_pool.loc[
+                                                    active_sim_pool["player_name"] == _rp_name, "status"
+                                                ] = _new_status
+                                                _refresh_changes.append(
+                                                    f"{_rp_name}: {_old_status} → {_new_status}"
+                                                )
+                                # Re-run eligibility after status updates
+                                from yak_core.sims import _INELIGIBLE_STATUSES as _INELIG_RS
+                                if "status" in active_sim_pool.columns:
+                                    _inelig_rs = active_sim_pool["status"].fillna("").str.upper().isin(_INELIG_RS)
+                                    active_sim_pool.loc[_inelig_rs, "sim_eligible"] = False
+                                _src_refresh = "sim_pool_df" if st.session_state.get("sim_pool_df") is not None else "pool_df"
+                                st.session_state[_src_refresh] = active_sim_pool
+                                if _refresh_changes:
+                                    st.info(
+                                        "**Status refresh:** "
+                                        + " | ".join(_refresh_changes[:8])
+                                        + (" …" if len(_refresh_changes) > 8 else "")
+                                    )
+                        except Exception as _refresh_err:
+                            st.caption(f"Injury refresh skipped: {_refresh_err}")
                     # Filter to sim-eligible players only
                     pool_for_sim_run = active_sim_pool[active_sim_pool["sim_eligible"]].copy() if "sim_eligible" in active_sim_pool.columns else active_sim_pool.copy()
                     _required_roster = 8
