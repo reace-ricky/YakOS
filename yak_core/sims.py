@@ -1,28 +1,155 @@
 """Monte Carlo simulation for YakOS DFS optimizer."""
-from typing import Any, Dict, List, Optional
+from __future__ import annotations
+
+import dataclasses
+import enum
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
-# DK NBA scoring thresholds (classic 8-man roster)
-SMASH_THRESHOLD = 300.0  # strong GPP score
-BUST_THRESHOLD = 230.0   # likely cash-game miss
 
-# Private aliases kept for backwards compatibility
-_SMASH_THRESHOLD = SMASH_THRESHOLD
-_BUST_THRESHOLD = BUST_THRESHOLD
+class ContestType(enum.Enum):
+    """DK contest archetypes used to derive dynamic smash/bust thresholds."""
+    CASH = "CASH"
+    SE_SMALL = "SE_SMALL"          # single-entry / 3-max / small-field
+    GPP_LARGE = "GPP_LARGE"        # large-field GPP / lotto
+
+    @classmethod
+    def _missing_(cls, value: object) -> "ContestType":  # type: ignore[override]
+        """Case-insensitive lookup by value string."""
+        if isinstance(value, str):
+            for member in cls:
+                if member.value.upper() == value.upper():
+                    return member
+        return cls.GPP_LARGE
+
+
+@dataclasses.dataclass
+class LineupSimSummary:
+    """Per-lineup Monte Carlo summary statistics and dynamic thresholds."""
+    lineup_id: Any
+    median_score: float
+    stdev_score: float
+    p15_score: float
+    p85_score: float
+    smash_threshold: float = 0.0
+    bust_threshold: float = 0.0
+
+
+# Optional contest-calibrated absolute overrides.
+# Set a value to ``None`` to use the dynamic (distribution-relative) formula.
+# Absolute values are calibrated to historical NBA DK cash-line / GPP win-line data:
+#   CASH  bust 190 ≈ approximate 50/50 break-even floor (NBA 8-man classic)
+#   SE_SMALL smash 250 ≈ typical single-entry GPP min-cash line
+#   GPP_LARGE smash 260 / bust 200 ≈ large-field tournament cash / min-cash targets
+CONTEST_ABSOLUTE_THRESHOLDS: Dict[ContestType, Dict[str, Optional[float]]] = {
+    ContestType.CASH:      {"smash": None,  "bust": 190.0},
+    ContestType.SE_SMALL:  {"smash": 250.0, "bust": 190.0},
+    ContestType.GPP_LARGE: {"smash": 260.0, "bust": 200.0},
+}
+
+
+def summarize_lineup_sims(scores: List[float]) -> LineupSimSummary:
+    """Compute distribution statistics for a list of simulated lineup totals.
+
+    Parameters
+    ----------
+    scores : list of float
+        Raw simulated DK score totals for a single lineup.
+
+    Returns
+    -------
+    LineupSimSummary
+        Contains ``median_score``, ``stdev_score``, ``p15_score``, ``p85_score``.
+        The ``smash_threshold`` and ``bust_threshold`` fields are initialised to
+        ``0.0`` and should be populated by :func:`compute_thresholds`.
+    """
+    arr = np.asarray(scores, dtype=float)
+    return LineupSimSummary(
+        lineup_id=None,
+        median_score=float(np.median(arr)),
+        stdev_score=float(arr.std()),
+        p15_score=float(np.percentile(arr, 15)),
+        p85_score=float(np.percentile(arr, 85)),
+    )
+
+
+def compute_thresholds(
+    summary: LineupSimSummary,
+    contest_type: ContestType = ContestType.GPP_LARGE,
+) -> None:
+    """Set ``smash_threshold`` and ``bust_threshold`` on *summary* in place.
+
+    Uses distribution-relative formulas scaled per contest type, with optional
+    absolute overrides from :data:`CONTEST_ABSOLUTE_THRESHOLDS`.
+
+    Dynamic formulas (applied when the override value is ``None``):
+
+    * ``CASH``      — smash = median + 0.5 × stdev, bust = median − 1.0 × stdev
+    * ``SE_SMALL``  — smash = median + 1.0 × stdev, bust = median − 1.0 × stdev
+    * ``GPP_LARGE`` — smash = median + 1.5 × stdev, bust = median − 1.0 × stdev
+    """
+    _multipliers: Dict[ContestType, Tuple[float, float]] = {
+        ContestType.CASH:      (0.5, 1.0),
+        ContestType.SE_SMALL:  (1.0, 1.0),
+        ContestType.GPP_LARGE: (1.5, 1.0),
+    }
+    smash_mult, bust_mult = _multipliers.get(contest_type, (1.5, 1.0))
+
+    dynamic_smash = summary.median_score + smash_mult * summary.stdev_score
+    dynamic_bust = summary.median_score - bust_mult * summary.stdev_score
+
+    overrides = CONTEST_ABSOLUTE_THRESHOLDS.get(contest_type, {})
+    smash_override = overrides.get("smash")
+    bust_override = overrides.get("bust")
+    summary.smash_threshold = float(smash_override) if smash_override is not None else dynamic_smash
+    summary.bust_threshold = float(bust_override) if bust_override is not None else dynamic_bust
+
+
+def compute_smash_bust_rates(
+    scores: List[float],
+    smash_threshold: float,
+    bust_threshold: float,
+) -> Tuple[float, float]:
+    """Return ``(smash_pct, bust_pct)`` from raw sim scores and thresholds.
+
+    Parameters
+    ----------
+    scores : list of float
+        Raw simulated totals for a single lineup.
+    smash_threshold : float
+        Scores *≥* this value count as smashes.
+    bust_threshold : float
+        Scores *≤* this value count as busts.
+
+    Returns
+    -------
+    tuple[float, float]
+        ``(smash_pct, bust_pct)`` each in the range ``[0.0, 1.0]``.
+    """
+    arr = np.asarray(scores, dtype=float)
+    total = len(arr)
+    if total == 0:
+        return 0.0, 0.0
+    smash_pct = float((arr >= smash_threshold).sum()) / total
+    bust_pct = float((arr <= bust_threshold).sum()) / total
+    return smash_pct, bust_pct
 
 
 def run_monte_carlo_for_lineups(
     lineups_df: pd.DataFrame,
     n_sims: int = 500,
     volatility_mode: str = "standard",
+    contest_type: ContestType = ContestType.GPP_LARGE,
 ) -> pd.DataFrame:
     """Run Monte Carlo simulations on lineup projections.
 
     For each lineup, simulates ``n_sims`` outcomes by sampling from
     per-player normal distributions (mean=proj, std derived from
-    ceil/floor when available).
+    ceil/floor when available).  Smash and bust thresholds are computed
+    dynamically from each lineup's own sim distribution using
+    :func:`summarize_lineup_sims` and :func:`compute_thresholds`.
 
     Parameters
     ----------
@@ -34,14 +161,20 @@ def run_monte_carlo_for_lineups(
     volatility_mode : str, optional
         ``"low"`` / ``"standard"`` / ``"high"`` — scales default variance when
         ceil/floor are unavailable.
+    contest_type : ContestType, optional
+        Contest archetype used to derive per-lineup smash/bust thresholds
+        (default ``ContestType.GPP_LARGE``).
 
     Returns
     -------
     pd.DataFrame
         Per-lineup summary with columns:
         ``lineup_index``, ``sim_mean``, ``sim_std``,
-        ``smash_prob``, ``bust_prob``, ``median_points``,
-        ``sim_p85``, ``sim_p15``.
+        ``median_points``, ``sim_p85``, ``sim_p15``,
+        ``smash_threshold``, ``bust_threshold``,
+        ``smash_pct``, ``bust_pct``, ``contest_type``.
+        ``smash_prob`` and ``bust_prob`` are retained as aliases for
+        ``smash_pct`` and ``bust_pct`` for backwards compatibility.
     """
     if lineups_df.empty or "lineup_index" not in lineups_df.columns:
         return pd.DataFrame()
@@ -75,15 +208,28 @@ def run_monte_carlo_for_lineups(
         sim_matrix = np.clip(sim_matrix, 0, None)
         totals = sim_matrix.sum(axis=1)
 
+        # Dynamic thresholds from this lineup's own distribution
+        summary = summarize_lineup_sims(totals.tolist())
+        compute_thresholds(summary, contest_type)
+        smash_pct, bust_pct = compute_smash_bust_rates(
+            totals.tolist(), summary.smash_threshold, summary.bust_threshold
+        )
+
         results.append({
             "lineup_index": lu_id,
             "sim_mean": round(float(totals.mean()), 2),
             "sim_std": round(float(totals.std()), 2),
-            "smash_prob": round(float((totals >= _SMASH_THRESHOLD).mean()), 3),
-            "bust_prob": round(float((totals <= _BUST_THRESHOLD).mean()), 3),
-            "median_points": round(float(np.median(totals)), 2),
-            "sim_p85": round(float(np.percentile(totals, 85)), 2),
-            "sim_p15": round(float(np.percentile(totals, 15)), 2),
+            "median_points": round(summary.median_score, 2),
+            "sim_p85": round(summary.p85_score, 2),
+            "sim_p15": round(summary.p15_score, 2),
+            "smash_threshold": round(summary.smash_threshold, 2),
+            "bust_threshold": round(summary.bust_threshold, 2),
+            "smash_pct": round(smash_pct, 3),
+            "bust_pct": round(bust_pct, 3),
+            # Backwards-compatible aliases
+            "smash_prob": round(smash_pct, 3),
+            "bust_prob": round(bust_pct, 3),
+            "contest_type": contest_type.value,
         })
 
     return pd.DataFrame(results)

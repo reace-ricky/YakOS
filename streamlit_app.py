@@ -79,8 +79,7 @@ from yak_core.sims import (  # type: ignore
     simulate_live_updates,
     build_sim_player_accuracy_table,
     compute_player_anomaly_table,
-    SMASH_THRESHOLD as _SIM_SMASH_THRESHOLD,
-    BUST_THRESHOLD as _SIM_BUST_THRESHOLD,
+    ContestType as _SimContestType,
 )
 from yak_core.live import (  # type: ignore
     fetch_live_opt_pool,
@@ -2329,8 +2328,8 @@ with tab_lab:
                     "| **Lineup #** | Lineup identifier (matches the Optimizer view) |\n"
                     "| **Avg Score** | Mean total FP across all sim iterations — best single-number estimate of lineup strength |\n"
                     "| **Std Dev** | Score variability. High = boom-or-bust GPP profile; low = steady cash-game floor |\n"
-                    f"| **Smash %** | Probability of scoring **≥ {_SIM_SMASH_THRESHOLD:.0f} FP** — the GPP \"smash\" threshold. Higher is better for tournaments |\n"
-                    f"| **Bust %** | Probability of scoring **≤ {_SIM_BUST_THRESHOLD:.0f} FP** — likely cash-game miss. Lower is better |\n"
+                    f"| **Smash %** | Probability of scoring **≥ dynamic smash threshold** (median + stdev multiplier per contest type) — higher is better for tournaments |\n"
+                    f"| **Bust %** | Probability of scoring **≤ dynamic bust threshold** (median − stdev multiplier per contest type) — lower is better |\n"
                     "| **Median Score** | Middle-of-distribution outcome (50th percentile) |\n"
                     "| **P85 (Upside)** | 85th-percentile score — what the lineup looks like on a good night |\n"
                     "| **P15 (Floor)** | 15th-percentile score — downside floor on a bad night |"
@@ -2344,6 +2343,9 @@ with tab_lab:
                     "median_points": "Median Score",
                     "sim_p85": "P85 (Upside)",
                     "sim_p15": "P15 (Floor)",
+                    "smash_threshold": "Smash Threshold",
+                    "bust_threshold": "Bust Threshold",
+                    "contest_type": "Contest Type",
                 })
                 st.dataframe(_sim_display, use_container_width=True, height=300)
 
