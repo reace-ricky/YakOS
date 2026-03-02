@@ -90,6 +90,7 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 69 | **Contest Type preset picker** — replaced "Slate Type", "DFS Archetype", "DraftKings Contest Type" dropdowns in the Optimizer tab with a single "Contest Type" dropdown (Cash Game, Single Entry, 3-Max Tournament, 20-Max GPP, MME (150-Max), Showdown); each option drives a `CONTEST_PRESETS` dict in `config.py` that sets `slate_type`, `archetype`, `internal_contest`, `projection_style`, `volatility`, `correlation_mode`, `default_lineups`, `default_max_exposure`, and `min_salary`; one-line description shown below dropdown; Sim Module in Calibration Lab updated to use same Contest Type picker; Admin Lab Section B archetype knobs kept for manual override | `yak_core/config.py`, `streamlit_app.py` | latest |
 | 70 | **CI import smoke test** — `tests/test_app_imports.py` (53 tests) asserts every `yak_core` symbol imported by `streamlit_app.py` is importable; prevents recurring Streamlit Cloud `ImportError` when a symbol is added to the app before the module, or renamed/removed from a module without updating the app | `tests/test_app_imports.py` | latest |
 | 71 | **Sprint 1: Fix Data Foundation** — 1.1: Added URL/params logging to `fetch_live_dfs` and `_fetch_actuals_from_box_scores`; `NoGamesScheduledError` raised for off-days (shows "No games scheduled for [date]." in UI); 1.2: `fetch_live_dfs` now extracts player `status` field; both Fetch Pool handlers show combined banner with excluded count + actuals info; 1.3: auto-exclude OUT/IR/Suspended players after fetch (sim_eligible=False), collapsible "Auto-Excluded Players" expander in Slate Room; 1.4: Override slate date already dynamic from `actuals.keys()`; 1.5: Removed "Fetch Actuals from API" tab from Sim Module, replaced with status display + CSV fallback; 1.6: Auto-refresh injury statuses injected into "Run Sims" flow with diff banner; removed "Live News & Lineup Updates" expander; kept Manual Override as small collapsed expander; 7 new tests | `yak_core/live.py`, `streamlit_app.py`, `tests/test_live_actuals.py`, `tests/test_app_imports.py` | latest |
+| 72 | **Sprint 2: Injury Cascade into Projections** — 2.1: `find_key_injuries()` finds OUT/IR players with `proj_minutes >= 20`; 2.2: `apply_injury_cascade()` redistributes minutes: same-position teammates get 60%, adjacent-group (backcourt ↔ frontcourt) get 40%, weighted by proj_minutes, capped at 40 min/player; 2.3: recalculates `adjusted_proj = original_proj + extra_mins × fp_per_minute`; stores `original_proj`, `adjusted_proj`, `injury_bump_fp`; sets `proj = adjusted_proj` so optimizer/sim use it transparently; 2.4: cascade applied at both pool-load call sites (Slate Room API fetch + Calibration Lab fetch + CSV upload); 2.5: cascade report stored in `st.session_state["injury_cascade"]`; Slate Room shows "🚑 Injury Cascade Report" section with per-OUT-player expanders showing beneficiary table; Player Projections table now shows "Orig Proj" and "Inj Bump" columns; 28 new unit tests | `yak_core/injury_cascade.py`, `streamlit_app.py`, `tests/test_injury_cascade.py` | latest |
 
 
 
@@ -154,6 +155,7 @@ YakOS/
 │   ├── rg_loader.py          # RotoGrinders CSV parser
 │   ├── multislate.py         # multi-slate discovery, run, compare, DK CSV ingest
 │   ├── contest_ingest.py     # DK contest results CSV → ownership
+│   ├── injury_cascade.py     # Sprint 2 injury cascade: redistribute OUT player minutes to teammates
 │   └── validation.py         # lineup validity checks
 ├── scripts/
 │   └── train_models.py           # Train FP/Minutes/Ownership models → models/*.pkl
@@ -179,7 +181,8 @@ YakOS/
 │   ├── test_sim_backtest.py             (19 tests)
 │   ├── test_sim_player_accuracy.py      (23 tests)
 │   ├── test_live_actuals.py             (23 tests)
-│   └── test_sim_eligible.py             (24 tests)
+│   ├── test_sim_eligible.py             (24 tests)
+│   └── test_injury_cascade.py           (28 tests)
 └── requirements.txt
 ```
 

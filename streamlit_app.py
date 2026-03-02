@@ -104,6 +104,7 @@ from yak_core.projections import (  # type: ignore
 )
 from yak_core.scoring import calibration_kpi_summary, quality_color, _QUALITY_BG, _QUALITY_TEXT  # type: ignore
 from yak_core.config import CONTEST_PRESETS, CONTEST_PRESET_LABELS, CONTEST_PRESET_ARCH_LABELS  # type: ignore
+from yak_core.injury_cascade import apply_injury_cascade  # type: ignore
 
 # Map internal DK contest type string -> ContestType enum.
 # Keys match values produced by DK_CONTEST_TYPE_MAP in yak_core/calibration.py.
@@ -555,6 +556,9 @@ def ensure_session_state():
     if "auto_excluded_players" not in st.session_state:
         # list of dicts: {player_name, status} auto-excluded due to injury/status
         st.session_state["auto_excluded_players"] = []
+    if "injury_cascade" not in st.session_state:
+        # list of {out_player, team, out_proj_mins, beneficiaries: [...]}
+        st.session_state["injury_cascade"] = []
 
 
 def run_optimizer(
@@ -872,6 +876,9 @@ with tab_slate:
                                     live_pool.loc[_inelig_mask, "sim_eligible"] = False
                                     _auto_excl = live_pool.loc[_inelig_mask, ["player_name", "status"]].to_dict("records")
                                 st.session_state["auto_excluded_players"] = _auto_excl
+                                # Apply injury cascade: redistribute OUT player minutes to teammates
+                                live_pool, _cascade = apply_injury_cascade(live_pool)
+                                st.session_state["injury_cascade"] = _cascade
                                 st.session_state["pool_df"] = live_pool
                                 st.session_state["pool_date"] = str(slate_fetch_date)
                                 # Auto-fetch actuals for past dates
@@ -1089,7 +1096,8 @@ with tab_slate:
             st.markdown("### 📋 Player Projections")
             _proj_disp_cols = [c for c in [
                 "player_name", "pos", "team", "salary",
-                "proj", "floor", "ceil", "proj_minutes", "proj_own", "proj_source",
+                "proj", "original_proj", "injury_bump_fp",
+                "floor", "ceil", "proj_minutes", "proj_own", "proj_source",
             ] if c in pool_df.columns]
             _proj_table = (
                 pool_df[_proj_disp_cols]
@@ -1102,7 +1110,9 @@ with tab_slate:
                     "pos": st.column_config.TextColumn("Pos", width="small"),
                     "team": st.column_config.TextColumn("Team", width="small"),
                     "salary": st.column_config.NumberColumn("Salary", format="$%d"),
-                    "proj": st.column_config.NumberColumn("Proj", format="%.2f"),
+                    "proj": st.column_config.NumberColumn("Adj Proj", format="%.2f"),
+                    "original_proj": st.column_config.NumberColumn("Orig Proj", format="%.2f"),
+                    "injury_bump_fp": st.column_config.NumberColumn("Inj Bump", format="%.2f"),
                     "floor": st.column_config.NumberColumn("Floor", format="%.2f"),
                     "ceil": st.column_config.NumberColumn("Ceil", format="%.2f"),
                     "proj_minutes": st.column_config.NumberColumn("Mins", format="%.1f"),
@@ -1115,6 +1125,50 @@ with tab_slate:
                     hide_index=True,
                     column_config={k: v for k, v in _col_cfg.items() if k in _proj_table.columns},
                 )
+
+            # ════════════════════════════════════════════════════════════
+            # LAYER 2c — Injury Cascade Report
+            # ════════════════════════════════════════════════════════════
+            _cascade = st.session_state.get("injury_cascade", [])
+            if _cascade:
+                st.markdown("### 🚑 Injury Cascade Report")
+                st.caption(
+                    "Players marked OUT/IR with projected ≥ 20 min — "
+                    "their minutes were redistributed to active teammates. "
+                    "Projections above already include these bumps."
+                )
+                for _entry in _cascade:
+                    _out = _entry["out_player"]
+                    _team = _entry["team"]
+                    _omins = _entry["out_proj_mins"]
+                    _benes = _entry["beneficiaries"]
+                    with st.expander(
+                        f"🔴 {_out} ({_team}) — OUT  ·  {_omins:.0f} proj min redistributed",
+                        expanded=True,
+                    ):
+                        if _benes:
+                            _bene_df = pd.DataFrame(_benes).rename(columns={
+                                "name": "Player",
+                                "original_proj": "Orig Proj",
+                                "adjusted_proj": "Adj Proj",
+                                "bump": "Bump",
+                                "salary": "Salary",
+                                "new_value_multiple": "Value (pts/$K)",
+                            })
+                            st.dataframe(
+                                _bene_df,
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={
+                                    "Salary": st.column_config.NumberColumn("Salary", format="$%d"),
+                                    "Orig Proj": st.column_config.NumberColumn("Orig Proj", format="%.2f"),
+                                    "Adj Proj": st.column_config.NumberColumn("Adj Proj", format="%.2f"),
+                                    "Bump": st.column_config.NumberColumn("Bump", format="%.2f"),
+                                    "Value (pts/$K)": st.column_config.NumberColumn("Value (pts/$K)", format="%.2fx"),
+                                },
+                            )
+                        else:
+                            st.info("No eligible teammates found to redistribute minutes.")
 
             st.markdown("---")
 
@@ -1519,6 +1573,9 @@ with tab_lab:
                             live_pool.loc[_cal_inelig_mask, "sim_eligible"] = False
                             _cal_auto_excl = live_pool.loc[_cal_inelig_mask, ["player_name", "status"]].to_dict("records")
                         st.session_state["auto_excluded_players"] = _cal_auto_excl
+                        # Apply injury cascade: redistribute OUT player minutes to teammates
+                        live_pool, _cascade = apply_injury_cascade(live_pool)
+                        st.session_state["injury_cascade"] = _cascade
                         st.session_state["pool_df"] = live_pool
                         st.session_state["pool_date"] = str(fetch_slate_date_cal)
                         # Auto-fetch actuals for past dates
@@ -1555,6 +1612,12 @@ with tab_lab:
         if st.session_state.get("_pool_df_filename") != rg_upload_cal.name:
             raw_df = pd.read_csv(rg_upload_cal)
             pool_df_cal = rename_rg_columns_to_yakos(raw_df)
+            # Apply injury cascade when status column is present
+            if "status" in pool_df_cal.columns and "proj_minutes" in pool_df_cal.columns:
+                pool_df_cal, _csv_cascade = apply_injury_cascade(pool_df_cal)
+                st.session_state["injury_cascade"] = _csv_cascade
+            else:
+                st.session_state["injury_cascade"] = []
             st.session_state["pool_df"] = pool_df_cal
             st.session_state["_pool_df_filename"] = rg_upload_cal.name
             st.success(f"✅ Pool loaded — {len(pool_df_cal)} players. Head to **🏀 Ricky's Slate Room** to review.")
