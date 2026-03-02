@@ -106,6 +106,15 @@ from yak_core.projections import (  # type: ignore
 from yak_core.scoring import calibration_kpi_summary, quality_color, _QUALITY_BG, _QUALITY_TEXT  # type: ignore
 from yak_core.config import CONTEST_PRESETS, CONTEST_PRESET_LABELS, CONTEST_PRESET_ARCH_LABELS  # type: ignore
 from yak_core.injury_cascade import apply_injury_cascade  # type: ignore
+from yak_core.dvp import (  # type: ignore
+    parse_dvp_upload,
+    save_dvp_table,
+    load_dvp_table,
+    dvp_staleness_days,
+    compute_league_averages,
+    DVP_STALE_DAYS,
+    DVP_DEFAULT_PATH as _DVP_DEFAULT_PATH,
+)
 
 # Map internal DK contest type string -> ContestType enum.
 # Keys match values produced by DK_CONTEST_TYPE_MAP in yak_core/calibration.py.
@@ -564,6 +573,17 @@ def ensure_session_state():
         st.session_state["is_admin"] = False
     if "sim_lu_nav" not in st.session_state:
         st.session_state["sim_lu_nav"] = 0
+    if "dvp_table" not in st.session_state:
+        # pd.DataFrame with columns Team, PG, SG, SF, PF, C — loaded from dvp_baseline.csv
+        st.session_state["dvp_table"] = load_dvp_table(_DVP_DEFAULT_PATH)
+    if "dvp_league_avgs" not in st.session_state:
+        # dict: {"PG": float, ...} — league averages computed from dvp_table
+        _dvp_init = st.session_state.get("dvp_table")
+        st.session_state["dvp_league_avgs"] = (
+            compute_league_averages(_dvp_init) if _dvp_init is not None else {}
+        )
+    if "_dvp_filename" not in st.session_state:
+        st.session_state["_dvp_filename"] = None
 
 
 def run_optimizer(
@@ -1775,6 +1795,69 @@ with tab_lab:
         st.caption(f"Active pool: **{len(current_pool_df)} players** loaded.")
     else:
         st.info("No pool loaded yet. Upload a player pool CSV above to begin.")
+
+    st.markdown("---")
+
+    # ── Upload DvP Table ──────────────────────────────────────────────────────
+    st.markdown("### 🛡️ Upload DvP Table")
+    st.markdown(
+        "Upload a FantasyPros Defense vs Position (DvP) CSV to inform edge analysis. "
+        "Expected columns: `Team, PG_FPPG_Allowed, SG_FPPG_Allowed, SF_FPPG_Allowed, "
+        "PF_FPPG_Allowed, C_FPPG_Allowed` (canonical and human-readable variants accepted)."
+    )
+
+    # Staleness banner
+    _dvp_age = dvp_staleness_days(_DVP_DEFAULT_PATH)
+    if _dvp_age is not None and _dvp_age > DVP_STALE_DAYS:
+        st.warning(
+            f"⚠️ DvP data is **{_dvp_age:.0f} days** old. "
+            "Consider uploading a fresh FantasyPros export."
+        )
+
+    # Last-updated indicator
+    _dvp_df_cur = st.session_state.get("dvp_table")
+    if _dvp_age is not None:
+        _dvp_updated_str = (
+            pd.Timestamp.now() - pd.Timedelta(days=_dvp_age)
+        ).strftime("%Y-%m-%d")
+        st.caption(f"Last updated: **{_dvp_updated_str}**")
+    elif _dvp_df_cur is None:
+        st.caption("Last updated: _not yet uploaded_")
+
+    dvp_upload_col, dvp_info_col = st.columns([2, 1])
+    with dvp_upload_col:
+        dvp_file = st.file_uploader(
+            "Upload DvP CSV",
+            type=["csv"],
+            key="dvp_upload",
+            help="FantasyPros DvP export — one row per NBA team.",
+        )
+    with dvp_info_col:
+        if _dvp_df_cur is not None:
+            st.markdown("**League averages (FPPG allowed)**")
+            _avgs = st.session_state.get("dvp_league_avgs", {})
+            for _pos in ["PG", "SG", "SF", "PF", "C"]:
+                if _pos in _avgs:
+                    st.markdown(f"- **{_pos}:** {_avgs[_pos]:.1f}")
+        else:
+            st.info("Upload a DvP table to see league averages.")
+
+    if dvp_file is not None:
+        if st.session_state.get("_dvp_filename") != dvp_file.name:
+            try:
+                _dvp_parsed = parse_dvp_upload(dvp_file)
+                save_dvp_table(_dvp_parsed, _DVP_DEFAULT_PATH)
+                _dvp_avgs = compute_league_averages(_dvp_parsed)
+                st.session_state["dvp_table"] = _dvp_parsed
+                st.session_state["dvp_league_avgs"] = _dvp_avgs
+                st.session_state["_dvp_filename"] = dvp_file.name
+                st.success(
+                    f"✅ DvP table loaded — {len(_dvp_parsed)} teams, "
+                    f"{len(_dvp_avgs)} positions. Saved to `data/dvp_baseline.csv`."
+                )
+                st.rerun()
+            except Exception as _dvp_err:
+                st.error(f"Failed to parse DvP CSV: {_dvp_err}")
 
     st.markdown("---")
 

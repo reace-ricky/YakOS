@@ -257,3 +257,33 @@ class TestInjuryCascadeImports:
     def test_find_key_injuries(self):
         mod = importlib.import_module("yak_core.injury_cascade")
         assert hasattr(mod, "find_key_injuries")
+
+
+class TestDvpImports:
+    def test_parse_dvp_upload(self):
+        mod = importlib.import_module("yak_core.dvp")
+        assert hasattr(mod, "parse_dvp_upload")
+
+    def test_save_dvp_table(self):
+        mod = importlib.import_module("yak_core.dvp")
+        assert hasattr(mod, "save_dvp_table")
+
+    def test_load_dvp_table(self):
+        mod = importlib.import_module("yak_core.dvp")
+        assert hasattr(mod, "load_dvp_table")
+
+    def test_dvp_staleness_days(self):
+        mod = importlib.import_module("yak_core.dvp")
+        assert hasattr(mod, "dvp_staleness_days")
+
+    def test_compute_league_averages(self):
+        mod = importlib.import_module("yak_core.dvp")
+        assert hasattr(mod, "compute_league_averages")
+
+    def test_DVP_STALE_DAYS(self):
+        mod = importlib.import_module("yak_core.dvp")
+        assert hasattr(mod, "DVP_STALE_DAYS")
+
+    def test_DVP_DEFAULT_PATH(self):
+        mod = importlib.import_module("yak_core.dvp")
+        assert hasattr(mod, "DVP_DEFAULT_PATH")
