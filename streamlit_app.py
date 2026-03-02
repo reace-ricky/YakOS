@@ -105,6 +105,7 @@ from yak_core.projections import (  # type: ignore
 )
 from yak_core.scoring import calibration_kpi_summary, quality_color, _QUALITY_BG, _QUALITY_TEXT  # type: ignore
 from yak_core.config import CONTEST_PRESETS, CONTEST_PRESET_LABELS, CONTEST_PRESET_ARCH_LABELS  # type: ignore
+from yak_core.ownership import apply_ownership  # type: ignore
 from yak_core.injury_cascade import apply_injury_cascade  # type: ignore
 from yak_core.dvp import (  # type: ignore
     parse_dvp_upload,
@@ -2543,6 +2544,18 @@ with tab_lab:
         with sim_col_l:
             sim_n_lu = st.slider("Lineups to sim", 1, 150, 20, key="sim_n_lu")
             sim_n_sims = st.slider("Sim iterations", 100, 2000, 500, step=100, key="sim_n_sims")
+            sim_max_pair = st.number_input(
+                "Max pair appearances",
+                min_value=0,
+                max_value=max(1, sim_n_lu),
+                value=max(1, sim_n_lu // 4),
+                step=1,
+                key="sim_max_pair",
+                help=(
+                    "Lineup diversity: max lineups any two players can share. "
+                    "Lower = more diverse builds. Default = 25% of lineup count."
+                ),
+            )
         with sim_col_r:
             _sim_prev_preset = st.session_state.get("sim_contest_preset", "20-Max GPP")
             sim_contest_preset_sel = st.selectbox(
@@ -2838,6 +2851,7 @@ with tab_lab:
                             min_salary_used=sim_min_sal,
                             proj_col="proj",
                             archetype=sim_archetype,
+                            max_pair_appearances=int(st.session_state.get("sim_max_pair", max(1, sim_n_lu // 4))),
                         )
                         if sim_lu_df is not None and not sim_lu_df.empty:
                             _sim_cal_knobs = st.session_state.get("cal_knobs", {})
@@ -2854,9 +2868,11 @@ with tab_lab:
                             annotated_sim = ricky_annotate(sim_lu_df, sim_res)
                             st.session_state["sim_lineups_df"] = annotated_sim
                             st.session_state["sim_results_df"] = sim_res
+                            # Ensure ownership is populated in the pool before anomaly calc
+                            _anomaly_pool = apply_ownership(pool_for_sim_run.copy())
                             # Compute per-player anomaly table using cal_knobs
                             _anomaly_df = compute_player_anomaly_table(
-                                pool_for_sim_run,
+                                _anomaly_pool,
                                 sim_lu_df,
                                 n_sims=sim_n_sims,
                                 cal_knobs=_sim_cal_knobs,
