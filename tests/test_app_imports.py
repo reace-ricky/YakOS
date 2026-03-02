@@ -247,3 +247,13 @@ class TestConfigImports:
         """This is the symbol whose absence caused the original ImportError."""
         mod = importlib.import_module("yak_core.config")
         assert hasattr(mod, "CONTEST_PRESET_ARCH_LABELS")
+
+
+class TestInjuryCascadeImports:
+    def test_apply_injury_cascade(self):
+        mod = importlib.import_module("yak_core.injury_cascade")
+        assert hasattr(mod, "apply_injury_cascade")
+
+    def test_find_key_injuries(self):
+        mod = importlib.import_module("yak_core.injury_cascade")
+        assert hasattr(mod, "find_key_injuries")
