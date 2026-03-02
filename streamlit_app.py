@@ -526,6 +526,10 @@ def ensure_session_state():
         st.session_state["calib_queue_arch"] = None
     if "calib_queue_slate" not in st.session_state:
         st.session_state["calib_queue_slate"] = None
+    if "cal_check_errors" not in st.session_state:
+        st.session_state["cal_check_errors"] = None
+    if "cal_check_errors_before" not in st.session_state:
+        st.session_state["cal_check_errors_before"] = None
 
 
 def run_optimizer(
@@ -612,6 +616,94 @@ def load_historical_lineups() -> pd.DataFrame:
         df["slate_date"] = pd.to_datetime(df["slate_date"]).dt.date
         return df
     return pd.DataFrame()
+
+
+def _diagnose_errors(queue_df: pd.DataFrame) -> dict:
+    """Compute FP/Minutes/Ownership MAE and error counts from a calibration queue slice."""
+    def _sc(df: pd.DataFrame, col: str) -> pd.Series:
+        return pd.to_numeric(df[col], errors="coerce").fillna(0) if col in df.columns else pd.Series(0.0, index=df.index)
+
+    fp_err = (_sc(queue_df, "actual") - _sc(queue_df, "proj")).abs()
+    min_err = (_sc(queue_df, "actual_minutes") - _sc(queue_df, "proj_minutes")).abs()
+    own_err = (_sc(queue_df, "own") - _sc(queue_df, "proj_own")).abs()
+
+    fp_mae = float(fp_err.mean()) if len(fp_err) else 0.0
+    min_mae = float(min_err.mean()) if len(min_err) else 0.0
+    own_mae = float(own_err.mean()) if len(own_err) else 0.0
+
+    fp_errors_n = int(fp_err.gt(6).sum())
+    min_errors_n = int(min_err.gt(3).sum())
+    own_errors_n = int(own_err.gt(3).sum())
+
+    return {
+        "fp_mae": fp_mae,
+        "min_mae": min_mae,
+        "own_mae": own_mae,
+        "fp_errors": fp_errors_n,
+        "min_errors": min_errors_n,
+        "own_errors": own_errors_n,
+        "n_players": max(len(queue_df), 1),
+    }
+
+
+def _generate_suggestions(errors: dict, current_knobs: dict) -> list:
+    """Return a list of actionable knob suggestions based on error diagnosis."""
+    suggestions = []
+
+    if errors["min_errors"] > errors["fp_errors"]:
+        suggestions.append({
+            "knob": "blowout_threshold",
+            "current": current_knobs.get("blowout_threshold", 15),
+            "suggested": 20,
+            "reason": (
+                f"Minutes errors dominate ({errors['min_errors']} of {errors['n_players']} players) "
+                "— loosening blowout threshold reduces false minute cuts"
+            ),
+        })
+        cur_b2b = float(current_knobs.get("b2b_discount", 0.93))
+        if cur_b2b > 0.85 and errors["min_mae"] > 3:
+            suggestions.append({
+                "knob": "b2b_discount",
+                "current": cur_b2b,
+                "suggested": round(max(cur_b2b - 0.05, 0.80), 2),
+                "reason": (
+                    f"Min MAE {errors['min_mae']:.1f} min — reducing B2B discount may improve minutes accuracy"
+                ),
+            })
+
+    if errors["fp_mae"] > 10:
+        suggestions.append({
+            "knob": "ensemble_w_yakos",
+            "current": current_knobs.get("ensemble_w_yakos", 0.40),
+            "suggested": 0.65,
+            "reason": (
+                f"Large FP errors (MAE {errors['fp_mae']:.1f} pts) "
+                "— increase YakOS model weight to lean more on trained projections"
+            ),
+        })
+    elif errors["fp_mae"] > 6:
+        cur_rg = float(current_knobs.get("ensemble_w_rg", 0.30))
+        suggestions.append({
+            "knob": "ensemble_w_rg",
+            "current": cur_rg,
+            "suggested": round(min(cur_rg + 0.10, 0.50), 2),
+            "reason": (
+                f"FP MAE {errors['fp_mae']:.1f} pts above target — boost RG consensus weight for more stable projections"
+            ),
+        })
+
+    if errors["own_errors"] > errors["fp_errors"] and errors["own_errors"] > errors["min_errors"]:
+        suggestions.append({
+            "knob": "ensemble_w_rg",
+            "current": current_knobs.get("ensemble_w_rg", 0.30),
+            "suggested": round(min(float(current_knobs.get("ensemble_w_rg", 0.30)) + 0.10, 0.50), 2),
+            "reason": (
+                f"Ownership errors dominate ({errors['own_errors']} of {errors['n_players']} players) "
+                "— increasing RG weight often improves ownership accuracy when RG data is fresh"
+            ),
+        })
+
+    return suggestions
 
 
 # -----------------------------
@@ -1442,8 +1534,8 @@ with tab_lab:
 
     st.markdown("---")
 
-    # ── Section A: Calibration Queue ─────────────────────────────────────
-    st.markdown("### A. Calibration Queue — Prior-Day Lineups")
+    # ── Section A: 3-Step Calibration Workflow ───────────────────────────────
+    st.markdown("### A. 📡 Calibration Check")
 
     if hist_df.empty:
         st.warning(
@@ -1459,179 +1551,281 @@ with tab_lab:
         cal_queue = st.session_state["cal_queue_df"]
 
         if cal_queue is not None and not cal_queue.empty:
+            # ── Step 1: Auto-Diagnose ────────────────────────────────────────
             available_dates = sorted(cal_queue["slate_date"].unique(), reverse=True)
-            queue_date_sel = st.selectbox("Queue slate date", available_dates, key="queue_date")
-            date_queue = cal_queue[cal_queue["slate_date"] == queue_date_sel]
 
-            # KPIs for the queue date
-            kq_cols = st.columns(6)
-            n_players = len(date_queue)
-            avg_proj = date_queue["proj"].mean() if "proj" in date_queue.columns else 0
-            avg_proj_own = date_queue["proj_own"].mean() if "proj_own" in date_queue.columns else 0
-            avg_actual = date_queue["actual"].mean() if "actual" in date_queue.columns else 0
-            avg_own = date_queue["own"].mean() if "own" in date_queue.columns else 0
-            n_reviewed = (date_queue["queue_status"] == "reviewed").sum() if "queue_status" in date_queue.columns else 0
-            kq_cols[0].metric("Players in queue", n_players)
-            kq_cols[1].metric("Avg Projected", f"{avg_proj:.1f}")
-            kq_cols[2].metric("Avg Proj Own %", f"{avg_proj_own:.1f}%")
-            kq_cols[3].metric("Avg actual score", f"{avg_actual:.1f}")
-            kq_cols[4].metric("Avg ownership", f"{avg_own:.1f}%")
-            kq_cols[5].metric("Reviewed", n_reviewed)
-
-            # Merge current pool projections into display
-            _cal_pool = st.session_state.get("pool_df")
-            _queue_display = date_queue.copy()
-            if _cal_pool is not None and not _cal_pool.empty:
-                _pool_extra_cols = [
-                    c for c in ["floor", "ceil"]
-                    if c in _cal_pool.columns and c not in _queue_display.columns
-                ]
-                if "proj_own" not in _queue_display.columns and "ownership" in _cal_pool.columns:
-                    _pool_extra_cols.append("ownership")
-                if _pool_extra_cols:
-                    _pool_merge = (
-                        _cal_pool[["player_name"] + _pool_extra_cols]
-                        .rename(columns={"player_name": "name", "ownership": "proj_own"})
-                        .groupby("name", as_index=False)
-                        .first()
-                    )
-                    _queue_display = _queue_display.merge(_pool_merge, on="name", how="left")
-
-                # Overwrite stale historical projections with real pool projections
-                # (pool contains RG FPTS — real consensus projections, not salary proxy)
-                if "proj" in _cal_pool.columns:
-                    _pool_proj_df = (
-                        _cal_pool[["player_name", "proj"]]
-                        .rename(columns={"player_name": "name", "proj": "_pool_proj"})
-                        .drop_duplicates("name")
-                    )
-                    _queue_display = _queue_display.merge(_pool_proj_df, on="name", how="left")
-                    _pool_proj_mask = _queue_display["_pool_proj"].notna()
-                    _queue_display.loc[_pool_proj_mask, "proj"] = _queue_display.loc[_pool_proj_mask, "_pool_proj"]
-                    _queue_display = _queue_display.drop(columns=["_pool_proj"])
-
-                # Populate proj_minutes from pool's MINUTES column when not yet present
-                if "minutes" in _cal_pool.columns:
-                    _pool_min_df = (
-                        _cal_pool[["player_name", "minutes"]]
-                        .rename(columns={"player_name": "name", "minutes": "_pool_minutes"})
-                        .drop_duplicates("name")
-                    )
-                    _queue_display = _queue_display.merge(_pool_min_df, on="name", how="left")
-                    if "proj_minutes" not in _queue_display.columns:
-                        _queue_display["proj_minutes"] = _queue_display["_pool_minutes"]
-                    else:
-                        _pm_mask = (
-                            _queue_display["proj_minutes"].isna()
-                            & _queue_display["_pool_minutes"].notna()
-                        )
-                        _queue_display.loc[_pm_mask, "proj_minutes"] = _queue_display.loc[_pm_mask, "_pool_minutes"]
-                    _queue_display = _queue_display.drop(columns=["_pool_minutes"])
-
-            # Compute error columns
-            def _safe_col(df: pd.DataFrame, col: str) -> pd.Series:
-                return pd.to_numeric(df[col], errors="coerce").fillna(0) if col in df.columns else pd.Series(0.0, index=df.index)
-
-            _qd = _queue_display.copy()
-            _qd["pts_error"] = _safe_col(_qd, "actual") - _safe_col(_qd, "proj")
-            _qd["min_error"] = _safe_col(_qd, "actual_minutes") - _safe_col(_qd, "proj_minutes")
-            _qd["own_error"] = _safe_col(_qd, "own") - _safe_col(_qd, "proj_own")
-            # Flag: any error exceeds KPI thresholds (pts >6, mins >3, own >3)
-            _qd["Flag"] = (
-                _qd["pts_error"].abs().gt(6)
-                | _qd["min_error"].abs().gt(3)
-                | _qd["own_error"].abs().gt(3)
-            )
-
-            # Build player label combining team + pos
-            _player_col = []
-            for _, _r in _qd.iterrows():
-                parts = [str(_r.get("name", ""))]
-                tp = " / ".join(filter(None, [str(_r.get("team", "")), str(_r.get("pos", ""))]))
-                if tp:
-                    parts.append(f"({tp})")
-                _player_col.append(" ".join(parts))
-            _qd["Player"] = _player_col
-
-            # Focused visible columns only
-            _focused_cols_map = {
-                "Player": "Player",
-                "salary": "Salary",
-                "proj": "Proj FP",
-                "actual": "Act FP",
-                "pts_error": "Error (pts)",
-                "proj_minutes": "Proj Mins",
-                "actual_minutes": "Act Mins",
-                "min_error": "Min Error",
-                "proj_own": "Proj Own %",
-                "own": "Act Own %",
-                "own_error": "Own Error",
-                "Flag": "Flag",
-            }
-            _focused_avail = [c for c in _focused_cols_map if c in _qd.columns or c == "Player"]
-            _queue_focused = _qd[_focused_avail].rename(columns=_focused_cols_map)
-
-            # ── Calibration Queue — read-only accuracy dashboard ──
-            st.markdown("#### Calibration Queue")
-            st.dataframe(
-                _queue_focused,
-                column_config={
-                    "Salary": st.column_config.NumberColumn("Salary", format="$%d"),
-                    "Proj FP": st.column_config.NumberColumn("Proj FP", format="%.1f"),
-                    "Act FP": st.column_config.NumberColumn("Act FP", format="%.1f"),
-                    "Error (pts)": st.column_config.NumberColumn("Error (pts)", format="%+.1f"),
-                    "Proj Mins": st.column_config.NumberColumn("Proj Mins", format="%.1f"),
-                    "Act Mins": st.column_config.NumberColumn("Act Mins", format="%.1f"),
-                    "Min Error": st.column_config.NumberColumn("Min Error", format="%+.1f"),
-                    "Proj Own %": st.column_config.NumberColumn("Proj Own %", format="%.1f"),
-                    "Act Own %": st.column_config.NumberColumn("Act Own %", format="%.1f"),
-                    "Own Error": st.column_config.NumberColumn("Own Error", format="%+.1f"),
-                    "Flag": st.column_config.CheckboxColumn("Flag", disabled=True),
-                },
-                use_container_width=True,
-                hide_index=True,
-            )
-
-            _n_flagged = int(_queue_focused["Flag"].sum()) if "Flag" in _queue_focused.columns else 0
-            if _n_flagged > 0:
-                st.warning(
-                    f"⚠️ {_n_flagged} player(s) flagged with large projection errors "
-                    "(pts >6, mins >3, or own% >3). Review archetype config knobs below."
+            _step1_col, _step1_override = st.columns([2, 1])
+            with _step1_col:
+                _run_check = st.button(
+                    "🔍 Run Calibration Check",
+                    type="primary",
+                    key="run_cal_check_btn",
+                    help="Diagnose projection errors for the most recent completed slate.",
+                )
+            with _step1_override:
+                _override_date = st.selectbox(
+                    "Override slate date",
+                    available_dates,
+                    index=0,
+                    key="cal_check_date_override",
                 )
 
-                # ── Error Diagnosis ──────────────────────────────────────────
-                _qd_diag = _qd.copy()
-                _pts_errors = _qd_diag[_qd_diag["pts_error"].abs().gt(6)] if "pts_error" in _qd_diag.columns else _qd_diag.iloc[:0]
-                _min_errors = _qd_diag[_qd_diag["min_error"].abs().gt(3)] if "min_error" in _qd_diag.columns else _qd_diag.iloc[:0]
-                _own_errors = _qd_diag[_qd_diag["own_error"].abs().gt(3)] if "own_error" in _qd_diag.columns else _qd_diag.iloc[:0]
+            if _run_check:
+                _check_date = _override_date
+                _check_slice = cal_queue[cal_queue["slate_date"] == _check_date].copy()
 
-                st.markdown("#### 🔍 Error Diagnosis")
-                _diag_col1, _diag_col2, _diag_col3 = st.columns(3)
-                _diag_col1.metric("FP Errors", len(_pts_errors), help="Players with >6pt projection error")
-                _diag_col2.metric("Minutes Errors", len(_min_errors), help="Players with >3min projection error")
-                _diag_col3.metric("Ownership Errors", len(_own_errors), help="Players with >3% ownership error")
+                # Merge pool projections/minutes into the slice
+                _cal_pool_check = st.session_state.get("pool_df")
+                if _cal_pool_check is not None and not _cal_pool_check.empty:
+                    if "proj" in _cal_pool_check.columns:
+                        _pp = (
+                            _cal_pool_check[["player_name", "proj"]]
+                            .rename(columns={"player_name": "name", "proj": "_pp"})
+                            .drop_duplicates("name")
+                        )
+                        _check_slice = _check_slice.merge(_pp, on="name", how="left")
+                        _mask = _check_slice["_pp"].notna()
+                        _check_slice.loc[_mask, "proj"] = _check_slice.loc[_mask, "_pp"]
+                        _check_slice = _check_slice.drop(columns=["_pp"])
+                    if "minutes" in _cal_pool_check.columns:
+                        _pm = (
+                            _cal_pool_check[["player_name", "minutes"]]
+                            .rename(columns={"player_name": "name", "minutes": "_pm"})
+                            .drop_duplicates("name")
+                        )
+                        _check_slice = _check_slice.merge(_pm, on="name", how="left")
+                        if "proj_minutes" not in _check_slice.columns:
+                            _check_slice["proj_minutes"] = _check_slice["_pm"]
+                        else:
+                            _pmm = _check_slice["proj_minutes"].isna() & _check_slice["_pm"].notna()
+                            _check_slice.loc[_pmm, "proj_minutes"] = _check_slice.loc[_pmm, "_pm"]
+                        _check_slice = _check_slice.drop(columns=["_pm"])
 
-                _err_counts = {
-                    "pts": len(_pts_errors),
-                    "min": len(_min_errors),
-                    "own": len(_own_errors),
-                }
-                _dominant = max(_err_counts, key=_err_counts.get)
-                if _err_counts[_dominant] > 0:
-                    if _dominant == "pts":
-                        st.info(
-                            "💡 FP errors dominate. Try adjusting ensemble weights below "
-                            "(reduce YakOS weight if model is biased, increase Tank01/RG weight for consensus)."
-                        )
-                    elif _dominant == "min":
-                        st.info(
-                            "💡 Minutes errors dominate. Check b2b discount and blowout threshold knobs below."
-                        )
+                _errors = _diagnose_errors(_check_slice)
+                st.session_state["cal_check_errors"] = _errors
+                st.session_state["cal_check_errors_before"] = _errors.copy()
+
+            _errors = st.session_state.get("cal_check_errors")
+
+            if _errors is not None:
+                # Traffic-light scorecard
+                _SCORECARD_TARGETS = [
+                    ("FP MAE", _errors["fp_mae"], 6, "pts"),
+                    ("Min MAE", _errors["min_mae"], 3, "min"),
+                    ("Own MAE", _errors["own_mae"], 3, "%"),
+                ]
+                _sc_cols = st.columns(3)
+                for _sc_col, (_metric, _val, _target, _unit) in zip(_sc_cols, _SCORECARD_TARGETS):
+                    if _val == 0.0:
+                        _status = "—"
+                        _card_bg = "#1e1e1e"
+                        _card_color = "#888"
+                    elif _val <= _target:
+                        _status = "✅"
+                        _card_bg = "#0d2d0d"
+                        _card_color = "#4caf50"
+                    elif _val <= _target * 1.5:
+                        _status = "⚠️"
+                        _card_bg = "#2d2200"
+                        _card_color = "#ff9800"
                     else:
-                        st.info(
-                            "💡 Ownership errors dominate. This typically means RG ownership data was stale. "
-                            "Consider increasing RG ensemble weight if RG data is fresh."
+                        _status = "❌"
+                        _card_bg = "#2d0d0d"
+                        _card_color = "#f44336"
+                    _sc_col.markdown(
+                        f'<div style="border:1px solid #3a3a3a;border-radius:6px;'
+                        f'padding:10px 8px;text-align:center;background:{_card_bg};">'
+                        f'<div style="font-size:0.72rem;text-transform:uppercase;'
+                        f'letter-spacing:0.06em;color:#aaa;margin-bottom:4px;">'
+                        f'{_status} {_metric}</div>'
+                        f'<div style="font-size:1.5rem;font-weight:700;color:{_card_color};">'
+                        f'{_val:.2f} {_unit}</div>'
+                        f'<div style="font-size:0.65rem;color:#888;margin-top:3px;">'
+                        f'target ≤ {_target} {_unit}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                st.markdown("")
+
+                # ── Step 2: Suggested Fixes ──────────────────────────────────
+                st.markdown("#### 💊 Suggested Fixes")
+                _current_knobs = st.session_state.get("cal_knobs", {})
+                _suggestions = _generate_suggestions(_errors, _current_knobs)
+
+                if not _suggestions:
+                    st.success("✅ No urgent knob changes recommended — projection accuracy looks good!")
+                else:
+                    for _s in _suggestions:
+                        _fix_col1, _fix_col2 = st.columns([4, 1])
+                        _fix_col1.markdown(
+                            f"**`{_s['knob']}`**: `{_s['current']}` → `{_s['suggested']}`  \n"
+                            f"_{_s['reason']}_"
                         )
+                        if _fix_col2.button("Apply", key=f"apply_sug_{_s['knob']}"):
+                            _knobs_updated = dict(st.session_state.get("cal_knobs", {}))
+                            _knobs_updated[_s["knob"]] = _s["suggested"]
+                            st.session_state["cal_knobs"] = _knobs_updated
+                            st.rerun()
+
+                # ── Step 3: Re-project & Compare ────────────────────────────
+                st.markdown("")
+                if st.button("🔄 Re-project & Compare", key="reproj_compare_btn", type="secondary"):
+                    _reproj_pool = st.session_state.get("pool_df")
+                    if _reproj_pool is None or _reproj_pool.empty:
+                        st.warning("No pool loaded. Load a player pool first.")
+                    else:
+                        _active_knobs = st.session_state.get("cal_knobs", {})
+                        _reproj_pool = _apply_yakos_projections(_reproj_pool, knobs=_active_knobs)
+                        st.session_state["pool_df"] = _reproj_pool
+                        # Re-compute errors with new projections
+                        _check_date2 = st.session_state.get("cal_check_date_override", available_dates[0])
+                        _check_slice2 = cal_queue[cal_queue["slate_date"] == _check_date2].copy()
+                        if "proj" in _reproj_pool.columns:
+                            _pp2 = (
+                                _reproj_pool[["player_name", "proj"]]
+                                .rename(columns={"player_name": "name", "proj": "_pp2"})
+                                .drop_duplicates("name")
+                            )
+                            _check_slice2 = _check_slice2.merge(_pp2, on="name", how="left")
+                            _m2 = _check_slice2["_pp2"].notna()
+                            _check_slice2.loc[_m2, "proj"] = _check_slice2.loc[_m2, "_pp2"]
+                            _check_slice2 = _check_slice2.drop(columns=["_pp2"])
+                        _new_errors = _diagnose_errors(_check_slice2)
+                        st.session_state["cal_check_errors"] = _new_errors
+
+                        # Before/after comparison
+                        _before = st.session_state.get("cal_check_errors_before", {})
+                        st.markdown("##### 📊 Before vs After")
+                        _ba_cols = st.columns(3)
+                        for _ba_col, (_metric, _bkey, _unit) in zip(
+                            _ba_cols,
+                            [("FP MAE", "fp_mae", "pts"), ("Min MAE", "min_mae", "min"), ("Own MAE", "own_mae", "%")],
+                        ):
+                            _b_val = _before.get(_bkey, 0.0)
+                            _a_val = _new_errors.get(_bkey, 0.0)
+                            _delta = _a_val - _b_val
+                            _delta_str = f"{_delta:+.2f} {_unit}"
+                            _ba_col.metric(
+                                _metric,
+                                f"{_a_val:.2f} {_unit}",
+                                delta=_delta_str,
+                                delta_color="inverse",
+                            )
+
+                # ── Queue Details (expandable) ───────────────────────────────
+                with st.expander("📋 Player Details — Full Queue Table", expanded=False):
+                    queue_date_sel = st.selectbox(
+                        "Queue slate date",
+                        available_dates,
+                        key="queue_date",
+                    )
+                    date_queue = cal_queue[cal_queue["slate_date"] == queue_date_sel]
+
+                    # Merge current pool projections into display
+                    _cal_pool = st.session_state.get("pool_df")
+                    _queue_display = date_queue.copy()
+                    if _cal_pool is not None and not _cal_pool.empty:
+                        _pool_extra_cols = [
+                            c for c in ["floor", "ceil"]
+                            if c in _cal_pool.columns and c not in _queue_display.columns
+                        ]
+                        if "proj_own" not in _queue_display.columns and "ownership" in _cal_pool.columns:
+                            _pool_extra_cols.append("ownership")
+                        if _pool_extra_cols:
+                            _pool_merge = (
+                                _cal_pool[["player_name"] + _pool_extra_cols]
+                                .rename(columns={"player_name": "name", "ownership": "proj_own"})
+                                .groupby("name", as_index=False)
+                                .first()
+                            )
+                            _queue_display = _queue_display.merge(_pool_merge, on="name", how="left")
+
+                        if "proj" in _cal_pool.columns:
+                            _pool_proj_df = (
+                                _cal_pool[["player_name", "proj"]]
+                                .rename(columns={"player_name": "name", "proj": "_pool_proj"})
+                                .drop_duplicates("name")
+                            )
+                            _queue_display = _queue_display.merge(_pool_proj_df, on="name", how="left")
+                            _pool_proj_mask = _queue_display["_pool_proj"].notna()
+                            _queue_display.loc[_pool_proj_mask, "proj"] = _queue_display.loc[_pool_proj_mask, "_pool_proj"]
+                            _queue_display = _queue_display.drop(columns=["_pool_proj"])
+
+                        if "minutes" in _cal_pool.columns:
+                            _pool_min_df = (
+                                _cal_pool[["player_name", "minutes"]]
+                                .rename(columns={"player_name": "name", "minutes": "_pool_minutes"})
+                                .drop_duplicates("name")
+                            )
+                            _queue_display = _queue_display.merge(_pool_min_df, on="name", how="left")
+                            if "proj_minutes" not in _queue_display.columns:
+                                _queue_display["proj_minutes"] = _queue_display["_pool_minutes"]
+                            else:
+                                _pm_mask = (
+                                    _queue_display["proj_minutes"].isna()
+                                    & _queue_display["_pool_minutes"].notna()
+                                )
+                                _queue_display.loc[_pm_mask, "proj_minutes"] = _queue_display.loc[_pm_mask, "_pool_minutes"]
+                            _queue_display = _queue_display.drop(columns=["_pool_minutes"])
+
+                    def _safe_col(df: pd.DataFrame, col: str) -> pd.Series:
+                        return pd.to_numeric(df[col], errors="coerce").fillna(0) if col in df.columns else pd.Series(0.0, index=df.index)
+
+                    _qd = _queue_display.copy()
+                    _qd["pts_error"] = _safe_col(_qd, "actual") - _safe_col(_qd, "proj")
+                    _qd["min_error"] = _safe_col(_qd, "actual_minutes") - _safe_col(_qd, "proj_minutes")
+                    _qd["own_error"] = _safe_col(_qd, "own") - _safe_col(_qd, "proj_own")
+                    _qd["Flag"] = (
+                        _qd["pts_error"].abs().gt(6)
+                        | _qd["min_error"].abs().gt(3)
+                        | _qd["own_error"].abs().gt(3)
+                    )
+
+                    _player_col = []
+                    for _, _r in _qd.iterrows():
+                        parts = [str(_r.get("name", ""))]
+                        tp = " / ".join(filter(None, [str(_r.get("team", "")), str(_r.get("pos", ""))]))
+                        if tp:
+                            parts.append(f"({tp})")
+                        _player_col.append(" ".join(parts))
+                    _qd["Player"] = _player_col
+
+                    _focused_cols_map = {
+                        "Player": "Player",
+                        "salary": "Salary",
+                        "proj": "Proj FP",
+                        "actual": "Act FP",
+                        "pts_error": "Error (pts)",
+                        "proj_minutes": "Proj Mins",
+                        "actual_minutes": "Act Mins",
+                        "min_error": "Min Error",
+                        "proj_own": "Proj Own %",
+                        "own": "Act Own %",
+                        "own_error": "Own Error",
+                        "Flag": "Flag",
+                    }
+                    _focused_avail = [c for c in _focused_cols_map if c in _qd.columns or c == "Player"]
+                    _queue_focused = _qd[_focused_avail].rename(columns=_focused_cols_map)
+
+                    st.dataframe(
+                        _queue_focused,
+                        column_config={
+                            "Salary": st.column_config.NumberColumn("Salary", format="$%d"),
+                            "Proj FP": st.column_config.NumberColumn("Proj FP", format="%.1f"),
+                            "Act FP": st.column_config.NumberColumn("Act FP", format="%.1f"),
+                            "Error (pts)": st.column_config.NumberColumn("Error (pts)", format="%+.1f"),
+                            "Proj Mins": st.column_config.NumberColumn("Proj Mins", format="%.1f"),
+                            "Act Mins": st.column_config.NumberColumn("Act Mins", format="%.1f"),
+                            "Min Error": st.column_config.NumberColumn("Min Error", format="%+.1f"),
+                            "Proj Own %": st.column_config.NumberColumn("Proj Own %", format="%.1f"),
+                            "Act Own %": st.column_config.NumberColumn("Act Own %", format="%.1f"),
+                            "Own Error": st.column_config.NumberColumn("Own Error", format="%+.1f"),
+                            "Flag": st.column_config.CheckboxColumn("Flag", disabled=True),
+                        },
+                        use_container_width=True,
+                        hide_index=True,
+                    )
 
     # ---- Section B: Archetype Config Knobs ----
     st.markdown("---")
