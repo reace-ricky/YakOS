@@ -280,3 +280,49 @@ class TestApplyInjuryCascade:
         # and from Star PG (same-pos)
         backup = updated[updated["player_name"] == "Backup PG"].iloc[0]
         assert backup["injury_bump_fp"] > 0
+
+
+# ---------------------------------------------------------------------------
+# Regression: apply_injury_cascade must use 'minutes' as fallback for
+# 'proj_minutes' (RotoGrinders CSV pools use 'minutes', not 'proj_minutes')
+# ---------------------------------------------------------------------------
+
+class TestApplyInjuryCascadeMinutesFallback:
+    """Regression tests: cascade must fire on RG CSV pools that use 'minutes'."""
+
+    def _make_rg_pool(self) -> pd.DataFrame:
+        """Pool with 'minutes' column (RG CSV style) instead of 'proj_minutes'."""
+        rows = [
+            {"player_name": "Star PG", "team": "LAL", "pos": "PG",
+             "salary": 9000, "proj": 48.0, "minutes": 28.0, "status": "OUT"},
+            {"player_name": "Backup PG", "team": "LAL", "pos": "PG",
+             "salary": 4500, "proj": 22.0, "minutes": 18.0, "status": "Active"},
+            {"player_name": "SF One", "team": "LAL", "pos": "SF",
+             "salary": 6000, "proj": 30.0, "minutes": 25.0, "status": "Active"},
+            {"player_name": "GSW PG", "team": "GSW", "pos": "PG",
+             "salary": 7000, "proj": 35.0, "minutes": 30.0, "status": "Active"},
+        ]
+        return pd.DataFrame(rows)
+
+    def test_cascade_fires_when_only_minutes_col_present(self):
+        """With only 'minutes' column (no 'proj_minutes'), cascade should still fire."""
+        pool = self._make_rg_pool()
+        assert "proj_minutes" not in pool.columns
+        updated, report = apply_injury_cascade(pool)
+        assert len(report) == 1, "Expected one injury cascade entry"
+        assert report[0]["out_player"] == "Star PG"
+
+    def test_backup_gets_bumped_via_minutes_fallback(self):
+        """Backup PG should receive a bump when cascade uses 'minutes' column."""
+        pool = self._make_rg_pool()
+        updated, _ = apply_injury_cascade(pool)
+        backup = updated[updated["player_name"] == "Backup PG"].iloc[0]
+        assert backup["injury_bump_fp"] > 0
+        assert backup["adjusted_proj"] > backup["original_proj"]
+
+    def test_gsw_unaffected_via_minutes_fallback(self):
+        """Other-team player must not be bumped even with 'minutes' fallback."""
+        pool = self._make_rg_pool()
+        updated, _ = apply_injury_cascade(pool)
+        gsw = updated[updated["player_name"] == "GSW PG"].iloc[0]
+        assert gsw["injury_bump_fp"] == 0.0

@@ -194,3 +194,108 @@ class TestComputeSimEligibleManualOverrides:
         pool = pd.DataFrame(columns=["player_name", "status", "minutes"])
         result = compute_sim_eligible(pool)
         assert result.empty
+
+
+class TestComputeSimEligibleProjMinutesFallback:
+    """Regression tests: compute_sim_eligible must honour proj_minutes when
+    the pool has no 'minutes' column (API-loaded pools use 'proj_minutes')."""
+
+    def test_proj_minutes_zero_is_ineligible_when_no_minutes_col(self):
+        """Player with proj_minutes=0 and no 'minutes' column must be excluded."""
+        pool = pd.DataFrame({
+            "player_name": ["Alice", "Bob"],
+            "proj_minutes": [30.0, 0.0],
+            "status": ["-", "-"],
+        })
+        result = compute_sim_eligible(pool, min_proj_minutes=4.0, exclude_out_ir=False)
+        assert not result.loc[result["player_name"] == "Bob", "sim_eligible"].iloc[0]
+        assert result.loc[result["player_name"] == "Alice", "sim_eligible"].iloc[0]
+
+    def test_proj_minutes_above_threshold_is_eligible_when_no_minutes_col(self):
+        """Player with proj_minutes > threshold and no 'minutes' column is eligible."""
+        pool = pd.DataFrame({
+            "player_name": ["Alice"],
+            "proj_minutes": [25.0],
+            "status": ["-"],
+        })
+        result = compute_sim_eligible(pool, min_proj_minutes=4.0, exclude_out_ir=False)
+        assert result["sim_eligible"].iloc[0]
+
+    def test_minutes_col_takes_precedence_over_proj_minutes(self):
+        """When both columns exist, 'minutes' column is used (not proj_minutes)."""
+        pool = pd.DataFrame({
+            "player_name": ["Alice"],
+            "minutes": [0.0],       # triggers exclusion
+            "proj_minutes": [30.0], # would keep eligible if used
+            "status": ["-"],
+        })
+        result = compute_sim_eligible(pool, min_proj_minutes=4.0, exclude_out_ir=False)
+        # 'minutes' wins → should be excluded
+        assert not result["sim_eligible"].iloc[0]
+
+    def test_no_minutes_or_proj_minutes_all_eligible(self):
+        """When neither column exists, no minutes filter is applied."""
+        pool = pd.DataFrame({
+            "player_name": ["Alice", "Bob"],
+            "status": ["-", "-"],
+        })
+        result = compute_sim_eligible(pool, min_proj_minutes=4.0, exclude_out_ir=False)
+        assert result["sim_eligible"].all()
+
+
+class TestComputeSimEligibleMinutesColParam:
+    """Tests for the minutes_col parameter (live vs historical slate behaviour)."""
+
+    def test_minutes_col_proj_minutes_explicit(self):
+        """minutes_col='proj_minutes' uses proj_minutes even when minutes col present."""
+        pool = pd.DataFrame({
+            "player_name": ["Alice", "Bob"],
+            "minutes": [30.0, 30.0],       # both healthy in 'minutes'
+            "proj_minutes": [25.0, 0.0],   # Bob projected 0 mins (injured)
+            "status": ["-", "-"],
+        })
+        result = compute_sim_eligible(
+            pool, min_proj_minutes=4.0, exclude_out_ir=False, minutes_col="proj_minutes"
+        )
+        assert result.loc[result["player_name"] == "Alice", "sim_eligible"].iloc[0]
+        assert not result.loc[result["player_name"] == "Bob", "sim_eligible"].iloc[0]
+
+    def test_minutes_col_actual_minutes_historical(self):
+        """minutes_col='actual_minutes' uses actual minutes for historical slates."""
+        pool = pd.DataFrame({
+            "player_name": ["Alice", "Bob"],
+            "proj_minutes": [25.0, 25.0],   # both projected healthy
+            "actual_minutes": [28.0, 0.0],  # Bob actually played 0 mins
+            "status": ["-", "-"],
+        })
+        result = compute_sim_eligible(
+            pool, min_proj_minutes=4.0, exclude_out_ir=False, minutes_col="actual_minutes"
+        )
+        assert result.loc[result["player_name"] == "Alice", "sim_eligible"].iloc[0]
+        assert not result.loc[result["player_name"] == "Bob", "sim_eligible"].iloc[0]
+
+    def test_minutes_col_missing_column_skips_filter(self):
+        """When minutes_col names a column not in the pool, the filter is skipped."""
+        pool = pd.DataFrame({
+            "player_name": ["Alice"],
+            "proj_minutes": [0.0],  # would be excluded if proj_minutes used
+            "status": ["-"],
+        })
+        result = compute_sim_eligible(
+            pool, min_proj_minutes=4.0, exclude_out_ir=False, minutes_col="actual_minutes"
+        )
+        # actual_minutes column absent → filter skipped → player stays eligible
+        assert result["sim_eligible"].iloc[0]
+
+    def test_minutes_col_none_falls_back_to_auto_detect(self):
+        """minutes_col=None (default) uses auto-detection (minutes then proj_minutes)."""
+        pool = pd.DataFrame({
+            "player_name": ["Alice"],
+            "proj_minutes": [0.0],
+            "status": ["-"],
+        })
+        result = compute_sim_eligible(
+            pool, min_proj_minutes=4.0, exclude_out_ir=False, minutes_col=None
+        )
+        # Auto-detect finds proj_minutes → 0 ≤ 4 → ineligible
+        assert not result["sim_eligible"].iloc[0]

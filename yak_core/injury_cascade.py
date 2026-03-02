@@ -144,7 +144,11 @@ def apply_injury_cascade(
 
     # Ensure required columns exist with safe defaults
     if "proj_minutes" not in df.columns:
-        df["proj_minutes"] = 0.0
+        # Fall back to "minutes" column (used by RotoGrinders CSV pools)
+        if "minutes" in df.columns:
+            df["proj_minutes"] = pd.to_numeric(df["minutes"], errors="coerce").fillna(0.0)
+        else:
+            df["proj_minutes"] = 0.0
     if "proj" not in df.columns:
         df["proj"] = 0.0
     if "status" not in df.columns:

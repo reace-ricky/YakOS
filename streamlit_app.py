@@ -4,7 +4,7 @@ import hmac
 import json
 import sys
 import os
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -1783,8 +1783,10 @@ with tab_lab:
         if st.session_state.get("_pool_df_filename") != rg_upload_cal.name:
             raw_df = pd.read_csv(rg_upload_cal)
             pool_df_cal = rename_rg_columns_to_yakos(raw_df)
-            # Apply injury cascade when status column is present
-            if "status" in pool_df_cal.columns and "proj_minutes" in pool_df_cal.columns:
+            # Apply injury cascade when status column is present and minutes are available
+            if "status" in pool_df_cal.columns and (
+                "proj_minutes" in pool_df_cal.columns or "minutes" in pool_df_cal.columns
+            ):
                 pool_df_cal, _csv_cascade = apply_injury_cascade(pool_df_cal)
                 st.session_state["injury_cascade"] = _csv_cascade
             else:
@@ -2626,6 +2628,11 @@ with tab_lab:
                         if _src in _acts_raw.columns and "actual_fp" not in _acts_raw.columns:
                             _col_renames[_src] = "actual_fp"
                             break
+                    # Capture actual minutes when available (RG export: "MIN" or "Minutes")
+                    for _src in ("MIN", "Minutes", "minutes", "actual_minutes"):
+                        if _src in _acts_raw.columns and "actual_minutes" not in _acts_raw.columns:
+                            _col_renames[_src] = "actual_minutes"
+                            break
                     _acts_norm = _acts_raw.rename(columns=_col_renames)
                     # Accept 'actual' column directly too
                     if "actual" in _acts_norm.columns and "actual_fp" not in _acts_norm.columns:
@@ -2635,8 +2642,13 @@ with tab_lab:
                     _name_col = "player_name" if "player_name" in _acts_norm.columns else None
                     _fp_col = "actual_fp" if "actual_fp" in _acts_norm.columns else None
                     if _name_col and _fp_col:
-                        _acts_clean = _acts_norm[[_name_col, _fp_col]].copy()
+                        _keep_cols = [_name_col, _fp_col]
+                        if "actual_minutes" in _acts_norm.columns:
+                            _keep_cols.append("actual_minutes")
+                        _acts_clean = _acts_norm[_keep_cols].copy()
                         _acts_clean[_fp_col] = pd.to_numeric(_acts_clean[_fp_col], errors="coerce")
+                        if "actual_minutes" in _acts_clean.columns:
+                            _acts_clean["actual_minutes"] = pd.to_numeric(_acts_clean["actual_minutes"], errors="coerce")
                         _acts_clean = _acts_clean.dropna(subset=[_fp_col])
                         st.session_state["sim_actuals_df"] = _acts_clean
                         st.success(f"✅ Loaded actuals for {len(_acts_clean)} players.")
@@ -2712,12 +2724,34 @@ with tab_lab:
             if _sf_excl_team and "team" in active_sim_pool.columns:
                 _today_teams = active_sim_pool["team"].dropna().unique().tolist()
 
+            # Determine which minutes column to use:
+            # - Live slate  → proj_minutes (forward-looking)
+            # - Historical  → actual_minutes when available from actuals (backward-looking)
+            _actuals_for_mins = st.session_state.get("sim_actuals_df")
+            _sf_minutes_col: Optional[str]
+            if _sim_is_historical and _actuals_for_mins is not None and "actual_minutes" in _actuals_for_mins.columns:
+                # Merge actual_minutes from actuals into active_sim_pool so compute_sim_eligible can use them
+                _name_col_pool = "player_name" if "player_name" in active_sim_pool.columns else "name"
+                _name_col_acts = "player_name" if "player_name" in _actuals_for_mins.columns else "name"
+                _mins_lookup = (
+                    _actuals_for_mins[[_name_col_acts, "actual_minutes"]]
+                    .rename(columns={_name_col_acts: _name_col_pool})
+                    .drop_duplicates(subset=[_name_col_pool])
+                )
+                active_sim_pool = active_sim_pool.drop(columns=["actual_minutes"], errors="ignore")
+                active_sim_pool = active_sim_pool.merge(_mins_lookup, on=_name_col_pool, how="left")
+                _sf_minutes_col = "actual_minutes"
+                st.caption("📅 Historical mode — using **actual minutes** for sim eligibility filter.")
+            else:
+                _sf_minutes_col = "proj_minutes"
+
             # Recompute sim_eligible on the current active pool
             active_sim_pool = compute_sim_eligible(
                 active_sim_pool,
                 min_proj_minutes=float(_sf_min_min),
                 exclude_out_ir=_sf_excl_out,
                 today_teams=_today_teams,
+                minutes_col=_sf_minutes_col,
             )
             # Persist updated eligibility back to session state
             _src_key = "sim_pool_df" if st.session_state.get("sim_pool_df") is not None else "pool_df"
