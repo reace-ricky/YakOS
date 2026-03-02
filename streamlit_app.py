@@ -79,6 +79,7 @@ from yak_core.sims import (  # type: ignore
     simulate_live_updates,
     build_sim_player_accuracy_table,
     compute_player_anomaly_table,
+    compute_sim_eligible,
     ContestType as _SimContestType,
 )
 from yak_core.live import (  # type: ignore
@@ -137,6 +138,7 @@ def rename_rg_columns_to_yakos(df: pd.DataFrame) -> pd.DataFrame:
         "FLOOR": "floor",
         "CEIL": "ceil",
         "SIM85TH": "sim85",
+        "INJURY": "status",
         # Friendly-header aliases (RG web export)
         "Name": "player_name",
         "Position": "pos",
@@ -186,6 +188,9 @@ def rename_rg_columns_to_yakos(df: pd.DataFrame) -> pd.DataFrame:
     # Drop rows with missing salary or projection
     out = out.dropna(subset=["salary", "proj"])
     out = out[out["salary"] > 0]
+
+    # Compute default sim_eligible based on status and projected minutes
+    out = compute_sim_eligible(out)
 
     return out
 
@@ -2055,7 +2060,15 @@ with tab_lab:
             )
         else:
             _knob_summary = "defaults"
-        st.caption(f"Using projections from pool ({len(pool_for_sim)} players). Knobs: {_knob_summary}.")
+        if "sim_eligible" in pool_for_sim.columns:
+            _n_eligible = int(pool_for_sim["sim_eligible"].sum())
+        else:
+            _n_eligible = len(pool_for_sim)
+        st.caption(
+            f"Using projections from pool "
+            f"(**{_n_eligible} sim-eligible players** out of {len(pool_for_sim)} loaded). "
+            f"Knobs: {_knob_summary}."
+        )
     if pool_for_sim is None:
         st.info(
             "Load a player pool using the **📂 Load Player Pool** section at the top of this tab to enable sims."
@@ -2063,6 +2076,12 @@ with tab_lab:
     else:
         # News / lineup updates
         with st.expander("📰 Live News & Lineup Updates", expanded=False):
+            _news_auto_toggle = st.checkbox(
+                "Let news auto-update sim eligibility",
+                value=st.session_state.get("sim_news_auto_eligible", True),
+                key="sim_news_auto_eligible",
+                help="When ON, players marked OUT in a news update are automatically set sim_eligible=False.",
+            )
             # --- API fetch ---
             api_news_col, manual_news_col = st.columns([1, 2])
             with api_news_col:
@@ -2092,6 +2111,15 @@ with tab_lab:
                                     sim_pool_api = simulate_live_updates(
                                         pool_for_sim, api_updates
                                     )
+                                    if _news_auto_toggle:
+                                        out_names = [
+                                            u["player_name"] for u in api_updates
+                                            if u.get("status", "").upper() in {"OUT", "IR", "SUSPENDED", "G-LEAGUE"}
+                                        ]
+                                        if out_names and "player_name" in sim_pool_api.columns:
+                                            sim_pool_api.loc[
+                                                sim_pool_api["player_name"].isin(out_names), "sim_eligible"
+                                            ] = False
                                     st.session_state["sim_pool_df"] = sim_pool_api
                                     st.session_state["sim_pool_orig_df"] = sim_pool_api
                                     st.success(
@@ -2150,6 +2178,15 @@ with tab_lab:
 
                 if news_updates:
                     sim_pool = simulate_live_updates(pool_for_sim, news_updates)
+                    if _news_auto_toggle:
+                        out_names_manual = [
+                            u["player_name"] for u in news_updates
+                            if u.get("status", "").upper() in {"OUT", "IR", "SUSPENDED", "G-LEAGUE"}
+                        ]
+                        if out_names_manual and "player_name" in sim_pool.columns:
+                            sim_pool.loc[
+                                sim_pool["player_name"].isin(out_names_manual), "sim_eligible"
+                            ] = False
                     st.session_state["sim_pool_df"] = sim_pool
                     st.session_state["sim_pool_orig_df"] = sim_pool
                     changed = []
@@ -2272,53 +2309,201 @@ with tab_lab:
             _loaded_actuals = st.session_state.get("sim_actuals_df")
             if _loaded_actuals is not None and not _loaded_actuals.empty:
                 st.caption(f"Actuals loaded: **{len(_loaded_actuals)} players**")
+                if _sim_is_historical:
+                    # Historical sanity check: de-activate players with 0 actual FP in pool
+                    _act_name_col = "player_name" if "player_name" in _loaded_actuals.columns else "name"
+                    _act_fp_col = "actual_fp" if "actual_fp" in _loaded_actuals.columns else "actual"
+                    if _act_name_col in _loaded_actuals.columns and _act_fp_col in _loaded_actuals.columns:
+                        _zero_min_players = _loaded_actuals[
+                            pd.to_numeric(_loaded_actuals[_act_fp_col], errors="coerce").fillna(0) <= 0
+                        ][_act_name_col].tolist()
+                        _cur_pool = st.session_state.get("sim_pool_df") or pool_for_sim
+                        if _cur_pool is not None and not _cur_pool.empty:
+                            _pc_name_col = "player_name" if "player_name" in _cur_pool.columns else "name"
+                            if _pc_name_col in _cur_pool.columns:
+                                # Only de-activate players who are in the actuals with 0 FP
+                                _pool_updated = _cur_pool.copy()
+                                if "sim_eligible" not in _pool_updated.columns:
+                                    _pool_updated["sim_eligible"] = True
+                                _pool_updated.loc[
+                                    _pool_updated[_pc_name_col].isin(_zero_min_players), "sim_eligible"
+                                ] = False
+                                st.session_state["sim_pool_df"] = _pool_updated
+                                if _zero_min_players:
+                                    st.info(
+                                        f"🔍 Sanity check: dropped **{len(_zero_min_players)}** player(s) "
+                                        f"with 0 actual FP from sim-eligible pool."
+                                    )
                 if st.button("Clear actuals", key="sim_clear_actuals_btn"):
                     st.session_state["sim_actuals_df"] = None
                     st.rerun()
 
         active_sim_pool = st.session_state.get("sim_pool_df") or pool_for_sim
 
+        # ── Sim Player Filters ────────────────────────────────────────────
+        with st.expander("🔧 Sim Player Filters", expanded=False):
+            _sf_col_l, _sf_col_r = st.columns([1, 1])
+            with _sf_col_l:
+                _sf_excl_out = st.checkbox(
+                    "Exclude OUT/IR/Suspended players",
+                    value=st.session_state.get("sf_excl_out", True),
+                    key="sf_excl_out",
+                )
+                _sf_excl_team = st.checkbox(
+                    "Exclude players not on today's team list",
+                    value=st.session_state.get("sf_excl_team", False),
+                    key="sf_excl_team",
+                )
+            with _sf_col_r:
+                _sf_min_min = st.slider(
+                    "Min projected minutes",
+                    min_value=0,
+                    max_value=20,
+                    value=st.session_state.get("sf_min_min", 4),
+                    step=1,
+                    key="sf_min_min",
+                    help="Players projected for ≤ this many minutes are excluded from sims.",
+                )
+
+            # Derive today's team list from pool when team-filter is active
+            _today_teams = None
+            if _sf_excl_team and "team" in active_sim_pool.columns:
+                _today_teams = active_sim_pool["team"].dropna().unique().tolist()
+
+            # Recompute sim_eligible on the current active pool
+            active_sim_pool = compute_sim_eligible(
+                active_sim_pool,
+                min_proj_minutes=float(_sf_min_min),
+                exclude_out_ir=_sf_excl_out,
+                today_teams=_today_teams,
+            )
+            # Persist updated eligibility back to session state
+            _src_key = "sim_pool_df" if st.session_state.get("sim_pool_df") is not None else "pool_df"
+            st.session_state[_src_key] = active_sim_pool
+
+            _n_elig = int(active_sim_pool["sim_eligible"].sum())
+            _n_total = len(active_sim_pool)
+            st.caption(f"**Using {_n_elig} sim-eligible players out of {_n_total} loaded.**")
+
+        # ── Manual Include / Exclude Table ───────────────────────────────
+        with st.expander("📋 Manual Player Eligibility Overrides", expanded=False):
+            st.markdown(
+                "Edit the **Sim Eligible** checkbox to manually include or exclude players. "
+                "Changes take effect immediately on the next sim run."
+            )
+            _me_filter_col, _me_search_col = st.columns([1, 2])
+            with _me_filter_col:
+                _me_show_non = st.checkbox(
+                    "Show only non-eligible players",
+                    value=False,
+                    key="me_show_non_eligible",
+                )
+            with _me_search_col:
+                _me_search = st.text_input(
+                    "Search by name / team",
+                    value="",
+                    key="me_search_text",
+                    placeholder="e.g. LeBron or LAL",
+                )
+
+            _me_pool = active_sim_pool.copy()
+            _me_name_col = "player_name" if "player_name" in _me_pool.columns else (
+                "name" if "name" in _me_pool.columns else None
+            )
+            if _me_name_col:
+                _me_disp_cols = [_me_name_col]
+                if "team" in _me_pool.columns:
+                    _me_disp_cols.append("team")
+                if "status" in _me_pool.columns:
+                    _me_disp_cols.append("status")
+                if "minutes" in _me_pool.columns:
+                    _me_disp_cols.append("minutes")
+                if "proj" in _me_pool.columns:
+                    _me_disp_cols.append("proj")
+                _me_disp_cols.append("sim_eligible")
+
+                _me_view = _me_pool[_me_disp_cols].copy().reset_index(drop=True)
+                if _me_show_non:
+                    _me_view = _me_view[~_me_view["sim_eligible"]]
+                if _me_search.strip():
+                    _srch = _me_search.strip().lower()
+                    _name_match = _me_view[_me_name_col].astype(str).str.lower().str.contains(_srch, na=False)
+                    if "team" in _me_view.columns:
+                        _team_match = _me_view["team"].astype(str).str.lower().str.contains(_srch, na=False)
+                        _me_view = _me_view[_name_match | _team_match]
+                    else:
+                        _me_view = _me_view[_name_match]
+
+                _edited = st.data_editor(
+                    _me_view,
+                    column_config={
+                        "sim_eligible": st.column_config.CheckboxColumn("Sim Eligible", help="Uncheck to exclude from sims"),
+                        _me_name_col: st.column_config.TextColumn("Player", disabled=True),
+                    },
+                    disabled=[c for c in _me_disp_cols if c != "sim_eligible"],
+                    use_container_width=True,
+                    height=300,
+                    key="me_data_editor",
+                )
+                # Apply manual edits back to active_sim_pool
+                if _edited is not None and not _edited.empty:
+                    _edit_idx = _edited.index
+                    active_sim_pool.loc[_edit_idx, "sim_eligible"] = _edited["sim_eligible"].values
+                    _src_key2 = "sim_pool_df" if st.session_state.get("sim_pool_df") is not None else "pool_df"
+                    st.session_state[_src_key2] = active_sim_pool
+
         if st.button("🎲 Run Sims", type="primary", key="sim_run_btn"):
             with st.spinner("Building lineups + running Monte Carlo sims..."):
                 try:
-                    sim_lu_df, _ = run_optimizer(
-                        active_sim_pool,
-                        num_lineups=sim_n_lu,
-                        max_exposure=0.4,
-                        min_salary_used=sim_min_sal,
-                        proj_col="proj",
-                        archetype=sim_archetype,
-                    )
-                    if sim_lu_df is not None and not sim_lu_df.empty:
-                        _sim_cal_knobs = st.session_state.get("cal_knobs", {})
-                        # Map DK contest type string -> ContestType enum for dynamic thresholds
-                        _internal_ct = DK_CONTEST_TYPE_MAP.get(sim_dk_contest, "GPP")
-                        _sim_contest_type = _INTERNAL_CT_TO_SIM_TYPE.get(
-                            _internal_ct, _SimContestType.GPP_LARGE
-                        )
-                        sim_res = run_monte_carlo_for_lineups(
-                            sim_lu_df, n_sims=sim_n_sims, volatility_mode=sim_vol,
-                            contest_type=_sim_contest_type,
-                        )
-                        # Annotate with Ricky confidence
-                        annotated_sim = ricky_annotate(sim_lu_df, sim_res)
-                        st.session_state["sim_lineups_df"] = annotated_sim
-                        st.session_state["sim_results_df"] = sim_res
-                        # Compute per-player anomaly table using cal_knobs
-                        _anomaly_df = compute_player_anomaly_table(
-                            active_sim_pool,
-                            sim_lu_df,
-                            n_sims=sim_n_sims,
-                            cal_knobs=_sim_cal_knobs,
-                        )
-                        st.session_state["sim_anomaly_df"] = _anomaly_df
-                        # Clear any previous custom lineup when sims are re-run
-                        st.session_state["sim_custom_lineup"] = []
-                        st.success(
-                            f"Sims complete — {sim_n_lu} lineups × {sim_n_sims} iterations."
+                    # Filter to sim-eligible players only
+                    pool_for_sim_run = active_sim_pool[active_sim_pool["sim_eligible"]].copy() if "sim_eligible" in active_sim_pool.columns else active_sim_pool.copy()
+                    _required_roster = 8
+                    if len(pool_for_sim_run) < _required_roster + 5:
+                        st.error(
+                            f"Only {len(pool_for_sim_run)} sim-eligible players — need at least "
+                            f"{_required_roster + 5} to build valid lineups. "
+                            "Loosen your Sim Player Filters or check your pool."
                         )
                     else:
-                        st.error("Optimizer returned no lineups. Check pool and settings.")
+                        sim_lu_df, _ = run_optimizer(
+                            pool_for_sim_run,
+                            num_lineups=sim_n_lu,
+                            max_exposure=0.4,
+                            min_salary_used=sim_min_sal,
+                            proj_col="proj",
+                            archetype=sim_archetype,
+                        )
+                        if sim_lu_df is not None and not sim_lu_df.empty:
+                            _sim_cal_knobs = st.session_state.get("cal_knobs", {})
+                            # Map DK contest type string -> ContestType enum for dynamic thresholds
+                            _internal_ct = DK_CONTEST_TYPE_MAP.get(sim_dk_contest, "GPP")
+                            _sim_contest_type = _INTERNAL_CT_TO_SIM_TYPE.get(
+                                _internal_ct, _SimContestType.GPP_LARGE
+                            )
+                            sim_res = run_monte_carlo_for_lineups(
+                                sim_lu_df, n_sims=sim_n_sims, volatility_mode=sim_vol,
+                                contest_type=_sim_contest_type,
+                            )
+                            # Annotate with Ricky confidence
+                            annotated_sim = ricky_annotate(sim_lu_df, sim_res)
+                            st.session_state["sim_lineups_df"] = annotated_sim
+                            st.session_state["sim_results_df"] = sim_res
+                            # Compute per-player anomaly table using cal_knobs
+                            _anomaly_df = compute_player_anomaly_table(
+                                pool_for_sim_run,
+                                sim_lu_df,
+                                n_sims=sim_n_sims,
+                                cal_knobs=_sim_cal_knobs,
+                            )
+                            st.session_state["sim_anomaly_df"] = _anomaly_df
+                            # Clear any previous custom lineup when sims are re-run
+                            st.session_state["sim_custom_lineup"] = []
+                            st.success(
+                                f"Sims complete — {sim_n_lu} lineups × {sim_n_sims} iterations "
+                                f"({len(pool_for_sim_run)} sim-eligible players)."
+                            )
+                        else:
+                            st.error("Optimizer returned no lineups. Check pool and settings.")
                 except Exception as e:
                     st.error(f"Sim error: {e}")
 
@@ -2392,6 +2577,82 @@ with tab_lab:
                     lambda x: "⚠️ VALUE TRAP" if x else ""
                 )
                 st.dataframe(_anomaly_display, use_container_width=True, height=350)
+
+            # ── Sim Diagnostics — Exposure & Eligibility ──────────────────────
+            if sim_lu_df is not None and not sim_lu_df.empty:
+                _diag_name_col = "player_name" if "player_name" in sim_lu_df.columns else (
+                    "name" if "name" in sim_lu_df.columns else None
+                )
+                if _diag_name_col:
+                    _diag_total_lu = sim_lu_df["lineup_index"].nunique()
+                    _exposure_series = (
+                        sim_lu_df.groupby(_diag_name_col)["lineup_index"]
+                        .nunique()
+                        .div(_diag_total_lu)
+                        .mul(100)
+                        .round(1)
+                        .reset_index()
+                        .rename(columns={"lineup_index": "Exposure %", _diag_name_col: "Player"})
+                        .sort_values("Exposure %", ascending=False)
+                    )
+
+                    with st.expander("📊 Sim Diagnostics — Player Exposure", expanded=False):
+                        st.caption("Top 20 players by exposure across all sim lineups.")
+                        _top20_exp = _exposure_series.head(20)
+
+                        # Bar chart of exposures
+                        try:
+                            import altair as alt
+                            _exp_chart = (
+                                alt.Chart(_top20_exp)
+                                .mark_bar()
+                                .encode(
+                                    x=alt.X("Player:N", sort="-y", title=None),
+                                    y=alt.Y("Exposure %:Q", title="Exposure %"),
+                                    tooltip=["Player", "Exposure %"],
+                                )
+                                .properties(height=300)
+                            )
+                            st.altair_chart(_exp_chart, use_container_width=True)
+                        except Exception:
+                            st.bar_chart(_top20_exp.set_index("Player")["Exposure %"])
+
+                        # Enrich with status and sim_eligible from pool
+                        _diag_pool = active_sim_pool.copy()
+                        _dp_name_col = "player_name" if "player_name" in _diag_pool.columns else "name"
+                        _diag_extra_cols = [_dp_name_col]
+                        for _ec in ("status", "minutes", "proj", "sim_eligible"):
+                            if _ec in _diag_pool.columns:
+                                _diag_extra_cols.append(_ec)
+                        _diag_pool_sub = (
+                            _diag_pool[_diag_extra_cols]
+                            .drop_duplicates(subset=[_dp_name_col])
+                            .rename(columns={_dp_name_col: "Player"})
+                        )
+                        _diag_merged = _exposure_series.merge(_diag_pool_sub, on="Player", how="left")
+
+                        # Warn if ineligible/non-healthy players have exposure
+                        _inelig_exposed = _diag_merged[
+                            (~_diag_merged["sim_eligible"])
+                            & (_diag_merged["Exposure %"] > 0)
+                        ] if "sim_eligible" in _diag_merged.columns else pd.DataFrame()
+                        _non_healthy = _diag_merged[
+                            (~_diag_merged["status"].isin(["", "-", "P", "Q", "GTD"]))
+                            & (_diag_merged["Exposure %"] > 0)
+                        ] if "status" in _diag_merged.columns else pd.DataFrame()
+                        if not _inelig_exposed.empty:
+                            st.warning(
+                                f"⚠️ {len(_inelig_exposed)} player(s) marked sim_eligible=False "
+                                "still appear in sim lineups — re-run sims to apply latest filters."
+                            )
+                        if not _non_healthy.empty:
+                            _bad_names = ", ".join(_non_healthy["Player"].head(5).tolist())
+                            st.warning(
+                                f"⚠️ Players with non-healthy status in sim lineups: **{_bad_names}**. "
+                                "Consider tightening Sim Player Filters."
+                            )
+
+                        st.dataframe(_diag_merged, use_container_width=True, height=300)
 
             # ── Custom Lineup Builder ─────────────────────────────────────────
             st.markdown("---")

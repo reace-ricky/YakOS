@@ -8,6 +8,79 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+# Status values that make a player ineligible for sims.
+_INELIGIBLE_STATUSES = {
+    "OUT", "IR", "INJ", "SUSPENDED", "SUSP",
+    "G-LEAGUE", "G_LEAGUE", "GLEAGUE",
+    "DND", "NA", "O",
+}
+
+
+def compute_sim_eligible(
+    pool_df: pd.DataFrame,
+    min_proj_minutes: float = 4.0,
+    exclude_out_ir: bool = True,
+    today_teams: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """Compute the ``sim_eligible`` column for every player in the pool.
+
+    Parameters
+    ----------
+    pool_df : pd.DataFrame
+        Player pool.  Expected columns (all optional): ``status``, ``minutes``,
+        ``team``.
+    min_proj_minutes : float
+        Minimum projected minutes required for ``sim_eligible = True``
+        (default 4.0).  Players with ``minutes ≤ min_proj_minutes`` are
+        excluded.  Set to ``0`` to skip the minutes filter.
+    exclude_out_ir : bool
+        If ``True`` (default), players whose ``status`` matches a known
+        ineligible value (OUT, IR, G-League, Suspended, etc.) are excluded.
+    today_teams : list of str, optional
+        If provided, players whose ``team`` is **not** in this list are
+        excluded.
+
+    Returns
+    -------
+    pd.DataFrame
+        Copy of *pool_df* with a boolean ``sim_eligible`` column added (or
+        overwritten if it already exists).  Existing ``sim_eligible = False``
+        overrides are preserved when ``pool_df`` already contains the column —
+        i.e. manual overrides are respected.
+    """
+    df = pool_df.copy()
+
+    # Preserve any manual overrides already in the DataFrame.
+    # Start everyone as eligible; manual False overrides are re-applied at the
+    # end so they can't be accidentally reset by the rule engine.
+    has_existing = "sim_eligible" in df.columns
+    if has_existing:
+        manual_false = df.index[~df["sim_eligible"].astype(bool)]
+    else:
+        manual_false = df.index[[]]
+
+    df["sim_eligible"] = True
+
+    # ── Status-based exclusions ───────────────────────────────────────────
+    if exclude_out_ir and "status" in df.columns:
+        norm = df["status"].fillna("").astype(str).str.strip().str.upper()
+        df.loc[norm.isin(_INELIGIBLE_STATUSES), "sim_eligible"] = False
+
+    # ── Minutes-based exclusions ──────────────────────────────────────────
+    if "minutes" in df.columns and min_proj_minutes > 0:
+        mins = pd.to_numeric(df["minutes"], errors="coerce").fillna(0)
+        df.loc[mins <= min_proj_minutes, "sim_eligible"] = False
+
+    # ── Team-based exclusions ─────────────────────────────────────────────
+    if today_teams is not None and "team" in df.columns:
+        df.loc[~df["team"].isin(today_teams), "sim_eligible"] = False
+
+    # Re-apply any manual False overrides
+    if len(manual_false):
+        df.loc[manual_false, "sim_eligible"] = False
+
+    return df
+
 
 class ContestType(enum.Enum):
     """DK contest archetypes used to derive dynamic smash/bust thresholds."""
