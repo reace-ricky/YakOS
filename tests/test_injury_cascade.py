@@ -422,3 +422,105 @@ class TestCascadeThenDropPattern:
         cleaned, _, removed = _cascade_then_drop(pool)
         assert removed == []
         assert len(cleaned) == len(pool)
+
+
+class TestCsvUploadDropPattern:
+    """Regression tests verifying that the CSV-upload code path applies the
+    cascade-then-drop pattern (not just cascade with no drop), mirroring the
+    logic added to the Cal-tab CSV uploader in streamlit_app.py."""
+
+    def _make_csv_pool(self) -> pd.DataFrame:
+        """Minimal pool that might come from a RotoGrinders CSV upload."""
+        return pd.DataFrame([
+            {"player_name": "Alex Sarr",  "team": "WAS", "pos": "C",
+             "salary": 7200, "proj": 38.0, "proj_minutes": 28.0, "status": "OUT"},
+            {"player_name": "Backup C",   "team": "WAS", "pos": "C",
+             "salary": 5000, "proj": 18.0, "proj_minutes": 16.0, "status": "Active"},
+            {"player_name": "WAS PG",     "team": "WAS", "pos": "PG",
+             "salary": 5500, "proj": 25.0, "proj_minutes": 22.0, "status": "Active"},
+            {"player_name": "IR Player",  "team": "WAS", "pos": "SG",
+             "salary": 6000, "proj": 30.0, "proj_minutes": 26.0, "status": "IR"},
+        ])
+
+    def test_csv_out_player_dropped_after_cascade(self):
+        """OUT player must be absent from pool after cascade-then-drop."""
+        cleaned, _, _ = _cascade_then_drop(self._make_csv_pool())
+        assert "Alex Sarr" not in cleaned["player_name"].values
+
+    def test_csv_ir_player_dropped_after_cascade(self):
+        """IR player must be absent from pool after cascade-then-drop."""
+        cleaned, _, _ = _cascade_then_drop(self._make_csv_pool())
+        assert "IR Player" not in cleaned["player_name"].values
+
+    def test_csv_active_players_retained(self):
+        """Active players must remain after cascade-then-drop."""
+        cleaned, _, _ = _cascade_then_drop(self._make_csv_pool())
+        assert "Backup C" in cleaned["player_name"].values
+        assert "WAS PG" in cleaned["player_name"].values
+
+    def test_csv_cascade_still_fires_before_drop(self):
+        """Backup C should receive an injury bump even though Alex Sarr is
+        subsequently removed — cascade must run before the drop."""
+        cleaned, report, _ = _cascade_then_drop(self._make_csv_pool())
+        backup = cleaned[cleaned["player_name"] == "Backup C"].iloc[0]
+        assert backup["injury_bump_fp"] > 0
+
+    def test_csv_pool_no_out_ir_after_drop(self):
+        """After cascade-then-drop the cleaned pool must contain zero OUT/IR
+        players — this mirrors the assertion added to 'Run Sims'."""
+        cleaned, _, _ = _cascade_then_drop(self._make_csv_pool())
+        if "status" in cleaned.columns:
+            bad = cleaned[cleaned["status"].fillna("").str.upper().isin({"OUT", "IR", "O"})]
+            assert bad.empty, f"OUT/IR players found in cleaned pool: {bad[['player_name','status']].to_dict('records')}"
+
+
+class TestManualOverrideDropPattern:
+    """Regression tests verifying that the manual override (live-update) path
+    removes OUT/IR players from the pool entirely instead of just marking
+    sim_eligible=False."""
+
+    def _make_pool(self) -> pd.DataFrame:
+        return pd.DataFrame([
+            {"player_name": "Zion Williamson", "team": "NOP", "pos": "PF",
+             "salary": 9500, "proj": 50.0, "proj_minutes": 30.0, "status": "Active"},
+            {"player_name": "Brandon Ingram",  "team": "NOP", "pos": "SF",
+             "salary": 7000, "proj": 38.0, "proj_minutes": 30.0, "status": "Active"},
+            {"player_name": "CJ McCollum",     "team": "NOP", "pos": "PG",
+             "salary": 6500, "proj": 35.0, "proj_minutes": 28.0, "status": "Active"},
+        ])
+
+    def _apply_manual_out_drop(self, pool: pd.DataFrame, player_name: str) -> pd.DataFrame:
+        """Mirrors the corrected manual-override path in streamlit_app.py:
+        drop instead of setting sim_eligible=False."""
+        from yak_core.sims import simulate_live_updates
+        news_updates = [{"player_name": player_name, "status": "OUT"}]
+        sim_pool = simulate_live_updates(pool, news_updates)
+        out_names = [
+            u["player_name"] for u in news_updates
+            if u.get("status", "").upper() in {"OUT", "IR", "SUSPENDED", "G-LEAGUE"}
+        ]
+        if out_names and "player_name" in sim_pool.columns:
+            sim_pool = sim_pool[~sim_pool["player_name"].isin(out_names)].reset_index(drop=True)
+        return sim_pool
+
+    def test_manual_out_player_removed_from_pool(self):
+        """Player marked OUT via manual override must be absent from the pool."""
+        pool = self._make_pool()
+        result = self._apply_manual_out_drop(pool, "Zion Williamson")
+        assert "Zion Williamson" not in result["player_name"].values
+
+    def test_manual_out_other_players_retained(self):
+        """Non-OUT players must still be in the pool after manual override."""
+        pool = self._make_pool()
+        result = self._apply_manual_out_drop(pool, "Zion Williamson")
+        assert "Brandon Ingram" in result["player_name"].values
+        assert "CJ McCollum" in result["player_name"].values
+
+    def test_manual_out_pool_has_no_out_status(self):
+        """After manual-override drop, pool must contain zero OUT players —
+        matches the assertion added before run_optimizer in Run Sims."""
+        pool = self._make_pool()
+        result = self._apply_manual_out_drop(pool, "Zion Williamson")
+        if "status" in result.columns:
+            bad = result[result["status"].fillna("").str.upper().isin({"OUT", "IR", "O"})]
+            assert bad.empty, f"OUT players still present: {bad[['player_name','status']].to_dict('records')}"

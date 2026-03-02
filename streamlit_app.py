@@ -1859,6 +1859,14 @@ with tab_lab:
                 st.session_state["injury_cascade"] = _csv_cascade
             else:
                 st.session_state["injury_cascade"] = []
+            # Drop OUT/IR/ineligible players so they never appear in sims (cascade-then-drop)
+            if "status" in pool_df_cal.columns:
+                from yak_core.sims import _INELIGIBLE_STATUSES as _INELIG
+                _csv_inelig_mask = pool_df_cal["status"].fillna("").str.upper().isin(_INELIG)
+                _csv_excl = pool_df_cal.loc[_csv_inelig_mask, ["player_name", "status"]].to_dict("records") if "player_name" in pool_df_cal.columns else []
+                pool_df_cal = pool_df_cal[~_csv_inelig_mask].reset_index(drop=True)
+                if _csv_excl:
+                    st.session_state["auto_excluded_players"] = _csv_excl
             st.session_state["pool_df"] = pool_df_cal
             st.session_state["_pool_df_filename"] = rg_upload_cal.name
             st.success(f"✅ Pool loaded — {len(pool_df_cal)} players. Head to **🏀 Ricky's Slate Room** to review.")
@@ -2604,10 +2612,12 @@ with tab_lab:
                     u["player_name"] for u in news_updates
                     if u.get("status", "").upper() in {"OUT", "IR", "SUSPENDED", "G-LEAGUE"}
                 ]
+                # Drop OUT/IR players entirely rather than flagging sim_eligible so the
+                # pool stays clean and consistent with the cascade-then-drop pattern.
                 if out_names_manual and "player_name" in sim_pool.columns:
-                    sim_pool.loc[
-                        sim_pool["player_name"].isin(out_names_manual), "sim_eligible"
-                    ] = False
+                    sim_pool = sim_pool[
+                        ~sim_pool["player_name"].isin(out_names_manual)
+                    ].reset_index(drop=True)
                 st.session_state["sim_pool_df"] = sim_pool
                 st.session_state["sim_pool_orig_df"] = sim_pool
 
@@ -2828,6 +2838,13 @@ with tab_lab:
             _n_elig = int(active_sim_pool["sim_eligible"].sum())
             _n_total = len(active_sim_pool)
             st.caption(f"**Using {_n_elig} sim-eligible players out of {_n_total} loaded.**")
+            # Sanity check: OUT/IR players should never be in the sim pool after cascade-then-drop.
+            # This count should always be 0; if it isn't the load path bypassed the drop step.
+            if "status" in active_sim_pool.columns:
+                _out_count = int(
+                    active_sim_pool["status"].fillna("").str.upper().isin({"OUT", "IR"}).sum()
+                )
+                st.caption(f"OUT players in sim pool: {_out_count}")
 
         # ── Manual Include / Exclude Table ───────────────────────────────
         with st.expander("📋 Manual Player Eligibility Overrides", expanded=False):
@@ -2915,6 +2932,16 @@ with tab_lab:
                             )
                     # Filter to sim-eligible players only
                     pool_for_sim_run = active_sim_pool[active_sim_pool["sim_eligible"]].copy() if "sim_eligible" in active_sim_pool.columns else active_sim_pool.copy()
+                    # Instrument: assert no OUT/IR players remain in the sim pool so that
+                    # any path that bypasses cascade-then-drop fails loudly here.
+                    if "status" in pool_for_sim_run.columns:
+                        _bad = pool_for_sim_run[
+                            pool_for_sim_run["status"].fillna("").str.upper().isin({"OUT", "IR", "O"})
+                        ]
+                        assert _bad.empty, (
+                            f"OUT players still in sim pool: "
+                            f"{_bad[['player_name', 'status']].head().to_dict('records')}"
+                        )
                     _required_roster = 8
                     if len(pool_for_sim_run) < _required_roster + 5:
                         st.error(
