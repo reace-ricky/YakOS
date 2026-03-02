@@ -332,3 +332,50 @@ class TestRunMonteCarloContestType:
     def test_empty_df_returns_empty(self):
         result = run_monte_carlo_for_lineups(pd.DataFrame())
         assert result.empty
+
+    def test_return_scores_false_returns_dataframe(self):
+        """By default (no _return_scores) the function returns a DataFrame only."""
+        df = _make_lineups_df()
+        result = run_monte_carlo_for_lineups(df)
+        assert isinstance(result, pd.DataFrame)
+
+    def test_return_scores_true_returns_tuple(self):
+        """_return_scores=True must return a (DataFrame, dict) tuple."""
+        df = _make_lineups_df()
+        result = run_monte_carlo_for_lineups(df, _return_scores=True)
+        assert isinstance(result, tuple), "expected (DataFrame, dict) tuple"
+        assert len(result) == 2
+
+    def test_return_scores_dict_keys_match_lineup_indices(self):
+        """The scores dict must contain one entry per lineup_index."""
+        df = _make_lineups_df(n_lineups=3)
+        _, scores_dict = run_monte_carlo_for_lineups(df, _return_scores=True)
+        assert set(scores_dict.keys()) == {0, 1, 2}
+
+    def test_return_scores_arrays_have_n_sims_length(self):
+        """Each value in the scores dict must be a 1-D array of length n_sims."""
+        n_sims = 100
+        df = _make_lineups_df(n_lineups=2)
+        _, scores_dict = run_monte_carlo_for_lineups(df, n_sims=n_sims, _return_scores=True)
+        for lu_id, arr in scores_dict.items():
+            assert len(arr) == n_sims, f"lineup {lu_id}: expected {n_sims} sims, got {len(arr)}"
+
+    def test_return_scores_df_identical_to_plain_result(self):
+        """The DataFrame returned with _return_scores=True is identical to the
+        plain result returned without the flag.
+
+        The function uses a fixed RandomState(42) seed internally, so both calls
+        produce identical results deterministically.
+        """
+        df = _make_lineups_df()
+        plain = run_monte_carlo_for_lineups(df, n_sims=200)
+        result_df, _ = run_monte_carlo_for_lineups(df, n_sims=200, _return_scores=True)
+        pd.testing.assert_frame_equal(plain.reset_index(drop=True), result_df.reset_index(drop=True))
+
+    def test_return_scores_empty_df_returns_empty_tuple(self):
+        """Empty input with _return_scores=True must return (empty DataFrame, empty dict)."""
+        result = run_monte_carlo_for_lineups(pd.DataFrame(), _return_scores=True)
+        assert isinstance(result, tuple)
+        df, scores = result
+        assert df.empty
+        assert scores == {}
