@@ -10,6 +10,9 @@ from yak_core.sims import (
     ContestType,
     LineupSimSummary,
     CONTEST_ABSOLUTE_THRESHOLDS,
+    CONTEST_SMASH_PERCENTILE,
+    CONTEST_BUST_PERCENTILE,
+    MIN_OWNERSHIP_FOR_LEVERAGE,
     summarize_lineup_sims,
     compute_thresholds,
     compute_smash_bust_rates,
@@ -261,7 +264,8 @@ class TestRunMonteCarloContestType:
     def test_new_columns_present(self):
         df = _make_lineups_df()
         result = run_monte_carlo_for_lineups(df)
-        for col in ("smash_threshold", "bust_threshold", "smash_pct", "bust_pct", "contest_type"):
+        for col in ("smash_threshold", "bust_threshold", "smash_pct", "bust_pct",
+                    "contest_type", "contest_smash_score", "contest_bust_score"):
             assert col in result.columns, f"missing column: {col}"
 
     def test_backwards_compat_columns_present(self):
@@ -277,9 +281,22 @@ class TestRunMonteCarloContestType:
         assert np.allclose(result["smash_prob"], result["smash_pct"])
         assert np.allclose(result["bust_prob"], result["bust_pct"])
 
-    def test_per_lineup_thresholds_differ_from_high_to_low_scoring(self):
-        """With fully dynamic (p90/p30) thresholds, a high-scoring lineup gets a
-        higher smash threshold than a low-scoring one, regardless of contest type."""
+    def test_contest_thresholds_same_for_all_lineups(self):
+        """smash_threshold and bust_threshold are contest-level values — identical
+        for every lineup in a single run."""
+        df = _make_lineups_df(n_lineups=3)
+        result = run_monte_carlo_for_lineups(df)
+        # All rows must share the same contest-level threshold values
+        assert len(result["smash_threshold"].unique()) == 1
+        assert len(result["bust_threshold"].unique()) == 1
+        # contest_smash_score / contest_bust_score aliases must be present and equal
+        assert "contest_smash_score" in result.columns
+        assert "contest_bust_score" in result.columns
+        assert result["contest_smash_score"].iloc[0] == result["smash_threshold"].iloc[0]
+
+    def test_smash_pct_differs_from_high_to_low_scoring(self):
+        """Even though thresholds are contest-level (the same for all lineups),
+        a high-scoring lineup has a higher smash_pct than a low-scoring one."""
         rows = []
         for p in range(8):
             rows.append({"lineup_index": 0, "player_name": f"P{p}", "proj": 10.0})
@@ -288,12 +305,17 @@ class TestRunMonteCarloContestType:
         df = pd.DataFrame(rows)
         for ct in ContestType:
             result = run_monte_carlo_for_lineups(df, contest_type=ct)
-            low_smash = result.loc[result["lineup_index"] == 0, "smash_threshold"].iloc[0]
-            high_smash = result.loc[result["lineup_index"] == 1, "smash_threshold"].iloc[0]
-            assert low_smash < high_smash, f"failed for {ct}"
+            # Thresholds must now be equal (contest-level)
+            low_thr = result.loc[result["lineup_index"] == 0, "smash_threshold"].iloc[0]
+            high_thr = result.loc[result["lineup_index"] == 1, "smash_threshold"].iloc[0]
+            assert low_thr == high_thr, f"thresholds should be equal for {ct}"
+            # Smash% must be higher for the high-scoring lineup
+            low_smash_pct = result.loc[result["lineup_index"] == 0, "smash_pct"].iloc[0]
+            high_smash_pct = result.loc[result["lineup_index"] == 1, "smash_pct"].iloc[0]
+            assert low_smash_pct < high_smash_pct, f"smash_pct should differ for {ct}"
 
-    def test_per_lineup_thresholds_can_vary(self):
-        """Each lineup gets its own threshold computed from its own distribution."""
+    def test_smash_pct_varies_across_lineups(self):
+        """Smash% varies naturally across lineups — low-scoring gets lower Smash%."""
         rows = []
         # Lineup 0: all players proj=10 (low-scoring)
         for p in range(8):
@@ -302,11 +324,10 @@ class TestRunMonteCarloContestType:
         for p in range(8):
             rows.append({"lineup_index": 1, "player_name": f"P{p}", "proj": 50.0})
         df = pd.DataFrame(rows)
-        # GPP_LARGE is fully dynamic (p90 of each lineup's own distribution)
         result = run_monte_carlo_for_lineups(df, contest_type=ContestType.GPP_LARGE)
-        thresholds = result["smash_threshold"].tolist()
-        # Low-scoring lineup should have a lower smash threshold than high-scoring
-        assert thresholds[0] < thresholds[1]
+        smash_pcts = result.sort_values("lineup_index")["smash_pct"].tolist()
+        # Low-scoring lineup should have a lower Smash% than high-scoring
+        assert smash_pcts[0] < smash_pcts[1]
 
     def test_empty_df_returns_empty(self):
         result = run_monte_carlo_for_lineups(pd.DataFrame())
