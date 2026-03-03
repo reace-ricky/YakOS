@@ -392,6 +392,104 @@ def _apply_proj_fallback(pool: pd.DataFrame) -> pd.DataFrame:
     return pool
 
 
+def _merge_external_proj(
+    pool: pd.DataFrame,
+    source: Optional[str],
+    rg_df: Optional[pd.DataFrame],
+    fp_df: Optional[pd.DataFrame],
+) -> pd.DataFrame:
+    """Merge external projection data into *pool* as the ``proj_fp`` column.
+
+    This is the pure-logic core of the projection-source merge — it does not
+    read from ``st.session_state`` and is therefore fully unit-testable.
+
+    Parameters
+    ----------
+    pool:
+        Player pool DataFrame.  Must contain ``player_name`` and ``proj``.
+    source:
+        One of ``"RotoGrinders"``, ``"FantasyPros"``, or ``"Blended"``.
+        Any other value (including *None*) sets ``proj_fp = proj``.
+    rg_df:
+        DataFrame with ``player_name`` + ``proj`` columns from the
+        RotoGrinders projection upload.  May be *None*.
+    fp_df:
+        DataFrame with ``player_name`` + ``proj`` columns from the
+        FantasyPros projection upload.  May be *None*.
+
+    Returns
+    -------
+    pd.DataFrame
+        Copy of *pool* with a ``proj_fp`` column added or updated.
+        Unmatched players fall back to the ``proj`` value so downstream
+        code never sees NaN in ``proj_fp``.
+    """
+    pool = pool.copy()
+    base_proj = pd.to_numeric(pool.get("proj", 0), errors="coerce").fillna(0)
+
+    def _proj_series(src_df: Optional[pd.DataFrame]) -> pd.Series:
+        """Return a player_name-indexed Series of proj values."""
+        if src_df is None or "player_name" not in src_df.columns or "proj" not in src_df.columns:
+            return pd.Series(dtype=float)
+        return (
+            src_df[["player_name", "proj"]]
+            .drop_duplicates("player_name")
+            .set_index("player_name")["proj"]
+            .pipe(pd.to_numeric, errors="coerce")
+        )
+
+    if source == "RotoGrinders" and rg_df is not None:
+        rg_series = _proj_series(rg_df)
+        mapped = pool["player_name"].map(rg_series)
+        pool["proj_fp"] = mapped.where(mapped.notna(), base_proj)
+    elif source == "FantasyPros" and fp_df is not None:
+        fp_series = _proj_series(fp_df)
+        mapped = pool["player_name"].map(fp_series)
+        pool["proj_fp"] = mapped.where(mapped.notna(), base_proj)
+    elif source == "Blended" and rg_df is not None and fp_df is not None:
+        rg_series = _proj_series(rg_df)
+        fp_series = _proj_series(fp_df)
+        rg_mapped = pool["player_name"].map(rg_series)
+        fp_mapped = pool["player_name"].map(fp_series)
+        both = rg_mapped.notna() & fp_mapped.notna()
+        rg_only = rg_mapped.notna() & fp_mapped.isna()
+        fp_only = rg_mapped.isna() & fp_mapped.notna()
+        blended = base_proj.copy()
+        blended[both] = (rg_mapped[both] + fp_mapped[both]) / 2
+        blended[rg_only] = rg_mapped[rg_only]
+        blended[fp_only] = fp_mapped[fp_only]
+        pool["proj_fp"] = blended
+    else:
+        pool["proj_fp"] = base_proj
+
+    return pool
+
+
+def _apply_proj_source(pool: pd.DataFrame, source: Optional[str]) -> pd.DataFrame:
+    """Merge the selected external projection source into *pool* as the ``proj_fp`` column.
+
+    Thin wrapper around :func:`_merge_external_proj` that reads the
+    ``rg_proj_df`` and ``fp_proj_df`` DataFrames from ``st.session_state``.
+
+    Parameters
+    ----------
+    pool:
+        Player pool DataFrame.  Must contain a ``player_name`` column.
+    source:
+        One of ``"RotoGrinders"``, ``"FantasyPros"``, or ``"Blended"``.
+        Any other value (including *None*) results in ``proj_fp`` being set
+        equal to ``proj`` (i.e. no external projection override).
+
+    Returns
+    -------
+    pd.DataFrame
+        Copy of *pool* with a ``proj_fp`` column added or updated.
+    """
+    rg_df: Optional[pd.DataFrame] = st.session_state.get("rg_proj_df")
+    fp_df: Optional[pd.DataFrame] = st.session_state.get("fp_proj_df")
+    return _merge_external_proj(pool, source, rg_df, fp_df)
+
+
 # Default constants used by _apply_yakos_projections for b2b / blowout adjustments
 _DEFAULT_B2B_DISCOUNT = 0.93
 _DEFAULT_BLOWOUT_THRESHOLD = 15
@@ -856,6 +954,17 @@ def ensure_session_state():
     if "dk_roster_rules" not in st.session_state:
         # Parsed roster rules for the selected DK game type
         st.session_state["dk_roster_rules"] = None
+    # Dual projection upload DataFrames (Fix 2)
+    if "rg_proj_df" not in st.session_state:
+        # pd.DataFrame with player_name + proj columns from RotoGrinders upload
+        st.session_state["rg_proj_df"] = None
+    if "fp_proj_df" not in st.session_state:
+        # pd.DataFrame with player_name + proj columns from FantasyPros upload
+        st.session_state["fp_proj_df"] = None
+    if "_rg_proj_filename" not in st.session_state:
+        st.session_state["_rg_proj_filename"] = None
+    if "_fp_proj_filename" not in st.session_state:
+        st.session_state["_fp_proj_filename"] = None
 
 
 def run_optimizer(
@@ -1176,15 +1285,42 @@ with st.sidebar:
         step=500,
     )
 
-    proj_style = st.selectbox(
-        "Projection style",
-        ["proj", "floor", "ceil", "sim85"],
-        index=0,
-        help=(
-            "proj = base projection | floor = conservative / low-end | "
-            "ceil = ceiling / best-case | sim85 = 85th-percentile simulation score"
-        ),
-    )
+    # ── Projection source selector (Fix 2) ──────────────────────────────────
+    # Options are built dynamically from whichever projection CSVs have been uploaded.
+    # This widget is disabled until at least one projection file is loaded.
+    _proj_src_options: list[str] = []
+    if st.session_state.get("rg_proj_df") is not None:
+        _proj_src_options.append("RotoGrinders")
+    if st.session_state.get("fp_proj_df") is not None:
+        _proj_src_options.append("FantasyPros")
+    if len(_proj_src_options) == 2:
+        _proj_src_options.append("Blended")
+
+    if _proj_src_options:
+        # Validate current selection against available options
+        _cur_proj_src = st.session_state.get("sidebar_proj_source", _proj_src_options[0])
+        if _cur_proj_src not in _proj_src_options:
+            _cur_proj_src = _proj_src_options[0]
+        proj_source = st.selectbox(
+            "Projection style",
+            _proj_src_options,
+            index=_proj_src_options.index(_cur_proj_src),
+            key="sidebar_proj_source",
+            help=(
+                "Select the active projection source. "
+                "Upload RotoGrinders and/or FantasyPros CSVs in Ricky's Lab to add options. "
+                "Blended averages both sources."
+            ),
+        )
+    else:
+        st.selectbox(
+            "Projection style",
+            ["— upload projections in Lab —"],
+            disabled=True,
+            key="sidebar_proj_source",
+            help="Upload RotoGrinders and/or FantasyPros projection CSVs in Ricky's Lab to enable this.",
+        )
+        proj_source = None
 
     st.markdown("---")
     st.subheader("🔑 API Settings")
@@ -1214,6 +1350,15 @@ with st.sidebar:
         else:
             _out_count = 0
         st.caption(f"OUT players in sim pool: {_out_count}")
+
+# ── Apply active projection source to pool_df as proj_fp ───────────────────
+# Runs on every rerun so Slate Room, Optimizer, Calibration, and Sims all see
+# the up-to-date proj_fp column without any additional triggers.
+_active_pool_for_fp = st.session_state.get("pool_df")
+if _active_pool_for_fp is not None and not _active_pool_for_fp.empty:
+    _updated_pool = _apply_proj_source(_active_pool_for_fp, proj_source)
+    if not _updated_pool.equals(_active_pool_for_fp):
+        st.session_state["pool_df"] = _updated_pool
 
 tab_slate, tab_optimizer, tab_lab = st.tabs([
     "🏀 Ricky's Slate Room",
@@ -1632,8 +1777,13 @@ with tab_slate:
                 _hvp_df = pool_df.copy()
                 _hvp_df["proj"] = pd.to_numeric(_hvp_df.get("proj", 0), errors="coerce").fillna(0)
                 _hvp_df["salary"] = pd.to_numeric(_hvp_df.get("salary", 0), errors="coerce").fillna(0)
-                # Use adjusted_proj column when available
-                _adj_col = "adjusted_proj" if "adjusted_proj" in _hvp_df.columns else "proj"
+                # Prefer proj_fp (active projection source) → adjusted_proj → proj
+                if "proj_fp" in _hvp_df.columns and pd.to_numeric(_hvp_df["proj_fp"], errors="coerce").fillna(0).max() > 0:
+                    _adj_col = "proj_fp"
+                elif "adjusted_proj" in _hvp_df.columns:
+                    _adj_col = "adjusted_proj"
+                else:
+                    _adj_col = "proj"
                 _hvp_df["_adj_proj"] = pd.to_numeric(_hvp_df[_adj_col], errors="coerce").fillna(0)
                 _mins_col = next((c for c in ["proj_minutes", "minutes"] if c in _hvp_df.columns), None)
                 if _mins_col:
@@ -1697,7 +1847,7 @@ with tab_slate:
             st.markdown("### 📋 Player Projections")
             _proj_disp_cols = [c for c in [
                 "player_name", "pos", "team", "salary",
-                "adjusted_proj", "proj", "original_proj", "injury_bump_fp",
+                "proj_fp", "adjusted_proj", "proj", "original_proj", "injury_bump_fp",
                 "floor", "ceil", "proj_minutes",
                 "ext_own", "own_model", "own_proj", "proj_own",
                 "status", "proj_source",
@@ -1706,20 +1856,20 @@ with tab_slate:
                 pool_df[_proj_disp_cols]
                 .copy()
                 .sort_values(
-                    "adjusted_proj" if "adjusted_proj" in pool_df.columns else "proj",
+                    "proj_fp" if "proj_fp" in pool_df.columns
+                    else ("adjusted_proj" if "adjusted_proj" in pool_df.columns else "proj"),
                     ascending=False,
                 )
                 .reset_index(drop=True)
             )
-            # Compute value multiple
+            # Compute value multiple using the active projection source
             if "salary" in _proj_table.columns:
                 _vproj = (
-                    _proj_table["adjusted_proj"]
-                    if "adjusted_proj" in _proj_table.columns
-                    else _proj_table["proj"]
+                    _proj_table["proj_fp"] if "proj_fp" in _proj_table.columns
+                    else (_proj_table["adjusted_proj"] if "adjusted_proj" in _proj_table.columns else _proj_table["proj"])
                 )
                 _proj_table["value_x"] = (
-                    _vproj / (_proj_table["salary"].replace(0, float("nan")) / 1000.0)
+                    pd.to_numeric(_vproj, errors="coerce") / (_proj_table["salary"].replace(0, float("nan")) / 1000.0)
                 ).round(2)
 
             with st.expander("📋 All Players — sorted by projection", expanded=True):
@@ -1746,6 +1896,7 @@ with tab_slate:
                     "pos": st.column_config.TextColumn("Pos", width="small"),
                     "team": st.column_config.TextColumn("Team", width="small"),
                     "salary": st.column_config.NumberColumn("Salary", format="$%d"),
+                    "proj_fp": st.column_config.NumberColumn("Active Proj", format="%.2f"),
                     "adjusted_proj": st.column_config.NumberColumn("Adj Proj", format="%.2f"),
                     "proj": st.column_config.NumberColumn("Proj", format="%.2f"),
                     "original_proj": st.column_config.NumberColumn("Orig Proj", format="%.2f"),
@@ -2155,12 +2306,23 @@ with tab_optimizer:
                             + " | ".join(_opt_changes[:8])
                             + (" …" if len(_opt_changes) > 8 else "")
                         )
+                    # Use proj_fp when an external projection source is active
+                    _active_src = st.session_state.get("sidebar_proj_source")
+                    _has_proj_fp = (
+                        "proj_fp" in pool_for_opt.columns
+                        and pd.to_numeric(pool_for_opt["proj_fp"], errors="coerce").fillna(0).max() > 0
+                    )
+                    _opt_proj_col = (
+                        "proj_fp"
+                        if _has_proj_fp and _active_src not in (None, "— upload projections in Lab —")
+                        else proj_style_opt
+                    )
                     lu_df, exp_df = run_optimizer(
                         pool_for_opt,
                         num_lineups=num_lu_opt,
                         max_exposure=max_exp_opt,
                         min_salary_used=min_sal_opt,
-                        proj_col=proj_style_opt,
+                        proj_col=_opt_proj_col,
                         archetype=archetype_sel,
                         lock_names=_lock_names or None,
                         exclude_names=_exclude_names or None,
@@ -2411,6 +2573,72 @@ with tab_lab:
 
     st.markdown("---")
 
+    # ── 0b. Projection Uploads (Fix 2 — dual projection sources) ────────────
+    st.markdown("### 📊 Upload Projection Sources")
+    st.markdown(
+        "Upload a RotoGrinders and/or FantasyPros projection CSV to override the "
+        "base YakOS projections. Once loaded, select your preferred source from the "
+        "**Projection style** dropdown in the sidebar. Both files are mapped to the "
+        "``player_name`` + ``proj`` schema automatically."
+    )
+
+    _rg_proj_col, _fp_proj_col = st.columns(2)
+    with _rg_proj_col:
+        st.markdown("**RotoGrinders Projections**")
+        _rg_proj_upload = st.file_uploader(
+            "RotoGrinders projection CSV",
+            type=["csv"],
+            key="lab_rg_proj_upload",
+            help="RotoGrinders export with FPTS/SALARY/PLAYER columns. Mapped to proj_fp when 'RotoGrinders' is selected.",
+        )
+        _cur_rg_proj = st.session_state.get("rg_proj_df")
+        if _cur_rg_proj is not None:
+            st.caption(f"✅ Loaded: **{len(_cur_rg_proj)} players**")
+        if st.button("🗑️ Clear RG projections", key="clear_rg_proj_btn", disabled=_cur_rg_proj is None):
+            st.session_state["rg_proj_df"] = None
+            st.rerun()
+
+    with _fp_proj_col:
+        st.markdown("**FantasyPros Projections**")
+        _fp_proj_upload = st.file_uploader(
+            "FantasyPros projection CSV",
+            type=["csv"],
+            key="lab_fp_proj_upload",
+            help="FantasyPros projection export. Expected columns: FPTS/PLAYER (or proj/player_name). Mapped to proj_fp when 'FantasyPros' is selected.",
+        )
+        _cur_fp_proj = st.session_state.get("fp_proj_df")
+        if _cur_fp_proj is not None:
+            st.caption(f"✅ Loaded: **{len(_cur_fp_proj)} players**")
+        if st.button("🗑️ Clear FP projections", key="clear_fp_proj_btn", disabled=_cur_fp_proj is None):
+            st.session_state["fp_proj_df"] = None
+            st.rerun()
+
+    if _rg_proj_upload is not None:
+        if st.session_state.get("_rg_proj_filename") != _rg_proj_upload.name:
+            _rg_raw = pd.read_csv(_rg_proj_upload)
+            _rg_mapped = rename_rg_columns_to_yakos(_rg_raw)
+            if "player_name" in _rg_mapped.columns and "proj" in _rg_mapped.columns:
+                st.session_state["rg_proj_df"] = _rg_mapped[["player_name", "proj"]].dropna(subset=["proj"])
+                st.session_state["_rg_proj_filename"] = _rg_proj_upload.name
+                st.success(f"✅ RotoGrinders projections loaded — {len(st.session_state['rg_proj_df'])} players. Select **RotoGrinders** in the sidebar.")
+                st.rerun()
+            else:
+                st.error("Could not map columns. Expected FPTS/PLAYER or proj/player_name columns.")
+
+    if _fp_proj_upload is not None:
+        if st.session_state.get("_fp_proj_filename") != _fp_proj_upload.name:
+            _fp_raw = pd.read_csv(_fp_proj_upload)
+            _fp_mapped = rename_rg_columns_to_yakos(_fp_raw)
+            if "player_name" in _fp_mapped.columns and "proj" in _fp_mapped.columns:
+                st.session_state["fp_proj_df"] = _fp_mapped[["player_name", "proj"]].dropna(subset=["proj"])
+                st.session_state["_fp_proj_filename"] = _fp_proj_upload.name
+                st.success(f"✅ FantasyPros projections loaded — {len(st.session_state['fp_proj_df'])} players. Select **FantasyPros** in the sidebar.")
+                st.rerun()
+            else:
+                st.error("Could not map columns. Expected FPTS/PLAYER or proj/player_name columns.")
+
+    st.markdown("---")
+
     # ── Upload DvP Table ──────────────────────────────────────────────────────
     st.markdown("### 🛡️ Upload DvP Table")
     st.markdown(
@@ -2626,10 +2854,17 @@ with tab_lab:
                 _check_slice = _acts_df.copy()
 
                 # Merge pool projections/minutes/ownership into the slice
-                if "proj" in _cal_pool_check.columns:
+                # Prefer proj_fp (active projection source) over proj for calibration accuracy
+                _cal_proj_col = (
+                    "proj_fp"
+                    if "proj_fp" in _cal_pool_check.columns
+                    and pd.to_numeric(_cal_pool_check["proj_fp"], errors="coerce").fillna(0).max() > 0
+                    else "proj"
+                )
+                if _cal_proj_col in _cal_pool_check.columns:
                     _pp = (
-                        _cal_pool_check[["player_name", "proj"]]
-                        .rename(columns={"player_name": "name", "proj": "_pp"})
+                        _cal_pool_check[["player_name", _cal_proj_col]]
+                        .rename(columns={"player_name": "name", _cal_proj_col: "_pp"})
                         .drop_duplicates("name")
                     )
                     _check_slice = _check_slice.merge(_pp, on="name", how="left")
@@ -2737,10 +2972,17 @@ with tab_lab:
                     if "actual_fp" in _acts_df2.columns:
                         _acts_df2 = _acts_df2.rename(columns={"actual_fp": "actual"})
                     _check_slice2 = _acts_df2.copy()
-                    if "proj" in _reproj_pool.columns:
+                    # Prefer proj_fp for re-projection comparison as well
+                    _reproj_col2 = (
+                        "proj_fp"
+                        if "proj_fp" in _reproj_pool.columns
+                        and pd.to_numeric(_reproj_pool["proj_fp"], errors="coerce").fillna(0).max() > 0
+                        else "proj"
+                    )
+                    if _reproj_col2 in _reproj_pool.columns:
                         _pp2 = (
-                            _reproj_pool[["player_name", "proj"]]
-                            .rename(columns={"player_name": "name", "proj": "_pp2"})
+                            _reproj_pool[["player_name", _reproj_col2]]
+                            .rename(columns={"player_name": "name", _reproj_col2: "_pp2"})
                             .drop_duplicates("name")
                         )
                         _check_slice2 = _check_slice2.merge(_pp2, on="name", how="left")
@@ -3549,12 +3791,23 @@ with tab_lab:
                             "Loosen your Sim Player Filters or check your pool."
                         )
                     else:
+                        # Use proj_fp when an external projection source is active
+                        _sim_active_src = st.session_state.get("sidebar_proj_source")
+                        _sim_has_proj_fp = (
+                            "proj_fp" in pool_for_sim_run.columns
+                            and pd.to_numeric(pool_for_sim_run["proj_fp"], errors="coerce").fillna(0).max() > 0
+                        )
+                        _sim_proj_col = (
+                            "proj_fp"
+                            if _sim_has_proj_fp and _sim_active_src not in (None, "— upload projections in Lab —")
+                            else "proj"
+                        )
                         sim_lu_df, _ = run_optimizer(
                             pool_for_sim_run,
                             num_lineups=sim_n_lu,
                             max_exposure=0.4,
                             min_salary_used=sim_min_sal,
-                            proj_col="proj",
+                            proj_col=_sim_proj_col,
                             archetype=sim_archetype,
                             max_pair_appearances=int(st.session_state.get("sim_max_pair", max(1, sim_n_lu // 4))),
                         )
