@@ -287,3 +287,40 @@ class TestDvpImports:
     def test_DVP_DEFAULT_PATH(self):
         mod = importlib.import_module("yak_core.dvp")
         assert hasattr(mod, "DVP_DEFAULT_PATH")
+
+
+
+class TestOwnershipImports:
+    def test_apply_ownership(self):
+        mod = importlib.import_module("yak_core.ownership")
+        assert hasattr(mod, "apply_ownership")
+
+    def test_apply_ownership_pipeline(self):
+        mod = importlib.import_module("yak_core.ownership")
+        assert hasattr(mod, "apply_ownership_pipeline")
+
+
+class TestExtOwnershipImports:
+    def test_ingest_ext_ownership(self):
+        mod = importlib.import_module("yak_core.ext_ownership")
+        assert hasattr(mod, "ingest_ext_ownership")
+
+    def test_merge_ext_ownership(self):
+        mod = importlib.import_module("yak_core.ext_ownership")
+        assert hasattr(mod, "merge_ext_ownership")
+
+    def test_build_ownership_features(self):
+        mod = importlib.import_module("yak_core.ext_ownership")
+        assert hasattr(mod, "build_ownership_features")
+
+    def test_predict_ownership(self):
+        mod = importlib.import_module("yak_core.ext_ownership")
+        assert hasattr(mod, "predict_ownership")
+
+    def test_blend_and_normalize(self):
+        mod = importlib.import_module("yak_core.ext_ownership")
+        assert hasattr(mod, "blend_and_normalize")
+
+    def test_compute_ownership_diagnostics(self):
+        mod = importlib.import_module("yak_core.ext_ownership")
+        assert hasattr(mod, "compute_ownership_diagnostics")

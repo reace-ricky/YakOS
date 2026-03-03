@@ -106,7 +106,7 @@ from yak_core.projections import (  # type: ignore
 )
 from yak_core.scoring import calibration_kpi_summary, quality_color, _QUALITY_BG, _QUALITY_TEXT  # type: ignore
 from yak_core.config import CONTEST_PRESETS, CONTEST_PRESET_LABELS, CONTEST_PRESET_ARCH_LABELS  # type: ignore
-from yak_core.ownership import apply_ownership  # type: ignore
+from yak_core.ownership import apply_ownership, apply_ownership_pipeline  # type: ignore
 from yak_core.injury_cascade import apply_injury_cascade  # type: ignore
 from yak_core.dvp import (  # type: ignore
     parse_dvp_upload,
@@ -199,6 +199,10 @@ def rename_rg_columns_to_yakos(df: pd.DataFrame) -> pd.DataFrame:
         out["proj_own"] = (
             out["proj_own"].astype(str).str.replace("%", "", regex=False).pipe(pd.to_numeric, errors="coerce")
         )
+        # Mirror POWN into ext_own — this is the raw site ownership label (v1 external ownership)
+        _ext_vals = out["proj_own"].copy()
+        if _ext_vals.notna().any() and (_ext_vals > 0).any():
+            out["ext_own"] = _ext_vals
 
     # Drop rows with missing salary or projection
     out = out.dropna(subset=["salary", "proj"])
@@ -465,6 +469,16 @@ def _apply_yakos_projections(pool: pd.DataFrame, knobs: dict = None) -> pd.DataF
     if "proj_own" not in pool.columns or pool["proj_own"].fillna(0).max() == 0:
         pool["proj_own"] = proj_own_values
     pool["proj_source"] = proj_source_values
+
+    # --- Three-layer ownership pipeline ---
+    # own_model: supervised GBM prediction; own_proj: blended with ext_own
+    try:
+        pool = apply_ownership_pipeline(pool)
+    except Exception as _e:
+        # Graceful fallback: own_proj = proj_own when pipeline fails
+        import traceback; traceback.print_exc()
+        if "own_proj" not in pool.columns:
+            pool["own_proj"] = pool["proj_own"] if "proj_own" in pool.columns else 0.0
 
     return pool
 
@@ -771,9 +785,9 @@ def render_lineup_card(rows: pd.DataFrame, pool_df: "pd.DataFrame | None" = None
         name = str(r.get("player_name", r.get("name", "")))
         salary = int(r.get("salary", 0))
 
-        # Ownership: prefer proj_own, fall back to ownership
+        # Ownership: prefer own_proj (blended final), then proj_own, then ownership
         own_val = None
-        for _ocol in ["proj_own", "ownership"]:
+        for _ocol in ["own_proj", "proj_own", "ownership"]:
             _v = r.get(_ocol)
             if _v is not None and pd.notna(_v):
                 try:
@@ -823,7 +837,7 @@ def render_lineup_card(rows: pd.DataFrame, pool_df: "pd.DataFrame | None" = None
     proj_series = pd.to_numeric(rows["proj"], errors="coerce").fillna(0) if "proj" in rows.columns else pd.Series([0.0])
     total_proj = float(proj_series.sum())
     total_own = None
-    for _ocol in ["proj_own", "ownership"]:
+    for _ocol in ["own_proj", "proj_own", "ownership"]:
         if _ocol in rows.columns:
             _s = pd.to_numeric(rows[_ocol], errors="coerce")
             if _s.notna().any():
@@ -1315,7 +1329,8 @@ with tab_slate:
             _proj_disp_cols = [c for c in [
                 "player_name", "pos", "team", "salary",
                 "proj", "original_proj", "injury_bump_fp",
-                "floor", "ceil", "proj_minutes", "proj_own", "proj_source",
+                "floor", "ceil", "proj_minutes",
+                "ext_own", "own_model", "own_proj", "proj_own", "proj_source",
             ] if c in pool_df.columns]
             _proj_table = (
                 pool_df[_proj_disp_cols]
@@ -1323,6 +1338,24 @@ with tab_slate:
                 .reset_index(drop=True)
             )
             with st.expander("📋 All Players — sorted by projection", expanded=True):
+                # Ownership display toggle
+                _own_toggle_opts = []
+                if "ext_own" in _proj_table.columns and _proj_table["ext_own"].notna().any():
+                    _own_toggle_opts.append("ext_own (raw site)")
+                if "own_model" in _proj_table.columns:
+                    _own_toggle_opts.append("own_model (GBM)")
+                if "own_proj" in _proj_table.columns:
+                    _own_toggle_opts.append("own_final (blended)")
+                if "proj_own" in _proj_table.columns:
+                    _own_toggle_opts.append("proj_own (legacy)")
+                if _own_toggle_opts:
+                    _own_view = st.radio(
+                        "Field% view",
+                        _own_toggle_opts,
+                        index=min(2, len(_own_toggle_opts) - 1),
+                        horizontal=True,
+                        key="proj_table_own_toggle",
+                    )
                 _col_cfg: dict = {
                     "player_name": st.column_config.TextColumn("Player"),
                     "pos": st.column_config.TextColumn("Pos", width="small"),
@@ -1334,7 +1367,10 @@ with tab_slate:
                     "floor": st.column_config.NumberColumn("Floor", format="%.2f"),
                     "ceil": st.column_config.NumberColumn("Ceil", format="%.2f"),
                     "proj_minutes": st.column_config.NumberColumn("Mins", format="%.1f"),
-                    "proj_own": st.column_config.NumberColumn("Own %", format="%.1f"),
+                    "ext_own": st.column_config.NumberColumn("Ext Own%", format="%.1f"),
+                    "own_model": st.column_config.NumberColumn("Model Own%", format="%.1f"),
+                    "own_proj": st.column_config.NumberColumn("Field%", format="%.1f"),
+                    "proj_own": st.column_config.NumberColumn("Own % (legacy)", format="%.1f"),
                     "proj_source": st.column_config.TextColumn("Source"),
                 }
                 st.dataframe(
@@ -3379,6 +3415,107 @@ with tab_lab:
                                 )
                             except Exception:
                                 st.bar_chart(_hist_df["Score"].value_counts().sort_index())
+
+            # ── Ownership Diagnostics ─────────────────────────────────────────
+            with st.expander("📊 Ownership Diagnostics", expanded=False):
+                st.markdown(
+                    "Compare **predicted ownership** (own_proj) against **actual contest ownership** "
+                    "after a slate completes.  Upload an actuals CSV with columns "
+                    "`player_name` and `actual_own` (or `OWNERSHIP`)."
+                )
+                _own_diag_file = st.file_uploader(
+                    "Upload actuals CSV (player_name, actual_own)",
+                    type=["csv"],
+                    key="own_diag_upload",
+                )
+                if _own_diag_file is not None:
+                    try:
+                        _own_act_df = pd.read_csv(_own_diag_file)
+                        # Normalise column names
+                        _own_col_map = {"PLAYER": "player_name", "OWNERSHIP": "actual_own"}
+                        _own_act_df = _own_act_df.rename(
+                            columns={k: v for k, v in _own_col_map.items() if k in _own_act_df.columns}
+                        )
+                        if "actual_own" in _own_act_df.columns:
+                            _own_act_df["actual_own"] = (
+                                _own_act_df["actual_own"].astype(str)
+                                .str.replace("%", "", regex=False)
+                                .pipe(pd.to_numeric, errors="coerce")
+                            )
+                        _own_pool = st.session_state.get("sim_player_pool_clean") or pool_df
+                        if _own_pool is not None and not _own_pool.empty:
+                            _join_col = "player_name" if "player_name" in _own_pool.columns else "name"
+                            _act_col = "player_name" if "player_name" in _own_act_df.columns else "name"
+                            _merged_own = _own_pool.merge(
+                                _own_act_df[[_act_col, "actual_own"]].rename(columns={_act_col: _join_col}),
+                                on=_join_col,
+                                how="inner",
+                            )
+                            from yak_core.ext_ownership import compute_ownership_diagnostics
+                            _diag_result = compute_ownership_diagnostics(
+                                _merged_own, actual_col="actual_own", pred_col="own_proj"
+                            )
+                            if "error" not in _diag_result:
+                                _d1, _d2 = st.columns(2)
+                                _d1.metric("Overall MAE", f"{_diag_result['overall_mae']:.2f}%")
+                                _d2.metric(
+                                    "Bias (pred − actual)",
+                                    f"{_diag_result['overall_bias']:+.2f}%",
+                                    help="Positive = over-predicting ownership",
+                                )
+                                # Bucket table
+                                _bucket_rows = _diag_result.get("buckets", [])
+                                if _bucket_rows:
+                                    _bucket_df = pd.DataFrame(_bucket_rows)
+                                    st.dataframe(_bucket_df, use_container_width=True, hide_index=True)
+                                # Scatter plot (predicted vs actual)
+                                if "own_proj" in _merged_own.columns:
+                                    try:
+                                        import altair as alt
+                                        _scatter_df = _merged_own[["player_name", "own_proj", "actual_own"]].dropna()
+                                        _scatter = alt.Chart(_scatter_df).mark_circle(size=60, opacity=0.7).encode(
+                                            x=alt.X("actual_own:Q", title="Actual Own%"),
+                                            y=alt.Y("own_proj:Q", title="Predicted (own_proj) %"),
+                                            tooltip=["player_name:N", "own_proj:Q", "actual_own:Q"],
+                                        ).properties(height=300, title="Predicted vs Actual Ownership")
+                                        _diag_line = alt.Chart(
+                                            pd.DataFrame({"x": [0, 80], "y": [0, 80]})
+                                        ).mark_line(color="gray", strokeDash=[4, 2]).encode(
+                                            x="x:Q", y="y:Q"
+                                        )
+                                        st.altair_chart(_scatter + _diag_line, use_container_width=True)
+                                    except Exception:
+                                        pass
+                                # Download diagnostics CSV
+                                _diag_csv = pd.DataFrame(_bucket_rows).to_csv(index=False)
+                                st.download_button(
+                                    "⬇️ Download Diagnostics CSV",
+                                    _diag_csv,
+                                    file_name="ownership_diagnostics.csv",
+                                    mime="text/csv",
+                                    key="own_diag_download",
+                                )
+                            else:
+                                st.warning(f"Diagnostics error: {_diag_result['error']}")
+                    except Exception as _own_diag_err:
+                        st.error(f"Failed to process actuals: {_own_diag_err}")
+                else:
+                    # Show current ownership breakdown for active pool
+                    _curr_pool = st.session_state.get("sim_player_pool_clean") or pool_df
+                    if _curr_pool is not None and not _curr_pool.empty:
+                        _own_cols_avail = [c for c in ["ext_own", "own_model", "own_proj"] if c in _curr_pool.columns]
+                        if _own_cols_avail:
+                            st.markdown("**Current slate ownership breakdown (top 15 by own_proj):**")
+                            _own_view_df = _curr_pool[["player_name"] + _own_cols_avail].copy() if "player_name" in _curr_pool.columns else _curr_pool[_own_cols_avail].copy()
+                            _sort_col = "own_proj" if "own_proj" in _own_view_df.columns else _own_cols_avail[0]
+                            _own_view_df = _own_view_df.sort_values(_sort_col, ascending=False).head(15).reset_index(drop=True)
+                            _own_view_cfg = {
+                                "ext_own": st.column_config.NumberColumn("Ext Own% (site)", format="%.1f"),
+                                "own_model": st.column_config.NumberColumn("Model Own%", format="%.1f"),
+                                "own_proj": st.column_config.NumberColumn("Field% (final)", format="%.1f"),
+                            }
+                            st.dataframe(_own_view_df, use_container_width=True, hide_index=True,
+                                         column_config={k: v for k, v in _own_view_cfg.items() if k in _own_view_df.columns})
 
             # ── Custom Lineup Builder ─────────────────────────────────────────
             st.markdown("---")
