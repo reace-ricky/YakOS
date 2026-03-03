@@ -437,3 +437,113 @@ class TestIntegrationPipeline:
         result = apply_ownership_pipeline(pool, ext_df=ext)
         assert "own_proj" in result.columns
         assert "own_model" in result.columns
+
+
+# ---------------------------------------------------------------------------
+# Regression tests: dedup, punctuation normalization, NaN fallback
+# ---------------------------------------------------------------------------
+
+class TestMergeExtOwnershipDedup:
+    def test_duplicate_ext_rows_no_pool_duplicates(self):
+        """Duplicate rows in ext_df must not inflate pool rows."""
+        pool = _make_pool_df()
+        # ext has two identical rows for LeBron — merge must not duplicate pool
+        ext = pd.DataFrame([
+            {"player_id": "1", "player_name": "LeBron James", "salary": 9800,
+             "team": "LAL", "opponent": "BOS", "pos": "SF", "ext_own": 32.5},
+            {"player_id": "1", "player_name": "LeBron James", "salary": 9800,
+             "team": "LAL", "opponent": "BOS", "pos": "SF", "ext_own": 32.5},
+        ])
+        result = merge_ext_ownership(pool, ext)
+        assert len(result) == len(pool), (
+            f"Expected {len(pool)} rows but got {len(result)} — duplicate ext rows inflated pool"
+        )
+
+    def test_duplicate_composite_key_no_pool_duplicates(self):
+        """Composite-key duplicates in ext_df must not inflate pool."""
+        pool = _make_pool_df().drop(columns=["player_id"])
+        ext = pd.DataFrame([
+            {"player_id": "999", "player_name": "Nikola Jokic", "salary": 10500,
+             "team": "DEN", "opponent": "GSW", "pos": "C", "ext_own": 41.2},
+            {"player_id": "998", "player_name": "Nikola Jokic", "salary": 10500,
+             "team": "DEN", "opponent": "GSW", "pos": "C", "ext_own": 41.2},
+        ])
+        result = merge_ext_ownership(pool, ext)
+        assert len(result) == len(pool), (
+            f"Expected {len(pool)} rows but got {len(result)} — composite key dups inflated pool"
+        )
+
+
+class TestMergeExtOwnershipNameNorm:
+    def test_apostrophe_in_name_matched(self):
+        """De'Aaron Fox (pool) should match DeAaron Fox (ext) after punctuation removal."""
+        pool = pd.DataFrame([
+            {"player_id": "10", "player_name": "De'Aaron Fox", "salary": 7800,
+             "pos": "PG", "team": "SAC", "opponent": "LAL", "proj": 40.0},
+        ])
+        ext = pd.DataFrame([
+            {"player_id": "999", "player_name": "DeAaron Fox", "salary": 7800,
+             "team": "SAC", "opponent": "LAL", "pos": "PG", "ext_own": 18.5},
+        ])
+        result = merge_ext_ownership(pool, ext)
+        assert "ext_own" in result.columns
+        assert abs(result.iloc[0]["ext_own"] - 18.5) < 0.01, (
+            "De'Aaron Fox did not match DeAaron Fox after punctuation normalization"
+        )
+
+    def test_case_whitespace_mismatch_matched(self):
+        """Name with different casing should still match."""
+        pool = pd.DataFrame([
+            {"player_id": "20", "player_name": "Lebron James", "salary": 9800,
+             "pos": "SF", "team": "LAL", "opponent": "BOS", "proj": 45.0},
+        ])
+        ext = pd.DataFrame([
+            {"player_id": "999", "player_name": "LeBron James", "salary": 9800,
+             "team": "LAL", "opponent": "BOS", "pos": "SF", "ext_own": 32.5},
+        ])
+        result = merge_ext_ownership(pool, ext)
+        assert abs(result.iloc[0]["ext_own"] - 32.5) < 0.01
+
+
+class TestBlendNaNFallback:
+    def test_nan_ext_own_uses_model_not_zero(self):
+        """Players with NaN ext_own should get model prediction, not 0.0."""
+        pool = _make_pool_df()
+        # Only first two players have ext_own; last two are unmatched (NaN)
+        pool["ext_own"] = [32.5, 28.1, np.nan, np.nan]
+        pool["own_model"] = [30.0, 26.0, 15.0, 8.0]
+        result = blend_and_normalize(pool, alpha=1.0)
+        # Unmatched players should use model (15.0 and 8.0), not 0.0
+        assert result["own_proj"].iloc[2] > 0.0, "Unmatched player got 0 instead of model fallback"
+        assert abs(result["own_proj"].iloc[2] - 15.0) < 0.01
+        assert abs(result["own_proj"].iloc[3] - 8.0) < 0.01
+
+    def test_matched_players_use_ext_own(self):
+        """Matched players must still use ext_own at alpha=1.0."""
+        pool = _make_pool_df()
+        pool["ext_own"] = [32.5, 28.1, np.nan, np.nan]
+        pool["own_model"] = [10.0, 10.0, 15.0, 8.0]
+        result = blend_and_normalize(pool, alpha=1.0)
+        assert abs(result["own_proj"].iloc[0] - 32.5) < 0.01
+        assert abs(result["own_proj"].iloc[1] - 28.1) < 0.01
+
+
+class TestOwnershipPipelineDiagnosticLogging:
+    def test_pipeline_prints_match_diagnostics(self, capsys):
+        """apply_ownership_pipeline must print ext_own match count after merge."""
+        from yak_core.ownership import apply_ownership_pipeline
+        pool = _make_pool_df()
+        pool["ext_own"] = [32.5, 28.1, np.nan, np.nan]
+        apply_ownership_pipeline(pool)
+        captured = capsys.readouterr()
+        assert "ext_own merge:" in captured.out
+        assert "2/4" in captured.out
+
+    def test_pipeline_no_merge_log_when_no_ext(self, capsys):
+        """When no ext_own is in pool and no ext_df passed, no merge log line."""
+        from yak_core.ownership import apply_ownership_pipeline
+        pool = _make_pool_df()
+        apply_ownership_pipeline(pool)
+        captured = capsys.readouterr()
+        # No ext_own in pool → no match diagnostic line
+        assert "ext_own merge:" not in captured.out

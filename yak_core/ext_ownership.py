@@ -39,6 +39,7 @@ compute_ownership_diagnostics(pool_df, actual_col="actual_own")
 from __future__ import annotations
 
 import os
+import re
 from typing import Optional, Tuple
 
 import numpy as np
@@ -69,6 +70,16 @@ OWN_CLIP_MAX = 80.0
 # Bucket boundaries for diagnostics
 _BUCKETS = [(0, 5), (5, 15), (15, 30), (30, 101)]
 _BUCKET_LABELS = ["0–5%", "5–15%", "15–30%", "30%+"]
+
+
+def _clean_name(s: str) -> str:
+    """Normalize a player name for fuzzy matching.
+
+    Strips surrounding whitespace, lowercases, then removes all characters
+    that are not ASCII letters, digits, or spaces.  This ensures names like
+    "De'Aaron Fox" and "DeAaron Fox" resolve to the same key ("deaaron fox").
+    """
+    return re.sub(r"[^a-z0-9 ]", "", s.strip().lower())
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +218,11 @@ def merge_ext_ownership(pool_df: pd.DataFrame, ext_df: pd.DataFrame) -> pd.DataF
 
     # Try player_id match first
     if "player_id" in pool.columns:
-        ext_id = ext.dropna(subset=["player_id"])[["player_id", "ext_own"]].copy()
+        ext_id = (
+            ext.dropna(subset=["player_id"])[["player_id", "ext_own"]]
+            .drop_duplicates(subset=["player_id"])
+            .copy()
+        )
         ext_id = ext_id.rename(columns={"ext_own": "_ext_own_id"})
         pool = pool.merge(ext_id, on="player_id", how="left")
         if "_ext_own_id" in pool.columns:
@@ -219,7 +234,11 @@ def merge_ext_ownership(pool_df: pd.DataFrame, ext_df: pd.DataFrame) -> pd.DataF
     # Composite key match (player_name + team + opponent + salary)
     _join_cols_full = [c for c in ["player_name", "team", "opponent", "salary"] if c in pool.columns and c in ext.columns]
     if _join_cols_full:
-        ext_full = ext[_join_cols_full + ["ext_own"]].copy()
+        ext_full = (
+            ext[_join_cols_full + ["ext_own"]]
+            .drop_duplicates(subset=_join_cols_full)
+            .copy()
+        )
         ext_full = ext_full.rename(columns={"ext_own": "_ext_own_full"})
         pool = pool.merge(ext_full, on=_join_cols_full, how="left", suffixes=("", "_dup"))
         if "_ext_own_full" in pool.columns:
@@ -236,7 +255,11 @@ def merge_ext_ownership(pool_df: pd.DataFrame, ext_df: pd.DataFrame) -> pd.DataF
     if "ext_own" not in pool.columns or pool["ext_own"].isna().all():
         _join_cols_short = [c for c in ["player_name", "salary"] if c in pool.columns and c in ext.columns]
         if _join_cols_short:
-            ext_short = ext[_join_cols_short + ["ext_own"]].copy()
+            ext_short = (
+                ext[_join_cols_short + ["ext_own"]]
+                .drop_duplicates(subset=_join_cols_short)
+                .copy()
+            )
             ext_short = ext_short.rename(columns={"ext_own": "_ext_own_short"})
             pool = pool.merge(ext_short, on=_join_cols_short, how="left")
             if "_ext_own_short" in pool.columns:
@@ -245,14 +268,15 @@ def merge_ext_ownership(pool_df: pd.DataFrame, ext_df: pd.DataFrame) -> pd.DataF
                 pool["ext_own"] = pool["ext_own"].combine_first(pool["_ext_own_short"])
                 pool = pool.drop(columns=["_ext_own_short"])
 
-    # Step 4: normalized name fallback — strip + lowercase for unmatched rows
-    # Handles cases where names differ in whitespace or casing between sources.
+    # Step 4: normalized name fallback — strip + lowercase + remove punctuation for
+    # unmatched rows.  Handles names that differ in whitespace, casing, or
+    # punctuation between sources (e.g. "De'Aaron Fox" vs "DeAaron Fox").
     if "player_name" in pool.columns and "player_name" in ext.columns:
         _unmatched = pool["ext_own"].isna() if "ext_own" in pool.columns else pd.Series(True, index=pool.index)
         if _unmatched.any():
-            pool["_name_clean"] = pool["player_name"].astype(str).str.strip().str.lower()
+            pool["_name_clean"] = pool["player_name"].astype(str).apply(_clean_name)
             ext_norm = ext[["player_name", "ext_own"]].copy()
-            ext_norm["_name_clean"] = ext_norm["player_name"].astype(str).str.strip().str.lower()
+            ext_norm["_name_clean"] = ext_norm["player_name"].astype(str).apply(_clean_name)
             ext_norm = ext_norm[["_name_clean", "ext_own"]].drop_duplicates("_name_clean")
             ext_norm = ext_norm.rename(columns={"ext_own": "_ext_own_norm"})
             pool = pool.merge(ext_norm, on="_name_clean", how="left")
@@ -432,9 +456,13 @@ def blend_and_normalize(
     has_model = "own_model" in pool.columns and pool["own_model"].notna().any()
 
     if has_ext and has_model:
-        ext = pd.to_numeric(pool["ext_own"], errors="coerce").fillna(0.0)
+        ext = pd.to_numeric(pool["ext_own"], errors="coerce")
         model = pd.to_numeric(pool["own_model"], errors="coerce").fillna(0.0)
-        combined = alpha * ext + (1.0 - alpha) * model
+        # For players without ext_own data (unmatched merge), substitute the
+        # model prediction so the blend formula works correctly and those players
+        # don't get forced to 0%.
+        ext_filled = ext.fillna(model)
+        combined = alpha * ext_filled + (1.0 - alpha) * model
     elif has_ext:
         combined = pd.to_numeric(pool["ext_own"], errors="coerce").fillna(0.0)
     elif has_model:

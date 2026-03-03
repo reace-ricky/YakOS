@@ -209,6 +209,13 @@ def apply_ownership_pipeline(
         if ext_vals.notna().any() and (ext_vals > 0).any():
             pool["ext_own"] = ext_vals
 
+    # Diagnostic: log how many players received ext_own values after merge
+    if "ext_own" in pool.columns:
+        matched = int(pool["ext_own"].notna().sum())
+        total = len(pool)
+        pct = matched / total * 100 if total > 0 else 0.0
+        print(f"[ownership] ext_own merge: {matched}/{total} players matched ({pct:.0f}%)")
+
     # Determine whether we have valid external ownership data.
     # Re-use the already-coerced series when ext_own was just set above.
     if "ext_own" in pool.columns:
