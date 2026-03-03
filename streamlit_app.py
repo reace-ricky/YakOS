@@ -119,6 +119,19 @@ from yak_core.dvp import (  # type: ignore
     DVP_STALE_DAYS,
     DVP_DEFAULT_PATH as _DVP_DEFAULT_PATH,
 )
+from yak_core.alert_backtest import (  # type: ignore
+    run_alert_backtest,
+    score_stack_alerts,
+    score_high_value_alerts,
+    score_injury_cascade_alerts,
+    score_game_environment_alerts,
+    aggregate_alert_metrics,
+    compute_overall_edge,
+    tune_alert_thresholds,
+    load_backtest,
+    list_backtest_slates,
+    DEFAULT_ALERT_THRESHOLDS,
+)
 
 # Map internal DK contest type string -> ContestType enum.
 # Keys match values produced by DK_CONTEST_TYPE_MAP in yak_core/calibration.py.
@@ -4630,6 +4643,205 @@ with tab_calib:
 
     st.markdown("---")
     st.caption("Ricky's Calibration Lab — BacktestIQ-style strategy calibration.")
+
+    # ── Section F: 📊 Alert Validation Panel (Sprint 4B) ────────────────────
+    st.markdown("### F. 📊 Alert Validation")
+
+    _av_pool = st.session_state.get("pool_df")
+    _av_actuals_in_pool = _av_pool is not None and not _av_pool.empty and "actual_fp" in _av_pool.columns
+
+    with st.expander("📊 Alert Validation Panel", expanded=False):
+        st.markdown(
+            "Re-run the full alert engine on historical slates to measure hit rates, "
+            "false positives, and overall edge vs field baseline.  "
+            "Then optionally auto-tune thresholds and re-run."
+        )
+
+        # ── Slate selection ──────────────────────────────────────────────────
+        _av_use_current = st.checkbox(
+            "Use currently-loaded pool + actuals (requires actual_fp column)",
+            value=_av_actuals_in_pool,
+            key="av_use_current_pool",
+        )
+
+        _av_run = st.button("▶ Run Alert Backtest", key="av_run_btn")
+
+        if _av_run:
+            if _av_use_current and _av_actuals_in_pool:
+                with st.spinner("Running alert backtest on current slate…"):
+                    try:
+                        _pool_for_bt = _av_pool.copy()
+                        _actuals_for_bt = _pool_for_bt[["player_name", "actual_fp"]].copy()
+                        if "actual_minutes" in _pool_for_bt.columns:
+                            _actuals_for_bt["actual_minutes"] = _pool_for_bt["actual_minutes"].values
+                        _slate_date_bt = str(
+                            st.session_state.get("slate_date", pd.Timestamp.now().strftime("%Y-%m-%d"))
+                        )
+                        _bt_df = run_alert_backtest(
+                            _slate_date_bt,
+                            _pool_for_bt,
+                            _actuals_for_bt,
+                            persist=True,
+                        )
+                        st.session_state["alert_backtest_df"] = _bt_df
+                        st.session_state["alert_backtest_slates"] = [_slate_date_bt]
+                        st.success(f"✅ Backtest complete — {len(_bt_df)} alert records generated.")
+                    except Exception as _av_exc:
+                        st.error(f"Backtest failed: {_av_exc}")
+            else:
+                st.info(
+                    "Load a player pool with an **actual_fp** column in 📂 Load Player Pool above, "
+                    "then check the box to run the backtest on that slate."
+                )
+
+        # ── Show results ─────────────────────────────────────────────────────
+        _av_bt_df = st.session_state.get("alert_backtest_df")
+
+        if _av_bt_df is not None and not _av_bt_df.empty:
+            _av_metrics = aggregate_alert_metrics([_av_bt_df])
+            _av_edge = compute_overall_edge(_av_bt_df)
+
+            st.markdown("---")
+            # Overall edge score
+            st.markdown("#### 🎯 Overall Blind-Follow Edge")
+            _ecol1, _ecol2, _ecol3 = st.columns(3)
+            _ecol1.metric("Flagged Hit Rate", f"{_av_edge['flagged_hit_rate']:.1%}")
+            _ecol2.metric("Baseline Hit Rate", f"{_av_edge['baseline_hit_rate']:.1%}")
+            _edge_delta = _av_edge["edge"]
+            _ecol3.metric(
+                "Edge",
+                f"{_edge_delta:+.1%}",
+                delta=f"{_edge_delta:+.1%}",
+                delta_color="normal",
+            )
+            st.info(_av_edge["summary"])
+
+            st.markdown("---")
+            st.markdown("#### 📊 Per-Alert-Type Metrics")
+
+            # Stack alerts
+            _stk = _av_metrics["stack"]
+            with st.expander(f"🔥 Stack Alerts — hit rate {_stk['hit_rate']:.1%} ({_stk['n_flagged']} flagged)", expanded=True):
+                _sc1, _sc2, _sc3 = st.columns(3)
+                _sc1.metric("Hit Rate", f"{_stk['hit_rate']:.1%}")
+                _sc2.metric("Dud Rate", f"{_stk['dud_rate']:.1%}")
+                _sc3.metric("False-Neg Rate", f"{_stk['false_neg_rate']:.1%}")
+                if not _stk["per_slate"].empty:
+                    st.dataframe(_stk["per_slate"], use_container_width=True, hide_index=True)
+                if not _stk["examples_hit"].empty:
+                    st.markdown("**Big Hits**")
+                    st.dataframe(
+                        _stk["examples_hit"][["entity_id", "actual_fp", "proj_total"]].rename(
+                            columns={"entity_id": "team", "actual_fp": "actual_fp", "proj_total": "proj"}
+                        ),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                if not _stk["examples_miss"].empty:
+                    st.markdown("**Big Misses**")
+                    st.dataframe(
+                        _stk["examples_miss"][["entity_id", "actual_fp", "proj_total"]].rename(
+                            columns={"entity_id": "team"}
+                        ),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+            # High-value alerts
+            _hv = _av_metrics["high_value"]
+            with st.expander(f"💎 High-Value Alerts — hit rate {_hv['overall_hit_rate']:.1%} ({_hv['n_flagged']} flagged)", expanded=True):
+                _hc1, _hc2 = st.columns(2)
+                _hc1.metric("Overall Hit Rate", f"{_hv['overall_hit_rate']:.1%}")
+                _hc2.metric("Flagged vs Unflagged Δ", f"{_hv['avg_delta_flagged'] - _hv['avg_delta_unflagged']:+.1f} FP")
+                if not _hv["tier_detail"].empty:
+                    st.markdown("**By Salary Tier**")
+                    _tier_disp = _hv["tier_detail"].copy()
+                    _tier_disp["hit_rate"] = _tier_disp["hit_rate"].apply(lambda x: f"{x:.1%}")
+                    st.dataframe(_tier_disp, use_container_width=True, hide_index=True)
+                if not _hv["examples_hit"].empty:
+                    st.markdown("**Big Hits**")
+                    _hv_cols = [c for c in ["entity_id", "actual_fp", "proj_total"] if c in _hv["examples_hit"].columns]
+                    st.dataframe(_hv["examples_hit"][_hv_cols], use_container_width=True, hide_index=True)
+
+            # Injury cascade alerts
+            _cas = _av_metrics["injury_cascade"]
+            with st.expander(f"🚑 Injury Cascade — {_cas['n_beneficiaries']} beneficiaries", expanded=False):
+                _ic1, _ic2, _ic3 = st.columns(3)
+                _ic1.metric("% Minutes Increased", f"{_cas['pct_minutes_increased']:.1%}")
+                _ic2.metric("% FP Closer to Bumped", f"{_cas['pct_fp_closer_to_bumped']:.1%}")
+                _ic3.metric("Mean Signed Error", f"{_cas['mean_signed_error']:+.1f} FP")
+                if not _cas["per_slate"].empty:
+                    st.dataframe(_cas["per_slate"], use_container_width=True, hide_index=True)
+
+            # Game environment alerts
+            _ge = _av_metrics["game_environment"]
+            with st.expander(f"⚡ Game Environment — {_ge['n_shootout_flagged']} shootouts, {_ge['n_blowout_flagged']} blowouts", expanded=False):
+                _gc1, _gc2, _gc3 = st.columns(3)
+                _gc1.metric("Shootout Hit Rate", f"{_ge['shootout_hit_rate']:.1%}")
+                _gc2.metric("Shootout Top-3 Rate", f"{_ge['shootout_top3_rate']:.1%}")
+                _gc3.metric("Blowout Risk Hit Rate", f"{_ge['blowout_risk_hit_rate']:.1%}")
+
+            # ── Auto-Tuning Block ─────────────────────────────────────────────
+            st.markdown("---")
+            st.markdown("#### 🔧 Auto-Tuning Suggestions")
+            _tuning = tune_alert_thresholds(_av_metrics)
+            if _tuning["needs_tuning"]:
+                st.warning(f"⚠️ {len(_tuning['changes'])} threshold adjustment(s) suggested:")
+                for _ch in _tuning["changes"]:
+                    st.markdown(f"- {_ch}")
+
+                _av_tune_col1, _av_tune_col2 = st.columns(2)
+                with _av_tune_col1:
+                    st.markdown("**Current Thresholds**")
+                    st.json(_tuning["current"])
+                with _av_tune_col2:
+                    st.markdown("**Proposed Thresholds**")
+                    st.json(_tuning["proposed"])
+
+                if st.button("🔄 Re-run with Tuned Thresholds", key="av_retune_btn"):
+                    if _av_actuals_in_pool:
+                        with st.spinner("Re-running backtest with tuned thresholds…"):
+                            try:
+                                _pool_for_bt2 = st.session_state["pool_df"].copy()
+                                _actuals_for_bt2 = _pool_for_bt2[["player_name", "actual_fp"]].copy()
+                                if "actual_minutes" in _pool_for_bt2.columns:
+                                    _actuals_for_bt2["actual_minutes"] = _pool_for_bt2["actual_minutes"].values
+                                _slate_date_bt2 = str(
+                                    st.session_state.get("slate_date", pd.Timestamp.now().strftime("%Y-%m-%d"))
+                                )
+                                _bt_df_tuned = run_alert_backtest(
+                                    _slate_date_bt2,
+                                    _pool_for_bt2,
+                                    _actuals_for_bt2,
+                                    thresholds=_tuning["proposed"],
+                                    persist=False,
+                                )
+                                _av_metrics_tuned = aggregate_alert_metrics([_bt_df_tuned])
+                                _av_edge_tuned = compute_overall_edge(_bt_df_tuned)
+
+                                st.markdown("##### Before vs After Tuning")
+                                _bac1, _bac2 = st.columns(2)
+                                with _bac1:
+                                    st.markdown("**Before**")
+                                    st.metric("Stack Hit Rate", f"{_av_metrics['stack']['hit_rate']:.1%}")
+                                    st.metric("HV Hit Rate", f"{_av_metrics['high_value']['overall_hit_rate']:.1%}")
+                                    st.metric("Edge", f"{_av_edge['edge']:+.1%}")
+                                with _bac2:
+                                    st.markdown("**After**")
+                                    st.metric("Stack Hit Rate", f"{_av_metrics_tuned['stack']['hit_rate']:.1%}")
+                                    st.metric("HV Hit Rate", f"{_av_metrics_tuned['high_value']['overall_hit_rate']:.1%}")
+                                    st.metric("Edge", f"{_av_edge_tuned['edge']:+.1%}")
+                            except Exception as _rt_exc:
+                                st.error(f"Re-run failed: {_rt_exc}")
+                    else:
+                        st.info("Load a pool with actuals to re-run.")
+            else:
+                st.success("✅ All alert thresholds are performing well — no tuning required.")
+
+        elif _av_bt_df is not None and _av_bt_df.empty:
+            st.info("Backtest returned no records. Ensure the pool has opponent/team/proj columns.")
+        else:
+            st.info("Run the alert backtest above to see validation metrics here.")
 
 
 # ── System Audit (PR #62) ──────────────────────────────────────────
