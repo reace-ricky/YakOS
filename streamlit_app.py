@@ -52,7 +52,6 @@ from yak_core.lineups import build_multiple_lineups_with_exposure, to_dk_upload_
 from yak_core.calibration import (  # type: ignore
     run_backtest_lineups,
     compute_calibration_metrics,
-    identify_calibration_gaps,
     load_calibration_config,
     save_calibration_config,
     DFS_ARCHETYPES,
@@ -60,8 +59,6 @@ from yak_core.calibration import (  # type: ignore
     DK_CONTEST_TYPE_MAP,
     apply_archetype,
     get_calibration_queue,
-    action_queue_items,
-    suggest_config_from_queue,
     build_approved_lineups,
     get_approved_lineups_by_archetype,
     compute_slate_kpis,
@@ -2466,6 +2463,12 @@ with tab_lab:
             key="cal_rg_upload",
             help="RotoGrinders or compatible export — FPTS/SALARY/OWNERSHIP columns mapped automatically.",
         )
+        csv_slate_date = st.date_input(
+            "Slate date for this CSV (used to fetch actuals for past dates)",
+            value=_today_est(),
+            key="cal_csv_slate_date",
+            help="Set to the date of this slate. For past dates the app will auto-fetch actuals when an API key is present.",
+        )
     with cal_upload_r:
         st.markdown("**— or fetch from API —**")
         fetch_slate_date_cal = st.date_input(
@@ -2563,7 +2566,66 @@ with tab_lab:
             st.session_state["pool_df"] = pool_df_cal
             st.session_state["sim_player_pool_clean"] = pool_df_cal.copy()
             st.session_state["_pool_df_filename"] = rg_upload_cal.name
-            st.success(f"✅ Pool loaded — {len(pool_df_cal)} players. Head to **🏀 Ricky's Slate Room** to review.")
+            _csv_date_str = str(csv_slate_date)
+            st.session_state["pool_date"] = _csv_date_str
+            _csv_excl_note = f" {len(_csv_excl)} excluded (OUT/IR)." if _csv_excl else ""
+            # For past dates, auto-fetch actuals when an API key is available so that
+            # historical calibration works the same way as the API-fetch path.
+            if csv_slate_date < _today_est():
+                _csv_api_key = st.session_state.get("rapidapi_key", "")
+                if _csv_api_key:
+                    try:
+                        _csv_acts = fetch_actuals_from_api(
+                            csv_slate_date.strftime("%Y%m%d"),
+                            {"RAPIDAPI_KEY": _csv_api_key},
+                        )
+                        st.session_state["actuals"][_csv_date_str] = _csv_acts
+                        st.session_state["sim_actuals_df"] = _csv_acts
+                        st.session_state["historical_bundles"][_csv_date_str] = HistoricalSlateBundle(
+                            slate_date=_csv_date_str,
+                            pool_df=pool_df_cal.copy(),
+                            actuals=_csv_acts,
+                            proj_col="proj",
+                        )
+                        st.success(
+                            f"✅ Pool loaded — {len(pool_df_cal)} players.{_csv_excl_note} "
+                            f"Actuals loaded for {_csv_date_str} ({len(_csv_acts)} players). "
+                            "Head to **🏀 Ricky's Slate Room** to review."
+                        )
+                    except NoGamesScheduledError:
+                        st.session_state["historical_bundles"][_csv_date_str] = HistoricalSlateBundle(
+                            slate_date=_csv_date_str,
+                            pool_df=pool_df_cal.copy(),
+                            actuals=None,
+                            proj_col="proj",
+                        )
+                        st.success(f"✅ Pool loaded — {len(pool_df_cal)} players.{_csv_excl_note}")
+                        st.info(f"No games scheduled for {_csv_date_str}.")
+                    except Exception as _csv_ae:
+                        st.session_state["historical_bundles"][_csv_date_str] = HistoricalSlateBundle(
+                            slate_date=_csv_date_str,
+                            pool_df=pool_df_cal.copy(),
+                            actuals=None,
+                            proj_col="proj",
+                        )
+                        st.success(f"✅ Pool loaded — {len(pool_df_cal)} players.{_csv_excl_note}")
+                        st.warning(f"Actuals API error (set your API key to retry): {_csv_ae}")
+                else:
+                    # No API key: store the bundle without actuals; user can load actuals manually
+                    st.session_state["historical_bundles"][_csv_date_str] = HistoricalSlateBundle(
+                        slate_date=_csv_date_str,
+                        pool_df=pool_df_cal.copy(),
+                        actuals=None,
+                        proj_col="proj",
+                    )
+                    st.success(f"✅ Pool loaded — {len(pool_df_cal)} players.{_csv_excl_note}")
+                    st.info(
+                        f"Past slate ({_csv_date_str}) — set your Tank01 API key in the sidebar "
+                        "to auto-fetch actuals for historical calibration."
+                    )
+            else:
+                st.success(f"✅ Pool loaded — {len(pool_df_cal)} players.{_csv_excl_note}")
+                st.info("Head to **🏀 Ricky's Slate Room** to review.")
 
     current_pool_df = st.session_state.get("pool_df")
     if current_pool_df is not None and not current_pool_df.empty:
@@ -3410,6 +3472,20 @@ with tab_lab:
                 news_updates.append(update)
 
             if news_updates:
+                # Validate: warn for player names that don't match the pool
+                if pool_for_sim is not None and "player_name" in pool_for_sim.columns:
+                    _pool_names = set(pool_for_sim["player_name"].tolist())
+                    _unmatched = [
+                        u["player_name"] for u in news_updates
+                        if u["player_name"] not in _pool_names
+                    ]
+                    if _unmatched:
+                        st.warning(
+                            f"⚠️ Manual override: {len(_unmatched)} player(s) not found in the "
+                            f"loaded pool and will be ignored — check spelling: "
+                            + ", ".join(_unmatched[:10])
+                            + (" ..." if len(_unmatched) > 10 else "")
+                        )
                 sim_pool = simulate_live_updates(pool_for_sim, news_updates)
                 out_names_manual = [
                     u["player_name"] for u in news_updates
@@ -5314,6 +5390,16 @@ with tab_calib:
                 with st.spinner("Running alert backtest on current slate…"):
                     try:
                         _pool_for_bt = _av_pool.copy()
+                        # Normalise the projection column: use proj_fp (external source) when
+                        # it matches the column the sim engine actually used so that alert
+                        # validation scores against the same numbers.
+                        _av_active_src = st.session_state.get("sidebar_proj_source")
+                        _av_has_proj_fp = (
+                            "proj_fp" in _pool_for_bt.columns
+                            and pd.to_numeric(_pool_for_bt["proj_fp"], errors="coerce").fillna(0).max() > 0
+                        )
+                        if _av_has_proj_fp and _av_active_src not in (None, "— upload projections in Lab —"):
+                            _pool_for_bt["proj"] = _pool_for_bt["proj_fp"]
                         _actuals_for_bt = _pool_for_bt[["player_name", "actual_fp"]].copy()
                         if "actual_minutes" in _pool_for_bt.columns:
                             _actuals_for_bt["actual_minutes"] = _pool_for_bt["actual_minutes"].values
