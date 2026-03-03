@@ -8,7 +8,7 @@ from typing import Optional
 # RG projections CSV -> our internal schema
 _RG_PROJ_MAP = {
     "player_id": "rg_player_id",
-    "name": "name",
+    "name": "player_name",
     "team": "team",
     "opp": "opp",
     "pos": "pos",
@@ -83,7 +83,7 @@ def _apply_map(df: pd.DataFrame, col_map: dict) -> pd.DataFrame:
 
 def load_rg_projections(path: str) -> pd.DataFrame:
     """Load a RotoGrinders projections CSV and normalize columns.
-    Returns DataFrame with columns: name, team, opp, pos, proj, salary,
+    Returns DataFrame with columns: player_name, team, opp, pos, proj, salary,
     proj_own, ceil, floor, smash, opto_pct, minutes, rg_value.
     """
     df = pd.read_csv(path)
@@ -127,7 +127,7 @@ def merge_rg_with_pool(
     Adds any new columns from rg_df that pool_df doesn't have yet.
     """
     if merge_cols is None:
-        merge_cols = ["name", "team"]
+        merge_cols = ["player_name", "team"]
     # Find new columns in rg_df that pool_df lacks
     new_cols = [c for c in rg_df.columns if c not in pool_df.columns and c not in merge_cols]
     if not new_cols:
