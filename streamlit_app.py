@@ -564,6 +564,70 @@ def _add_injury_columns(pool_df: pd.DataFrame) -> pd.DataFrame:
     return pool
 
 
+def _process_clean_pool(
+    pool: pd.DataFrame,
+) -> "tuple[pd.DataFrame, list, list]":
+    """Apply the canonical post-load cleaning pipeline to a player pool.
+
+    This is the single authoritative function that every pool loading path
+    (Lab CSV upload, Lab API fetch) must call.  It ensures the injury cascade,
+    ``injury_status``/``is_out`` columns, the OUT/IR hard-drop, and the
+    ownership pipeline (``own_proj``) are applied identically everywhere so that
+    the Slate Room, Optimizer, and Sim Module all read from a clean, consistent
+    pool.
+
+    Parameters
+    ----------
+    pool : pd.DataFrame
+        Raw pool after column normalisation and YakOS projection application.
+
+    Returns
+    -------
+    cleaned_pool : pd.DataFrame
+        Pool with OUT/IR players removed, injury cascade bumps applied, and
+        ``own_proj`` populated via :func:`~yak_core.ownership.apply_ownership_pipeline`.
+    cascade : list of dict
+        Cascade report from :func:`~yak_core.injury_cascade.apply_injury_cascade`.
+    auto_excluded : list of dict
+        ``[{player_name, status}, …]`` for every player that was hard-dropped.
+    """
+    from yak_core.sims import _INELIGIBLE_STATUSES as _INELIG_P
+
+    # 1. Apply manual injury overrides (config/manual_injuries.csv) so that the
+    #    cascade redistributes minutes from ANY out player, not just API ones.
+    pool = apply_manual_injury_overrides_to_pool(pool)
+
+    # 2. Injury cascade — OUT players must still be in the pool so their minutes
+    #    can be redistributed to healthy teammates.
+    pool, cascade = apply_injury_cascade(pool)
+
+    # 3. Tag each player with injury_status / is_out columns.
+    pool = _add_injury_columns(pool)
+
+    # 4. Hard-drop ineligible players so they never reach the optimizer or sims.
+    auto_excluded: list = []
+    if "is_out" in pool.columns and "player_name" in pool.columns:
+        auto_excluded = (
+            pool.loc[pool["is_out"], ["player_name", "status"]].to_dict("records")
+        )
+        pool = pool[~pool["is_out"]].reset_index(drop=True)
+    elif "status" in pool.columns and "player_name" in pool.columns:
+        _inelig_mask = pool["status"].fillna("").str.upper().isin(_INELIG_P)
+        auto_excluded = (
+            pool.loc[_inelig_mask, ["player_name", "status"]].to_dict("records")
+        )
+        pool = pool[~_inelig_mask].reset_index(drop=True)
+
+    # 5. Ownership pipeline: populates own_model + own_proj (ext_own blended).
+    try:
+        pool = apply_ownership_pipeline(pool)
+    except Exception:
+        if "own_proj" not in pool.columns:
+            pool["own_proj"] = pool["proj_own"] if "proj_own" in pool.columns else 0.0
+
+    return pool, cascade, auto_excluded
+
+
 def ensure_session_state():
     if "lineups_df" not in st.session_state:
         st.session_state["lineups_df"] = None
@@ -1065,84 +1129,9 @@ with tab_slate:
     if sport == "PGA":
         st.info("PGA support is coming soon. Please select NBA for now.")
     else:
-        # ── API fetch on the dashboard ───────────────────────────────────
-        with st.expander("🌐 Fetch Player Pool from API", expanded=False):
-            slate_fetch_col_l, slate_fetch_col_r = st.columns([1, 1])
-            with slate_fetch_col_l:
-                slate_fetch_date = st.date_input(
-                    "Slate date",
-                    value=_today_est(),
-                    key="slate_fetch_date",
-                )
-            with slate_fetch_col_r:
-                if st.button(
-                    "🌐 Fetch Pool from API",
-                    key="slate_fetch_api_btn",
-                    help="Requires Tank01 RapidAPI key set in the sidebar.",
-                ):
-                    api_key = st.session_state.get("rapidapi_key", "")
-                    if not api_key:
-                        st.error("Set your Tank01 RapidAPI key in the sidebar first.")
-                    else:
-                        with st.spinner("Fetching live DK pool from Tank01…"):
-                            try:
-                                live_pool = fetch_live_opt_pool(
-                                    str(slate_fetch_date),
-                                    {"RAPIDAPI_KEY": api_key},
-                                )
-                                if "player_name" not in live_pool.columns and "name" in live_pool.columns:
-                                    live_pool = live_pool.rename(columns={"name": "player_name"})
-                                live_pool = _apply_yakos_projections(live_pool, knobs=st.session_state.get("cal_knobs", {}))
-                                # Apply manual injury overrides before cascade so OUT players get redistributed
-                                live_pool = apply_manual_injury_overrides_to_pool(live_pool)
-                                # Apply injury cascade first (OUT players must still be in pool to redistribute minutes)
-                                live_pool, _cascade = apply_injury_cascade(live_pool)
-                                # Add injury_status / is_out columns then hard-drop ineligible players
-                                live_pool = _add_injury_columns(live_pool)
-                                _auto_excl = []
-                                if "is_out" in live_pool.columns and "player_name" in live_pool.columns:
-                                    _auto_excl = live_pool.loc[live_pool["is_out"], ["player_name", "status"]].to_dict("records")
-                                    live_pool = live_pool[~live_pool["is_out"]].reset_index(drop=True)
-                                elif "status" in live_pool.columns and "player_name" in live_pool.columns:
-                                    from yak_core.sims import _INELIGIBLE_STATUSES as _INELIG
-                                    _inelig_mask = live_pool["status"].fillna("").str.upper().isin(_INELIG)
-                                    _auto_excl = live_pool.loc[_inelig_mask, ["player_name", "status"]].to_dict("records")
-                                    live_pool = live_pool[~_inelig_mask].reset_index(drop=True)
-                                st.session_state["auto_excluded_players"] = _auto_excl
-                                st.session_state["injury_cascade"] = _cascade
-                                st.session_state["pool_df"] = live_pool
-                                st.session_state["sim_player_pool_clean"] = live_pool.copy()
-                                st.session_state["pool_date"] = str(slate_fetch_date)
-                                # Auto-fetch actuals for past dates
-                                _date_str = str(slate_fetch_date)
-                                _n_excl = len(_auto_excl)
-                                _excl_note = f" {_n_excl} excluded (OUT/IR)." if _n_excl else ""
-                                if slate_fetch_date < _today_est():
-                                    try:
-                                        _acts = fetch_actuals_from_api(
-                                            slate_fetch_date.strftime("%Y%m%d"),
-                                            {"RAPIDAPI_KEY": api_key},
-                                        )
-                                        st.session_state["actuals"][_date_str] = _acts
-                                        st.session_state["sim_actuals_df"] = _acts
-                                        st.success(
-                                            f"✅ Loaded {len(live_pool)} players.{_excl_note} "
-                                            f"Actuals loaded for {_date_str} ({len(_acts)} players)."
-                                        )
-                                    except NoGamesScheduledError:
-                                        st.success(f"✅ Loaded {len(live_pool)} players.{_excl_note}")
-                                        st.info(f"No games scheduled for {_date_str}.")
-                                    except Exception as _ae:
-                                        st.success(f"✅ Loaded {len(live_pool)} players.{_excl_note}")
-                                        st.warning(f"Actuals API error: {_ae}")
-                                else:
-                                    st.success(
-                                        f"✅ Loaded {len(live_pool)} players.{_excl_note} "
-                                        "Live slate — no actuals yet."
-                                    )
-                            except Exception as _e:
-                                st.error(f"API fetch failed: {_e}")
-
+        # ── Pool source indicator ────────────────────────────────────────
+        # The Slate Room reads the pool published by 🔒 Ricky's Lab.
+        # Load or fetch your player pool in the Lab tab to populate this view.
         pool_df = st.session_state.get("pool_df")
         approved_lineups = st.session_state.get("approved_lineups", [])
         last_cal_ts = st.session_state.get("last_calibration_ts")
@@ -1909,21 +1898,8 @@ with tab_lab:
                         if "player_name" not in live_pool.columns and "name" in live_pool.columns:
                             live_pool = live_pool.rename(columns={"name": "player_name"})
                         live_pool = _apply_yakos_projections(live_pool, knobs=st.session_state.get("cal_knobs", {}))
-                        # Apply manual injury overrides before cascade so OUT players get redistributed
-                        live_pool = apply_manual_injury_overrides_to_pool(live_pool)
-                        # Apply injury cascade first (OUT players must still be in pool to redistribute minutes)
-                        live_pool, _cascade = apply_injury_cascade(live_pool)
-                        # Add injury_status / is_out columns then hard-drop ineligible players
-                        live_pool = _add_injury_columns(live_pool)
-                        _cal_auto_excl = []
-                        if "is_out" in live_pool.columns and "player_name" in live_pool.columns:
-                            _cal_auto_excl = live_pool.loc[live_pool["is_out"], ["player_name", "status"]].to_dict("records")
-                            live_pool = live_pool[~live_pool["is_out"]].reset_index(drop=True)
-                        elif "status" in live_pool.columns and "player_name" in live_pool.columns:
-                            from yak_core.sims import _INELIGIBLE_STATUSES as _INELIG
-                            _cal_inelig_mask = live_pool["status"].fillna("").str.upper().isin(_INELIG)
-                            _cal_auto_excl = live_pool.loc[_cal_inelig_mask, ["player_name", "status"]].to_dict("records")
-                            live_pool = live_pool[~_cal_inelig_mask].reset_index(drop=True)
+                        # Canonical Lab pipeline: cascade → hard-drop OUT/IR → own_proj
+                        live_pool, _cascade, _cal_auto_excl = _process_clean_pool(live_pool)
                         st.session_state["auto_excluded_players"] = _cal_auto_excl
                         st.session_state["injury_cascade"] = _cascade
                         st.session_state["pool_df"] = live_pool
@@ -1963,37 +1939,12 @@ with tab_lab:
         if st.session_state.get("_pool_df_filename") != rg_upload_cal.name:
             raw_df = pd.read_csv(rg_upload_cal)
             pool_df_cal = rename_rg_columns_to_yakos(raw_df)
-            # Apply manual injury overrides before cascade
-            pool_df_cal = apply_manual_injury_overrides_to_pool(pool_df_cal)
-            # Apply injury cascade when status column is present and minutes are available
-            if "status" in pool_df_cal.columns and (
-                "proj_minutes" in pool_df_cal.columns or "minutes" in pool_df_cal.columns
-            ):
-                pool_df_cal, _csv_cascade = apply_injury_cascade(pool_df_cal)
-                st.session_state["injury_cascade"] = _csv_cascade
-            else:
-                st.session_state["injury_cascade"] = []
-            # Add injury_status / is_out columns then hard-drop ineligible players
-            pool_df_cal = _add_injury_columns(pool_df_cal)
-            if "is_out" in pool_df_cal.columns:
-                _csv_excl = pool_df_cal.loc[pool_df_cal["is_out"], ["player_name", "status"]].to_dict("records") if "player_name" in pool_df_cal.columns else []
-                pool_df_cal = pool_df_cal[~pool_df_cal["is_out"]].reset_index(drop=True)
-            elif "status" in pool_df_cal.columns:
-                from yak_core.sims import _INELIGIBLE_STATUSES as _INELIG
-                _csv_inelig_mask = pool_df_cal["status"].fillna("").str.upper().isin(_INELIG)
-                _csv_excl = pool_df_cal.loc[_csv_inelig_mask, ["player_name", "status"]].to_dict("records") if "player_name" in pool_df_cal.columns else []
-                pool_df_cal = pool_df_cal[~_csv_inelig_mask].reset_index(drop=True)
-            else:
-                _csv_excl = []
+            # Canonical Lab pipeline: cascade → hard-drop OUT/IR → own_proj.
+            # CSV pools carry RG/API projections directly — no re-projection needed.
+            pool_df_cal, _csv_cascade, _csv_excl = _process_clean_pool(pool_df_cal)
+            st.session_state["injury_cascade"] = _csv_cascade
             if _csv_excl:
                 st.session_state["auto_excluded_players"] = _csv_excl
-            # Apply ownership pipeline so own_proj is populated from POWN/proj_own
-            try:
-                pool_df_cal = apply_ownership_pipeline(pool_df_cal)
-            except Exception:
-                # Graceful fallback: mirror proj_own → own_proj when pipeline fails
-                if "own_proj" not in pool_df_cal.columns:
-                    pool_df_cal["own_proj"] = pool_df_cal["proj_own"] if "proj_own" in pool_df_cal.columns else 1.0
             st.session_state["pool_df"] = pool_df_cal
             st.session_state["sim_player_pool_clean"] = pool_df_cal.copy()
             st.session_state["_pool_df_filename"] = rg_upload_cal.name
