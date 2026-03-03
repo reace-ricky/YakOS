@@ -88,6 +88,7 @@ from yak_core.live import (  # type: ignore
     fetch_injury_updates,
     fetch_actuals_from_api,
     NoGamesScheduledError,
+    apply_manual_injury_overrides_to_pool,
 )
 from yak_core.multislate import (  # type: ignore
     parse_dk_contest_csv,
@@ -509,6 +510,9 @@ def _refresh_injury_statuses(
                 pool.loc[mask, "status"] = new_status
                 changes.append(f"{p_name}: {old_status} → {new_status}")
 
+    # Apply manual injury overrides (always win over Tank01 status)
+    pool = apply_manual_injury_overrides_to_pool(pool)
+
     # Drop any player whose status is ineligible so they never appear in sims
     if "status" in pool.columns:
         inelig = pool["status"].fillna("").str.upper().isin(_INELIG_RF)
@@ -517,7 +521,33 @@ def _refresh_injury_statuses(
                 changes.append(f"{_p}: removed (ineligible status)")
             pool = pool[~inelig].reset_index(drop=True)
 
+    # Keep sim_player_pool_clean in sync
+    pool = _add_injury_columns(pool)
+    st.session_state["sim_player_pool_clean"] = pool[~pool["is_out"]].reset_index(drop=True) if "is_out" in pool.columns else pool
+
     return pool, changes
+
+
+def _add_injury_columns(pool_df: pd.DataFrame) -> pd.DataFrame:
+    """Add ``injury_status`` and ``is_out`` columns derived from ``status``.
+
+    * ``injury_status`` = ``"Out"`` when status is OUT/IR/DND/etc.,
+      ``"Day-To-Day"`` for GTD/Q/Questionable, ``"Healthy"`` otherwise.
+    * ``is_out`` = ``True`` when ``injury_status == "Out"``.
+    """
+    from yak_core.sims import _INELIGIBLE_STATUSES as _INELIG_S
+    _GTD_STATUSES = {"GTD", "Q", "QUESTIONABLE", "DAY-TO-DAY", "DTD", "PROBABLE"}
+    pool = pool_df.copy()
+    if "status" not in pool.columns:
+        pool["injury_status"] = "Healthy"
+        pool["is_out"] = False
+        return pool
+    norm = pool["status"].fillna("").astype(str).str.strip().str.upper()
+    pool["injury_status"] = "Healthy"
+    pool.loc[norm.isin(_GTD_STATUSES), "injury_status"] = "Day-To-Day"
+    pool.loc[norm.isin(_INELIG_S), "injury_status"] = "Out"
+    pool["is_out"] = pool["injury_status"].eq("Out")
+    return pool
 
 
 def ensure_session_state():
@@ -558,6 +588,8 @@ def ensure_session_state():
         st.session_state["sim_pool_df"] = None
     if "sim_pool_orig_df" not in st.session_state:
         st.session_state["sim_pool_orig_df"] = None
+    if "sim_player_pool_clean" not in st.session_state:
+        st.session_state["sim_player_pool_clean"] = None
     if "sim_lineups_df" not in st.session_state:
         st.session_state["sim_lineups_df"] = None
     if "sim_results_df" not in st.session_state:
@@ -987,6 +1019,17 @@ with st.sidebar:
         st.session_state["rapidapi_key"] = rapidapi_key_input
         os.environ["RAPIDAPI_KEY"] = rapidapi_key_input
 
+    # Sanity check: OUT players in sim pool should always be 0
+    _sim_pool_check = st.session_state.get("sim_player_pool_clean")
+    if _sim_pool_check is not None and not _sim_pool_check.empty:
+        if "injury_status" in _sim_pool_check.columns:
+            _out_count = int(_sim_pool_check["injury_status"].eq("Out").sum())
+        elif "is_out" in _sim_pool_check.columns:
+            _out_count = int(_sim_pool_check["is_out"].sum())
+        else:
+            _out_count = 0
+        st.caption(f"OUT players in sim pool: {_out_count}")
+
 tab_slate, tab_optimizer, tab_lab = st.tabs([
     "🏀 Ricky's Slate Room",
     "⚡ Optimizer",
@@ -1034,11 +1077,17 @@ with tab_slate:
                                 if "player_name" not in live_pool.columns and "name" in live_pool.columns:
                                     live_pool = live_pool.rename(columns={"name": "player_name"})
                                 live_pool = _apply_yakos_projections(live_pool, knobs=st.session_state.get("cal_knobs", {}))
+                                # Apply manual injury overrides before cascade so OUT players get redistributed
+                                live_pool = apply_manual_injury_overrides_to_pool(live_pool)
                                 # Apply injury cascade first (OUT players must still be in pool to redistribute minutes)
                                 live_pool, _cascade = apply_injury_cascade(live_pool)
-                                # Remove OUT/IR/ineligible players from pool entirely so they never appear in sims
+                                # Add injury_status / is_out columns then hard-drop ineligible players
+                                live_pool = _add_injury_columns(live_pool)
                                 _auto_excl = []
-                                if "status" in live_pool.columns and "player_name" in live_pool.columns:
+                                if "is_out" in live_pool.columns and "player_name" in live_pool.columns:
+                                    _auto_excl = live_pool.loc[live_pool["is_out"], ["player_name", "status"]].to_dict("records")
+                                    live_pool = live_pool[~live_pool["is_out"]].reset_index(drop=True)
+                                elif "status" in live_pool.columns and "player_name" in live_pool.columns:
                                     from yak_core.sims import _INELIGIBLE_STATUSES as _INELIG
                                     _inelig_mask = live_pool["status"].fillna("").str.upper().isin(_INELIG)
                                     _auto_excl = live_pool.loc[_inelig_mask, ["player_name", "status"]].to_dict("records")
@@ -1046,6 +1095,7 @@ with tab_slate:
                                 st.session_state["auto_excluded_players"] = _auto_excl
                                 st.session_state["injury_cascade"] = _cascade
                                 st.session_state["pool_df"] = live_pool
+                                st.session_state["sim_player_pool_clean"] = live_pool.copy()
                                 st.session_state["pool_date"] = str(slate_fetch_date)
                                 # Auto-fetch actuals for past dates
                                 _date_str = str(slate_fetch_date)
@@ -1804,11 +1854,17 @@ with tab_lab:
                         if "player_name" not in live_pool.columns and "name" in live_pool.columns:
                             live_pool = live_pool.rename(columns={"name": "player_name"})
                         live_pool = _apply_yakos_projections(live_pool, knobs=st.session_state.get("cal_knobs", {}))
+                        # Apply manual injury overrides before cascade so OUT players get redistributed
+                        live_pool = apply_manual_injury_overrides_to_pool(live_pool)
                         # Apply injury cascade first (OUT players must still be in pool to redistribute minutes)
                         live_pool, _cascade = apply_injury_cascade(live_pool)
-                        # Remove OUT/IR/ineligible players from pool entirely so they never appear in sims
+                        # Add injury_status / is_out columns then hard-drop ineligible players
+                        live_pool = _add_injury_columns(live_pool)
                         _cal_auto_excl = []
-                        if "status" in live_pool.columns and "player_name" in live_pool.columns:
+                        if "is_out" in live_pool.columns and "player_name" in live_pool.columns:
+                            _cal_auto_excl = live_pool.loc[live_pool["is_out"], ["player_name", "status"]].to_dict("records")
+                            live_pool = live_pool[~live_pool["is_out"]].reset_index(drop=True)
+                        elif "status" in live_pool.columns and "player_name" in live_pool.columns:
                             from yak_core.sims import _INELIGIBLE_STATUSES as _INELIG
                             _cal_inelig_mask = live_pool["status"].fillna("").str.upper().isin(_INELIG)
                             _cal_auto_excl = live_pool.loc[_cal_inelig_mask, ["player_name", "status"]].to_dict("records")
@@ -1816,6 +1872,7 @@ with tab_lab:
                         st.session_state["auto_excluded_players"] = _cal_auto_excl
                         st.session_state["injury_cascade"] = _cascade
                         st.session_state["pool_df"] = live_pool
+                        st.session_state["sim_player_pool_clean"] = live_pool.copy()
                         st.session_state["pool_date"] = str(fetch_slate_date_cal)
                         # Auto-fetch actuals for past dates
                         _cal_date_str = str(fetch_slate_date_cal)
@@ -1851,6 +1908,8 @@ with tab_lab:
         if st.session_state.get("_pool_df_filename") != rg_upload_cal.name:
             raw_df = pd.read_csv(rg_upload_cal)
             pool_df_cal = rename_rg_columns_to_yakos(raw_df)
+            # Apply manual injury overrides before cascade
+            pool_df_cal = apply_manual_injury_overrides_to_pool(pool_df_cal)
             # Apply injury cascade when status column is present and minutes are available
             if "status" in pool_df_cal.columns and (
                 "proj_minutes" in pool_df_cal.columns or "minutes" in pool_df_cal.columns
@@ -1859,15 +1918,22 @@ with tab_lab:
                 st.session_state["injury_cascade"] = _csv_cascade
             else:
                 st.session_state["injury_cascade"] = []
-            # Drop OUT/IR/ineligible players so they never appear in sims (cascade-then-drop)
-            if "status" in pool_df_cal.columns:
+            # Add injury_status / is_out columns then hard-drop ineligible players
+            pool_df_cal = _add_injury_columns(pool_df_cal)
+            if "is_out" in pool_df_cal.columns:
+                _csv_excl = pool_df_cal.loc[pool_df_cal["is_out"], ["player_name", "status"]].to_dict("records") if "player_name" in pool_df_cal.columns else []
+                pool_df_cal = pool_df_cal[~pool_df_cal["is_out"]].reset_index(drop=True)
+            elif "status" in pool_df_cal.columns:
                 from yak_core.sims import _INELIGIBLE_STATUSES as _INELIG
                 _csv_inelig_mask = pool_df_cal["status"].fillna("").str.upper().isin(_INELIG)
                 _csv_excl = pool_df_cal.loc[_csv_inelig_mask, ["player_name", "status"]].to_dict("records") if "player_name" in pool_df_cal.columns else []
                 pool_df_cal = pool_df_cal[~_csv_inelig_mask].reset_index(drop=True)
-                if _csv_excl:
-                    st.session_state["auto_excluded_players"] = _csv_excl
+            else:
+                _csv_excl = []
+            if _csv_excl:
+                st.session_state["auto_excluded_players"] = _csv_excl
             st.session_state["pool_df"] = pool_df_cal
+            st.session_state["sim_player_pool_clean"] = pool_df_cal.copy()
             st.session_state["_pool_df_filename"] = rg_upload_cal.name
             st.success(f"✅ Pool loaded — {len(pool_df_cal)} players. Head to **🏀 Ricky's Slate Room** to review.")
 
@@ -2932,15 +2998,21 @@ with tab_lab:
                             )
                     # Filter to sim-eligible players only
                     pool_for_sim_run = active_sim_pool[active_sim_pool["sim_eligible"]].copy() if "sim_eligible" in active_sim_pool.columns else active_sim_pool.copy()
-                    # Instrument: assert no OUT/IR players remain in the sim pool so that
-                    # any path that bypasses cascade-then-drop fails loudly here.
-                    if "status" in pool_for_sim_run.columns:
+                    # Hard guardrail: no OUT players allowed in the sim pool.
+                    # Uses injury_status column when available; falls back to status.
+                    if "injury_status" in pool_for_sim_run.columns:
+                        _bad = pool_for_sim_run[pool_for_sim_run["injury_status"].eq("Out")]
+                    elif "status" in pool_for_sim_run.columns:
                         _bad = pool_for_sim_run[
                             pool_for_sim_run["status"].fillna("").str.upper().isin({"OUT", "IR", "O"})
                         ]
-                        assert _bad.empty, (
-                            f"OUT players still in sim pool: "
-                            f"{_bad[['player_name', 'status']].head().to_dict('records')}"
+                    else:
+                        _bad = pd.DataFrame()
+                    if not _bad.empty:
+                        _bad_cols = [c for c in ["player_name", "player", "injury_status", "status"] if c in _bad.columns]
+                        raise RuntimeError(
+                            "OUT players still in sim pool: "
+                            + str(_bad[_bad_cols].to_dict("records"))
                         )
                     _required_roster = 8
                     if len(pool_for_sim_run) < _required_roster + 5:

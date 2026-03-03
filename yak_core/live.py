@@ -2,7 +2,7 @@
 import os
 import requests
 import pandas as pd
-from typing import Dict, Any
+from typing import Any, Dict
 from .config import YAKOS_ROOT
 
 _TANK01_HOST = "tank01-fantasy-stats.p.rapidapi.com"
@@ -37,6 +37,83 @@ _STATUS_MAP = {
 
 class NoGamesScheduledError(ValueError):
     """Raised when the API confirms no games are scheduled for a given date."""
+
+
+def load_manual_injury_overrides() -> pd.DataFrame:
+    """Load active manual injury overrides from config/manual_injuries.csv.
+
+    Returns a DataFrame with columns ``playerID``, ``player``, ``designation``
+    for rows where ``active`` is True.  Returns an empty DataFrame (with those
+    columns) if the file is missing or unreadable.
+    """
+    overrides_path = os.path.join(YAKOS_ROOT, "config", "manual_injuries.csv")
+    if not os.path.exists(overrides_path):
+        return pd.DataFrame(columns=["playerID", "player", "designation"])
+    try:
+        df = pd.read_csv(overrides_path)
+    except Exception:
+        return pd.DataFrame(columns=["playerID", "player", "designation"])
+    if df.empty or "active" not in df.columns:
+        return pd.DataFrame(columns=["playerID", "player", "designation"])
+    active = df[
+        df["active"].astype(str).str.strip().str.lower().isin(["true", "1", "yes"])
+    ]
+    needed = [c for c in ["playerID", "player", "designation"] if c in active.columns]
+    return active[needed].reset_index(drop=True)
+
+
+def apply_manual_injury_overrides_to_pool(pool_df: pd.DataFrame) -> pd.DataFrame:
+    """Apply manual injury overrides to the player pool's ``status`` column.
+
+    Matches each override row first by Tank01 ``playerID`` (against the pool's
+    ``player_id`` column), then falls back to case-insensitive ``player`` name
+    matching (against ``player_name``).  Overrides always win — they force the
+    mapped status regardless of what Tank01 reported.
+
+    Designation → status mapping:
+      * ``"Out"``        → ``"OUT"``
+      * ``"Day-To-Day"`` → ``"GTD"``
+
+    Parameters
+    ----------
+    pool_df : pd.DataFrame
+        Player pool.  Should have ``player_name`` and optionally ``player_id``.
+
+    Returns
+    -------
+    pd.DataFrame
+        Copy of *pool_df* with updated ``status`` values for matched players.
+    """
+    overrides = load_manual_injury_overrides()
+    if overrides.empty:
+        return pool_df
+    pool = pool_df.copy()
+    if "status" not in pool.columns:
+        pool["status"] = "Active"
+    _desig_to_status: Dict[str, str] = {
+        "Out": "OUT",
+        "Day-To-Day": "GTD",
+        "GTD": "GTD",
+        "OUT": "OUT",
+    }
+    for _, row in overrides.iterrows():
+        pid = str(row.get("playerID", "")).strip()
+        pname = str(row.get("player", "")).strip()
+        designation = str(row.get("designation", "")).strip()
+        mapped_status = _desig_to_status.get(designation, designation.upper())
+        matched = False
+        # Match by Tank01 playerID first
+        if pid and pid.lower() not in ("", "nan") and "player_id" in pool.columns:
+            mask = pool["player_id"].astype(str).str.strip() == pid
+            if mask.any():
+                pool.loc[mask, "status"] = mapped_status
+                matched = True
+        # Fall back to player name matching
+        if not matched and pname and "player_name" in pool.columns:
+            mask = pool["player_name"].str.strip().str.lower() == pname.lower()
+            if mask.any():
+                pool.loc[mask, "status"] = mapped_status
+    return pool
 
 
 def _get_rapidapi_key(cfg):

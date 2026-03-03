@@ -1,5 +1,7 @@
 *.parquet
 *.csv
+# Allow the manually-managed injury override file to be committed
+!config/manual_injuries.csv
 *.ipynb_checkpoints/
 __pycache__/
 .DS_Store

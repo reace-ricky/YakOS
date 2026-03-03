@@ -102,6 +102,7 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 82 | **Injury refresh on every lineup build** — extracted `_refresh_injury_statuses(pool_df, api_key)` helper: calls Tank01 `getNBAInjuryList`, updates player statuses in the pool, re-marks ineligible players (`sim_eligible=False`), returns change list; silent no-op when API key absent or call fails; called before `run_optimizer` in the Optimizer "🚀 Build Lineups" handler (new) and in the Sims "🎲 Run Sims" handler (refactored from 35-line inline block); status-change banner shown in both tabs | `streamlit_app.py` | latest |
 | 83 | **Drop OUT/IR players at API pool load — not downstream** — root-fix for injury logic: at both "Fetch Pool from API" sites (Slate Room + Cal tab) the cascade now runs first (so OUT-player minutes are redistributed to active teammates), then all rows whose `status` is in `_INELIGIBLE_STATUSES` are hard-deleted from the pool before it is stored in session state; `_refresh_injury_statuses` updated to likewise drop (not just flag) any player whose status becomes ineligible after a late-breaking injury refresh; 7 new `TestCascadeThenDropPattern` regression tests confirm Alex Sarr / Leaky Black-style OUT players are absent from the cleaned pool | `streamlit_app.py`, `tests/test_injury_cascade.py` | latest |
 | 84 | **Instrument sim pool — assert no OUT/IR at run time** — (1) CSV upload path in Cal tab now applies cascade-then-drop (was cascade-only — gap closed); (2) Manual Override path drops OUT/IR players from pool instead of just setting `sim_eligible=False`; (3) `assert _bad.empty` added right before `run_optimizer` in "🎲 Run Sims" handler so any path that bypasses drop fails loudly; (4) "OUT players in sim pool: N" `st.caption` added in Sim Player Filters expander (should always read 0); (5) 9 new regression tests (`TestCsvUploadDropPattern` × 5, `TestManualOverrideDropPattern` × 3 + pool-assertion test) | `streamlit_app.py`, `tests/test_injury_cascade.py` | latest |
+| 85 | **Manual injury overrides + hard sim guardrail** — (1) `config/manual_injuries.csv` with `playerID,player,team,designation,notes,active` lets you force Alex Sarr or any player to Out/Day-To-Day without touching code; (2) `load_manual_injury_overrides()` + `apply_manual_injury_overrides_to_pool()` added to `yak_core/live.py`; (3) overrides applied before cascade+drop in all three pool-load paths (Slate Room API, Cal Lab API, Cal Lab CSV); (4) `_refresh_injury_statuses` also applies overrides so late-breaking status refreshes include manual overrides; (5) `_add_injury_columns()` helper adds `injury_status` and `is_out` columns to pool; (6) `sim_player_pool_clean` session state key stores the OUT-free pool; (7) sim runner guardrail upgraded from `assert` to `raise RuntimeError` using `injury_status` column; (8) sidebar caption "OUT players in sim pool: N" added; 18 new unit tests in `tests/test_manual_injury_overrides.py` | `config/manual_injuries.csv`, `yak_core/live.py`, `streamlit_app.py`, `tests/test_manual_injury_overrides.py` | latest |
 
 
 
@@ -160,7 +161,7 @@ YakOS/
 │   ├── calibration.py        # archetypes, queue, backtest, config knobs, persistent calibration_config.json
 │   ├── right_angle.py        # stack/pace/value edge analysis + lineup tagging
 │   ├── sims.py               # Monte Carlo, live update, promote logic, player accuracy table, compute_sim_eligible
-│   ├── live.py               # Tank01 API (live pool + injury updates)
+│   ├── live.py               # Tank01 API (live pool + injury updates); load_manual_injury_overrides, apply_manual_injury_overrides_to_pool
 │   ├── ownership.py          # salary-rank ownership, leverage
 │   ├── scoring.py            # KPIs, hit rate, projection %, backtest summary
 │   ├── rg_loader.py          # RotoGrinders CSV parser
@@ -175,6 +176,8 @@ YakOS/
 │   ├── yakos_fp_model.pkl        # Trained FP projection pipeline
 │   ├── yakos_minutes_model.pkl   # Trained minutes projection pipeline
 │   └── yakos_ownership_model.pkl # Trained ownership projection pipeline
+├── config/
+│   └── manual_injuries.csv      # manual injury overrides (playerID,player,team,designation,notes,active)
 ├── data/
 │   ├── calibration_config.json  # committed default calibration config
 │   ├── dvp_baseline.csv         # persisted DvP table (uploaded via Ricky's Lab)
@@ -196,6 +199,7 @@ YakOS/
 │   ├── test_live_actuals.py             (23 tests)
 │   ├── test_sim_eligible.py             (24 tests)
 │   ├── test_injury_cascade.py           (35 tests)
+│   ├── test_manual_injury_overrides.py  (18 tests)
 │   └── test_dvp.py                      (27 tests)
 └── requirements.txt
 ```
