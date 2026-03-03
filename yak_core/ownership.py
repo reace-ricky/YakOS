@@ -97,22 +97,33 @@ def apply_ownership(pool_df: pd.DataFrame) -> pd.DataFrame:
 
 
 
-def compute_leverage(pool_df, own_col="ownership"):
+def compute_leverage(pool_df, own_col=None):
     """Compute leverage score: proj / ownership.
 
     Higher leverage = better value for GPP (high proj, low ownership).
     Used by optimizer to weight the objective toward contrarian picks.
 
+    Ownership column priority: ``own_proj`` (external POWN-based) →
+    ``ownership`` (legacy) → any column passed via *own_col*.
+
     Parameters
     ----------
     pool_df : DataFrame with 'proj' and ownership column.
-    own_col : column name for ownership (default: 'ownership').
+    own_col : column name for ownership.  When *None*, ``own_proj`` is used
+              if present, otherwise ``ownership``.
 
     Returns
     -------
     pool_df with new 'leverage' column.
     """
     df = pool_df.copy()
+
+    # Resolve ownership column: prefer own_proj (external POWN) over legacy ownership
+    if own_col is None:
+        if "own_proj" in df.columns and df["own_proj"].notna().any():
+            own_col = "own_proj"
+        else:
+            own_col = "ownership"
 
     if "proj" not in df.columns or own_col not in df.columns:
         df["leverage"] = 0.0
@@ -149,10 +160,17 @@ def apply_ownership_pipeline(
 ) -> pd.DataFrame:
     """Full ownership pipeline: ingest ext_own → predict own_model → blend → own_proj.
 
+    External ownership (RG/FP POWN) is the **default source** for ``own_proj``.
+    When external data is present (``ext_own`` column populated with non-zero
+    values), ``own_proj`` is set directly from ``ext_own`` (alpha=1.0).  The
+    internal GBM/heuristic model is only used as a fallback when no external
+    file has been loaded for the current slate, in which case a warning is
+    logged.
+
     This orchestrates the three-layer ownership system:
       - ``ext_own``   : raw RG/FP site ownership (from *ext_df* or already in pool)
-      - ``own_model`` : GBM model prediction
-      - ``own_proj``  : blended & normalised final ownership (used for Field%)
+      - ``own_model`` : GBM model prediction (fallback only)
+      - ``own_proj``  : final ownership used for Field% display and leverage
 
     Parameters
     ----------
@@ -165,6 +183,7 @@ def apply_ownership_pipeline(
         Path to ``ownership_model.pkl``.  Defaults to models/ownership_model.pkl.
     alpha : float
         Blend weight on ``ext_own`` (0 = pure model, 1 = pure ext_own).
+        Overridden to 1.0 automatically when external data is present.
     target_mean : float, optional
         Optional target mean for distribution scaling.
 
@@ -190,17 +209,37 @@ def apply_ownership_pipeline(
         if ext_vals.notna().any() and (ext_vals > 0).any():
             pool["ext_own"] = ext_vals
 
-    # Step 2: predict own_model
+    # Determine whether we have valid external ownership data.
+    # Re-use the already-coerced series when ext_own was just set above.
+    if "ext_own" in pool.columns:
+        _ext_series = pd.to_numeric(pool["ext_own"], errors="coerce")
+        has_ext = bool(_ext_series.notna().any() and (_ext_series > 0).any())
+    else:
+        has_ext = False
+
+    if has_ext:
+        # External ownership is the default source — use it exclusively.
+        effective_alpha = 1.0
+        print("[ownership] External ownership (RG/FP POWN) detected — using as sole own_proj source.")
+    else:
+        # No external file loaded for this slate — fall back to internal model.
+        effective_alpha = 0.0
+        print(
+            "[ownership] WARNING: No external ownership file found — "
+            "using internal model (less accurate)."
+        )
+
+    # Step 2: predict own_model (always compute for diagnostics / fallback)
     pool = predict_ownership(pool, model_path=model_path)
 
     # Step 3: blend and normalize → own_proj
-    pool = blend_and_normalize(pool, alpha=alpha, target_mean=target_mean)
+    pool = blend_and_normalize(pool, alpha=effective_alpha, target_mean=target_mean)
 
     own_model_mean = pool["own_model"].mean() if "own_model" in pool.columns else float("nan")
     own_proj_mean = pool["own_proj"].mean() if "own_proj" in pool.columns else float("nan")
     print(
         f"[ownership] Pipeline complete — "
-        f"ext_own present: {'ext_own' in pool.columns and pool['ext_own'].notna().any()}, "
+        f"ext_own present: {has_ext}, "
         f"own_model mean: {own_model_mean:.1f}%, "
         f"own_proj mean: {own_proj_mean:.1f}%"
     )

@@ -136,6 +136,8 @@ def build_player_pool(opt_pool: pd.DataFrame,
     ]
     if "ownership" in df.columns:
         base_cols.append("ownership")
+    if "own_proj" in df.columns:
+        base_cols.append("own_proj")
     if "actual_fp" in df.columns:
         base_cols.append("actual_fp")
     if "leverage" in df.columns:

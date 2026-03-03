@@ -1759,6 +1759,23 @@ with tab_optimizer:
                 unique_lu = sorted(lineups_df["lineup_index"].unique())
                 st.success(f"Generated {len(unique_lu)} lineups ({dk_contest_sel} / {archetype_sel})")
 
+                # ── Ownership sanity check caption ────────────────────────
+                _opt_pool_df = st.session_state.get("pool_df")
+                if _opt_pool_df is not None and "own_proj" in _opt_pool_df.columns:
+                    _own_s = _opt_pool_df["own_proj"].dropna()
+                    if not _own_s.empty:
+                        _own_src = (
+                            "external (RG/FP)"
+                            if "ext_own" in _opt_pool_df.columns and _opt_pool_df["ext_own"].notna().any()
+                            else "internal model ⚠️"
+                        )
+                        st.caption(
+                            f"Ownership source: {_own_src} | "
+                            f"Min own: {_own_s.min():.1f}% | "
+                            f"Max own: {_own_s.max():.1f}% | "
+                            f"Median: {_own_s.median():.1f}%"
+                        )
+
                 # ── Arrow navigation ──────────────────────────────────────
                 _lu_pos = max(0, min(len(unique_lu) - 1, st.session_state["current_lineup_index"]))
                 _nav_c1, _nav_c2, _nav_c3 = st.columns([1, 4, 1])
