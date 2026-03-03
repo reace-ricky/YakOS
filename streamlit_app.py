@@ -1987,6 +1987,13 @@ with tab_lab:
                 _csv_excl = []
             if _csv_excl:
                 st.session_state["auto_excluded_players"] = _csv_excl
+            # Apply ownership pipeline so own_proj is populated from POWN/proj_own
+            try:
+                pool_df_cal = apply_ownership_pipeline(pool_df_cal)
+            except Exception:
+                # Graceful fallback: mirror proj_own → own_proj when pipeline fails
+                if "own_proj" not in pool_df_cal.columns:
+                    pool_df_cal["own_proj"] = pool_df_cal["proj_own"] if "proj_own" in pool_df_cal.columns else 1.0
             st.session_state["pool_df"] = pool_df_cal
             st.session_state["sim_player_pool_clean"] = pool_df_cal.copy()
             st.session_state["_pool_df_filename"] = rg_upload_cal.name
@@ -2870,7 +2877,8 @@ with tab_lab:
                         _zero_min_players = _loaded_actuals[
                             pd.to_numeric(_loaded_actuals[_act_fp_col], errors="coerce").fillna(0) <= 0
                         ][_act_name_col].tolist()
-                        _cur_pool = st.session_state.get("sim_pool_df") or pool_for_sim
+                        _cur_pool_raw = st.session_state.get("sim_pool_df")
+                        _cur_pool = _cur_pool_raw if _cur_pool_raw is not None and not _cur_pool_raw.empty else pool_for_sim
                         if _cur_pool is not None and not _cur_pool.empty:
                             _pc_name_col = "player_name" if "player_name" in _cur_pool.columns else "name"
                             if _pc_name_col in _cur_pool.columns:
@@ -2891,7 +2899,8 @@ with tab_lab:
                     st.session_state["sim_actuals_df"] = None
                     st.rerun()
 
-        active_sim_pool = st.session_state.get("sim_pool_df") or pool_for_sim
+        _active_sim_pool_raw = st.session_state.get("sim_pool_df")
+        active_sim_pool = _active_sim_pool_raw if _active_sim_pool_raw is not None and not _active_sim_pool_raw.empty else pool_for_sim
 
         # ── Sim Player Filters ────────────────────────────────────────────
         with st.expander("🔧 Sim Player Filters", expanded=False):
@@ -3459,7 +3468,8 @@ with tab_lab:
                                 .str.replace("%", "", regex=False)
                                 .pipe(pd.to_numeric, errors="coerce")
                             )
-                        _own_pool = st.session_state.get("sim_player_pool_clean") or pool_df
+                        _own_pool_raw = st.session_state.get("sim_player_pool_clean")
+                        _own_pool = _own_pool_raw if _own_pool_raw is not None and not _own_pool_raw.empty else pool_df
                         if _own_pool is not None and not _own_pool.empty:
                             _join_col = "player_name" if "player_name" in _own_pool.columns else "name"
                             _act_col = "player_name" if "player_name" in _own_act_df.columns else "name"
@@ -3518,8 +3528,38 @@ with tab_lab:
                         st.error(f"Failed to process actuals: {_own_diag_err}")
                 else:
                     # Show current ownership breakdown for active pool
-                    _curr_pool = st.session_state.get("sim_player_pool_clean") or pool_df
+                    _curr_pool_raw = st.session_state.get("sim_player_pool_clean")
+                    _curr_pool = _curr_pool_raw if _curr_pool_raw is not None and not _curr_pool_raw.empty else pool_df
                     if _curr_pool is not None and not _curr_pool.empty:
+                        # Ownership source sanity caption
+                        _own_external_loaded = (
+                            "ext_own" in _curr_pool.columns and _curr_pool["ext_own"].notna().any()
+                            and (_curr_pool["ext_own"] > 0).any()
+                        )
+                        if "own_proj" in _curr_pool.columns:
+                            _own_proj_s = _curr_pool["own_proj"].dropna()
+                            if not _own_proj_s.empty:
+                                st.caption(
+                                    f"Ownership source: {'external RG/FP' if _own_external_loaded else 'internal model'} | "
+                                    f"Min: {_own_proj_s.min():.1f}% | "
+                                    f"Max: {_own_proj_s.max():.1f}% | "
+                                    f"Median: {_own_proj_s.median():.1f}%"
+                                )
+                                if _own_proj_s.max() < 15:  # flag if max field% is suspiciously low
+                                    st.warning(
+                                        "⚠️ Max ownership is below 15%. "
+                                        "The external ownership merge may be failing silently. "
+                                        "Check that player names in your RG/FP CSV match the pool."
+                                    )
+                        # Merge diagnostics: show column list and name/POWN samples
+                        with st.expander("🔍 Merge Diagnostics", expanded=False):
+                            st.write("**Pool columns:**", _curr_pool.columns.tolist())
+                            if "own_proj" in _curr_pool.columns:
+                                st.write("**Sample own_proj (top 5):**", _curr_pool["own_proj"].head(5).tolist())
+                            if "proj_own" in _curr_pool.columns:
+                                st.write("**Sample proj_own (POWN) top 5:**", _curr_pool["proj_own"].head(5).tolist())
+                            if "player_name" in _curr_pool.columns:
+                                st.write("**Sample player names (pool):**", _curr_pool["player_name"].head(5).tolist())
                         _own_cols_avail = [c for c in ["ext_own", "own_model", "own_proj"] if c in _curr_pool.columns]
                         if _own_cols_avail:
                             st.markdown("**Current slate ownership breakdown (top 15 by own_proj):**")
@@ -3835,7 +3875,8 @@ with tab_lab:
                     if boost_names:
                         # Always boost from the original (pre-boost) pool to prevent
                         # compounding multiplier drift each time the button is clicked.
-                        orig_pool = st.session_state.get("sim_pool_orig_df") or pool_for_sim
+                        orig_pool_raw = st.session_state.get("sim_pool_orig_df")
+                        orig_pool = orig_pool_raw if orig_pool_raw is not None and not orig_pool_raw.empty else pool_for_sim
                         updated_pool = orig_pool.copy()
                         mask = updated_pool["player_name"].isin(boost_names)
                         updated_pool.loc[mask, "proj"] = updated_pool.loc[mask, "proj"] * (1.0 + _SIM_LEARNING_BOOST)

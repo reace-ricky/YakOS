@@ -185,6 +185,7 @@ def merge_ext_ownership(pool_df: pd.DataFrame, ext_df: pd.DataFrame) -> pd.DataF
       1. Exact ``player_id`` match (when present in both).
       2. (player_name, team, opponent, salary) composite key.
       3. (player_name, salary) fallback.
+      4. Normalized name (strip + lowercase) fallback for unmatched rows.
 
     Parameters
     ----------
@@ -243,6 +244,24 @@ def merge_ext_ownership(pool_df: pd.DataFrame, ext_df: pd.DataFrame) -> pd.DataF
                     pool["ext_own"] = np.nan
                 pool["ext_own"] = pool["ext_own"].combine_first(pool["_ext_own_short"])
                 pool = pool.drop(columns=["_ext_own_short"])
+
+    # Step 4: normalized name fallback — strip + lowercase for unmatched rows
+    # Handles cases where names differ in whitespace or casing between sources.
+    if "player_name" in pool.columns and "player_name" in ext.columns:
+        _unmatched = pool["ext_own"].isna() if "ext_own" in pool.columns else pd.Series(True, index=pool.index)
+        if _unmatched.any():
+            pool["_name_clean"] = pool["player_name"].astype(str).str.strip().str.lower()
+            ext_norm = ext[["player_name", "ext_own"]].copy()
+            ext_norm["_name_clean"] = ext_norm["player_name"].astype(str).str.strip().str.lower()
+            ext_norm = ext_norm[["_name_clean", "ext_own"]].drop_duplicates("_name_clean")
+            ext_norm = ext_norm.rename(columns={"ext_own": "_ext_own_norm"})
+            pool = pool.merge(ext_norm, on="_name_clean", how="left")
+            if "_ext_own_norm" in pool.columns:
+                if "ext_own" not in pool.columns:
+                    pool["ext_own"] = np.nan
+                pool["ext_own"] = pool["ext_own"].combine_first(pool["_ext_own_norm"])
+                pool = pool.drop(columns=["_ext_own_norm"])
+            pool = pool.drop(columns=["_name_clean"], errors="ignore")
 
     return pool.reset_index(drop=True)
 
