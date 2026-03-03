@@ -133,6 +133,26 @@ from yak_core.alert_backtest import (  # type: ignore
     list_backtest_slates,
     DEFAULT_ALERT_THRESHOLDS,
 )
+from yak_core.dk_ingest import (  # type: ignore
+    fetch_dk_lobby_contests,
+    fetch_dk_draftables,
+    fetch_dk_draft_group,
+    save_dk_contests,
+    load_dk_contests,
+    save_dk_player_pool,
+    load_dk_player_pool_for_group,
+    save_dk_slates,
+    map_dk_players_to_yak,
+    save_dk_player_map,
+    load_dk_player_map,
+    get_mapping_diagnostics,
+    fetch_game_type_rules,
+    parse_roster_rules,
+    build_contest_scoped_pool,
+    is_dk_integration_enabled,
+    DK_GAME_TYPE_LABELS,
+)
+from yak_core.config import DK_INTEGRATION_ENABLED, DK_SPORTS_ENABLED  # type: ignore
 
 # Map internal DK contest type string -> ContestType enum.
 # Keys match values produced by DK_CONTEST_TYPE_MAP in yak_core/calibration.py.
@@ -819,6 +839,23 @@ def ensure_session_state():
         # dict: slate_date_str → HistoricalSlateBundle
         # Populated when user clicks "Fetch Pool from API" for a past date.
         st.session_state["historical_bundles"] = {}
+    # Sprint 5 — DK contest scope
+    if "dk_scope_enabled" not in st.session_state:
+        # True when "Use DK contest scope" toggle is on
+        st.session_state["dk_scope_enabled"] = False
+    if "dk_lobby_contests" not in st.session_state:
+        # pd.DataFrame: last-fetched DK lobby contests
+        st.session_state["dk_lobby_contests"] = None
+    if "selected_dk_contest_id" not in st.session_state:
+        st.session_state["selected_dk_contest_id"] = None
+    if "selected_dk_draft_group_id" not in st.session_state:
+        st.session_state["selected_dk_draft_group_id"] = None
+    if "dk_scoped_pool" not in st.session_state:
+        # Contest-scoped player pool built from DK draftables + YakOS projections
+        st.session_state["dk_scoped_pool"] = None
+    if "dk_roster_rules" not in st.session_state:
+        # Parsed roster rules for the selected DK game type
+        st.session_state["dk_roster_rules"] = None
 
 
 def run_optimizer(
@@ -1295,6 +1332,202 @@ with tab_slate:
                 """,
                 unsafe_allow_html=True,
             )
+
+            # ════════════════════════════════════════════════════════════
+            # LAYER 1b — DK Contest Panel (Sprint 5 — 5.4)
+            # ════════════════════════════════════════════════════════════
+            _dk_enabled = DK_INTEGRATION_ENABLED and is_dk_integration_enabled()
+            with st.expander("🎰 DK Contest Panel", expanded=False):
+                if not _dk_enabled:
+                    st.info(
+                        "DK integration is disabled. "
+                        "Set the `DK_INTEGRATION_ENABLED=true` environment variable to enable it."
+                    )
+                else:
+                    _dk_sport = sport if sport in DK_SPORTS_ENABLED else DK_SPORTS_ENABLED[0] if DK_SPORTS_ENABLED else "NBA"
+                    _dk_c1, _dk_c2 = st.columns([1, 1])
+                    with _dk_c1:
+                        if st.button("🔄 Fetch DK Contests", key="fetch_dk_contests_btn"):
+                            with st.spinner(f"Fetching DK {_dk_sport} contests…"):
+                                try:
+                                    _fetched_contests = fetch_dk_lobby_contests(_dk_sport)
+                                    st.session_state["dk_lobby_contests"] = _fetched_contests
+                                    if not _fetched_contests.empty:
+                                        save_dk_contests(_fetched_contests)
+                                        st.success(f"Fetched {len(_fetched_contests)} contests.")
+                                    else:
+                                        st.warning("No contests returned from DK lobby.")
+                                except Exception as _dk_exc:
+                                    st.error(f"DK lobby fetch failed: {_dk_exc}")
+                                    _saved = load_dk_contests(_dk_sport)
+                                    if not _saved.empty:
+                                        st.session_state["dk_lobby_contests"] = _saved
+                                        st.info(f"Showing {len(_saved)} cached contests.")
+                    with _dk_c2:
+                        _dk_scope_toggle = st.toggle(
+                            "Use DK contest scope",
+                            value=st.session_state.get("dk_scope_enabled", False),
+                            key="dk_scope_toggle",
+                            disabled=not _dk_enabled,
+                            help=(
+                                "When ON the optimizer pool and salary are sourced from the "
+                                "selected DK Draft Group instead of the internal YakOS pool."
+                            ),
+                        )
+                        st.session_state["dk_scope_enabled"] = _dk_scope_toggle
+
+                    # Show contest table grouped by game type
+                    _lobby_df = st.session_state.get("dk_lobby_contests")
+                    if _lobby_df is None:
+                        _lobby_df = load_dk_contests(_dk_sport)
+                        if not _lobby_df.empty:
+                            st.session_state["dk_lobby_contests"] = _lobby_df
+
+                    if _lobby_df is not None and not _lobby_df.empty:
+                        st.markdown("#### Select a DK Contest")
+                        # Group by game_type_id with a friendly label (mapping from dk_ingest module)
+                        _lobby_df = _lobby_df.copy()
+                        _lobby_df["game_type_label"] = _lobby_df["game_type_id"].map(
+                            lambda g: DK_GAME_TYPE_LABELS.get(int(g), f"Type {g}")
+                        )
+                        _game_type_order = ["Classic", "Late Night", "Showdown"]
+                        _gt_vals = _lobby_df["game_type_label"].unique().tolist()
+                        _gt_order = [g for g in _game_type_order if g in _gt_vals] + [
+                            g for g in _gt_vals if g not in _game_type_order
+                        ]
+                        for _gt_label in _gt_order:
+                            _gt_rows = _lobby_df[_lobby_df["game_type_label"] == _gt_label]
+                            if _gt_rows.empty:
+                                continue
+                            st.markdown(f"**{_gt_label}**")
+                            _display_cols = ["contest_id", "name", "entry_fee", "prize_pool",
+                                             "current_entries", "max_entries", "max_entries_per_user",
+                                             "start_time", "draft_group_id"]
+                            _display_cols = [c for c in _display_cols if c in _gt_rows.columns]
+                            _gt_display = _gt_rows[_display_cols].copy()
+                            _col_rename = {
+                                "contest_id": "ID", "name": "Contest", "entry_fee": "Buy-in ($)",
+                                "prize_pool": "Prize Pool ($)", "current_entries": "Entries",
+                                "max_entries": "Max Entries", "max_entries_per_user": "Max/User",
+                                "start_time": "Start Time", "draft_group_id": "Draft Group",
+                            }
+                            _gt_display = _gt_display.rename(columns=_col_rename)
+                            st.dataframe(_gt_display, use_container_width=True, hide_index=True)
+
+                        # Contest selector
+                        _contest_options = ["— None —"] + _lobby_df["name"].tolist()
+                        _cur_sel_id = st.session_state.get("selected_dk_contest_id")
+                        _cur_sel_name = "— None —"
+                        if _cur_sel_id:
+                            _match = _lobby_df[_lobby_df["contest_id"] == _cur_sel_id]
+                            if not _match.empty:
+                                _cur_sel_name = _match.iloc[0]["name"]
+                        _sel_contest_name = st.selectbox(
+                            "Select contest to target",
+                            _contest_options,
+                            index=_contest_options.index(_cur_sel_name)
+                            if _cur_sel_name in _contest_options else 0,
+                            key="dk_contest_selector",
+                        )
+
+                        if _sel_contest_name != "— None —":
+                            _sel_row = _lobby_df[_lobby_df["name"] == _sel_contest_name]
+                            if not _sel_row.empty:
+                                _sel_cid = str(_sel_row.iloc[0]["contest_id"])
+                                _sel_dgid = int(_sel_row.iloc[0]["draft_group_id"])
+                                _sel_gtid = int(_sel_row.iloc[0].get("game_type_id", 0))
+                                st.session_state["selected_dk_contest_id"] = _sel_cid
+                                st.session_state["selected_dk_draft_group_id"] = _sel_dgid
+                                st.caption(
+                                    f"📌 Contest: **{_sel_contest_name}** | "
+                                    f"Draft Group: **{_sel_dgid}** | "
+                                    f"Game Type: **{_sel_gtid}**"
+                                )
+                                # Load DK player pool + build scoped pool if toggle on
+                                if _dk_scope_toggle:
+                                    _dk_pool_btn_col, _ = st.columns([1, 2])
+                                    with _dk_pool_btn_col:
+                                        if st.button("⚙️ Build DK-Scoped Pool", key="build_dk_scoped_pool"):
+                                            with st.spinner("Fetching DK draftables and building scoped pool…"):
+                                                try:
+                                                    _dk_draftables = fetch_dk_draftables(_sel_dgid)
+                                                    if not _dk_draftables.empty:
+                                                        save_dk_player_pool(_dk_draftables)
+                                                    # Fetch draft group metadata for roster rules
+                                                    try:
+                                                        _dg_meta = fetch_dk_draft_group(_sel_dgid)
+                                                        _dg_gtid = _dg_meta.get("game_type_id", _sel_gtid)
+                                                        _rules_raw = fetch_game_type_rules(_dg_gtid)
+                                                        _parsed_rules = parse_roster_rules(_rules_raw)
+                                                        st.session_state["dk_roster_rules"] = _parsed_rules
+                                                        _slate_row = pd.DataFrame([{
+                                                            "draft_group_id": _sel_dgid,
+                                                            "game_type_id": _dg_gtid,
+                                                            "sport": _dk_sport,
+                                                            "start_time": _dg_meta.get("start_time", ""),
+                                                        }])
+                                                        save_dk_slates(_slate_row)
+                                                    except Exception:
+                                                        pass
+                                                    # Build scoped pool
+                                                    _yak_pool = st.session_state.get("pool_df")
+                                                    if _yak_pool is not None and not _yak_pool.empty:
+                                                        _scoped = build_contest_scoped_pool(
+                                                            _sel_dgid, _yak_pool, _dk_draftables
+                                                        )
+                                                        st.session_state["dk_scoped_pool"] = _scoped
+                                                        # Persist mapping
+                                                        _mapping = map_dk_players_to_yak(
+                                                            _sel_dgid, _yak_pool, _dk_draftables
+                                                        )
+                                                        save_dk_player_map(_mapping)
+                                                        # Diagnostics
+                                                        _diag = get_mapping_diagnostics(_sel_dgid)
+                                                        _unmap = _diag["unmapped_players"]
+                                                        st.success(
+                                                            f"✅ DK-scoped pool built: "
+                                                            f"**{len(_scoped)}** players | "
+                                                            f"Mapped: **{_diag['pct_mapped']:.0f}%**"
+                                                        )
+                                                        if _unmap:
+                                                            with st.expander(
+                                                                f"⚠️ {len(_unmap)} unmapped DK players",
+                                                                expanded=False,
+                                                            ):
+                                                                st.dataframe(
+                                                                    pd.DataFrame(_unmap),
+                                                                    use_container_width=True,
+                                                                    hide_index=True,
+                                                                )
+                                                    else:
+                                                        st.warning(
+                                                            "Load a YakOS pool first (in 🔒 Ricky's Lab) "
+                                                            "to build a DK-scoped pool."
+                                                        )
+                                                except Exception as _dk_pool_exc:
+                                                    st.error(f"Failed to build DK-scoped pool: {_dk_pool_exc}")
+
+                                    # Show scoped pool summary
+                                    _scoped_pool = st.session_state.get("dk_scoped_pool")
+                                    if _scoped_pool is not None and not _scoped_pool.empty:
+                                        st.info(
+                                            f"🎯 Contest scope active — "
+                                            f"**{len(_scoped_pool)}** players from DK Draft Group {_sel_dgid} | "
+                                            f"**{(~_scoped_pool['_unmapped']).sum()}** mapped to YakOS projections"
+                                        )
+                                        _rules = st.session_state.get("dk_roster_rules")
+                                        if _rules:
+                                            st.caption(
+                                                f"📋 Roster rules: {_rules.get('lineup_size', '?')} players | "
+                                                f"salary cap ${_rules.get('salary_cap', 50000):,} | "
+                                                f"slots: {', '.join(_rules.get('slots', []))}"
+                                            )
+                        else:
+                            st.session_state["selected_dk_contest_id"] = None
+                            st.session_state["selected_dk_draft_group_id"] = None
+                            st.session_state["dk_scoped_pool"] = None
+                            if not _dk_scope_toggle:
+                                st.session_state["dk_scope_enabled"] = False
 
             # ════════════════════════════════════════════════════════════
             # LAYER 2 — Right Angle Ricky: Edge Analysis (data-driven)
@@ -1879,6 +2112,29 @@ with tab_optimizer:
 
             # Apply slate filter
             pool_for_opt = apply_slate_filters(pool_df_opt, slate_type_opt, showdown_game_opt)
+
+            # Contest-scope override (Sprint 5 — 5.5): use DK Draft Group pool when toggle is on
+            _dk_scope_on = st.session_state.get("dk_scope_enabled", False)
+            _dk_scoped_pool = st.session_state.get("dk_scoped_pool")
+            if _dk_scope_on and _dk_scoped_pool is not None and not _dk_scoped_pool.empty:
+                _sel_dg = st.session_state.get("selected_dk_draft_group_id")
+                st.info(
+                    f"🎯 **Contest-scope mode ON** — optimizer pool sourced from DK Draft Group "
+                    f"**{_sel_dg}** ({len(_dk_scoped_pool)} players). "
+                    f"DK salary is used; YakOS projections preserved."
+                )
+                # Surface unmapped players in a debug list
+                _unmapped_mask = _dk_scoped_pool.get("_unmapped", pd.Series(False, index=_dk_scoped_pool.index))
+                _unmapped_count = int(_unmapped_mask.sum()) if hasattr(_unmapped_mask, "sum") else 0
+                if _unmapped_count > 0:
+                    with st.expander(f"⚠️ {_unmapped_count} unmapped players (debug)", expanded=False):
+                        _unmapped_display = _dk_scoped_pool[_unmapped_mask][
+                            [c for c in ["player_name", "dk_player_id", "team", "pos", "salary"]
+                             if c in _dk_scoped_pool.columns]
+                        ]
+                        st.dataframe(_unmapped_display, use_container_width=True, hide_index=True)
+                        st.caption("These players have no YakOS projection match — they use $0 salary-implied projections.")
+                pool_for_opt = apply_slate_filters(_dk_scoped_pool, slate_type_opt, showdown_game_opt)
 
             st.markdown("---")
             if st.button("🚀 Build Lineups", type="primary", key="opt_build_btn"):

@@ -11,6 +11,22 @@ YAKOS_ROOT: str = os.environ.get(
     str(Path(__file__).resolve().parent.parent),
 )
 
+# ----- DK integration flags (Sprint 5) -----
+# On/off master switch.  Set env var DK_INTEGRATION_ENABLED=false to disable.
+DK_INTEGRATION_ENABLED: bool = os.environ.get(
+    "DK_INTEGRATION_ENABLED", "true"
+).strip().lower() not in ("0", "false", "no", "off")
+
+# Comma-separated sports for which DK lobby ingest is enabled.
+DK_SPORTS_ENABLED: List[str] = [
+    s.strip().upper()
+    for s in os.environ.get("DK_SPORTS_ENABLED", "NBA,PGA").split(",")
+    if s.strip()
+]
+
+# How often (in minutes) the scheduled ingest job should re-poll DK.
+DK_POLLING_FREQ_MINUTES: int = int(os.environ.get("DK_POLLING_FREQ_MINUTES", "30"))
+
 # ----- DK NBA roster shape (Classic) -----
 DK_LINEUP_SIZE = 8
 DK_POS_SLOTS = ["PG", "SG", "SF", "PF", "C", "G", "F", "UTIL"]
