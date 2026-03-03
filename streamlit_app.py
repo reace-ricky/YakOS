@@ -1036,7 +1036,7 @@ with st.sidebar:
         os.environ["RAPIDAPI_KEY"] = rapidapi_key_input
 
     # Sanity check: OUT players in sim pool should always be 0
-    _sim_pool_check = st.session_state.get("sim_player_pool_clean")
+    _sim_pool_check = st.session_state["sim_player_pool_clean"] if "sim_player_pool_clean" in st.session_state else None
     if _sim_pool_check is not None and not _sim_pool_check.empty:
         if "injury_status" in _sim_pool_check.columns:
             _out_count = int(_sim_pool_check["injury_status"].eq("Out").sum())
@@ -3114,7 +3114,7 @@ with tab_lab:
                             st.session_state["sim_lineup_scores"] = _sim_lineup_scores
                             # Ensure ownership is populated in the pool before anomaly calc.
                             # Use the same cleaned pool as sims; apply OUT filter as a hard guardrail.
-                            _anomaly_base = st.session_state.get("sim_player_pool_clean")
+                            _anomaly_base = st.session_state["sim_player_pool_clean"] if "sim_player_pool_clean" in st.session_state else None
                             if _anomaly_base is None or _anomaly_base.empty:
                                 _anomaly_base = pool_for_sim_run
                             players_df = _anomaly_base.copy()
@@ -3468,7 +3468,7 @@ with tab_lab:
                                 .str.replace("%", "", regex=False)
                                 .pipe(pd.to_numeric, errors="coerce")
                             )
-                        _own_pool_raw = st.session_state.get("sim_player_pool_clean")
+                        _own_pool_raw = st.session_state["sim_player_pool_clean"] if "sim_player_pool_clean" in st.session_state else None
                         _own_pool = _own_pool_raw if _own_pool_raw is not None and not _own_pool_raw.empty else pool_df
                         if _own_pool is not None and not _own_pool.empty:
                             _join_col = "player_name" if "player_name" in _own_pool.columns else "name"
@@ -3528,7 +3528,7 @@ with tab_lab:
                         st.error(f"Failed to process actuals: {_own_diag_err}")
                 else:
                     # Show current ownership breakdown for active pool
-                    _curr_pool_raw = st.session_state.get("sim_player_pool_clean")
+                    _curr_pool_raw = st.session_state["sim_player_pool_clean"] if "sim_player_pool_clean" in st.session_state else None
                     _curr_pool = _curr_pool_raw if _curr_pool_raw is not None and not _curr_pool_raw.empty else pool_df
                     if _curr_pool is not None and not _curr_pool.empty:
                         # Ownership source sanity caption
