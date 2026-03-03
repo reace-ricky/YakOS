@@ -113,6 +113,7 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 93 | **Sprint 4A: Make Slate Room Alerts Robust** — 4.1: Injury Cascade display reformatted with 🚨/→ text markers, shows projected FP, salary, value×; tags "🔴 Sleeper" for bumped value ≥ 5×; added `out_proj_fp` field to cascade report. 4.2: `compute_tiered_stack_alerts()` replaces simple stack display — fires only when 3+ conditions converge (implied total ≥ median, O/U ≥ median, spread ±7, correlation proxy ≥ 0.3, ceiling ≥ 1.4× floor); tiers 🔴 Strong (4+) / 🟡 Moderate (3); stacks below 3 suppressed. 4.3: High-Value Plays now filters adj_proj ≥ 20 FP AND proj_minutes ≥ 20; groups by salary tier (Spend-Up $7K+, Mid-Range $5K–$7K, Punt <$5K); edge tags Leverage/Chalk Value/Contrarian. 4.4: `compute_game_environment_cards()` shows one card per game: teams, implied totals, O/U, spread ±, pace rating; flags 🔥 Shootout (top-3 O/U) and ⚠️ Blowout Risk (spread > 10); shows "Vegas lines not loaded" fallback. 4.5: Player Projections table adds `status` and `value_x` columns; row highlighting red for non-Active, green for injury-bumped. 4.6: Approved Lineups header shows total salary / proj FP / ceiling (p90) per lineup; "Last published: [timestamp]" caption added. 4.7: "🕐 Last updated by Ricky: [timestamp]" at top of Slate Room. | `yak_core/right_angle.py`, `yak_core/injury_cascade.py`, `streamlit_app.py` | Sprint 4A |
 | 94 | **Sprint 4B: Alert Validation & Tuning** — 4B.1: `run_alert_backtest(slate_date, pool_df, actuals_df)` re-runs full alert engine pre-lock, captures all alerts into normalized table (slate_date, alert_type, entity_type, entity_id, metadata, flagged, actual_fp); persists per-slate parquet to `data/alert_backtests/`. 4B.2: `score_stack_alerts()` — hit/miss/false-negative rates for stack alerts. 4B.3: `score_high_value_alerts()` — per-salary-tier hit rates with avg delta flagged vs unflagged. 4B.4: `score_injury_cascade_alerts()` — % minutes increased, % FP closer to bumped proj, mean signed error. 4B.5: `score_game_environment_alerts()` — shootout/blowout flag hit rates. 4B.6: "📊 Alert Validation" Lab section (Section F) — run backtest, show per-alert-type metrics, overall edge metric, and auto-tuning suggestions. 4B.7: `tune_alert_thresholds(results_df)` — auto-suggest threshold tightening when hit rates < 50%; "Re-run with Tuned Thresholds" button for before/after comparison. 81 new unit tests in `tests/test_alert_validation.py`. | `yak_core/alert_backtest.py`, `streamlit_app.py`, `tests/test_alert_validation.py` | Sprint 4B |
 | 95 | **Wire HistoricalSlateBundle — unified pool + actuals by date** — `HistoricalSlateBundle` dataclass (slate_date, pool_df, actuals, proj_col, `has_valid_actuals()`); `load_historical_actuals(slate_date_str)` looks up bundle then legacy `actuals` dict; `historical_bundles` dict added to session state; "Fetch Pool from API" builds + stores a bundle after each past-date fetch (pool + actuals together); Sim Module "Load Actuals" expander auto-populates `sim_actuals_df` from bundle on date match, debug caption (bundle found/not-found + row count), CSV uploader label hidden when actuals already loaded; Calibration Section A merges bundle dates into available-dates dropdown, uses `load_historical_actuals()` and bundle's aligned pool_df for the check; Sim pool prefers bundle pool in historical mode (no separate projections CSV needed). | `streamlit_app.py` | latest |
+| 96 | **Sprint 5: DK Contest-Scoped Optimizer Integration** — 5.1: `fetch_dk_lobby_contests(sport)` calls `https://www.draftkings.com/lobby/getcontests?sport=NBA` (and PGA); `save_dk_contests`/`load_dk_contests` upsert to `data/dk/dk_contests.parquet` (keyed by `contest_id`, indexed on `draft_group_id`+`sport`). 5.2: `fetch_dk_draftables(draft_group_id)` → `data/dk/dk_player_pool.parquet` (keyed by `draft_group_id`+`dk_player_id`); `fetch_dk_draft_group` for slate metadata → `data/dk/dk_slates.parquet`. 5.3: `map_dk_players_to_yak()` links `dk_player_id` → YakOS `player_id` via name+team+position normalization (3-step: exact+team, name-only, fuzzy first+last token); `save_dk_player_map`/`load_dk_player_map` persist to `data/dk/dk_player_map.parquet`; `get_mapping_diagnostics()` reports `pct_mapped` and `unmapped_players` list. 5.4: "🎰 DK Contest Panel" expander in Slate Room shows grouped contest table (Classic/Late Night/Showdown), contest picker, selected Draft Group info. 5.5: "Use DK contest scope" toggle + "⚙️ Build DK-Scoped Pool" button; `build_contest_scoped_pool()` builds optimizer pool from DK draftables joined to YakOS projections (uses DK salary); `_unmapped` flag surfaces unmatched players; contest scope banner + unmapped debug list in Optimizer tab. 5.6: `fetch_game_type_rules(game_type_id)` with `config/RulesAndScoring.json` fallback; `parse_roster_rules()` → lineup_size, salary_cap, slots, captain_slot, is_showdown; roster rules caption in Slate Room. 5.7: `DK_INTEGRATION_ENABLED` / `DK_SPORTS_ENABLED` / `DK_POLLING_FREQ_MINUTES` env-driven config flags in `config.py`; toggle disabled when integration off; graceful fallback on API failure (loads cached contests). Rate-limited GET helper (`_MIN_REQUEST_INTERVAL=0.5 s`). 74 new unit tests in `tests/test_dk_ingest.py` + 19 smoke tests in `tests/test_app_imports.py`. | `yak_core/dk_ingest.py`, `yak_core/config.py`, `streamlit_app.py`, `tests/test_dk_ingest.py`, `tests/test_app_imports.py` | Sprint 5 |
 
 ## What's Remaining 🔲
 
@@ -179,6 +180,7 @@ YakOS/
 │   ├── injury_cascade.py     # Sprint 2 injury cascade: redistribute OUT player minutes to teammates
 │   ├── dvp.py                # Sprint 2B.1: DvP baseline — parse, save, load, compute averages, staleness
 │   ├── alert_backtest.py     # Sprint 4B: alert validation & tuning — run_alert_backtest, score_*, tune_alert_thresholds
+│   ├── dk_ingest.py          # Sprint 5: DK lobby + draft group + player pool ingest, DK→YakOS mapping, roster rules, contest-scoped pool
 │   └── validation.py         # lineup validity checks
 ├── scripts/
 │   ├── train_models.py           # Train FP/Minutes/Ownership models → models/*.pkl
@@ -193,6 +195,11 @@ YakOS/
 ├── data/
 │   ├── calibration_config.json  # committed default calibration config
 │   ├── dvp_baseline.csv         # persisted DvP table (uploaded via Ricky's Lab)
+│   ├── dk/                      # Sprint 5: DK ingest persisted data (created on first ingest)
+│   │   ├── dk_contests.parquet  # persisted DK lobby contests (keyed by contest_id)
+│   │   ├── dk_slates.parquet    # persisted DK draft group metadata (keyed by draft_group_id)
+│   │   ├── dk_player_pool.parquet # DK draftables (keyed by draft_group_id + dk_player_id)
+│   │   └── dk_player_map.parquet  # DK → YakOS player mapping
 │   ├── NBADK20260227.csv     # sample RG pool file (also used as ext_own training data)
 │   ├── 3350865.csv           # RG/FP ownership CSV #1 (POWN column)
 │   ├── 3350865 (1).csv       # RG/FP ownership CSV #2 (POWN column)
@@ -216,7 +223,9 @@ YakOS/
 │   ├── test_manual_injury_overrides.py  (18 tests)
 │   ├── test_dvp.py                      (27 tests)
 │   ├── test_ext_ownership.py            (47 tests)
-│   └── test_alert_validation.py         (81 tests)  ← Sprint 4B
+│   ├── test_alert_validation.py         (81 tests)  ← Sprint 4B
+│   ├── test_dk_ingest.py                (74 tests)  ← Sprint 5
+│   └── test_app_imports.py              (91 tests)  ← updated Sprint 5
 └── requirements.txt
 ```
 

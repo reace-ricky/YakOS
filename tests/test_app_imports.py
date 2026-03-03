@@ -324,3 +324,89 @@ class TestExtOwnershipImports:
     def test_compute_ownership_diagnostics(self):
         mod = importlib.import_module("yak_core.ext_ownership")
         assert hasattr(mod, "compute_ownership_diagnostics")
+
+
+class TestDkIngestImports:
+    """Smoke tests — every yak_core.dk_ingest symbol imported by streamlit_app.py."""
+
+    def test_fetch_dk_lobby_contests(self):
+        mod = importlib.import_module("yak_core.dk_ingest")
+        assert hasattr(mod, "fetch_dk_lobby_contests")
+
+    def test_fetch_dk_draftables(self):
+        mod = importlib.import_module("yak_core.dk_ingest")
+        assert hasattr(mod, "fetch_dk_draftables")
+
+    def test_fetch_dk_draft_group(self):
+        mod = importlib.import_module("yak_core.dk_ingest")
+        assert hasattr(mod, "fetch_dk_draft_group")
+
+    def test_save_dk_contests(self):
+        mod = importlib.import_module("yak_core.dk_ingest")
+        assert hasattr(mod, "save_dk_contests")
+
+    def test_load_dk_contests(self):
+        mod = importlib.import_module("yak_core.dk_ingest")
+        assert hasattr(mod, "load_dk_contests")
+
+    def test_save_dk_player_pool(self):
+        mod = importlib.import_module("yak_core.dk_ingest")
+        assert hasattr(mod, "save_dk_player_pool")
+
+    def test_load_dk_player_pool_for_group(self):
+        mod = importlib.import_module("yak_core.dk_ingest")
+        assert hasattr(mod, "load_dk_player_pool_for_group")
+
+    def test_save_dk_slates(self):
+        mod = importlib.import_module("yak_core.dk_ingest")
+        assert hasattr(mod, "save_dk_slates")
+
+    def test_map_dk_players_to_yak(self):
+        mod = importlib.import_module("yak_core.dk_ingest")
+        assert hasattr(mod, "map_dk_players_to_yak")
+
+    def test_save_dk_player_map(self):
+        mod = importlib.import_module("yak_core.dk_ingest")
+        assert hasattr(mod, "save_dk_player_map")
+
+    def test_load_dk_player_map(self):
+        mod = importlib.import_module("yak_core.dk_ingest")
+        assert hasattr(mod, "load_dk_player_map")
+
+    def test_get_mapping_diagnostics(self):
+        mod = importlib.import_module("yak_core.dk_ingest")
+        assert hasattr(mod, "get_mapping_diagnostics")
+
+    def test_fetch_game_type_rules(self):
+        mod = importlib.import_module("yak_core.dk_ingest")
+        assert hasattr(mod, "fetch_game_type_rules")
+
+    def test_parse_roster_rules(self):
+        mod = importlib.import_module("yak_core.dk_ingest")
+        assert hasattr(mod, "parse_roster_rules")
+
+    def test_build_contest_scoped_pool(self):
+        mod = importlib.import_module("yak_core.dk_ingest")
+        assert hasattr(mod, "build_contest_scoped_pool")
+
+    def test_is_dk_integration_enabled(self):
+        mod = importlib.import_module("yak_core.dk_ingest")
+        assert hasattr(mod, "is_dk_integration_enabled")
+
+    def test_DK_GAME_TYPE_LABELS(self):
+        mod = importlib.import_module("yak_core.dk_ingest")
+        assert hasattr(mod, "DK_GAME_TYPE_LABELS")
+
+
+class TestDkConfigImports:
+    def test_DK_INTEGRATION_ENABLED(self):
+        mod = importlib.import_module("yak_core.config")
+        assert hasattr(mod, "DK_INTEGRATION_ENABLED")
+
+    def test_DK_SPORTS_ENABLED(self):
+        mod = importlib.import_module("yak_core.config")
+        assert hasattr(mod, "DK_SPORTS_ENABLED")
+
+    def test_DK_POLLING_FREQ_MINUTES(self):
+        mod = importlib.import_module("yak_core.config")
+        assert hasattr(mod, "DK_POLLING_FREQ_MINUTES")
