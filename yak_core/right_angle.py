@@ -444,3 +444,325 @@ def compute_value_scores(pool_df: pd.DataFrame, top_n: int = 10, min_proj: float
         .head(top_n)
         .reset_index(drop=True)
     )
+
+
+# ============================================================
+# TIERED STACK ALERTS (Sprint 4A — condition-convergence)
+# ============================================================
+
+
+def compute_tiered_stack_alerts(pool_df: pd.DataFrame) -> list:
+    """Return tiered stack alerts by checking convergence of multiple conditions.
+
+    Conditions checked per team stack (up to 5):
+        1. Implied team total >= median slate implied total.
+           Uses the ``vegas_total`` column when available, else proj-sum proxy.
+        2. Game O/U >= slate median O/U (sum of both teams' implied totals).
+        3. Spread within +/-7 — competitive game (``spread`` col; skipped if missing).
+        4. Stack correlation proxy >= 0.3 (approximated as competitive spread < 7
+           combined with game total >= 85th-percentile of slate).
+        5. Stack ceiling >= 1.4x stack floor (``ceil`` and ``floor`` cols or proxy).
+
+    Tiers
+    -----
+    Strong (emoji 🔴)
+        4 or more conditions met.
+    Moderate (emoji 🟡)
+        Exactly 3 conditions met.
+    (Stacks with fewer than 3 conditions are suppressed.)
+
+    Returns
+    -------
+    list of dict
+        Each dict has keys: ``team``, ``tier``, ``tier_emoji``,
+        ``conditions_met``, ``conditions``, ``implied_total``, ``game_ou``,
+        ``spread``, ``combined_ownership``, ``key_players``.
+    """
+    if pool_df.empty or "team" not in pool_df.columns or "proj" not in pool_df.columns:
+        return []
+
+    df = pool_df.copy()
+    df["proj"] = pd.to_numeric(df["proj"], errors="coerce").fillna(0)
+
+    has_vegas = "vegas_total" in df.columns
+    has_spread = "spread" in df.columns
+    has_ceil = "ceil" in df.columns
+    has_floor = "floor" in df.columns
+
+    own_col = next(
+        (c for c in ["own_proj", "ownership", "proj_own", "ext_own"] if c in df.columns),
+        None,
+    )
+
+    if has_vegas:
+        df["vegas_total"] = pd.to_numeric(df["vegas_total"], errors="coerce").fillna(0)
+    if has_spread:
+        df["spread"] = pd.to_numeric(df["spread"], errors="coerce").fillna(0)
+    if has_ceil:
+        df["ceil"] = pd.to_numeric(df["ceil"], errors="coerce")
+    if has_floor:
+        df["floor"] = pd.to_numeric(df["floor"], errors="coerce")
+    if own_col:
+        df[own_col] = pd.to_numeric(df[own_col], errors="coerce").fillna(15.0)
+
+    team_rows = []
+    for team, grp in df.groupby("team"):
+        top3 = grp.nlargest(3, "proj")
+
+        if has_vegas:
+            implied_total = float(top3["vegas_total"].mean())
+        else:
+            implied_total = float(top3["proj"].sum())
+
+        opponent = None
+        if "opponent" in df.columns:
+            opp_vals = grp["opponent"].dropna().unique()
+            if len(opp_vals) > 0:
+                opponent = str(opp_vals[0])
+
+        game_ou: float = 0.0
+        if opponent:
+            opp_rows = df[df["team"].fillna("").str.upper() == str(opponent).upper()]
+            if not opp_rows.empty:
+                if has_vegas:
+                    opp_implied = float(opp_rows["vegas_total"].mean())
+                else:
+                    opp_implied = float(opp_rows.nlargest(3, "proj")["proj"].sum())
+                game_ou = round(implied_total + opp_implied, 1)
+
+        abs_spread: float = 0.0
+        if has_spread:
+            abs_spread = abs(float(grp["spread"].mean()))
+
+        if has_ceil:
+            ceil_vals = top3["ceil"].where(top3["ceil"].notna(), top3["proj"] * 1.25)
+            stack_ceil = float(ceil_vals.sum())
+        else:
+            stack_ceil = float(top3["proj"].sum()) * 1.25
+
+        if has_floor:
+            floor_vals = top3["floor"].where(top3["floor"].notna(), top3["proj"] * 0.6)
+            stack_floor = float(floor_vals.sum())
+        else:
+            stack_floor = float(top3["proj"].sum()) * 0.6
+
+        combined_own = 0.0
+        if own_col:
+            combined_own = float(top3[own_col].sum())
+
+        key_players = (
+            ", ".join(top3["player_name"].tolist()[:2])
+            if "player_name" in top3.columns
+            else "—"
+        )
+
+        team_rows.append({
+            "team": team,
+            "implied_total": round(implied_total, 1),
+            "game_ou": game_ou,
+            "abs_spread": abs_spread,
+            "stack_ceil": stack_ceil,
+            "stack_floor": stack_floor,
+            "combined_own": combined_own,
+            "key_players": key_players,
+        })
+
+    if not team_rows:
+        return []
+
+    results_df = pd.DataFrame(team_rows)
+    median_implied = float(results_df["implied_total"].median())
+    ou_vals = results_df["game_ou"].replace(0, np.nan).dropna()
+    median_ou = float(ou_vals.median()) if len(ou_vals) > 0 else 0.0
+    p85_ou = float(ou_vals.quantile(0.85)) if len(ou_vals) > 0 else 0.0
+
+    alerts = []
+    for _, r in results_df.iterrows():
+        conditions_met = []
+        condition_labels = []
+
+        # 1: Implied team total >= median
+        if r["implied_total"] >= median_implied:
+            conditions_met.append(1)
+            condition_labels.append(
+                f"implied {r['implied_total']:.1f} >= median {median_implied:.1f}"
+            )
+
+        # 2: Game O/U >= slate median
+        if median_ou > 0 and r["game_ou"] >= median_ou:
+            conditions_met.append(2)
+            condition_labels.append(f"O/U {r['game_ou']:.1f} >= median {median_ou:.1f}")
+        elif median_ou == 0 and r["game_ou"] > 0:
+            conditions_met.append(2)
+            condition_labels.append(f"O/U {r['game_ou']:.1f} available")
+
+        # 3: Spread within +/-7
+        if has_spread:
+            if r["abs_spread"] <= 7.0:
+                conditions_met.append(3)
+                condition_labels.append(f"spread +-{r['abs_spread']:.1f} (competitive)")
+        else:
+            if p85_ou > 0 and r["game_ou"] >= p85_ou:
+                conditions_met.append(3)
+                condition_labels.append("competitive (inferred from high O/U)")
+
+        # 4: Correlation proxy >= 0.3
+        corr_proxy = 0.0
+        if r["abs_spread"] <= 7.0 and p85_ou > 0 and r["game_ou"] >= p85_ou:
+            corr_proxy = 0.35
+        elif r["abs_spread"] <= 10.0 and r["implied_total"] >= median_implied:
+            corr_proxy = 0.30
+        if corr_proxy >= 0.3:
+            conditions_met.append(4)
+            condition_labels.append(f"corr proxy {corr_proxy:.2f}")
+
+        # 5: Stack ceiling >= 1.4x floor
+        if r["stack_floor"] > 0 and r["stack_ceil"] / r["stack_floor"] >= 1.4:
+            conditions_met.append(5)
+            ceil_mult = r["stack_ceil"] / r["stack_floor"]
+            condition_labels.append(f"ceil {ceil_mult:.1f}x floor")
+
+        n = len(conditions_met)
+        if n < 3:
+            continue
+
+        tier_emoji = "🔴" if n >= 4 else "🟡"
+        tier = "Strong" if n >= 4 else "Moderate"
+
+        alerts.append({
+            "team": r["team"],
+            "tier": tier,
+            "tier_emoji": tier_emoji,
+            "conditions_met": n,
+            "conditions": condition_labels,
+            "implied_total": r["implied_total"],
+            "game_ou": r["game_ou"],
+            "spread": r["abs_spread"],
+            "combined_ownership": round(r["combined_own"], 1),
+            "key_players": r["key_players"],
+        })
+
+    alerts.sort(key=lambda x: x["conditions_met"], reverse=True)
+    return alerts
+
+
+# ============================================================
+# GAME ENVIRONMENT CARDS (Sprint 4A — 4.4)
+# ============================================================
+
+
+def compute_game_environment_cards(pool_df: pd.DataFrame) -> list:
+    """Build one game-environment card per game on the slate.
+
+    Uses Vegas lines when available (``vegas_total``, ``spread`` columns).
+    Falls back to projection-derived totals when Vegas data is absent.
+
+    Returns
+    -------
+    list of dict
+        One entry per game sorted by combined implied total descending.
+        Keys: ``home``, ``away``, ``home_implied``, ``away_implied``,
+        ``combined_ou``, ``spread``, ``pace_rating``, ``flags``,
+        ``vegas_available``.
+    """
+    if pool_df.empty or "team" not in pool_df.columns:
+        return []
+
+    df = pool_df.copy()
+    df["proj"] = pd.to_numeric(df.get("proj", 0), errors="coerce").fillna(0)
+
+    has_vegas = "vegas_total" in df.columns
+    has_spread = "spread" in df.columns
+    has_opp = "opponent" in df.columns
+
+    if not has_opp:
+        return []
+
+    if has_vegas:
+        df["vegas_total"] = pd.to_numeric(df["vegas_total"], errors="coerce").fillna(0)
+    if has_spread:
+        df["spread"] = pd.to_numeric(df["spread"], errors="coerce").fillna(0)
+
+    seen: set = set()
+    games = []
+    for _, row in df.iterrows():
+        t1 = str(row.get("team", "") or "").upper().strip()
+        t2 = str(row.get("opponent", "") or "").upper().strip()
+        if not t1 or not t2 or t2 in ("", "NAN"):
+            continue
+        key = tuple(sorted([t1, t2]))
+        if key in seen:
+            continue
+        seen.add(key)
+        games.append((t1, t2))
+
+    if not games:
+        return []
+
+    def _team_implied(team: str) -> float:
+        trows = df[df["team"].fillna("").str.upper() == team]
+        if trows.empty:
+            return 0.0
+        if has_vegas:
+            return round(float(trows["vegas_total"].mean()), 1)
+        return round(float(trows.nlargest(3, "proj")["proj"].sum()), 1)
+
+    def _team_spread(team: str) -> float:
+        if not has_spread:
+            return 0.0
+        trows = df[df["team"].fillna("").str.upper() == team]
+        if trows.empty:
+            return 0.0
+        return round(float(trows["spread"].mean()), 1)
+
+    raw_cards = []
+    for t1, t2 in games:
+        imp1 = _team_implied(t1)
+        imp2 = _team_implied(t2)
+        combined = round(imp1 + imp2, 1)
+        sprd = abs(_team_spread(t1))
+        raw_cards.append({
+            "home": t1,
+            "away": t2,
+            "home_implied": imp1,
+            "away_implied": imp2,
+            "combined_ou": combined,
+            "spread": sprd,
+        })
+
+    all_ous = sorted([c["combined_ou"] for c in raw_cards if c["combined_ou"] > 0], reverse=True)
+    top3_threshold = all_ous[min(2, len(all_ous) - 1)] if all_ous else 0.0
+
+    def _pace_rating(combined_ou: float) -> str:
+        if not all_ous:
+            return "N/A"
+        p75 = all_ous[int(len(all_ous) * 0.25)]  # list is sorted desc
+        p25 = all_ous[int(len(all_ous) * 0.75)] if len(all_ous) > 2 else all_ous[-1]
+        if combined_ou >= p75:
+            return "Fast"
+        if combined_ou <= p25:
+            return "Slow"
+        return "Average"
+
+    cards = []
+    for rc in raw_cards:
+        flags = []
+        if top3_threshold > 0 and rc["combined_ou"] >= top3_threshold:
+            flags.append("🔥 Shootout")
+        if rc["spread"] > 10:
+            flags.append("⚠️ Blowout Risk")
+
+        cards.append({
+            "home": rc["home"],
+            "away": rc["away"],
+            "home_implied": rc["home_implied"],
+            "away_implied": rc["away_implied"],
+            "combined_ou": rc["combined_ou"],
+            "spread": rc["spread"],
+            "pace_rating": _pace_rating(rc["combined_ou"]),
+            "flags": flags,
+            "vegas_available": has_vegas,
+        })
+
+    cards.sort(key=lambda x: x["combined_ou"], reverse=True)
+    return cards

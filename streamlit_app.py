@@ -74,6 +74,8 @@ from yak_core.right_angle import (  # type: ignore
     detect_high_value_plays,
     compute_stack_scores,
     compute_value_scores,
+    compute_tiered_stack_alerts,
+    compute_game_environment_cards,
 )
 from yak_core.sims import (  # type: ignore
     run_monte_carlo_for_lineups,
@@ -1126,6 +1128,11 @@ tab_calib = tab_lab
 with tab_slate:
     st.subheader("🏀 Ricky's Slate Room")
 
+    # ── 4.7 Last Updated Timestamp ───────────────────────────────────────
+    _last_updated_ts = st.session_state.get("last_calibration_ts")
+    if _last_updated_ts:
+        st.caption(f"🕐 Last updated by Ricky: **{_last_updated_ts}**")
+
     if sport == "PGA":
         st.info("PGA support is coming soon. Please select NBA for now.")
     else:
@@ -1230,33 +1237,38 @@ with tab_slate:
 
             # Compute scored edge inputs (drive both UI and optimizer)
             _stack_scores_df = compute_stack_scores(pool_df, top_n=5)
-            _value_scores_df = compute_value_scores(pool_df, top_n=8)
+            _value_scores_df = compute_value_scores(pool_df, top_n=20)
+            _tiered_stack_alerts = compute_tiered_stack_alerts(pool_df)
 
             col_edge_l, col_edge_r = st.columns(2)
 
             with col_edge_l:
+                # ── 4.2 Stack Alerts ──────────────────────────────────
                 st.markdown("#### 🔥 Stack Alerts")
-                if not _stack_scores_df.empty:
-                    for _, _sr in _stack_scores_df.iterrows():
-                        _lev_emoji = {"Low-owned CEIL": "🔵", "Moderate": "🟡", "Chalk": "🔴"}.get(
-                            _sr["leverage_tag"], "⚪"
-                        )
+                if _tiered_stack_alerts:
+                    for _sa in _tiered_stack_alerts:
+                        _ou_part = f" | O/U {_sa['game_ou']:.1f}" if _sa['game_ou'] > 0 else ""
+                        _sprd_part = f" | spread ±{_sa['spread']:.1f}" if _sa['spread'] > 0 else ""
                         st.markdown(
-                            f"- {_lev_emoji} **{_sr['team']}** — score {_sr['stack_score']:.0f} | "
-                            f"proj {_sr['top_proj']:.1f} | ceil {_sr['top_ceil']:.1f} | "
-                            f"{_sr['leverage_tag']} · {_sr['key_players']}"
+                            f"{_sa['tier_emoji']} **{_sa['team']}** — {_sa['tier']} "
+                            f"({_sa['conditions_met']}/5 conditions) | "
+                            f"implied {_sa['implied_total']:.1f}"
+                            f"{_ou_part}{_sprd_part}"
+                            f" | own {_sa['combined_ownership']:.0f}% | {_sa['key_players']}"
                         )
+                        for _cond in _sa["conditions"]:
+                            st.caption(f"  ✓ {_cond}")
                     st.markdown("")
+                    _tiered_teams = [a["team"] for a in _tiered_stack_alerts]
                     with st.expander("📝 Log stack outcome", expanded=False):
                         log_slate_date = st.date_input(
                             "Slate date",
                             value=_today_est(),
                             key="stack_log_date",
                         )
-                        _stack_opts = _stack_scores_df["team"].tolist()
                         log_stack_sel = st.selectbox(
                             "Which stack?",
-                            _stack_opts,
+                            _tiered_teams,
                             key="stack_log_sel",
                         )
                         log_note = st.text_input(
@@ -1284,48 +1296,133 @@ with tab_slate:
                                 })
                                 st.warning("Logged as ❌ Miss")
                 else:
-                    st.info("No strong stack signals detected.")
+                    st.info(
+                        "No stacks meet the 3-condition threshold. "
+                        "Conditions: implied total, O/U, spread ±7, correlation, ceiling/floor ratio."
+                    )
 
-                st.markdown("#### ⚡ Pace / Game Environment")
-                pace_notes = detect_pace_environment(pool_df)
-                if pace_notes:
-                    for _pn in pace_notes:
-                        st.markdown(f"- {_pn}")
+                # ── 4.4 Game Environment Cards ────────────────────────
+                st.markdown("#### ⚡ Game Environment")
+                _game_cards = compute_game_environment_cards(pool_df)
+                if _game_cards:
+                    _vegas_avail = _game_cards[0]["vegas_available"] if _game_cards else False
+                    if not _vegas_avail:
+                        st.caption("⚠️ Vegas lines not loaded — using projection proxies.")
+                    for _gc in _game_cards:
+                        _flag_str = "  " + " ".join(_gc["flags"]) if _gc["flags"] else ""
+                        _ou_display = f"{_gc['combined_ou']:.1f}" if _gc["combined_ou"] > 0 else "—"
+                        _sprd_display = f"±{_gc['spread']:.1f}" if _gc["spread"] > 0 else "—"
+                        st.markdown(
+                            f"**{_gc['away']} @ {_gc['home']}** | "
+                            f"O/U {_ou_display} | spread {_sprd_display} | "
+                            f"pace {_gc['pace_rating']}{_flag_str}"
+                        )
+                        st.caption(
+                            f"{_gc['away']} implied {_gc['away_implied']:.1f}  ·  "
+                            f"{_gc['home']} implied {_gc['home_implied']:.1f}"
+                        )
                 else:
                     st.info("Upload a pool with opponent data for game environment analysis.")
 
             with col_edge_r:
+                # ── 4.3 High-Value Plays ──────────────────────────────
                 st.markdown("#### 💎 High-Value Plays")
-                if not _value_scores_df.empty:
-                    for _, _vr in _value_scores_df.iterrows():
-                        _own_emoji = {"Sneaky": "🟣", "Leverage": "🟡", "Chalk": "🔴"}.get(
-                            _vr.get("ownership_tag", ""), "⚪"
-                        )
-                        st.markdown(
-                            f"- {_own_emoji} **{_vr['player_name']}** ({_vr.get('team', '?')}) — "
-                            f"${int(_vr['salary']):,} | proj {_vr['proj']:.1f} | "
-                            f"value {_vr['value_eff']:.2f}x | {_vr.get('ownership_tag', '')}"
-                        )
+                st.caption("Filter: adj proj ≥ 20 FP and proj minutes ≥ 20")
+
+                # Build filtered value pool for 4.3
+                _hvp_df = pool_df.copy()
+                _hvp_df["proj"] = pd.to_numeric(_hvp_df.get("proj", 0), errors="coerce").fillna(0)
+                _hvp_df["salary"] = pd.to_numeric(_hvp_df.get("salary", 0), errors="coerce").fillna(0)
+                # Use adjusted_proj column when available
+                _adj_col = "adjusted_proj" if "adjusted_proj" in _hvp_df.columns else "proj"
+                _hvp_df["_adj_proj"] = pd.to_numeric(_hvp_df[_adj_col], errors="coerce").fillna(0)
+                _mins_col = next((c for c in ["proj_minutes", "minutes"] if c in _hvp_df.columns), None)
+                if _mins_col:
+                    _hvp_df["_mins"] = pd.to_numeric(_hvp_df[_mins_col], errors="coerce").fillna(0)
+                    _hvp_df = _hvp_df[(_hvp_df["_adj_proj"] >= 20) & (_hvp_df["_mins"] >= 20)]
                 else:
-                    st.info("No stand-out value plays identified.")
+                    _hvp_df = _hvp_df[_hvp_df["_adj_proj"] >= 20]
+
+                if not _hvp_df.empty and _hvp_df["salary"].max() > 0:
+                    _hvp_df["_value"] = _hvp_df["_adj_proj"] / (_hvp_df["salary"] / 1000.0)
+                    _own_col_hvp = next(
+                        (c for c in ["own_proj", "ownership", "proj_own", "ext_own"] if c in _hvp_df.columns),
+                        None,
+                    )
+                    _median_own = 0.0
+                    if _own_col_hvp:
+                        _hvp_df[_own_col_hvp] = pd.to_numeric(_hvp_df[_own_col_hvp], errors="coerce").fillna(15.0)
+                        _median_own = float(_hvp_df[_own_col_hvp].median())
+
+                    def _edge_tag(row) -> str:
+                        own = float(row[_own_col_hvp]) if _own_col_hvp else 15.0
+                        if own < _median_own * 0.6:
+                            return "Contrarian"
+                        if own > _median_own * 1.4:
+                            return "Chalk Value"
+                        return "Leverage"
+
+                    _hvp_df["_edge"] = _hvp_df.apply(_edge_tag, axis=1)
+
+                    _tiers = {
+                        "Spend-Up ($7K+)": _hvp_df[_hvp_df["salary"] >= 7000],
+                        "Mid-Range ($5K–$7K)": _hvp_df[(_hvp_df["salary"] >= 5000) & (_hvp_df["salary"] < 7000)],
+                        "Punt (<$5K)": _hvp_df[_hvp_df["salary"] < 5000],
+                    }
+                    for _tier_name, _tier_df in _tiers.items():
+                        if _tier_df.empty:
+                            continue
+                        st.markdown(f"**{_tier_name}**")
+                        for _, _vr in _tier_df.nlargest(5, "_value").iterrows():
+                            _own_disp = ""
+                            if _own_col_hvp:
+                                _own_disp = f" | own {_vr[_own_col_hvp]:.0f}%"
+                            _edge = _vr["_edge"]
+                            _edge_emoji = {"Contrarian": "🟣", "Leverage": "🟡", "Chalk Value": "🔴"}.get(_edge, "⚪")
+                            st.markdown(
+                                f"- {_edge_emoji} **{_vr['player_name']}** ({_vr.get('team', '?')}) — "
+                                f"${int(_vr['salary']):,} | adj proj {_vr['_adj_proj']:.1f} | "
+                                f"value {_vr['_value']:.2f}x{_own_disp} | {_edge}"
+                            )
+                else:
+                    st.info(
+                        "No qualifying plays found. "
+                        "Load a pool with players projecting ≥ 20 FP and ≥ 20 minutes."
+                    )
 
             st.markdown("---")
 
             # ════════════════════════════════════════════════════════════
-            # LAYER 2b — Player Projections Table
+            # LAYER 2b — Player Projections Table (4.5)
             # ════════════════════════════════════════════════════════════
             st.markdown("### 📋 Player Projections")
             _proj_disp_cols = [c for c in [
                 "player_name", "pos", "team", "salary",
-                "proj", "original_proj", "injury_bump_fp",
+                "adjusted_proj", "proj", "original_proj", "injury_bump_fp",
                 "floor", "ceil", "proj_minutes",
-                "ext_own", "own_model", "own_proj", "proj_own", "proj_source",
+                "ext_own", "own_model", "own_proj", "proj_own",
+                "status", "proj_source",
             ] if c in pool_df.columns]
             _proj_table = (
                 pool_df[_proj_disp_cols]
-                .sort_values("proj", ascending=False)
+                .copy()
+                .sort_values(
+                    "adjusted_proj" if "adjusted_proj" in pool_df.columns else "proj",
+                    ascending=False,
+                )
                 .reset_index(drop=True)
             )
+            # Compute value multiple
+            if "salary" in _proj_table.columns:
+                _vproj = (
+                    _proj_table["adjusted_proj"]
+                    if "adjusted_proj" in _proj_table.columns
+                    else _proj_table["proj"]
+                )
+                _proj_table["value_x"] = (
+                    _vproj / (_proj_table["salary"].replace(0, float("nan")) / 1000.0)
+                ).round(2)
+
             with st.expander("📋 All Players — sorted by projection", expanded=True):
                 # Ownership display toggle
                 _own_toggle_opts = []
@@ -1350,7 +1447,8 @@ with tab_slate:
                     "pos": st.column_config.TextColumn("Pos", width="small"),
                     "team": st.column_config.TextColumn("Team", width="small"),
                     "salary": st.column_config.NumberColumn("Salary", format="$%d"),
-                    "proj": st.column_config.NumberColumn("Adj Proj", format="%.2f"),
+                    "adjusted_proj": st.column_config.NumberColumn("Adj Proj", format="%.2f"),
+                    "proj": st.column_config.NumberColumn("Proj", format="%.2f"),
                     "original_proj": st.column_config.NumberColumn("Orig Proj", format="%.2f"),
                     "injury_bump_fp": st.column_config.NumberColumn("Inj Bump", format="%.2f"),
                     "floor": st.column_config.NumberColumn("Floor", format="%.2f"),
@@ -1360,17 +1458,31 @@ with tab_slate:
                     "own_model": st.column_config.NumberColumn("Model Own%", format="%.1f"),
                     "own_proj": st.column_config.NumberColumn("Field%", format="%.1f"),
                     "proj_own": st.column_config.NumberColumn("Own % (legacy)", format="%.1f"),
+                    "status": st.column_config.TextColumn("Status"),
+                    "value_x": st.column_config.NumberColumn("Value x", format="%.2fx"),
                     "proj_source": st.column_config.TextColumn("Source"),
                 }
+                # Row highlighting: red for non-Active status, green for injury-bumped
+                def _row_highlight(row):
+                    styles = [""] * len(row)
+                    status_val = str(row.get("status", "Active")).strip().upper()
+                    bump_val = float(row.get("injury_bump_fp", 0) or 0)
+                    if status_val not in ("ACTIVE", "", "NAN", "NONE"):
+                        styles = ["background-color: #4a0000; color: #ff9999"] * len(row)
+                    elif bump_val > 0:
+                        styles = ["background-color: #003300; color: #90ee90"] * len(row)
+                    return styles
+
+                _styled_table = _proj_table.style.apply(_row_highlight, axis=1)
                 st.dataframe(
-                    _proj_table,
+                    _styled_table,
                     use_container_width=True,
                     hide_index=True,
                     column_config={k: v for k, v in _col_cfg.items() if k in _proj_table.columns},
                 )
 
             # ════════════════════════════════════════════════════════════
-            # LAYER 2c — Injury Cascade Report
+            # LAYER 2c — Injury Cascade Report (4.1)
             # ════════════════════════════════════════════════════════════
             _cascade = st.session_state.get("injury_cascade", [])
             if _cascade:
@@ -1384,41 +1496,35 @@ with tab_slate:
                     _out = _entry["out_player"]
                     _team = _entry["team"]
                     _omins = _entry["out_proj_mins"]
+                    _ofp = _entry.get("out_proj_fp", 0.0)
                     _benes = _entry["beneficiaries"]
                     with st.expander(
-                        f"🔴 {_out} ({_team}) — OUT  ·  {_omins:.0f} proj min redistributed",
+                        f"🚨 {_out} ({_team}) — OUT | was projected {_omins:.0f} min, {_ofp:.1f} FP",
                         expanded=True,
                     ):
                         if _benes:
-                            _bene_df = pd.DataFrame(_benes).rename(columns={
-                                "name": "Player",
-                                "original_proj": "Orig Proj",
-                                "adjusted_proj": "Adj Proj",
-                                "bump": "Bump",
-                                "salary": "Salary",
-                                "new_value_multiple": "Value (pts/$K)",
-                            })
-                            st.dataframe(
-                                _bene_df,
-                                use_container_width=True,
-                                hide_index=True,
-                                column_config={
-                                    "Salary": st.column_config.NumberColumn("Salary", format="$%d"),
-                                    "Orig Proj": st.column_config.NumberColumn("Orig Proj", format="%.2f"),
-                                    "Adj Proj": st.column_config.NumberColumn("Adj Proj", format="%.2f"),
-                                    "Bump": st.column_config.NumberColumn("Bump", format="%.2f"),
-                                    "Value (pts/$K)": st.column_config.NumberColumn("Value (pts/$K)", format="%.2fx"),
-                                },
-                            )
+                            for _b in _benes:
+                                _sal_k = _b["salary"] / 1000.0
+                                _val = _b["new_value_multiple"]
+                                _sleeper = " 🔴 **Sleeper**" if _val >= 5.0 else ""
+                                st.markdown(
+                                    f"→ **{_b['name']}**: proj {_b['original_proj']:.1f} → "
+                                    f"**{_b['adjusted_proj']:.1f} FP** | "
+                                    f"${_b['salary']:,} | {_val:.1f}x value{_sleeper}"
+                                )
                         else:
                             st.info("No eligible teammates found to redistribute minutes.")
+
 
             st.markdown("---")
 
             # ════════════════════════════════════════════════════════════
-            # LAYER 3 — Ricky's Approved Lineups (read-only from Lab)
+            # LAYER 3 — Ricky's Approved Lineups (read-only from Lab) — 4.6
             # ════════════════════════════════════════════════════════════
             st.markdown("### 📥 Ricky's Approved Lineups")
+            _last_pub_ts = st.session_state.get("last_calibration_ts")
+            if _last_pub_ts:
+                st.caption(f"Last published: **{_last_pub_ts}**")
             st.caption(
                 "These lineups are published by Ricky from 🔒 Ricky's Lab after sims and backtests. "
                 "Rerun to refresh."
@@ -1443,10 +1549,12 @@ with tab_slate:
                             _lu_list = _by_arch[_alabel]
                             for _idx, _alu in enumerate(_lu_list):
                                 _late_badge = " 🕐 Late-swap set" if _alu.late_swap_window else ""
+                                _tot_sal_hdr = int(sum(p.get("salary", 0) for p in _alu.players))
                                 _hdr = (
                                     f"**#{_idx + 1}** · {_alu.site} · {_alu.slate} | "
-                                    f"ROI {_alu.sim_roi:.1%} · p90 {_alu.sim_p90:.1f} · "
-                                    f"proj {_alu.proj_points:.1f}{_late_badge}"
+                                    f"{_alabel} · ${_tot_sal_hdr:,} · "
+                                    f"proj {_alu.proj_points:.1f} · ceil {_alu.sim_p90:.1f}"
+                                    f"{_late_badge}"
                                 )
                                 with st.expander(_hdr, expanded=(_idx == 0)):
                                     if _alu.late_swap_window:
@@ -1474,8 +1582,9 @@ with tab_slate:
                                         except (ValueError, TypeError):
                                             _tot_own = 0.0
                                         st.caption(
-                                            f"**${_tot_sal:,}** · **{_tot_own:.1f}%** field · "
-                                            f"**{_alu.proj_points:.2f} pts**"
+                                            f"**${_tot_sal:,}** salary · **{_tot_own:.1f}%** total field% · "
+                                            f"**{_alu.proj_points:.2f} pts** proj · "
+                                            f"**{_alu.sim_p90:.1f}** ceiling (p90)"
                                         )
                                     else:
                                         st.info("No player data.")

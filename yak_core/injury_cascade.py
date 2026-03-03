@@ -263,11 +263,16 @@ def apply_injury_cascade(
         beneficiaries.sort(key=lambda x: x["bump"], reverse=True)
 
         if beneficiaries:
+            out_proj_fp = round(
+                float(pd.to_numeric(out_row.get("original_proj", out_row.get("proj", 0)), errors="coerce") or 0),
+                2,
+            )
             cascade_report.append(
                 {
                     "out_player": out_name,
                     "team": out_team,
                     "out_proj_mins": round(out_mins, 1),
+                    "out_proj_fp": out_proj_fp,
                     "beneficiaries": beneficiaries,
                 }
             )
