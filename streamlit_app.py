@@ -4,6 +4,7 @@ import hmac
 import json
 import sys
 import os
+from dataclasses import dataclass, field
 from typing import Dict, Any, Tuple, Optional
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -300,6 +301,54 @@ _CONTEST_PROJ_DEFAULTS: dict[str, str] = {
 def _default_proj_style_for_contest(internal_contest: str) -> str:
     """Return the suggested default projection style for the given internal contest type."""
     return _CONTEST_PROJ_DEFAULTS.get(internal_contest, "proj")
+
+
+@dataclass
+class HistoricalSlateBundle:
+    """Bundles together a player pool and its actuals for a single past slate date.
+
+    Attributes:
+        slate_date: ISO date string (e.g. "2026-03-01").
+        pool_df: Cleaned player pool DataFrame including projection columns.
+        actuals: DataFrame with columns ``player_name`` and ``actual_fp``
+            (and optionally ``actual_minutes``).  ``None`` when actuals have not
+            yet been fetched.
+        proj_col: The projection column used by the optimizer / sim (usually
+            ``"proj"``).
+    """
+
+    slate_date: str
+    pool_df: pd.DataFrame
+    actuals: Optional[pd.DataFrame] = None
+    proj_col: str = "proj"
+
+    def has_valid_actuals(self) -> bool:
+        """Return True when actuals are present and non-empty."""
+        return self.actuals is not None and not self.actuals.empty
+
+
+def load_historical_actuals(slate_date_str: str) -> Optional[pd.DataFrame]:
+    """Return actuals for *slate_date_str* from session state, or ``None``.
+
+    Lookup order:
+    1. ``st.session_state["historical_bundles"][slate_date_str].actuals``
+       (populated when the user clicked *Fetch Pool from API* for a past date).
+    2. ``st.session_state["actuals"][slate_date_str]`` (legacy dict).
+
+    Returns ``None`` (not an empty DataFrame) when no actuals are available so
+    callers can distinguish "not loaded" from "loaded but empty".
+    """
+    bundles: dict = st.session_state.get("historical_bundles", {})
+    bundle = bundles.get(slate_date_str)
+    if bundle is not None and bundle.has_valid_actuals():
+        return bundle.actuals
+
+    legacy: dict = st.session_state.get("actuals", {})
+    acts = legacy.get(slate_date_str)
+    if acts is not None and isinstance(acts, pd.DataFrame) and not acts.empty:
+        return acts
+
+    return None
 
 
 def _slate_value_leader(pool_df: pd.DataFrame) -> str:
@@ -766,6 +815,10 @@ def ensure_session_state():
         )
     if "_dvp_filename" not in st.session_state:
         st.session_state["_dvp_filename"] = None
+    if "historical_bundles" not in st.session_state:
+        # dict: slate_date_str → HistoricalSlateBundle
+        # Populated when user clicks "Fetch Pool from API" for a past date.
+        st.session_state["historical_bundles"] = {}
 
 
 def run_optimizer(
@@ -2039,14 +2092,36 @@ with tab_lab:
                                 )
                                 st.session_state["actuals"][_cal_date_str] = _acts
                                 st.session_state["sim_actuals_df"] = _acts
+                                # Store as a HistoricalSlateBundle so pool + actuals
+                                # travel together and calibration/sim can find them by date.
+                                st.session_state["historical_bundles"][_cal_date_str] = HistoricalSlateBundle(
+                                    slate_date=_cal_date_str,
+                                    pool_df=live_pool.copy(),
+                                    actuals=_acts,
+                                    proj_col="proj",
+                                )
                                 st.success(
                                     f"✅ Loaded {len(live_pool)} players.{_cal_excl_note} "
                                     f"Actuals loaded for {_cal_date_str} ({len(_acts)} players)."
                                 )
                             except NoGamesScheduledError:
+                                # Store bundle with no actuals for a no-games date
+                                st.session_state["historical_bundles"][_cal_date_str] = HistoricalSlateBundle(
+                                    slate_date=_cal_date_str,
+                                    pool_df=live_pool.copy(),
+                                    actuals=None,
+                                    proj_col="proj",
+                                )
                                 st.success(f"✅ Loaded {len(live_pool)} players.{_cal_excl_note}")
                                 st.info(f"No games scheduled for {_cal_date_str}.")
                             except Exception as _ae:
+                                # Store bundle with no actuals when API call fails
+                                st.session_state["historical_bundles"][_cal_date_str] = HistoricalSlateBundle(
+                                    slate_date=_cal_date_str,
+                                    pool_df=live_pool.copy(),
+                                    actuals=None,
+                                    proj_col="proj",
+                                )
                                 st.success(f"✅ Loaded {len(live_pool)} players.{_cal_excl_note}")
                                 st.warning(f"Actuals API error: {_ae}")
                         else:
@@ -2228,9 +2303,15 @@ with tab_lab:
     # ── Section A: 3-Step Calibration Workflow ───────────────────────────────
     st.markdown("### A. 📡 Calibration Check")
 
-    # Populate dropdown from actuals dict (dates where actuals have been fetched)
+    # Populate dropdown from all dates where actuals have been fetched.
+    # Merge both the legacy actuals dict and the historical_bundles dict
+    # so dates fetched via "Fetch Pool from API" always appear.
     _loaded_actuals_dict = st.session_state.get("actuals", {})
-    _actuals_dates = sorted(_loaded_actuals_dict.keys(), reverse=True)
+    _bundle_dates = {
+        d for d, b in st.session_state.get("historical_bundles", {}).items()
+        if b.has_valid_actuals()
+    }
+    _actuals_dates = sorted(set(_loaded_actuals_dict.keys()) | _bundle_dates, reverse=True)
 
     _step1_col, _step1_override = st.columns([2, 1])
     with _step1_col:
@@ -2255,17 +2336,32 @@ with tab_lab:
             _override_date = None
 
     if _run_check:
-        if _override_date is None or _override_date not in _loaded_actuals_dict:
+        # Use load_historical_actuals to check both legacy dict and historical_bundles
+        _check_acts = load_historical_actuals(_override_date) if _override_date else None
+        if _override_date is None or _check_acts is None:
             st.warning(
                 "No actuals for this date. Go to **Load Player Pool** and fetch a past date first."
             )
         else:
-            _cal_pool_check = st.session_state.get("pool_df")
+            # Prefer bundle pool (has aligned projections) over generic pool_df
+            _bundle_for_check = st.session_state.get("historical_bundles", {}).get(_override_date)
+            _cal_pool_check = (
+                _bundle_for_check.pool_df
+                if _bundle_for_check is not None and not _bundle_for_check.pool_df.empty
+                else st.session_state.get("pool_df")
+            )
             if _cal_pool_check is None or _cal_pool_check.empty:
                 st.warning("No pool loaded. Fetch a player pool first.")
             else:
-                # Build check slice from API actuals + pool projections
-                _acts_df = _loaded_actuals_dict[_override_date].copy()
+                # Debug: log bundle presence and actuals row count
+                _bundle_note = (
+                    f"Bundle found for {_override_date}: {len(_check_acts)} actuals rows."
+                    if _bundle_for_check is not None
+                    else f"Using legacy actuals dict for {_override_date}: {len(_check_acts)} rows."
+                )
+                st.caption(f"🔍 {_bundle_note}")
+                # Build check slice from actuals + pool projections (pool provides proj column)
+                _acts_df = _check_acts.copy()
                 # Normalise to 'name' / 'actual' columns expected by _diagnose_errors
                 if "player_name" in _acts_df.columns:
                     _acts_df = _acts_df.rename(columns={"player_name": "name"})
@@ -2377,8 +2473,9 @@ with tab_lab:
                 st.session_state["pool_df"] = _reproj_pool
                 # Re-compute errors using same actuals
                 _check_date2 = st.session_state.get("cal_check_date_override", _actuals_dates[0] if _actuals_dates else None)
-                if _check_date2 and _check_date2 in _loaded_actuals_dict:
-                    _acts_df2 = _loaded_actuals_dict[_check_date2].copy()
+                _acts_df2_raw = load_historical_actuals(_check_date2) if _check_date2 else None
+                if _check_date2 and _acts_df2_raw is not None:
+                    _acts_df2 = _acts_df2_raw.copy()
                     if "player_name" in _acts_df2.columns:
                         _acts_df2 = _acts_df2.rename(columns={"player_name": "name"})
                     if "actual_fp" in _acts_df2.columns:
@@ -2746,6 +2843,13 @@ with tab_lab:
         st.caption("🔴 Live mode — using today's loaded player pool.")
 
     pool_for_sim = st.session_state.get("pool_df")
+    # In historical mode, prefer the bundle's pool for the selected date so that
+    # the projection column is always in sync with the actuals.
+    if _sim_is_historical and _sim_hist_date:
+        _sim_hist_date_str = str(_sim_hist_date)
+        _sim_bundle = st.session_state.get("historical_bundles", {}).get(_sim_hist_date_str)
+        if _sim_bundle is not None and not _sim_bundle.pool_df.empty:
+            pool_for_sim = _sim_bundle.pool_df
     # Caption: show pool size and active knob summary
     _sim_knobs = st.session_state.get("cal_knobs", {})
     if pool_for_sim is not None and not pool_for_sim.empty:
@@ -2870,12 +2974,39 @@ with tab_lab:
 
         # Actuals upload — for historical slate calibration
         with st.expander("📊 Load Actuals (Historical Slate Calibration)", expanded=_sim_is_historical):
+            # Determine the relevant date for actuals lookup.
+            # In historical mode use the selected date; otherwise use the pool date.
+            _hist_date_str = str(_sim_hist_date) if _sim_is_historical and _sim_hist_date else None
+            _pool_date_str = st.session_state.get("pool_date", "")
+            _actuals_lookup_date = _hist_date_str or _pool_date_str
+
+            # --- Auto-populate sim_actuals_df from HistoricalSlateBundle when available ---
+            if _actuals_lookup_date:
+                _bundle_acts = load_historical_actuals(_actuals_lookup_date)
+                _current_acts = st.session_state.get("sim_actuals_df")
+                _bundle = st.session_state.get("historical_bundles", {}).get(_actuals_lookup_date)
+                if _bundle_acts is not None and (_current_acts is None or _current_acts.empty):
+                    # Auto-populate from bundle so user doesn't need a CSV upload
+                    st.session_state["sim_actuals_df"] = _bundle_acts
+
+            # Debug: show bundle presence and row count
+            _bundle_present = _actuals_lookup_date in st.session_state.get("historical_bundles", {})
+            _bundle_acts_count = 0
+            if _bundle_present:
+                _b = st.session_state["historical_bundles"][_actuals_lookup_date]
+                _bundle_acts_count = len(_b.actuals) if _b.actuals is not None else 0
+            st.caption(
+                f"🔍 Bundle for **{_actuals_lookup_date or '—'}**: "
+                f"{'✅ found' if _bundle_present else '❌ not found'}"
+                + (f" · {_bundle_acts_count} actuals rows" if _bundle_present else "")
+            )
+
             # Show status of already-loaded actuals (auto-loaded when pool was fetched)
             _loaded_actuals_status = st.session_state.get("sim_actuals_df")
-            _pool_date_str = st.session_state.get("pool_date", "")
-            if _loaded_actuals_status is not None and not _loaded_actuals_status.empty:
+            _has_actuals = _loaded_actuals_status is not None and not _loaded_actuals_status.empty
+            if _has_actuals:
                 st.info(
-                    f"Actuals loaded for {_pool_date_str}: "
+                    f"Actuals loaded for {_actuals_lookup_date}: "
                     f"**{len(_loaded_actuals_status)} players with box scores.** "
                     "Actuals are auto-loaded when you fetch a past-date pool."
                 )
@@ -2885,12 +3016,15 @@ with tab_lab:
                     "to auto-load actuals, or upload a CSV below."
                 )
 
-            st.markdown("**📂 Upload actuals CSV** (fallback — RotoGrinders export or custom)")
+            # CSV upload is the fallback — only shown when no actuals are present
+            if not _has_actuals:
+                st.markdown("**📂 Upload actuals CSV** (fallback — RotoGrinders export or custom)")
             _actuals_upload = st.file_uploader(
-                "Upload actuals CSV",
+                "Upload actuals CSV (fallback)",
                 type=["csv"],
                 key="sim_actuals_upload",
-                help="RotoGrinders contest export or any CSV with player names and actual FP scored.",
+                help="RotoGrinders contest export or any CSV with player names and actual FP scored. Only needed when actuals are not auto-loaded from the API.",
+                label_visibility="collapsed" if _has_actuals else "visible",
             )
             if _actuals_upload is not None:
                 try:
