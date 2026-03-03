@@ -651,6 +651,8 @@ def _apply_yakos_projections(pool: pd.DataFrame, knobs: dict = None) -> pd.DataF
 
     # --- Three-layer ownership pipeline ---
     # own_model: supervised GBM prediction; own_proj: blended with ext_own
+    if "name" in pool.columns and "player_name" not in pool.columns:
+        pool = pool.rename(columns={"name": "player_name"})
     try:
         pool = apply_ownership_pipeline(pool)
     except Exception as _e:
@@ -798,6 +800,8 @@ def _process_clean_pool(
         pool = pool[~_inelig_mask].reset_index(drop=True)
 
     # 5. Ownership pipeline: populates own_model + own_proj (ext_own blended).
+    if "name" in pool.columns and "player_name" not in pool.columns:
+        pool = pool.rename(columns={"name": "player_name"})
     try:
         pool = apply_ownership_pipeline(pool)
     except Exception:
