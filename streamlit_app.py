@@ -1153,8 +1153,8 @@ with tab_slate:
 
         if pool_df is None or pool_df.empty:
             st.info(
-                "📋 **No player pool loaded.** Use the **Fetch Pool from API** button above "
-                "to pull today's slate from Tank01."
+                "📋 **No player pool loaded.** Go to the **📡 Ricky's Lab** tab to upload a "
+                "RotoGrinders CSV or fetch today's slate from the Tank01 API."
             )
 
         else:
