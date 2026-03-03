@@ -604,6 +604,8 @@ def ensure_session_state():
         st.session_state["sim_custom_lineup"] = []
     if "sim_anomaly_df" not in st.session_state:
         st.session_state["sim_anomaly_df"] = None
+    if "sim_anomaly_out_count" not in st.session_state:
+        st.session_state["sim_anomaly_out_count"] = 0
     if "sim_lineup_scores" not in st.session_state:
         st.session_state["sim_lineup_scores"] = None
     if "ms_result" not in st.session_state:
@@ -3048,8 +3050,26 @@ with tab_lab:
                             st.session_state["sim_lineups_df"] = annotated_sim
                             st.session_state["sim_results_df"] = sim_res
                             st.session_state["sim_lineup_scores"] = _sim_lineup_scores
-                            # Ensure ownership is populated in the pool before anomaly calc
-                            _anomaly_pool = apply_ownership(pool_for_sim_run.copy())
+                            # Ensure ownership is populated in the pool before anomaly calc.
+                            # Use the same cleaned pool as sims; apply OUT filter as a hard guardrail.
+                            _anomaly_base = st.session_state.get("sim_player_pool_clean")
+                            if _anomaly_base is None or _anomaly_base.empty:
+                                _anomaly_base = pool_for_sim_run
+                            players_df = _anomaly_base.copy()
+                            if "injury_status" in players_df.columns:
+                                players_df = players_df[~players_df["injury_status"].eq("Out")].copy()
+                                # Hard guardrail: verify the filter actually removed all OUT players
+                                _post_filter_bad = players_df[players_df["injury_status"].eq("Out")]
+                                if not _post_filter_bad.empty:
+                                    raise RuntimeError(
+                                        "OUT players in anomalies table: "
+                                        + _post_filter_bad[["player_name", "injury_status"]].to_json(orient="records")
+                                    )
+                            st.session_state["sim_anomaly_out_count"] = int(
+                                players_df["injury_status"].eq("Out").sum()
+                                if "injury_status" in players_df.columns else 0
+                            )
+                            _anomaly_pool = apply_ownership(players_df)
                             # Compute per-player anomaly table using cal_knobs
                             _anomaly_df = compute_player_anomaly_table(
                                 _anomaly_pool,
@@ -3213,6 +3233,8 @@ with tab_lab:
                 elif _show_vt:
                     _anomaly_display = _anomaly_display[_sim_anomaly["Value Trap"]]
                 st.dataframe(_anomaly_display, use_container_width=True, height=350)
+                _out_count = st.session_state.get("sim_anomaly_out_count", 0)
+                st.caption(f"OUT players in anomalies source: {_out_count}")
 
             # ── Sim Diagnostics — Exposure & Eligibility ──────────────────────
             if sim_lu_df is not None and not sim_lu_df.empty:
