@@ -638,7 +638,7 @@ def compute_player_anomaly_table(
     if lu_name_col != "player_name":
         lu = lu.rename(columns={lu_name_col: "player_name"})
     # Normalise ownership column in lineup if present
-    for _src in ("ownership", "Own%", "proj_own"):
+    for _src in ("own_proj", "ownership", "Own%", "proj_own"):
         if _src in lu.columns and "own%" not in lu.columns:
             lu = lu.rename(columns={_src: "own%"})
             break
@@ -647,13 +647,13 @@ def compute_player_anomaly_table(
         return pd.DataFrame()
 
     # Build pool lookup keyed by name
-    _pool_sim_cols = ("name", "proj", "salary", "own%", "ownership", "Own%", "proj_own", "ceil", "floor")
+    _pool_sim_cols = ("name", "proj", "salary", "own%", "ownership", "Own%", "own_proj", "proj_own", "ceil", "floor")
     pool_lookup: dict = {}
     if not pool_df.empty:
         pool = pool_df.copy()
         if "player_name" in pool.columns and "name" not in pool.columns:
             pool = pool.rename(columns={"player_name": "name"})
-        for _src in ("ownership", "Own%", "proj_own"):
+        for _src in ("own_proj", "ownership", "Own%", "proj_own"):
             if _src in pool.columns and "own%" not in pool.columns:
                 pool = pool.rename(columns={_src: "own%"})
                 break

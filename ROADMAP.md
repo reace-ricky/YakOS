@@ -104,6 +104,7 @@ Build a production-quality **NBA DraftKings DFS lineup optimizer** called *YakOS
 | 84 | **Instrument sim pool — assert no OUT/IR at run time** — (1) CSV upload path in Cal tab now applies cascade-then-drop (was cascade-only — gap closed); (2) Manual Override path drops OUT/IR players from pool instead of just setting `sim_eligible=False`; (3) `assert _bad.empty` added right before `run_optimizer` in "🎲 Run Sims" handler so any path that bypasses drop fails loudly; (4) "OUT players in sim pool: N" `st.caption` added in Sim Player Filters expander (should always read 0); (5) 9 new regression tests (`TestCsvUploadDropPattern` × 5, `TestManualOverrideDropPattern` × 3 + pool-assertion test) | `streamlit_app.py`, `tests/test_injury_cascade.py` | latest |
 | 85 | **Manual injury overrides + hard sim guardrail** — (1) `config/manual_injuries.csv` with `playerID,player,team,designation,notes,active` lets you force Alex Sarr or any player to Out/Day-To-Day without touching code; (2) `load_manual_injury_overrides()` + `apply_manual_injury_overrides_to_pool()` added to `yak_core/live.py`; (3) overrides applied before cascade+drop in all three pool-load paths (Slate Room API, Cal Lab API, Cal Lab CSV); (4) `_refresh_injury_statuses` also applies overrides so late-breaking status refreshes include manual overrides; (5) `_add_injury_columns()` helper adds `injury_status` and `is_out` columns to pool; (6) `sim_player_pool_clean` session state key stores the OUT-free pool; (7) sim runner guardrail upgraded from `assert` to `raise RuntimeError` using `injury_status` column; (8) sidebar caption "OUT players in sim pool: N" added; 18 new unit tests in `tests/test_manual_injury_overrides.py` | `config/manual_injuries.csv`, `yak_core/live.py`, `streamlit_app.py`, `tests/test_manual_injury_overrides.py` | latest |
 | 86 | **Unify anomaly table source — OUT-player guardrail** — (1) Anomaly pool now sourced from `st.session_state["sim_player_pool_clean"]` (same cleaned pool used for sims) instead of raw `pool_for_sim_run`; (2) OUT filter (`~injury_status.eq("Out")`) applied before computing anomalies; (3) hard `RuntimeError` guardrail added in anomaly builder if any OUT player survives the filter; (4) `st.caption("OUT players in anomalies source: N")` added under the Sim Anomalies table (should always show 0) | `streamlit_app.py` | latest |
+| 87 | **External ownership ingestion + supervised ownership model** — (1) `yak_core/ext_ownership.py`: `ingest_ext_ownership` parses RG/FP CSV POWN column → `ext_own`; `merge_ext_ownership` left-joins by player_id or composite key; `build_ownership_features` builds X for GBM; `predict_ownership` loads GBM → `own_model`; `blend_and_normalize` blends ext_own + own_model → `own_proj` (clipped to 80); `compute_ownership_diagnostics` post-slate MAE/bias by bucket (0–5, 5–15, 15–30, 30%+). (2) `scripts/train_ownership_model.py`: trains `GradientBoostingRegressor(n_estimators=400, max_depth=3, lr=0.05, subsample=0.8)` on RG CSV data; saves to `models/ownership_model.pkl`. (3) `yak_core/ownership.py`: `apply_ownership_pipeline` orchestrates ext_own merge → predict → blend → own_proj. (4) `streamlit_app.py`: `rename_rg_columns_to_yakos` mirrors POWN → ext_own; `_apply_yakos_projections` calls pipeline after existing projections; `render_lineup_card` prefers own_proj for Field%; Player Projections table shows ext_own/own_model/own_proj with radio toggle; "📊 Ownership Diagnostics" expander in Lab with scatter plot + bucket MAE table + CSV download. (5) `yak_core/sims.py`: anomaly table prefers own_proj for Own%. 47 new unit tests + 8 import smoke tests. | `yak_core/ext_ownership.py`, `yak_core/ownership.py`, `yak_core/sims.py`, `scripts/train_ownership_model.py`, `models/ownership_model.pkl`, `streamlit_app.py`, `tests/test_ext_ownership.py`, `tests/test_app_imports.py` | latest |
 
 
 
@@ -163,7 +164,8 @@ YakOS/
 │   ├── right_angle.py        # stack/pace/value edge analysis + lineup tagging
 │   ├── sims.py               # Monte Carlo, live update, promote logic, player accuracy table, compute_sim_eligible
 │   ├── live.py               # Tank01 API (live pool + injury updates); load_manual_injury_overrides, apply_manual_injury_overrides_to_pool
-│   ├── ownership.py          # salary-rank ownership, leverage
+│   ├── ownership.py          # salary-rank ownership, leverage, apply_ownership_pipeline
+│   ├── ext_ownership.py      # ext_own ingest (RG/FP CSV POWN), GBM predict, blend → own_proj, ownership diagnostics
 │   ├── scoring.py            # KPIs, hit rate, projection %, backtest summary
 │   ├── rg_loader.py          # RotoGrinders CSV parser
 │   ├── multislate.py         # multi-slate discovery, run, compare, DK CSV ingest
@@ -172,17 +174,21 @@ YakOS/
 │   ├── dvp.py                # Sprint 2B.1: DvP baseline — parse, save, load, compute averages, staleness
 │   └── validation.py         # lineup validity checks
 ├── scripts/
-│   └── train_models.py           # Train FP/Minutes/Ownership models → models/*.pkl
+│   ├── train_models.py           # Train FP/Minutes/Ownership models → models/*.pkl
+│   └── train_ownership_model.py  # Train GBM ownership model → models/ownership_model.pkl
 ├── models/
 │   ├── yakos_fp_model.pkl        # Trained FP projection pipeline
 │   ├── yakos_minutes_model.pkl   # Trained minutes projection pipeline
-│   └── yakos_ownership_model.pkl # Trained ownership projection pipeline
+│   ├── yakos_ownership_model.pkl # Trained ownership projection pipeline
+│   └── ownership_model.pkl       # GBM supervised ownership model (ext_own target)
 ├── config/
 │   └── manual_injuries.csv      # manual injury overrides (playerID,player,team,designation,notes,active)
 ├── data/
 │   ├── calibration_config.json  # committed default calibration config
 │   ├── dvp_baseline.csv         # persisted DvP table (uploaded via Ricky's Lab)
-│   ├── NBADK20260227.csv     # sample RG pool file
+│   ├── NBADK20260227.csv     # sample RG pool file (also used as ext_own training data)
+│   ├── 3350865.csv           # RG/FP ownership CSV #1 (POWN column)
+│   ├── 3350865 (1).csv       # RG/FP ownership CSV #2 (POWN column)
 │   ├── historical_lineups.csv
 │   └── yakos_projections_2026-02-27.csv
 ├── tests/
@@ -201,7 +207,8 @@ YakOS/
 │   ├── test_sim_eligible.py             (24 tests)
 │   ├── test_injury_cascade.py           (35 tests)
 │   ├── test_manual_injury_overrides.py  (18 tests)
-│   └── test_dvp.py                      (27 tests)
+│   ├── test_dvp.py                      (27 tests)
+│   └── test_ext_ownership.py            (47 tests)
 └── requirements.txt
 ```
 

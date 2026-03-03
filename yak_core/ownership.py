@@ -140,6 +140,73 @@ def compute_leverage(pool_df, own_col="ownership"):
     return df
 
 
+def apply_ownership_pipeline(
+    pool_df: pd.DataFrame,
+    ext_df: pd.DataFrame = None,
+    model_path: str = None,
+    alpha: float = 0.5,
+    target_mean: float = None,
+) -> pd.DataFrame:
+    """Full ownership pipeline: ingest ext_own → predict own_model → blend → own_proj.
+
+    This orchestrates the three-layer ownership system:
+      - ``ext_own``   : raw RG/FP site ownership (from *ext_df* or already in pool)
+      - ``own_model`` : GBM model prediction
+      - ``own_proj``  : blended & normalised final ownership (used for Field%)
+
+    Parameters
+    ----------
+    pool_df : pd.DataFrame
+        Player pool (YakOS schema).
+    ext_df : pd.DataFrame, optional
+        Output of :func:`yak_core.ext_ownership.ingest_ext_ownership`.
+        When provided, merged into *pool_df* by player key.
+    model_path : str, optional
+        Path to ``ownership_model.pkl``.  Defaults to models/ownership_model.pkl.
+    alpha : float
+        Blend weight on ``ext_own`` (0 = pure model, 1 = pure ext_own).
+    target_mean : float, optional
+        Optional target mean for distribution scaling.
+
+    Returns
+    -------
+    pd.DataFrame
+        pool_df with ``ext_own``, ``own_model``, and ``own_proj`` columns.
+    """
+    from yak_core.ext_ownership import (
+        merge_ext_ownership,
+        predict_ownership,
+        blend_and_normalize,
+    )
+
+    pool = pool_df.copy()
+
+    # Step 1: merge external ownership if provided
+    if ext_df is not None and not ext_df.empty:
+        pool = merge_ext_ownership(pool, ext_df)
+    elif "proj_own" in pool.columns and "ext_own" not in pool.columns:
+        # Use proj_own from RG CSV load as ext_own when available
+        ext_vals = pd.to_numeric(pool["proj_own"], errors="coerce")
+        if ext_vals.notna().any() and (ext_vals > 0).any():
+            pool["ext_own"] = ext_vals
+
+    # Step 2: predict own_model
+    pool = predict_ownership(pool, model_path=model_path)
+
+    # Step 3: blend and normalize → own_proj
+    pool = blend_and_normalize(pool, alpha=alpha, target_mean=target_mean)
+
+    own_model_mean = pool["own_model"].mean() if "own_model" in pool.columns else float("nan")
+    own_proj_mean = pool["own_proj"].mean() if "own_proj" in pool.columns else float("nan")
+    print(
+        f"[ownership] Pipeline complete — "
+        f"ext_own present: {'ext_own' in pool.columns and pool['ext_own'].notna().any()}, "
+        f"own_model mean: {own_model_mean:.1f}%, "
+        f"own_proj mean: {own_proj_mean:.1f}%"
+    )
+    return pool
+
+
 def ownership_kpis(pool_df):
     """Compute ownership-related KPIs for display."""
     kpis = {}
