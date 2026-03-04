@@ -132,3 +132,25 @@ class TestPrepareSimsTableEmptyInput:
         df = _make_sims_df(mp_actual=[0.0, 0.0, 0.0])
         result = prepare_sims_table(df)
         assert result.empty
+
+
+class TestPrepareSimsTableSalaryCast:
+    """BUG-2 regression: salary must be cast to int, not rendered as float."""
+
+    def test_salary_cast_to_int(self):
+        df = _make_sims_df(salary=[8000.0, 7500.0, 6000.0])
+        result = prepare_sims_table(df)
+        assert result["salary"].dtype == int or pd.api.types.is_integer_dtype(result["salary"])
+
+    def test_salary_float_values_become_int(self):
+        df = _make_sims_df(salary=[3000.000000, 7500.000000, 12345.0])
+        result = prepare_sims_table(df)
+        assert list(result["salary"]) == [3000, 7500, 12345]
+
+    def test_no_salary_column_does_not_raise(self):
+        df = _make_sims_df()
+        # Ensure there's no salary column
+        if "salary" in df.columns:
+            df = df.drop(columns=["salary"])
+        result = prepare_sims_table(df)
+        assert "salary" not in result.columns

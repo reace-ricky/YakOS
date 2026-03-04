@@ -272,18 +272,29 @@ def fetch_dk_draftables(draft_group_id: int) -> pd.DataFrame:
         or []
     )
 
+    # Known valid NBA/DFS positions for validation.
+    _VALID_POSITIONS = {"PG", "SG", "SF", "PF", "C", "G", "F", "UTIL", "CPT", "FLEX"}
+
     rows = []
     for p in draftables_raw:
-        positions = p.get("playerGameAttributes") or p.get("draftStatAttributes") or []
-        pos_list: List[str] = []
-        if isinstance(positions, list):
-            for attr in positions:
-                if isinstance(attr, dict):
-                    v = attr.get("value") or attr.get("sortValue") or ""
-                    if v and not str(v).replace(".", "").isdigit():
-                        pos_list.append(str(v))
-        if not pos_list:
-            pos_list = [str(p.get("position") or p.get("Position") or "")]
+        # Primary source: explicit position key on the draftable record.
+        primary_pos = str(p.get("position") or p.get("Position") or "").strip()
+        if primary_pos and primary_pos.upper() in _VALID_POSITIONS:
+            pos_list: List[str] = [primary_pos]
+        else:
+            # Fallback: scan playerGameAttributes for known position tokens.
+            attrs = p.get("playerGameAttributes") or p.get("draftStatAttributes") or []
+            pos_list = []
+            if isinstance(attrs, list):
+                for attr in attrs:
+                    if isinstance(attr, dict):
+                        v = str(attr.get("value") or attr.get("sortValue") or "").strip()
+                        if v.upper() in _VALID_POSITIONS:
+                            pos_list.append(v)
+            # If attrs yielded nothing, fall back to the raw position field even
+            # if it isn't in the known NBA/DFS set (e.g. sport-specific positions).
+            if not pos_list:
+                pos_list = [primary_pos] if primary_pos else [""]
 
         rows.append(
             {
