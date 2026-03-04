@@ -390,7 +390,7 @@ def main() -> None:
     )
 
     if edge.ricky_edge_check:
-        st.success(f"✅ Ricky Edge Check approved at {edge.edge_check_ts}")
+        st.success(f"✅ Ricky Edge Check approved at {edge.edge_check_ts} UTC")
         if st.button("🔓 Revoke Edge Check", key="_re_revoke"):
             edge.revoke_edge_check()
             set_edge_state(edge)
@@ -405,7 +405,7 @@ def main() -> None:
             _ts = datetime.now(timezone.utc).isoformat()
             edge.approve_edge_check(_ts)
             set_edge_state(edge)
-            st.success(f"✅ Ricky Edge Check approved at {_ts}")
+            st.success(f"✅ Ricky Edge Check approved at {_ts} UTC")
             st.balloons()
 
 

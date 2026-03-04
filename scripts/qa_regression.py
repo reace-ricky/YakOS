@@ -443,8 +443,24 @@ def _check_late_swap():
     assert len(suggestions) == 2
     pivot = next((s for s in suggestions if s["action"] == "PIVOT"), None)
     assert pivot is not None
+    assert pivot["out"] == "Player_0", f"Expected OUT player Player_0, got {pivot['out']}"
+    # Replacement player must exist, have correct position, and satisfy salary constraint
+    if pivot["in"] is not None:
+        replacement = player_pool_map.get(pivot["in"])
+        assert replacement is not None, f"Replacement {pivot['in']} not found in pool"
+        out_pos = player_pool_map["Player_0"]["pos"]
+        assert replacement["pos"] == out_pos, (
+            f"Replacement pos {replacement['pos']} doesn't match out player pos {out_pos}"
+        )
+        out_salary = float(player_pool_map["Player_0"]["salary"] or 0)
+        repl_salary = float(replacement["salary"] or 0)
+        assert abs(repl_salary - out_salary) <= 1500, (
+            f"Salary delta {abs(repl_salary - out_salary)} exceeds 1500 cap"
+        )
+
     reduce = next((s for s in suggestions if s["action"] == "REDUCE_EXPOSURE"), None)
     assert reduce is not None
+    assert reduce["player"] == "Player_1", f"Expected GTD player Player_1, got {reduce['player']}"
 
 
 # ---------------------------------------------------------------------------

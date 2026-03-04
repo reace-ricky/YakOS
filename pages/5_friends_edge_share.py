@@ -290,7 +290,6 @@ def main() -> None:
 
         col_a, col_b, col_c = st.columns(3)
         with col_a:
-            salary_color = "green" if total_salary <= salary_cap else "red"
             st.metric("Total Salary", f"${total_salary:,}")
         with col_b:
             st.metric("Cap Remaining", f"${salary_cap - total_salary:,}")
