@@ -258,17 +258,41 @@ def _filter_lobby_by_date(lobby_df: pd.DataFrame, target_date: str) -> pd.DataFr
     The DK lobby returns all upcoming contests (potentially days away).
     This ensures we only auto-pick from contests actually scheduled for
     the user's selected slate date.
+
+    Handles DK .NET JSON dates like '/Date(1741212000000)/' as well as
+    ISO 8601 strings.  Falls back to unfiltered lobby when parsing fails
+    so the user can still load a player pool.
     """
     if lobby_df.empty or "start_time" not in lobby_df.columns:
         return lobby_df
     try:
-        st_parsed = pd.to_datetime(lobby_df["start_time"], errors="coerce", utc=True)
-        # Convert UTC to US/Eastern for date comparison (NBA games are evening ET)
+        import re as _re
         from zoneinfo import ZoneInfo
-        st_eastern = st_parsed.dt.tz_convert(ZoneInfo("America/New_York"))
-        mask = st_eastern.dt.strftime("%Y-%m-%d") == target_date
+
+        def _parse_dk_date(val: str) -> "pd.Timestamp | None":
+            """Parse a single DK start_time value."""
+            s = str(val).strip()
+            # .NET JSON date: /Date(1741212000000)/ or /Date(1741212000000-0500)/
+            m = _re.search(r"/Date\((\d+)", s)
+            if m:
+                epoch_ms = int(m.group(1))
+                return pd.Timestamp(epoch_ms, unit="ms", tz="UTC")
+            # ISO 8601 fallback
+            try:
+                return pd.Timestamp(s, tz="UTC") if s else None
+            except Exception:
+                return None
+
+        parsed = lobby_df["start_time"].apply(_parse_dk_date)
+        # Convert UTC to US/Eastern for date comparison (NBA games are evening ET)
+        eastern = parsed.apply(
+            lambda ts: ts.tz_convert(ZoneInfo("America/New_York")) if ts is not None else None
+        )
+        mask = eastern.apply(
+            lambda ts: ts.strftime("%Y-%m-%d") == target_date if ts is not None else False
+        )
         filtered = lobby_df[mask].reset_index(drop=True)
-        return filtered
+        return filtered if not filtered.empty else lobby_df
     except Exception:
         return lobby_df
 
