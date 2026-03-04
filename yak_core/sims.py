@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from yak_core.sim_rating import compute_pipeline_ratings  # noqa: E402
+
 # Status values that make a player ineligible for sims.
 _INELIGIBLE_STATUSES = {
     "OUT", "IR", "INJ", "SUSPENDED", "SUSP",
@@ -1007,8 +1009,6 @@ def run_sims_pipeline(
         ``top_x_rate``, ``itm_rate``, ``sim_roi``, ``leverage``,
         ``yakos_sim_rating``, ``rating_bucket``.
     """
-    from yak_core.sim_rating import compute_pipeline_ratings  # noqa: PLC0415
-
     if pool.empty or lineups_df.empty:
         return pd.DataFrame()
 

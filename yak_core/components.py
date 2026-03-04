@@ -161,7 +161,7 @@ def render_lineup_card(
     total_pown_pct = total_pown_frac * 100.0
 
     yakos_rating = float(metrics.get("yakos_sim_rating") or 0.0)
-    bucket = str(metrics.get("rating_bucket") or "—")
+    bucket = str(metrics.get("rating_bucket") or "-")
 
     # ── Header ───────────────────────────────────────────────────────────
     header_html = (
