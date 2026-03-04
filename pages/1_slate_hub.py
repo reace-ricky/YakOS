@@ -42,9 +42,9 @@ from yak_core.dk_ingest import (  # noqa: E402
 from yak_core.projections import (  # noqa: E402
     yakos_fp_projection,
     yakos_minutes_projection,
-    yakos_ownership_projection,
     apply_projections,
 )
+from yak_core.ownership import apply_ownership  # noqa: E402
 from yak_core.rg_loader import load_rg_projections, merge_rg_with_pool  # noqa: E402
 from yak_core.config import (  # noqa: E402
     CONTEST_PRESETS,
@@ -106,27 +106,32 @@ def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
     """Add floor/ceil/proj_minutes/ownership from YakOS per-player models.
 
     Preserves existing floor/ceil columns when already present.
+    Ownership is computed pool-wide via salary_rank_ownership (from
+    yak_core.ownership) which uses salary rank percentile and position
+    scarcity — no external RG data required.
     """
     has_floor = "floor" in pool.columns and pool["floor"].notna().any()
     has_ceil = "ceil" in pool.columns and pool["ceil"].notna().any()
 
-    floors, ceils, mins_proj, own_proj = [], [], [], []
+    floors, ceils, mins_proj = [], [], []
     for _, row in pool.iterrows():
         feats = {"salary": float(row.get("salary", 0) or 0)}
         fp_res = yakos_fp_projection(feats)
         min_res = yakos_minutes_projection(feats)
-        own_res = yakos_ownership_projection(feats)
         floors.append(fp_res.get("floor", fp_res["proj"] * 0.7))
         ceils.append(fp_res.get("ceil", fp_res["proj"] * 1.4))
         mins_proj.append(min_res.get("proj_minutes", 0.0))
-        own_proj.append(own_res.get("proj_own", 0.0))
 
     if not has_floor:
         pool["floor"] = floors
     if not has_ceil:
         pool["ceil"] = ceils
     pool["proj_minutes"] = mins_proj
-    pool["ownership"] = own_proj
+
+    # Pool-level ownership model (salary rank + position scarcity).
+    # Replaces the broken per-row yakos_ownership_projection call which
+    # required proj and rg_ownership features we don't have here.
+    pool = apply_ownership(pool)
 
     return compute_sim_eligible(pool)
 
