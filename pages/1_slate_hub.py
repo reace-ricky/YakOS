@@ -156,6 +156,20 @@ def _match_contests_to_preset(lobby_df: pd.DataFrame, preset: dict) -> pd.DataFr
     return lobby_df[mask].drop_duplicates(subset=["draft_group_id"]).reset_index(drop=True)
 
 
+def _auto_pick_best_contest(lobby_df: pd.DataFrame, preset: dict) -> Optional[int]:
+    """Pick the best-matching DraftKings draft_group_id for the given preset.
+
+    Filters lobby contests to match the preset's slate type (Showdown vs. Classic),
+    then returns the draft_group_id of the contest with the highest prize pool.
+    Returns None if no matching contest is found.
+    """
+    matched = _match_contests_to_preset(lobby_df, preset)
+    if matched.empty:
+        return None
+    best_row = matched.sort_values("prize_pool", ascending=False).iloc[0]
+    return int(best_row["draft_group_id"])
+
+
 def _extract_games(pool: pd.DataFrame) -> list[str]:
     """Extract unique game matchup strings from the pool."""
     opp_col = "opp" if "opp" in pool.columns else (
@@ -215,7 +229,20 @@ def main() -> None:
     if rapidapi_key:
         st.session_state["rapidapi_key"] = rapidapi_key
     else:
-        st.info("ℹ️ Tank01 stats enrichment and injury refresh are disabled. Set `TANK01_RAPIDAPI_KEY` in `.streamlit/secrets.toml` or Streamlit Cloud secrets to enable.")
+        # Show a dismissible info banner only when the key is absent.
+        # Once dismissed it stays hidden for the remainder of the session.
+        if not st.session_state.get("_tank01_banner_dismissed", False):
+            banner_col, dismiss_col = st.columns([6, 1])
+            with banner_col:
+                st.info(
+                    "ℹ️ Tank01 stats enrichment and injury refresh are disabled. "
+                    "Set `TANK01_RAPIDAPI_KEY` in `.streamlit/secrets.toml` or "
+                    "Streamlit Cloud secrets to enable."
+                )
+            with dismiss_col:
+                if st.button("Dismiss", key="_dismiss_tank01_banner", help="Hide this message for the session"):
+                    st.session_state["_tank01_banner_dismissed"] = True
+                    st.rerun()
 
     # ── Row 2: Contest Type ────────────────────────────────────────────────
     contest_type_label = st.selectbox("Contest Type", CONTEST_PRESET_LABELS)
@@ -225,75 +252,96 @@ def main() -> None:
     # Projection model is always YakOS Model
     proj_source = "model"
 
-    # ── Row 4: DK Lobby Contests ───────────────────────────────────────────
-    st.subheader("DK Contest Selection")
-
-    # Auto-detect live vs historical from the date
-    _is_live = slate_date_str == _today
-    if _is_live:
-        st.caption("📡 Live slate — fetching from DK lobby.")
-    else:
-        st.caption(f"📂 Historical slate — date: {slate_date_str}. Enter Draft Group ID directly.")
-
+    # ── DK lobby cache (used both by debug UI and auto-pick) ──────────────
     lobby_key = f"_hub_lobby_{sport}_{slate_date_str}"
     lobby_df: Optional[pd.DataFrame] = st.session_state.get(lobby_key)
 
-    col_fetch, col_clear = st.columns([2, 1])
-    with col_fetch:
-        if st.button("🔍 Fetch Contests from DK", help="Pulls current DK lobby contests for this sport."):
-            with st.spinner("Fetching DK lobby…"):
-                try:
-                    fetched = fetch_dk_lobby_contests(sport)
-                    st.session_state[lobby_key] = fetched
-                    lobby_df = fetched
-                    if fetched.empty:
-                        st.warning("No contests found in DK lobby for this sport/date.")
-                    else:
-                        st.success(f"Found {len(fetched)} contests.")
-                except Exception as exc:
-                    st.error(f"Failed to fetch DK lobby: {exc}")
-    with col_clear:
-        if lobby_df is not None and st.button("Clear"):
-            st.session_state.pop(lobby_key, None)
-            lobby_df = None
-            st.rerun()
+    # ── Debug Mode: DK Contest Selection (admin only) ─────────────────────
+    # Show the full DK contest selection UI only when debug_mode is enabled.
+    # In normal operation the contest is resolved automatically.
+    _debug_mode = st.session_state.get("debug_mode", False)
+    _debug_draft_group_id: Optional[int] = None
 
-    # Contest selector or manual entry
-    draft_group_id: Optional[int] = None
-
-    if lobby_df is not None and not lobby_df.empty:
-        matched = _match_contests_to_preset(lobby_df, preset)
-        if not matched.empty:
-            contest_options = {
-                f"{row['name']} (DG {row['draft_group_id']})": int(row["draft_group_id"])
-                for _, row in matched.iterrows()
-            }
-            selected_label = st.selectbox("Select Contest", list(contest_options.keys()))
-            draft_group_id = contest_options[selected_label]
-            st.caption(f"Draft Group ID: **{draft_group_id}**")
+    if _debug_mode:
+        st.subheader("DK Contest Selection (Debug)")
+        _is_live = slate_date_str == _today
+        if _is_live:
+            st.caption("📡 Live slate — fetching from DK lobby.")
         else:
-            st.info("No contests matched the selected Contest Type. Enter Draft Group ID manually.")
+            st.caption(f"📂 Historical slate — date: {slate_date_str}. Enter Draft Group ID directly.")
 
-    # Manual Draft Group ID override (always available)
-    with st.expander("Manual Draft Group ID override", expanded=draft_group_id is None):
-        dg_val = st.number_input(
-            "Draft Group ID",
-            min_value=0,
-            step=1,
-            value=int(draft_group_id or slate.draft_group_id or 0),
-            help="DraftKings draft group ID (visible in DK contest URLs). Overrides lobby selection.",
-            key="_hub_dg_manual",
-        )
-        if dg_val > 0:
-            draft_group_id = int(dg_val)
+        col_fetch, col_clear = st.columns([2, 1])
+        with col_fetch:
+            if st.button("🔍 Fetch Contests from DK", help="Pulls current DK lobby contests for this sport."):
+                with st.spinner("Fetching DK lobby…"):
+                    try:
+                        fetched = fetch_dk_lobby_contests(sport)
+                        st.session_state[lobby_key] = fetched
+                        lobby_df = fetched
+                        if fetched.empty:
+                            st.warning("No contests found in DK lobby for this sport/date.")
+                        else:
+                            st.success(f"Found {len(fetched)} contests.")
+                    except Exception as exc:
+                        st.error(f"Failed to fetch DK lobby: {exc}")
+        with col_clear:
+            if lobby_df is not None and st.button("Clear"):
+                st.session_state.pop(lobby_key, None)
+                lobby_df = None
+                st.rerun()
+
+        if lobby_df is not None and not lobby_df.empty:
+            matched = _match_contests_to_preset(lobby_df, preset)
+            if not matched.empty:
+                contest_options = {
+                    f"{row['name']} (DG {row['draft_group_id']})": int(row["draft_group_id"])
+                    for _, row in matched.iterrows()
+                }
+                selected_label = st.selectbox("Select Contest", list(contest_options.keys()))
+                _debug_draft_group_id = contest_options[selected_label]
+                st.caption(f"Draft Group ID: **{_debug_draft_group_id}**")
+            else:
+                st.info("No contests matched the selected Contest Type. Enter Draft Group ID manually.")
+
+        with st.expander("Manual Draft Group ID override", expanded=_debug_draft_group_id is None):
+            dg_val = st.number_input(
+                "Draft Group ID",
+                min_value=0,
+                step=1,
+                value=int(_debug_draft_group_id or slate.draft_group_id or 0),
+                help="DraftKings draft group ID (visible in DK contest URLs). Overrides lobby selection.",
+                key="_hub_dg_manual",
+            )
+            if dg_val > 0:
+                _debug_draft_group_id = int(dg_val)
 
     # ── Row 5: Load Player Pool ────────────────────────────────────────────
     if st.button("📥 Load Player Pool", type="primary"):
-        if not draft_group_id:
-            st.warning("Select a contest or enter a Draft Group ID to load the player pool.")
-        else:
-            with st.spinner("Loading player pool…"):
-                try:
+        # Resolve draft_group_id:
+        # • Debug mode  → use the manually selected / entered value.
+        # • Normal mode → auto-fetch the DK lobby and pick the highest prize-pool
+        #                 contest that matches the selected Contest Type.
+        draft_group_id: Optional[int] = _debug_draft_group_id if _debug_mode else None
+
+        with st.spinner("Loading player pool…"):
+            try:
+                # Auto-pick contest when no override is set
+                if not draft_group_id:
+                    _lobby = lobby_df
+                    if _lobby is None:
+                        _lobby = fetch_dk_lobby_contests(sport)
+                        st.session_state[lobby_key] = _lobby
+                    draft_group_id = _auto_pick_best_contest(_lobby, preset)
+                    if draft_group_id:
+                        st.caption(f"ℹ️ Auto-selected Draft Group ID: **{draft_group_id}**")
+
+                if not draft_group_id:
+                    st.warning(
+                        "Could not determine a Draft Group ID for the selected Contest Type. "
+                        "No matching contests were found in the DK lobby. "
+                        "Try a different sport, date, or contest type, or check your network connection."
+                    )
+                else:
                     # Step 1: Fetch DK draftables (salaries, positions, teams)
                     pool = fetch_dk_draftables(draft_group_id)
                     if pool.empty:
@@ -353,8 +401,8 @@ def main() -> None:
                     st.session_state["_hub_rules"] = parsed_rules
                     st.session_state["_hub_draft_group_id"] = draft_group_id
                     st.success(f"Loaded {len(pool)} players. Roster: {parsed_rules['slots']}")
-                except Exception as exc:
-                    st.error(f"Failed to load player pool: {exc}")
+            except Exception as exc:
+                st.error(f"Failed to load player pool: {exc}")
 
     # ── Pool Preview ──────────────────────────────────────────────────────
     hub_pool: Optional[pd.DataFrame] = st.session_state.get("_hub_pool")
