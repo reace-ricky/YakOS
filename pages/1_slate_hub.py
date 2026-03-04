@@ -362,7 +362,7 @@ def main() -> None:
                     if _lobby is None:
                         _lobby = fetch_dk_lobby_contests(sport)
                         st.session_state[lobby_key] = _lobby
-                                                _lobby = _filter_lobby_by_date(_lobby, slate_date_str)
+                    _lobby = _filter_lobby_by_date(_lobby, slate_date_str)
                     draft_group_id = _auto_pick_best_contest(_lobby, preset)
                     if draft_group_id:
                         st.caption(f"ℹ️ Auto-selected Draft Group ID: **{draft_group_id}**")
