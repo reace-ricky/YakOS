@@ -9,3 +9,4 @@ __pycache__/
 yakos/
 .ipynb_checkpoints/
 data/api_config.json
+streamlit_app_legacy.py
