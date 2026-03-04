@@ -176,6 +176,65 @@ CONTEST_PRESET_ARCH_LABELS: Dict[str, str] = {
     "Showdown": "Showdown",
 }
 
+# ============================================================
+# DK CONTEST MATCH RULES
+# ============================================================
+# Hidden mapping table: each preset label maps to rules used to
+# auto-match DK lobby contests.  The Slate Hub uses these rules
+# to filter lobby rows and pick the best draft_group_id.
+#
+# Keys per rule:
+#   game_type   - "classic" or "showdown" (maps to DK game_type_id)
+#   max_entries_per_user - exact match on DK max_entries_per_user (None = any)
+#   name_contains - list of substrings; contest name must contain one (case-insensitive)
+#   name_excludes - list of substrings; contest name must NOT contain any
+#   is_single_entry - True/False/None (None = don't filter)
+#   prefer       - "highest_prize" or "highest_entries" for tie-breaking
+
+DK_CONTEST_MATCH_RULES: Dict[str, Dict[str, Any]] = {
+    "GPP - 150 Max": {
+        "game_type": "classic",
+        "max_entries_per_user": 150,
+        "name_contains": [],
+        "name_excludes": ["Double Up", "50/50", "Satellite", "Qualifier"],
+        "is_single_entry": False,
+        "prefer": "highest_prize",
+    },
+    "GPP - 20 Max": {
+        "game_type": "classic",
+        "max_entries_per_user": 20,
+        "name_contains": [],
+        "name_excludes": ["Double Up", "50/50", "Satellite", "Qualifier"],
+        "is_single_entry": False,
+        "prefer": "highest_prize",
+    },
+    "Single Entry / 3-Max": {
+        "game_type": "classic",
+        "max_entries_per_user": None,  # match 1 or 3
+        "max_entries_per_user_lte": 3,
+        "name_contains": [],
+        "name_excludes": ["Double Up", "50/50", "Satellite", "Qualifier", "Showdown"],
+        "is_single_entry": None,
+        "prefer": "highest_prize",
+    },
+    "50/50 / Double-Up": {
+        "game_type": "classic",
+        "max_entries_per_user": None,
+        "name_contains": ["Double Up", "50/50"],
+        "name_excludes": ["Showdown"],
+        "is_single_entry": None,
+        "prefer": "highest_entries",
+    },
+    "Showdown": {
+        "game_type": "showdown",
+        "max_entries_per_user": None,
+        "name_contains": [],
+        "name_excludes": ["Satellite", "Qualifier"],
+        "is_single_entry": None,
+        "prefer": "highest_prize",
+    },
+}
+
 
 # --- Alias map: lowercase/legacy keys -> canonical UPPER keys ---
 _KEY_ALIASES = {

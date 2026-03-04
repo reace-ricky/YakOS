@@ -55,6 +55,7 @@ from yak_core.config import (  # noqa: E402
     SALARY_CAP,
     DK_SHOWDOWN_SLOTS,
     DK_SHOWDOWN_LINEUP_SIZE,
+        DK_CONTEST_MATCH_RULES,
 )
 from yak_core.sims import compute_sim_eligible  # noqa: E402
 from yak_core.live import fetch_injury_updates  # noqa: E402
@@ -156,30 +157,100 @@ def _render_status_bar(slate: "SlateState") -> None:
 
 
 def _match_contests_to_preset(lobby_df: pd.DataFrame, preset: dict) -> pd.DataFrame:
-    """Filter lobby contests to those whose game_type_id matches the preset's slate type."""
+    """Filter lobby contests using DK_CONTEST_MATCH_RULES for the given preset.
+
+    Uses the hidden mapping table in config.py to match on game_type,
+    max_entries_per_user, contest name patterns, and single-entry flags.
+    Falls back to simple Showdown/Classic filtering when no rule exists.
+    """
     if lobby_df.empty:
         return lobby_df
-    is_showdown = preset.get("slate_type") == "Showdown Captain"
-    if is_showdown:
-        mask = lobby_df["game_type_id"].isin(_SHOWDOWN_GAME_TYPE_IDS)
-    else:
-        mask = ~lobby_df["game_type_id"].isin(_SHOWDOWN_GAME_TYPE_IDS)
+
+    preset_label = None
+    for label, p in CONTEST_PRESETS.items():
+        if p is preset:
+            preset_label = label
+            break
+
+    rules = DK_CONTEST_MATCH_RULES.get(preset_label or "", {})
+    if not rules:
+        # Fallback: simple Showdown vs Classic
+        is_showdown = preset.get("slate_type") == "Showdown Captain"
+        if is_showdown:
+            mask = lobby_df["game_type_id"].isin(_SHOWDOWN_GAME_TYPE_IDS)
+        else:
+            mask = ~lobby_df["game_type_id"].isin(_SHOWDOWN_GAME_TYPE_IDS)
+        return lobby_df[mask].drop_duplicates(subset=["draft_group_id"]).reset_index(drop=True)
+
+    mask = pd.Series(True, index=lobby_df.index)
+
+    # 1. game_type filter (classic vs showdown)
+    if rules.get("game_type") == "showdown":
+        mask &= lobby_df["game_type_id"].isin(_SHOWDOWN_GAME_TYPE_IDS)
+    elif rules.get("game_type") == "classic":
+        mask &= ~lobby_df["game_type_id"].isin(_SHOWDOWN_GAME_TYPE_IDS)
+
+    # 2. max_entries_per_user exact match
+    mec = rules.get("max_entries_per_user")
+    if mec is not None and "max_entries_per_user" in lobby_df.columns:
+        mask &= lobby_df["max_entries_per_user"] == mec
+
+    # 3. max_entries_per_user <= threshold
+    mec_lte = rules.get("max_entries_per_user_lte")
+    if mec_lte is not None and "max_entries_per_user" in lobby_df.columns:
+        mask &= lobby_df["max_entries_per_user"] <= mec_lte
+
+    # 4. name_contains — contest name must contain at least one substring
+    includes = rules.get("name_contains", [])
+    if includes and "name" in lobby_df.columns:
+        name_lower = lobby_df["name"].str.lower()
+        inc_mask = pd.Series(False, index=lobby_df.index)
+        for sub in includes:
+            inc_mask |= name_lower.str.contains(sub.lower(), na=False)
+        mask &= inc_mask
+
+    # 5. name_excludes — contest name must NOT contain any substring
+    excludes = rules.get("name_excludes", [])
+    if excludes and "name" in lobby_df.columns:
+        name_lower = lobby_df["name"].str.lower()
+        for sub in excludes:
+            mask &= ~name_lower.str.contains(sub.lower(), na=False)
+
+    # 6. is_single_entry filter
+    ise = rules.get("is_single_entry")
+    if ise is not None and "is_single_entry" in lobby_df.columns:
+        mask &= lobby_df["is_single_entry"] == ise
+
     return lobby_df[mask].drop_duplicates(subset=["draft_group_id"]).reset_index(drop=True)
 
 
 def _auto_pick_best_contest(lobby_df: pd.DataFrame, preset: dict) -> Optional[int]:
     """Pick the best-matching DraftKings draft_group_id for the given preset.
 
-    Filters lobby contests to match the preset's slate type (Showdown vs. Classic),
-    then returns the draft_group_id of the contest with the highest prize pool.
+    Filters lobby contests using DK_CONTEST_MATCH_RULES, then returns the
+    draft_group_id of the contest with the best sort key (highest prize pool
+    or highest entries, depending on the rule's 'prefer' setting).
     Returns None if no matching contest is found.
     """
     matched = _match_contests_to_preset(lobby_df, preset)
     if matched.empty:
         return None
-    best_row = matched.sort_values("prize_pool", ascending=False).iloc[0]
-    return int(best_row["draft_group_id"])
 
+    # Determine sort column from match rules
+    preset_label = None
+    for label, p in CONTEST_PRESETS.items():
+        if p is preset:
+            preset_label = label
+            break
+    rules = DK_CONTEST_MATCH_RULES.get(preset_label or "", {})
+    prefer = rules.get("prefer", "highest_prize")
+    if prefer == "highest_entries" and "current_entries" in matched.columns:
+        sort_col = "current_entries"
+    else:
+        sort_col = "prize_pool"
+
+    best_row = matched.sort_values(sort_col, ascending=False).iloc[0]
+    return int(best_row["draft_group_id"])
 
 def _filter_lobby_by_date(lobby_df: pd.DataFrame, target_date: str) -> pd.DataFrame:
     """Filter lobby contests to those whose start_time falls on target_date (YYYY-MM-DD).
