@@ -450,3 +450,19 @@ class TestStateImports:
     def test_get_sim_state(self):
         mod = importlib.import_module("yak_core.state")
         assert hasattr(mod, "get_sim_state")
+
+
+class TestContextImports:
+    """Smoke tests for yak_core.context – shared slate context helpers."""
+
+    def test_get_slate_context(self):
+        mod = importlib.import_module("yak_core.context")
+        assert hasattr(mod, "get_slate_context")
+
+    def test_get_lab_analysis(self):
+        mod = importlib.import_module("yak_core.context")
+        assert hasattr(mod, "get_lab_analysis")
+
+    def test_SlateContext(self):
+        mod = importlib.import_module("yak_core.context")
+        assert hasattr(mod, "SlateContext")

@@ -57,6 +57,9 @@ from yak_core.right_angle import (  # noqa: E402
     compute_stack_scores,
     compute_value_scores,
 )
+# get_lab_analysis() exposes the finalized player pool and sim metrics produced
+# by this page so downstream pages (Ricky Edge, Build & Publish) can consume it.
+from yak_core.context import get_lab_analysis  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -181,6 +184,7 @@ def main() -> None:
     st.title("🧪 The Lab")
     st.caption("Run sims, analyze edge, calibrate projections.")
 
+    # Nav order: Slate Hub → The Lab → Ricky Edge → Build & Publish → Friends / Edge Share
     slate = get_slate_state()
     edge = get_edge_state()
     sim = get_sim_state()

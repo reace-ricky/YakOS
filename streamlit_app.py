@@ -4,8 +4,8 @@ Entry point for the Streamlit app.  Uses ``st.navigation`` to route between
 the five Sprint 1 pages:
 
   1. Slate Hub         – load DK contests, configure slate, publish
-  2. Ricky Edge        – tag players / games / stacks, edge labels
-  3. The Lab           – sims, calibration, contest gauges
+  2. The Lab           – sims, calibration, contest gauges
+  3. Ricky Edge        – tag players / games / stacks, edge labels
   4. Build & Publish   – build lineups, export CSV, publish to Edge Share
   5. Friends / Edge Share – read-only lineup view + friend builder
 
@@ -35,11 +35,12 @@ st.set_page_config(
 )
 
 # ── Navigation ─────────────────────────────────────────────────────────────
+# Nav order: 1) Slate Hub, 2) The Lab, 3) Ricky Edge, 4) Build & Publish, 5) Friends / Edge Share
 pg = st.navigation(
     [
         st.Page("pages/1_slate_hub.py", title="Slate Hub", icon="🏀"),
-        st.Page("pages/2_ricky_edge.py", title="Ricky Edge", icon="🎯"),
-        st.Page("pages/3_the_lab.py", title="The Lab", icon="🧪"),
+        st.Page("pages/2_the_lab.py", title="The Lab", icon="🧪"),
+        st.Page("pages/3_ricky_edge.py", title="Ricky Edge", icon="🎯"),
         st.Page("pages/4_build_publish.py", title="Build & Publish", icon="🏗️"),
         st.Page("pages/5_friends_edge_share.py", title="Friends / Edge Share", icon="👥"),
     ]
