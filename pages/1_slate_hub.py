@@ -197,7 +197,7 @@ def _filter_lobby_by_date(lobby_df: pd.DataFrame, target_date: str) -> pd.DataFr
         st_eastern = st_parsed.dt.tz_convert(ZoneInfo("America/New_York"))
         mask = st_eastern.dt.strftime("%Y-%m-%d") == target_date
         filtered = lobby_df[mask].reset_index(drop=True)
-        return filtered if not filtered.empty else lobby_df
+        return filtered
     except Exception:
         return lobby_df
 
