@@ -79,7 +79,6 @@ class SlateState:
         """Return True when the slate is fully configured and published."""
         return (
             self.published
-            and self.draft_group_id is not None
             and self.player_pool is not None
             and not self.player_pool.empty
         )

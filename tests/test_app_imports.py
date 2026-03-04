@@ -215,6 +215,10 @@ class TestProjectionsImports:
         mod = importlib.import_module("yak_core.projections")
         assert hasattr(mod, "yakos_ensemble")
 
+    def test_load_historical_slate(self):
+        mod = importlib.import_module("yak_core.projections")
+        assert hasattr(mod, "load_historical_slate")
+
 
 class TestScoringImports:
     def test_calibration_kpi_summary(self):

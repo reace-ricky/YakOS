@@ -2,13 +2,12 @@
 
 Responsibilities
 ----------------
-- Load DK contests by sport / date and group them like the DK lobby
-  (Main, Late Night, Showdown by game, Turbo).
-- On slate selection, pull draftables + game-type rules and
-  auto-configure roster template, salary cap, scoring, and captain
-  multipliers into SlateState.
-- Merge projections (floor / median / ceiling) and ownership from the
-  chosen sources, surfacing projected minutes as a visible column.
+- Data Mode toggle: Live (DK draftables API) or Historical (local parquet/CSV).
+- Contest Type picker from CONTEST_PRESETS (replaces DK lobby contest picker).
+- Projection Source picker: salary_implied / regression / model / blend / parquet.
+- Load Player Pool via DK draftables (Live) or local data file (Historical).
+- Run full apply_projections() pipeline on the loaded pool.
+- Optional RG CSV merge after pool load.
 - Provide a "Publish Slate" action that writes the full configuration
   into SlateState.
 - S1.7: Refresh action that re-pulls news / injuries, updates projections,
@@ -32,67 +31,59 @@ if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
 from yak_core.state import get_slate_state, set_slate_state  # noqa: E402
-from yak_core.dk_ingest import (  # noqa: E402
-    fetch_dk_lobby_contests,
-    fetch_dk_draftables,
-    fetch_game_type_rules,
-    parse_roster_rules,
-    build_contest_scoped_pool,
-    is_dk_integration_enabled,
-    DK_GAME_TYPE_LABELS,
-)
+from yak_core.dk_ingest import fetch_dk_draftables  # noqa: E402
 from yak_core.projections import (  # noqa: E402
-    salary_implied_proj,
     yakos_fp_projection,
     yakos_minutes_projection,
     yakos_ownership_projection,
+    apply_projections,
+    load_historical_slate,
+)
+from yak_core.rg_loader import load_rg_projections, merge_rg_with_pool  # noqa: E402
+from yak_core.config import (  # noqa: E402
+    CONTEST_PRESETS,
+    CONTEST_PRESET_LABELS,
+    merge_config,
+    YAKOS_ROOT,
+    DK_POS_SLOTS,
+    DK_LINEUP_SIZE,
+    SALARY_CAP,
+    DK_SHOWDOWN_SLOTS,
+    DK_SHOWDOWN_LINEUP_SIZE,
 )
 from yak_core.sims import compute_sim_eligible  # noqa: E402
 from yak_core.live import fetch_injury_updates  # noqa: E402
 
 # ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+_PROJ_SOURCES = ["salary_implied", "regression", "model", "blend", "parquet"]
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-_LOBBY_GROUP_ORDER = ["Main", "Late Night", "Turbo", "Showdown"]
+
+def _rules_from_preset(preset: dict) -> dict:
+    """Build a roster rules dict from a CONTEST_PRESETS entry."""
+    is_showdown = preset.get("slate_type") == "Showdown Captain"
+    return {
+        "slots": DK_SHOWDOWN_SLOTS if is_showdown else DK_POS_SLOTS,
+        "lineup_size": DK_SHOWDOWN_LINEUP_SIZE if is_showdown else DK_LINEUP_SIZE,
+        "salary_cap": SALARY_CAP,
+        "is_showdown": is_showdown,
+    }
 
 
-def _group_contests(contests_df: pd.DataFrame) -> dict[str, pd.DataFrame]:
-    """Group contests by lobby category (Main / Late Night / Showdown / Turbo)."""
-    groups: dict[str, list] = {g: [] for g in _LOBBY_GROUP_ORDER}
-    other: list = []
-    for _, row in contests_df.iterrows():
-        name = str(row.get("name", "")).lower()
-        game_type = int(row.get("gameTypeId", 1))
-        if game_type in (96, 114) or "showdown" in name:
-            groups["Showdown"].append(row)
-        elif "turbo" in name or "turbo" in str(row.get("contestType", "")).lower():
-            groups["Turbo"].append(row)
-        elif "late" in name or "late night" in name:
-            groups["Late Night"].append(row)
-        else:
-            groups["Main"].append(row)
-    result = {}
-    for label in _LOBBY_GROUP_ORDER:
-        rows = groups[label]
-        if rows:
-            result[label] = pd.DataFrame(rows)
-    if other:
-        result["Other"] = pd.DataFrame(other)
-    return result
+def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
+    """Add floor/ceil/proj_minutes/ownership from YakOS per-player models.
 
+    Preserves existing floor/ceil columns when already present.
+    """
+    has_floor = "floor" in pool.columns and pool["floor"].notna().any()
+    has_ceil = "ceil" in pool.columns and pool["ceil"].notna().any()
 
-def _build_default_pool(draftables_df: pd.DataFrame) -> pd.DataFrame:
-    """Add salary-implied projections to a raw draftables DataFrame."""
-    pool = draftables_df.copy()
-    if "salary" not in pool.columns:
-        pool["salary"] = 0
-    pool["salary"] = pd.to_numeric(pool["salary"], errors="coerce").fillna(0)
-
-    # Salary-implied projections
-    pool["proj"] = salary_implied_proj(pool["salary"])
-
-    # YakOS projections per player
     floors, ceils, mins_proj, own_proj = [], [], [], []
     for _, row in pool.iterrows():
         feats = {"salary": float(row.get("salary", 0) or 0)}
@@ -104,13 +95,14 @@ def _build_default_pool(draftables_df: pd.DataFrame) -> pd.DataFrame:
         mins_proj.append(min_res.get("proj_minutes", 0.0))
         own_proj.append(own_res.get("proj_own", 0.0))
 
-    pool["floor"] = floors
-    pool["ceil"] = ceils
+    if not has_floor:
+        pool["floor"] = floors
+    if not has_ceil:
+        pool["ceil"] = ceils
     pool["proj_minutes"] = mins_proj
     pool["ownership"] = own_proj
 
-    pool = compute_sim_eligible(pool)
-    return pool
+    return compute_sim_eligible(pool)
 
 
 def _render_status_bar(slate: "SlateState") -> None:
@@ -138,13 +130,13 @@ def _render_status_bar(slate: "SlateState") -> None:
 
 def main() -> None:
     st.title("🏀 Slate Hub")
-    st.caption("Select a DK contest, configure the slate, and publish it.")
+    st.caption("Configure the slate and publish it.")
 
     slate = get_slate_state()
     _render_status_bar(slate)
     st.divider()
 
-    # ── Inputs ────────────────────────────────────────────────────────────
+    # ── Row 1: Sport, Date, Data Mode ─────────────────────────────────────
     col1, col2, col3 = st.columns(3)
     with col1:
         sport = st.selectbox("Sport", ["NBA", "PGA"], index=0 if slate.sport == "NBA" else 1)
@@ -154,88 +146,78 @@ def main() -> None:
         slate_date = st.date_input("Date", value=pd.to_datetime(slate.slate_date or _today))
         slate_date_str = str(slate_date)
     with col3:
-        proj_source = st.selectbox(
-            "Projection Source",
-            ["salary_implied", "yakos", "RotoGrinders", "FantasyPros"],
-            index=["salary_implied", "yakos", "RotoGrinders", "FantasyPros"].index(
-                slate.proj_source if slate.proj_source in ["salary_implied", "yakos", "RotoGrinders", "FantasyPros"]
-                else "salary_implied"
-            ),
+        data_mode = st.selectbox("Data Mode", ["Live", "Historical"], index=0)
+
+    # ── Row 2: Contest Type ────────────────────────────────────────────────
+    contest_type_label = st.selectbox("Contest Type", CONTEST_PRESET_LABELS)
+    preset = CONTEST_PRESETS[contest_type_label]
+    st.caption(preset.get("description", ""))
+
+    # ── Row 3: Projection Source ───────────────────────────────────────────
+    _proj_idx = _PROJ_SOURCES.index(slate.proj_source) if slate.proj_source in _PROJ_SOURCES else 0
+    proj_source = st.selectbox("Projection Source", _PROJ_SOURCES, index=_proj_idx)
+
+    # ── Row 4: Live → Draft Group ID / Historical → auto-detect ───────────
+    draft_group_id: Optional[int] = None
+    if data_mode == "Live":
+        dg_val = st.number_input(
+            "Draft Group ID",
+            min_value=0,
+            step=1,
+            value=int(slate.draft_group_id or 0),
+            help="DraftKings draft group ID (visible in DK contest URLs).",
+        )
+        draft_group_id = int(dg_val) if dg_val > 0 else None
+    else:
+        date_compact = slate_date_str.replace("-", "")
+        st.info(
+            f"Historical mode: will look for `tank_opt_pool_{date_compact}.parquet` "
+            f"or `*DK{date_compact}*.csv` in the `data/` folder."
         )
 
-    # ── Fetch DK Lobby ────────────────────────────────────────────────────
-    if st.button("🔄 Load DK Lobby", type="primary"):
-        with st.spinner("Fetching DK lobby contests…"):
+    # ── Row 5: Load Player Pool ────────────────────────────────────────────
+    if st.button("📥 Load Player Pool", type="primary"):
+        with st.spinner("Loading player pool…"):
             try:
-                contests_df = fetch_dk_lobby_contests(sport)
-                st.session_state["_hub_contests_df"] = contests_df
-                st.session_state["_hub_sport"] = sport
-                st.session_state["_hub_date"] = slate_date_str
-                st.success(f"Loaded {len(contests_df)} contests.")
+                if data_mode == "Historical":
+                    pool = load_historical_slate(slate_date_str, YAKOS_ROOT)
+                    if pool.empty:
+                        st.error(
+                            f"No historical data found for {slate_date_str}. "
+                            f"Make sure a `tank_opt_pool_{date_compact}.parquet` or "
+                            f"`*DK{date_compact}*.csv` file exists in the `data/` folder."
+                        )
+                        return
+                    parsed_rules = _rules_from_preset(preset)
+                else:
+                    if not draft_group_id:
+                        st.warning("Enter a Draft Group ID to load a live slate.")
+                        return
+                    pool = fetch_dk_draftables(draft_group_id)
+                    parsed_rules = _rules_from_preset(preset)
+
+                # Normalize salary column
+                if "salary" not in pool.columns:
+                    pool["salary"] = 0
+                pool["salary"] = pd.to_numeric(pool["salary"], errors="coerce").fillna(0)
+
+                # Apply full projection pipeline
+                cfg = merge_config({
+                    "PROJ_SOURCE": proj_source,
+                    "SLATE_DATE": slate_date_str,
+                    "CONTEST_TYPE": preset["internal_contest"],
+                })
+                pool = apply_projections(pool, cfg)
+
+                # Add floor/ceil/minutes/ownership per player
+                pool = _enrich_pool(pool)
+
+                st.session_state["_hub_pool"] = pool
+                st.session_state["_hub_rules"] = parsed_rules
+                st.session_state["_hub_draft_group_id"] = draft_group_id
+                st.success(f"Loaded {len(pool)} players. Roster: {parsed_rules['slots']}")
             except Exception as exc:
-                st.error(f"Failed to load DK lobby: {exc}")
-
-    # ── Contest Picker ────────────────────────────────────────────────────
-    contests_df: Optional[pd.DataFrame] = st.session_state.get("_hub_contests_df")
-
-    if contests_df is not None and not contests_df.empty:
-        st.subheader("Select Contest")
-        groups = _group_contests(contests_df)
-
-        if not groups:
-            st.info("No contests found. Try a different date or sport.")
-            return
-
-        tab_labels = list(groups.keys())
-        tabs = st.tabs(tab_labels)
-
-        selected_contest_row = None
-        for tab, label in zip(tabs, tab_labels):
-            with tab:
-                grp_df = groups[label]
-                if grp_df.empty:
-                    st.info("No contests in this category.")
-                    continue
-
-                # Show selectable table
-                display_cols = [c for c in ["name", "entries", "totalPayoutAmount", "gameTypeId", "draftGroupId"] if c in grp_df.columns]
-                if not display_cols:
-                    display_cols = list(grp_df.columns[:5])
-                st.dataframe(grp_df[display_cols].reset_index(drop=True), use_container_width=True, hide_index=True)
-
-                contest_names = grp_df["name"].tolist() if "name" in grp_df.columns else grp_df.index.tolist()
-                chosen = st.selectbox(f"Pick contest ({label})", contest_names, key=f"_hub_pick_{label}")
-                if chosen:
-                    mask = grp_df["name"] == chosen if "name" in grp_df.columns else grp_df.index == chosen
-                    if mask.any():
-                        selected_contest_row = grp_df[mask].iloc[0]
-                        st.session_state["_hub_selected_row"] = selected_contest_row
-                        st.session_state["_hub_selected_label"] = label
-
-        # Pull draftables when a contest is selected
-        sel_row = st.session_state.get("_hub_selected_row")
-        if sel_row is not None:
-            draft_group_id = int(sel_row.get("draftGroupId", 0) or 0)
-            game_type_id = int(sel_row.get("gameTypeId", 1) or 1)
-            contest_id = int(sel_row.get("id", 0) or sel_row.get("contestId", 0) or 0)
-
-            if st.button("📥 Load Draftables + Rules", type="secondary"):
-                with st.spinner("Fetching draftables and roster rules…"):
-                    try:
-                        draftables_df = fetch_dk_draftables(draft_group_id)
-                        rules_json = fetch_game_type_rules(game_type_id)
-                        parsed_rules = parse_roster_rules(rules_json)
-                        pool = _build_default_pool(draftables_df)
-
-                        st.session_state["_hub_pool"] = pool
-                        st.session_state["_hub_rules"] = parsed_rules
-                        st.session_state["_hub_draft_group_id"] = draft_group_id
-                        st.session_state["_hub_game_type_id"] = game_type_id
-                        st.session_state["_hub_contest_id"] = contest_id
-                        st.session_state["_hub_contest_name"] = str(sel_row.get("name", ""))
-                        st.success(f"Loaded {len(pool)} draftables. Roster: {parsed_rules['slots']}")
-                    except Exception as exc:
-                        st.error(f"Failed to load draftables: {exc}")
+                st.error(f"Failed to load player pool: {exc}")
 
     # ── Pool Preview ──────────────────────────────────────────────────────
     hub_pool: Optional[pd.DataFrame] = st.session_state.get("_hub_pool")
@@ -244,8 +226,9 @@ def main() -> None:
     if hub_pool is not None:
         st.subheader("Player Pool Preview")
         preview_cols = [c for c in [
-            "player_name", "pos", "team", "opponent", "salary",
+            "player_name", "pos", "team", "opp", "salary",
             "proj", "floor", "ceil", "proj_minutes", "ownership", "status", "sim_eligible",
+            "actual_fp",
         ] if c in hub_pool.columns]
         st.dataframe(
             hub_pool[preview_cols].sort_values("proj", ascending=False),
@@ -257,26 +240,22 @@ def main() -> None:
             with st.expander("Roster Rules", expanded=False):
                 st.json(hub_rules)
 
-        # ── Projection source merge ───────────────────────────────────────
+        # ── External Projections Upload ───────────────────────────────────
         with st.expander("External Projections Upload", expanded=False):
-            st.caption("Upload RotoGrinders or FantasyPros CSV to merge projections.")
+            st.caption("Upload a RotoGrinders CSV to merge projections into the pool.")
             rg_file = st.file_uploader("RotoGrinders CSV", type="csv", key="_hub_rg_upload")
             if rg_file:
                 try:
-                    rg_df = pd.read_csv(rg_file)
+                    rg_df = load_rg_projections(rg_file)
                     st.session_state["_hub_rg_df"] = rg_df
-                    st.success(f"RotoGrinders: {len(rg_df)} rows")
+                    st.success(f"RotoGrinders: {len(rg_df)} rows loaded.")
+                    if st.button("Merge RG Projections into Pool"):
+                        merged = merge_rg_with_pool(hub_pool, rg_df)
+                        st.session_state["_hub_pool"] = merged
+                        st.success(f"Merged RG data into pool ({len(merged)} rows).")
+                        st.rerun()
                 except Exception as exc:
                     st.error(f"Failed to read RG CSV: {exc}")
-
-            fp_file = st.file_uploader("FantasyPros CSV", type="csv", key="_hub_fp_upload")
-            if fp_file:
-                try:
-                    fp_df = pd.read_csv(fp_file)
-                    st.session_state["_hub_fp_df"] = fp_df
-                    st.success(f"FantasyPros: {len(fp_df)} rows")
-                except Exception as exc:
-                    st.error(f"Failed to read FP CSV: {exc}")
 
         # ── S1.7 — Late Swap / Refresh ────────────────────────────────────
         st.subheader("Injury / News Refresh (Late Swap)")
@@ -329,10 +308,8 @@ def main() -> None:
             slate.sport = sport
             slate.slate_date = slate_date_str
             slate.proj_source = proj_source
+            slate.contest_name = contest_type_label
             slate.draft_group_id = st.session_state.get("_hub_draft_group_id")
-            slate.game_type_id = st.session_state.get("_hub_game_type_id")
-            slate.contest_id = st.session_state.get("_hub_contest_id")
-            slate.contest_name = st.session_state.get("_hub_contest_name", "")
 
             if hub_rules:
                 slate.apply_roster_rules(hub_rules)
@@ -348,17 +325,7 @@ def main() -> None:
             st.success(f"✅ Slate published! {len(hub_pool)} players, cap ${slate.salary_cap:,}, slots: {slate.roster_slots}")
             st.balloons()
     else:
-        if st.session_state.get("_hub_contests_df") is not None:
-            st.info("Select a contest and click **Load Draftables + Rules** to proceed.")
-        else:
-            st.info("Click **Load DK Lobby** to browse available contests.")
-
-    # Demo mode banner when DK integration is disabled
-    if not is_dk_integration_enabled():
-        st.warning(
-            "⚠️ **DK integration is disabled** (set `DK_INTEGRATION_ENABLED=true` to enable). "
-            "Showing mock data."
-        )
+        st.info("Click **Load Player Pool** to load the player pool.")
 
 
 main()
