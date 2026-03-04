@@ -1293,3 +1293,68 @@ def run_calibration_pipeline(
             summary[col] = summary[col].round(4)
 
     return summary.sort_values("rating_bucket").reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
+# Display Helpers
+# ---------------------------------------------------------------------------
+
+_SIMS_ROUND_COLS = [
+    "proj",
+    "floor",
+    "ceil",
+    "ownership",
+    "smash_prob",
+    "bust_prob",
+    "leverage",
+]
+
+
+def prepare_sims_table(df: pd.DataFrame) -> pd.DataFrame:
+    """Clean and format a sims results DataFrame for display in Streamlit.
+
+    Steps applied (in order):
+
+    1. Drop players who did not play — rows where ``mp_actual`` is 0 or NaN
+       (column is skipped when absent so player-level results without actuals
+       are unaffected).
+    2. Convert ``ownership`` from a 0–1 fraction to a percentage value.
+       The conversion is applied only when all non-null ownership values are
+       ≤ 1, which avoids double-converting data already stored as percentages
+       (e.g. 25.0 rather than 0.25).
+    3. Round :data:`_SIMS_ROUND_COLS` to 1 decimal place.
+    4. Rename ``ownership`` → ``own_pct`` for UI clarity.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Raw sims output.  Expected columns (all optional beyond what your
+        pipeline produces): ``mp_actual``, ``proj``, ``floor``, ``ceil``,
+        ``ownership``, ``smash_prob``, ``bust_prob``, ``leverage``.
+
+    Returns
+    -------
+    pd.DataFrame
+        Cleaned, display-ready copy of *df*.
+    """
+    df = df.copy()
+
+    # 1. Remove DNPs when mp_actual is available
+    if "mp_actual" in df.columns:
+        df = df[pd.to_numeric(df["mp_actual"], errors="coerce").fillna(0) > 0]
+
+    # 2. Convert ownership 0–1 → percentage (guard against already-pct data)
+    if "ownership" in df.columns:
+        own_numeric = pd.to_numeric(df["ownership"], errors="coerce")
+        if own_numeric.dropna().le(1).all():
+            df["ownership"] = own_numeric * 100
+
+    # 3. Round key numeric columns
+    existing_round_cols = [c for c in _SIMS_ROUND_COLS if c in df.columns]
+    df[existing_round_cols] = df[existing_round_cols].round(1)
+
+    # 4. Rename for UI friendliness
+    if "ownership" in df.columns:
+        df = df.rename(columns={"ownership": "own_pct"})
+
+    return df

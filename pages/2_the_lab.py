@@ -46,6 +46,7 @@ from yak_core.sims import (  # noqa: E402
     compute_player_anomaly_table,
     run_sims_pipeline,
     run_calibration_pipeline,
+    prepare_sims_table,
     ContestType,
 )
 from yak_core.calibration import (  # noqa: E402
@@ -277,7 +278,7 @@ def main() -> None:
 
     if sim.player_results is not None and not sim.player_results.empty:
         st.caption("Player-level smash / bust / leverage (sorted by leverage)")
-        display_df = sim.player_results.copy()
+        display_df = prepare_sims_table(sim.player_results)
 
         # Apply styling
         def _style_row(row: pd.Series) -> list:
