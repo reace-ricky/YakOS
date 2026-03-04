@@ -5575,6 +5575,13 @@ with tab_calib:
             st.info("Backtest returned no records. Ensure the pool has opponent/team/proj columns.")
         else:
             st.info("Run the alert backtest above to see validation metrics here.")
+# streamlit_app.py
+
+from your_module_path import merge_external_proj  # adjust import
+
+def _merge_external_proj(base_df, external_df, source_name: str):
+    """Thin wrapper kept for tests; delegates to the real merge implementation."""
+    return merge_external_proj(base_df, external_df, source_name)
 
 
 # ── System Audit (PR #62) ──────────────────────────────────────────
