@@ -14,6 +14,7 @@ Usage:
     pool_df = apply_projections(pool_df, cfg)
 """
 
+import glob
 import numpy as np
 import os
 import pandas as pd
@@ -608,6 +609,44 @@ def apply_projections(
     df["proj_salary_implied"] = sal_proj
 
     return df
+
+
+def load_historical_slate(date: str, yakos_root: str) -> pd.DataFrame:
+    """Load a single historical slate's player pool by date.
+
+    Looks for (in order):
+      1. ``tank_opt_pool_{YYYYMMDD}.parquet`` in ``{yakos_root}/data/``
+      2. Any ``*DK{YYYYMMDD}*.csv`` file in ``{yakos_root}/data/``
+
+    Returns a DataFrame with at minimum: player_name, pos, team, salary.
+    Includes ``actual_fp`` and ``opp`` when available (historical mode).
+    Returns an empty DataFrame if no matching file is found.
+    """
+    date_compact = date.replace("-", "")  # e.g. "20260227"
+
+    # 1. Try parquet first
+    parquet_path = os.path.join(yakos_root, "data", f"tank_opt_pool_{date_compact}.parquet")
+    if os.path.isfile(parquet_path):
+        df = pd.read_parquet(parquet_path)
+        if "player" in df.columns and "player_name" not in df.columns:
+            df = df.rename(columns={"player": "player_name"})
+        return df
+
+    # 2. Try DK/RG CSV pattern (e.g. NBADK20260227.csv)
+    dk_pattern = os.path.join(yakos_root, "data", f"*DK{date_compact}*.csv")
+    dk_files = sorted(glob.glob(dk_pattern))
+    if dk_files:
+        from yak_core.rg_loader import load_rg_contest
+        df = load_rg_contest(dk_files[0])
+        # load_rg_contest maps PLAYER -> "name"; normalize to player_name
+        if "name" in df.columns and "player_name" not in df.columns:
+            df = df.rename(columns={"name": "player_name"})
+        # Ensure salary is numeric
+        if "salary" in df.columns:
+            df["salary"] = pd.to_numeric(df["salary"], errors="coerce").fillna(0)
+        return df
+
+    return pd.DataFrame(columns=["player_name", "pos", "team", "opp", "salary", "actual_fp"])
 
 
 def projection_quality_report(

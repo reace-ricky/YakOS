@@ -60,6 +60,14 @@ class TestSlateState:
         s.published = True
         assert s.is_ready()
 
+    def test_is_ready_true_without_draft_group_id(self):
+        """Historical mode: is_ready() should not require draft_group_id."""
+        s = SlateState()
+        s.player_pool = _make_pool()
+        # draft_group_id intentionally left as None (Historical mode)
+        s.published = True
+        assert s.is_ready()
+
     def test_is_ready_false_when_pool_empty(self):
         s = SlateState()
         s.player_pool = pd.DataFrame()
