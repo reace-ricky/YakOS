@@ -68,6 +68,12 @@ _SHOWDOWN_GAME_TYPE_IDS = {
     gid for gid, label in DK_GAME_TYPE_LABELS.items() if "Showdown" in label
 }
 
+# Columns that uniquely identify a player slot in the pool (used for group-dedup)
+_PLAYER_IDENTITY_COLS = ["player_name", "team", "pos", "salary"]
+
+# Numeric projection columns aggregated (averaged) across duplicate rows
+_NUMERIC_AGG_COLS = ["proj", "floor", "ceil", "proj_minutes", "ownership"]
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -397,14 +403,30 @@ def main() -> None:
                     # Step 5: Add floor/ceil/minutes/ownership per player
                     pool = _enrich_pool(pool)
 
-                    # Step 6: Deduplicate – keep highest-proj row per player
-                    if "dk_player_id" in pool.columns:
-                        dedup_key = "dk_player_id"
+                    # Step 6: Group-then-deduplicate – aggregate duplicate rows per player
+                    # across sources (e.g. multiple projection providers for the same player)
+                    # before falling back to a single-key drop_duplicates for any residual dupes.
+                    _group_cols = [c for c in _PLAYER_IDENTITY_COLS if c in pool.columns]
+                    _agg_cols = {
+                        c: "mean"
+                        for c in _NUMERIC_AGG_COLS
+                        if c in pool.columns
+                    }
+                    if _group_cols and _agg_cols:
+                        # Preserve non-aggregated columns by taking the first value per group
+                        _extra_cols = [c for c in pool.columns if c not in _group_cols and c not in _agg_cols]
+                        _extra_agg = {c: "first" for c in _extra_cols}
+                        pool = pool.groupby(_group_cols, as_index=False).agg({**_agg_cols, **_extra_agg})
                     else:
-                        dedup_key = "player_name"
-                        st.caption("ℹ️ dk_player_id not found; deduplicating by player_name.")
-                    pool = pool.sort_values("proj", ascending=False)
-                    pool = pool.drop_duplicates(subset=[dedup_key], keep="first")
+                        # Fallback: single-key dedup when group cols or agg cols are absent
+                        if "dk_player_id" in pool.columns:
+                            dedup_key = "dk_player_id"
+                        else:
+                            dedup_key = "player_name"
+                            st.caption("ℹ️ dk_player_id not found; deduplicating by player_name.")
+                        if "proj" in pool.columns:
+                            pool = pool.sort_values("proj", ascending=False)
+                        pool = pool.drop_duplicates(subset=[dedup_key], keep="first")
                     pool = pool.reset_index(drop=True)
 
                     st.session_state["_hub_pool"] = pool
