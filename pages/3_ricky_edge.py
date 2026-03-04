@@ -35,6 +35,9 @@ from yak_core.right_angle import (  # noqa: E402
     compute_game_environment_cards,
     compute_tiered_stack_alerts,
 )
+# Shared slate context and lab analysis helpers (factored into yak_core.context
+# so The Lab, Ricky Edge, and Build & Publish all read the same data).
+from yak_core.context import get_slate_context, get_lab_analysis  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -76,6 +79,7 @@ def main() -> None:
     st.title("🎯 Ricky Edge")
     st.caption("Tag players, environments, and stacks for this slate.")
 
+    # Nav order: Slate Hub → The Lab → Ricky Edge → Build & Publish → Friends / Edge Share
     slate = get_slate_state()
     edge = get_edge_state()
     _render_status_bar(slate, edge)
@@ -83,7 +87,12 @@ def main() -> None:
     if not slate.is_ready():
         st.warning("⚠️ No slate published yet. Go to **Slate Hub** and publish a slate first.")
 
-    pool: pd.DataFrame = slate.player_pool if slate.player_pool is not None else pd.DataFrame()
+    # Use get_lab_analysis() as the default data source for player pool and sim metrics.
+    # Falls back to the base player pool from SlateState when sims have not been run.
+    _analysis = get_lab_analysis()
+    pool: pd.DataFrame = _analysis["pool"] if not _analysis["pool"].empty else (
+        slate.player_pool if slate.player_pool is not None else pd.DataFrame()
+    )
     player_names = sorted(pool["player_name"].dropna().tolist()) if not pool.empty and "player_name" in pool.columns else []
 
     st.divider()
