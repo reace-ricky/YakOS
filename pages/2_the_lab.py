@@ -264,7 +264,7 @@ def main() -> None:
 
     # Contest type selector for pipeline
     # Friendly contest names matching Slate Hub dropdown
-      pipeline_contest_display = ["GPP - 150 Max", "GPP - 20 Max", "Single Entry / 3-Max", "50/50 / Double-Up"]
+    pipeline_contest_display = ["GPP - 150 Max", "GPP - 20 Max", "Single Entry / 3-Max", "50/50 / Double-Up"]
     # Map Slate Hub contest names to pipeline rating types. Showdown uses GPP_20
     # as its closest equivalent since there is no dedicated Showdown pipeline type.
     _CONTEST_NAME_TO_PIPELINE = {
