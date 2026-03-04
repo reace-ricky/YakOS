@@ -54,11 +54,10 @@ _BUILD_MODE_COLS = {
     "ceiling": "ceil",
 }
 _CONTEST_TO_BUILD_MODE = {
-    "Cash Game": "floor",
-    "Single Entry": "median",
-    "3-Max Tournament": "median",
-    "20-Max GPP": "ceiling",
-    "MME (150-Max)": "ceiling",
+    "GPP - 150 Max": "ceiling",
+    "GPP - 20 Max": "ceiling",
+    "Single Entry / 3-Max": "median",
+    "50/50 / Double-Up": "floor",
     "Showdown": "ceiling",
 }
 
