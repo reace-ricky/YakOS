@@ -397,6 +397,16 @@ def main() -> None:
                     # Step 5: Add floor/ceil/minutes/ownership per player
                     pool = _enrich_pool(pool)
 
+                    # Step 6: Deduplicate – keep highest-proj row per player
+                    if "dk_player_id" in pool.columns:
+                        dedup_key = "dk_player_id"
+                    else:
+                        dedup_key = "player_name"
+                        st.caption("ℹ️ dk_player_id not found; deduplicating by player_name.")
+                    pool = pool.sort_values("proj", ascending=False)
+                    pool = pool.drop_duplicates(subset=[dedup_key], keep="first")
+                    pool = pool.reset_index(drop=True)
+
                     st.session_state["_hub_pool"] = pool
                     st.session_state["_hub_rules"] = parsed_rules
                     st.session_state["_hub_draft_group_id"] = draft_group_id
@@ -444,8 +454,12 @@ def main() -> None:
             "proj", "floor", "ceil", "proj_minutes", "ownership", "status", "sim_eligible",
             "actual_fp",
         ] if c in hub_pool.columns]
+        preview_df = hub_pool[preview_cols].sort_values("proj", ascending=False).copy()
+        float_cols = [c for c in ["proj", "floor", "ceil", "proj_minutes", "ownership", "actual_fp"]
+                      if c in preview_df.columns]
+        preview_df[float_cols] = preview_df[float_cols].round(1)
         st.dataframe(
-            hub_pool[preview_cols].sort_values("proj", ascending=False),
+            preview_df,
             use_container_width=True,
             hide_index=True,
         )
