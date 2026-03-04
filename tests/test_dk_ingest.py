@@ -555,3 +555,86 @@ class TestDkIngestAppImports:
         import importlib
         mod = importlib.import_module("yak_core.dk_ingest")
         assert hasattr(mod, "load_dk_contests")
+
+
+# ---------------------------------------------------------------------------
+# BUG-1 regression: position parsing must use explicit "position" field
+#   and must not accept ordinal rank strings ("31st", "2nd", etc.)
+# ---------------------------------------------------------------------------
+
+class TestFetchDkDraftablesPositionParsing:
+    """Regression tests for BUG-1 – ordinal strings must not appear as positions."""
+
+    def _mock_resp(self, draftables):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"draftables": draftables}
+        return mock_resp
+
+    def test_position_key_used_directly(self):
+        """Explicit 'position' field should be used as the primary source."""
+        resp = self._mock_resp([
+            {"draftableId": "d1", "displayName": "Player A", "teamAbbreviation": "LAL",
+             "salary": 8000, "position": "PG", "playerGameAttributes": [],
+             "playerGameInfo": {"status": "Active"}},
+        ])
+        with patch.object(dk, "_rate_limited_get", return_value=resp):
+            df = dk.fetch_dk_draftables(1)
+        assert df.iloc[0]["positions"] == "PG"
+
+    def test_ordinal_string_in_attributes_is_rejected(self):
+        """Ordinal rank strings like '31st', '2nd' must NOT appear as positions."""
+        resp = self._mock_resp([
+            {"draftableId": "d1", "displayName": "Player B", "teamAbbreviation": "GSW",
+             "salary": 7500, "position": "SG",
+             "playerGameAttributes": [
+                 {"value": "31st"},
+                 {"value": "2nd"},
+                 {"value": "16th"},
+             ],
+             "playerGameInfo": {"status": "Active"}},
+        ])
+        with patch.object(dk, "_rate_limited_get", return_value=resp):
+            df = dk.fetch_dk_draftables(1)
+        pos = df.iloc[0]["positions"]
+        # Must not contain ordinal strings
+        assert "31st" not in pos
+        assert "2nd" not in pos
+        assert "16th" not in pos
+        # Must be the real position from the "position" key
+        assert pos == "SG"
+
+    def test_valid_position_in_attributes_accepted_as_fallback(self):
+        """If 'position' key is absent, valid pos tokens from attributes are used."""
+        resp = self._mock_resp([
+            {"draftableId": "d1", "displayName": "Player C", "teamAbbreviation": "DEN",
+             "salary": 9000,
+             # No "position" key at top level
+             "playerGameAttributes": [
+                 {"value": "31st"},
+                 {"value": "C"},
+             ],
+             "playerGameInfo": {"status": "Active"}},
+        ])
+        with patch.object(dk, "_rate_limited_get", return_value=resp):
+            df = dk.fetch_dk_draftables(1)
+        pos = df.iloc[0]["positions"]
+        assert "C" in pos
+        assert "31st" not in pos
+
+    def test_multiple_valid_positions_combined(self):
+        """Multiple valid NBA position tokens (e.g. SF and PF) should be joined."""
+        resp = self._mock_resp([
+            {"draftableId": "d1", "displayName": "Player D", "teamAbbreviation": "BOS",
+             "salary": 8500, "position": "SF",
+             "playerGameAttributes": [],
+             "playerGameInfo": {"status": "Active"}},
+        ])
+        with patch.object(dk, "_rate_limited_get", return_value=resp):
+            df = dk.fetch_dk_draftables(1)
+        assert "SF" in df.iloc[0]["positions"]
+
+    def test_empty_draftables_returns_empty_df(self):
+        resp = self._mock_resp([])
+        with patch.object(dk, "_rate_limited_get", return_value=resp):
+            df = dk.fetch_dk_draftables(1)
+        assert df.empty

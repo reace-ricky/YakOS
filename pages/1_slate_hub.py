@@ -564,7 +564,9 @@ def main() -> None:
             if hub_rules:
                 slate.apply_roster_rules(hub_rules)
 
-            slate.player_pool = st.session_state["_hub_pool"]
+            # Publish the filtered pool (game filter applied) rather than the
+            # raw session-state pool so Lab and other pages see the same set.
+            slate.player_pool = hub_pool
             slate.published = True
             slate.published_at = _ts
 
@@ -572,8 +574,7 @@ def main() -> None:
                 slate.active_layers = ["Base"]
 
             set_slate_state(slate)
-            _pub_pool = st.session_state["_hub_pool"]
-            st.success(f"✅ Slate published! {len(_pub_pool)} players, cap ${slate.salary_cap:,}, slots: {slate.roster_slots}")
+            st.success(f"✅ Slate published! {len(hub_pool)} players, cap ${slate.salary_cap:,}, slots: {slate.roster_slots}")
             st.balloons()
     else:
         st.info("Click **Load Player Pool** to load the player pool.")

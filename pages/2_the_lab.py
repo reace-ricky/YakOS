@@ -170,14 +170,41 @@ def _build_player_level_sim_results(pool: pd.DataFrame, variance: float) -> pd.D
 
 
 def _gauge_score(sim_results: Optional[pd.DataFrame], contest: str) -> float:
-    """Return a 0–1 gauge score for a contest type."""
+    """Return a 0–1 gauge score for a contest type.
+
+    Uses the average smash_prob of the top-N players by smash_prob rather than
+    the full-pool mean (which is near-zero for most players). Cash uses
+    bust_prob inversion instead of smash_prob to reflect floor-based value.
+    """
     if sim_results is None or sim_results.empty:
         return 0.0
-    # Use average smash_prob as proxy; weight by contest volatility
-    weights = {"Cash": -1.0, "SE": 0.5, "3-Max": 0.8, "20-Max": 1.2, "150-Max": 1.5}
+
+    _TOP_N = 8  # representative "elite tier" player count
+
+    if contest == "Cash":
+        # Cash gauge: high average floor → low bust probability among top players.
+        if "bust_prob" not in sim_results.columns:
+            return 0.0
+        bust = pd.to_numeric(sim_results["bust_prob"], errors="coerce").dropna()
+        if bust.empty:
+            return 0.0
+        top_n_bust = bust.nsmallest(_TOP_N).mean()
+        # Invert: lower bust → higher cash score
+        return float(np.clip(1.0 - top_n_bust, 0.0, 1.0))
+
+    if "smash_prob" not in sim_results.columns:
+        return 0.0
+
+    smash = pd.to_numeric(sim_results["smash_prob"], errors="coerce").dropna()
+    if smash.empty:
+        return 0.0
+
+    top_n_smash = smash.nlargest(_TOP_N).mean()
+
+    # Weight by contest volatility / field size
+    weights = {"SE": 0.7, "3-Max": 0.85, "20-Max": 1.0, "150-Max": 1.2}
     w = weights.get(contest, 1.0)
-    base = float(sim_results.get("smash_prob", pd.Series([0])).mean()) if "smash_prob" in sim_results.columns else 0.0
-    return float(np.clip(base * w, 0.0, 1.0))
+    return float(np.clip(top_n_smash * w, 0.0, 1.0))
 
 
 # ---------------------------------------------------------------------------
@@ -243,10 +270,21 @@ def main() -> None:
 
     # Contest type selector for pipeline
     pipeline_contest_options = ["GPP_150", "GPP_20", "SE_3MAX", "CASH"]
+    # Map Slate Hub contest names to pipeline rating types. Showdown uses GPP_20
+    # as its closest equivalent since there is no dedicated Showdown pipeline type.
+    _CONTEST_NAME_TO_PIPELINE = {
+        "GPP - 150 Max": "GPP_150",
+        "GPP - 20 Max": "GPP_20",
+        "Single Entry / 3-Max": "SE_3MAX",
+        "50/50 / Double-Up": "CASH",
+        "Showdown": "GPP_20",
+    }
+    _default_pipeline = _CONTEST_NAME_TO_PIPELINE.get(slate.contest_name, "GPP_20")
+    _default_pipeline_idx = pipeline_contest_options.index(_default_pipeline) if _default_pipeline in pipeline_contest_options else 1
     pipeline_contest = st.selectbox(
         "Contest type for pipeline / rating",
         pipeline_contest_options,
-        index=1,
+        index=_default_pipeline_idx,
         key="_lab_pipeline_contest",
     )
 
@@ -326,23 +364,40 @@ def main() -> None:
                 neg_edge = pr[pr["leverage"] < 0.7].nsmallest(5, "leverage")
                 if not pos_edge.empty:
                     st.markdown("✅ *Positive leverage (smash / low owned):*")
-                    st.dataframe(pos_edge[["player_name", "ownership", "smash_prob", "leverage"]],
-                                 use_container_width=True, hide_index=True)
+                    _pe = pos_edge[["player_name", "ownership", "smash_prob", "leverage"]].copy()
+                    for _c in ["ownership", "smash_prob", "leverage"]:
+                        if _c in _pe.columns:
+                            _pe[_c] = _pe[_c].round(1)
+                    st.dataframe(_pe, use_container_width=True, hide_index=True)
                 if not neg_edge.empty:
                     st.markdown("⚠️ *Negative leverage (bust risk / high owned):*")
-                    st.dataframe(neg_edge[["player_name", "ownership", "bust_prob", "leverage"]],
-                                 use_container_width=True, hide_index=True)
+                    _ne = neg_edge[["player_name", "ownership", "bust_prob", "leverage"]].copy()
+                    for _c in ["ownership", "bust_prob", "leverage"]:
+                        if _c in _ne.columns:
+                            _ne[_c] = _ne[_c].round(1)
+                    st.dataframe(_ne, use_container_width=True, hide_index=True)
             else:
                 st.info("Run sims first to see ownership edge.")
 
         with ea_col2:
-            st.markdown("**FP/min & Minutes Edge**")
+            _MIN_VALUE_SALARY = 4000  # minimum salary for meaningful value plays
+            st.markdown(f"**Value Plays** (salary ≥ ${_MIN_VALUE_SALARY:,})")
             try:
                 val_scores = compute_value_scores(pool)
                 if not val_scores.empty:
+                    # Filter to non-trivially-cheap players for meaningful edge info
+                    if "salary" in val_scores.columns:
+                        val_scores = val_scores[
+                            pd.to_numeric(val_scores["salary"], errors="coerce").fillna(0) >= _MIN_VALUE_SALARY
+                        ]
                     top_val = val_scores.nlargest(5, "value_score") if "value_score" in val_scores.columns else val_scores.head(5)
                     show_cols = [c for c in ["player_name", "team", "salary", "proj", "value_score"] if c in top_val.columns]
-                    st.dataframe(top_val[show_cols], use_container_width=True, hide_index=True)
+                    _vd = top_val[show_cols].copy()
+                    if "value_score" in _vd.columns:
+                        _vd["value_score"] = _vd["value_score"].round(2)
+                    if "proj" in _vd.columns:
+                        _vd["proj"] = _vd["proj"].round(1)
+                    st.dataframe(_vd, use_container_width=True, hide_index=True)
                 else:
                     st.info("No value scores available.")
             except Exception as exc:

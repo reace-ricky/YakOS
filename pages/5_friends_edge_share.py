@@ -223,8 +223,13 @@ def main() -> None:
 
     # Show available pool
     pool_display_cols = [c for c in ["player_name", "pos", "team", "salary", "proj", "ceil", "ownership"] if c in filtered_pool.columns]
-    st.dataframe(filtered_pool[pool_display_cols].sort_values("proj", ascending=False),
-                 use_container_width=True, hide_index=True)
+    display_pool = filtered_pool[pool_display_cols].sort_values("proj", ascending=False).copy()
+    _float_cols = [c for c in ["proj", "ceil", "ownership"] if c in display_pool.columns]
+    if _float_cols:
+        display_pool[_float_cols] = display_pool[_float_cols].round(1)
+    if "salary" in display_pool.columns:
+        display_pool["salary"] = pd.to_numeric(display_pool["salary"], errors="coerce").fillna(0).astype(int)
+    st.dataframe(display_pool, use_container_width=True, hide_index=True)
 
     # Friend's lineup builder — manual player selection
     st.markdown("**Pick your lineup:**")

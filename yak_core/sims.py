@@ -1353,6 +1353,10 @@ def prepare_sims_table(df: pd.DataFrame) -> pd.DataFrame:
     existing_round_cols = [c for c in _SIMS_ROUND_COLS if c in df.columns]
     df[existing_round_cols] = df[existing_round_cols].round(1)
 
+    # Cast salary to int — DK salaries are always whole-dollar amounts.
+    if "salary" in df.columns:
+        df["salary"] = pd.to_numeric(df["salary"], errors="coerce").fillna(0).astype(int)
+
     # 4. Rename for UI friendliness
     if "ownership" in df.columns:
         df = df.rename(columns={"ownership": "own_pct"})
