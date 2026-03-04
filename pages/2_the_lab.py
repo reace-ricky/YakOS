@@ -224,7 +224,12 @@ def main() -> None:
     st.divider()
 
     # ── Inputs ────────────────────────────────────────────────────────────
-    col1, col2, col3 = st.columns(3)
+      # Auto-resolve draft group ID from slate (hidden from UI)
+    if slate.draft_group_id and slate.draft_group_id != sim.draft_group_id:
+        sim.draft_group_id = int(slate.draft_group_id)
+        set_sim_state(sim)
+
+    col1, col2 = st.columns(2)
     with col1:
         sim_mode = st.radio("Mode", ["Live", "Historical"], horizontal=True, key="_lab_mode",
                             index=0 if sim.sim_mode == "Live" else 1)
@@ -233,17 +238,6 @@ def main() -> None:
             set_sim_state(sim)
 
     with col2:
-        draft_group_id_input = st.number_input(
-            "DK Draft Group ID",
-            min_value=0, step=1,
-            value=int(sim.draft_group_id or slate.draft_group_id or 0),
-            key="_lab_dg_id",
-        )
-        if draft_group_id_input and draft_group_id_input != sim.draft_group_id:
-            sim.draft_group_id = int(draft_group_id_input)
-            set_sim_state(sim)
-
-    with col3:
         variance = st.slider(
             "Sim Variance", min_value=0.5, max_value=2.0, step=0.1,
             value=float(sim.variance), key="_lab_variance",
@@ -269,7 +263,8 @@ def main() -> None:
     pool: pd.DataFrame = slate.player_pool if slate.player_pool is not None else pd.DataFrame()
 
     # Contest type selector for pipeline
-    pipeline_contest_options = ["GPP_150", "GPP_20", "SE_3MAX", "CASH"]
+    # Friendly contest names matching Slate Hub dropdown
+      pipeline_contest_display = ["GPP - 150 Max", "GPP - 20 Max", "Single Entry / 3-Max", "50/50 / Double-Up"]
     # Map Slate Hub contest names to pipeline rating types. Showdown uses GPP_20
     # as its closest equivalent since there is no dedicated Showdown pipeline type.
     _CONTEST_NAME_TO_PIPELINE = {
@@ -279,14 +274,14 @@ def main() -> None:
         "50/50 / Double-Up": "CASH",
         "Showdown": "GPP_20",
     }
-    _default_pipeline = _CONTEST_NAME_TO_PIPELINE.get(slate.contest_name, "GPP_20")
-    _default_pipeline_idx = pipeline_contest_options.index(_default_pipeline) if _default_pipeline in pipeline_contest_options else 1
-    pipeline_contest = st.selectbox(
-        "Contest type for pipeline / rating",
-        pipeline_contest_options,
-        index=_default_pipeline_idx,
+    _default_display_idx = pipeline_contest_display.index(slate.contest_name) if slate.contest_name in pipeline_contest_display else 1
+    pipeline_contest_display_name = st.selectbox(
+                "Contest Type",
+                pipeline_contest_display,
+                index=_default_display_idx,
         key="_lab_pipeline_contest",
     )
+    pipeline_contest = _CONTEST_NAME_TO_PIPELINE.get(pipeline_contest_display_name, "GPP_20")
 
     if not pool.empty:
         if st.button("▶️ Run Sims Pipeline", type="primary", key="_lab_run_sims"):
