@@ -181,6 +181,26 @@ def _auto_pick_best_contest(lobby_df: pd.DataFrame, preset: dict) -> Optional[in
     return int(best_row["draft_group_id"])
 
 
+def _filter_lobby_by_date(lobby_df: pd.DataFrame, target_date: str) -> pd.DataFrame:
+    """Filter lobby contests to those whose start_time falls on target_date (YYYY-MM-DD).
+
+    The DK lobby returns all upcoming contests (potentially days away).
+    This ensures we only auto-pick from contests actually scheduled for
+    the user's selected slate date.
+    """
+    if lobby_df.empty or "start_time" not in lobby_df.columns:
+        return lobby_df
+    try:
+        st_parsed = pd.to_datetime(lobby_df["start_time"], errors="coerce", utc=True)
+        # Convert UTC to US/Eastern for date comparison (NBA games are evening ET)
+        from zoneinfo import ZoneInfo
+        st_eastern = st_parsed.dt.tz_convert(ZoneInfo("America/New_York"))
+        mask = st_eastern.dt.strftime("%Y-%m-%d") == target_date
+        filtered = lobby_df[mask].reset_index(drop=True)
+        return filtered if not filtered.empty else lobby_df
+    except Exception:
+        return lobby_df
+
 def _extract_games(pool: pd.DataFrame) -> list[str]:
     """Extract unique game matchup strings from the pool."""
     opp_col = "opp" if "opp" in pool.columns else (
@@ -342,6 +362,7 @@ def main() -> None:
                     if _lobby is None:
                         _lobby = fetch_dk_lobby_contests(sport)
                         st.session_state[lobby_key] = _lobby
+                                                _lobby = _filter_lobby_by_date(_lobby, slate_date_str)
                     draft_group_id = _auto_pick_best_contest(_lobby, preset)
                     if draft_group_id:
                         st.caption(f"ℹ️ Auto-selected Draft Group ID: **{draft_group_id}**")
