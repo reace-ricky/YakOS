@@ -159,6 +159,13 @@ _INTERNAL_CT_TO_SIM_TYPE: dict = {
     "Single Entry": _SimContestType.SE_SMALL,
 }
 
+# streamlit_app.py
+
+from your_module_path import merge_external_proj  # adjust import
+
+def _merge_external_proj(base_df, external_df, source_name: str):
+    """Thin wrapper kept for tests; delegates to the real merge implementation."""
+    return merge_external_proj(base_df, external_df, source_name)
 
 # -----------------------------
 # Core helpers
@@ -5579,9 +5586,7 @@ with tab_calib:
 
 from your_module_path import merge_external_proj  # adjust import
 
-def _merge_external_proj(base_df, external_df, source_name: str):
-    """Thin wrapper kept for tests; delegates to the real merge implementation."""
-    return merge_external_proj(base_df, external_df, source_name)
+
 
 
 # ── System Audit (PR #62) ──────────────────────────────────────────
