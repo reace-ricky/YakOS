@@ -45,3 +45,8 @@ pg = st.navigation(
     ]
 )
 pg.run()
+
+
+def _merge_external_proj(base_df, external_df, source_name: str):
+    """TEMP: placeholder to satisfy tests during Sprint 1 scaffold."""
+    raise NotImplementedError("_merge_external_proj not wired to new projection merge logic yet")
