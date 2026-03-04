@@ -224,7 +224,7 @@ def main() -> None:
     st.divider()
 
     # ── Inputs ────────────────────────────────────────────────────────────
-      # Auto-resolve draft group ID from slate (hidden from UI)
+          # Auto-resolve draft group ID from slate (hidden from UI)
     if slate.draft_group_id and slate.draft_group_id != sim.draft_group_id:
         sim.draft_group_id = int(slate.draft_group_id)
         set_sim_state(sim)
