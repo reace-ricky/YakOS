@@ -2,16 +2,18 @@
 
 Responsibilities
 ----------------
-- Data Mode toggle: Live (DK draftables API) or Historical (local parquet/CSV).
-- Contest Type picker from CONTEST_PRESETS (replaces DK lobby contest picker).
-- Projection Source picker: salary_implied / regression / model / blend / parquet.
-- Load Player Pool via DK draftables (Live) or local data file (Historical).
-- Run full apply_projections() pipeline on the loaded pool.
-- Optional RG CSV merge after pool load.
+- Date + Sport picker (date alone determines live vs historical — no Data Mode toggle).
+- Tank01 RapidAPI Key in Row 1 (required for stats enrichment and injury refresh).
+- Contest Type picker from CONTEST_PRESETS.
+- Projection Model picker: YakOS Model / Salary Baseline / Ensemble.
+- Fetch DK Lobby Contests → auto-resolves draft_group_id by matching contest type.
+- Load Player Pool via DK draftables API (always API-first, no local files).
+  Optionally enriches with Tank01 stats when API key is present.
+- Game selector (multiselect) after pool loads to filter by matchup.
+- Optional RG CSV overlay via merge_rg_with_pool().
+- S1.7: Refresh action that re-pulls injuries via Tank01 API.
 - Provide a "Publish Slate" action that writes the full configuration
   into SlateState.
-- S1.7: Refresh action that re-pulls news / injuries, updates projections,
-  and flags affected lineups per contest type.
 
 All state is written exclusively to SlateState.
 """
@@ -31,20 +33,22 @@ if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
 from yak_core.state import get_slate_state, set_slate_state  # noqa: E402
-from yak_core.dk_ingest import fetch_dk_draftables  # noqa: E402
+from yak_core.dk_ingest import (  # noqa: E402
+    fetch_dk_lobby_contests,
+    fetch_dk_draftables,
+    DK_GAME_TYPE_LABELS,
+)
 from yak_core.projections import (  # noqa: E402
     yakos_fp_projection,
     yakos_minutes_projection,
     yakos_ownership_projection,
     apply_projections,
-    load_historical_slate,
 )
 from yak_core.rg_loader import load_rg_projections, merge_rg_with_pool  # noqa: E402
 from yak_core.config import (  # noqa: E402
     CONTEST_PRESETS,
     CONTEST_PRESET_LABELS,
     merge_config,
-    YAKOS_ROOT,
     DK_POS_SLOTS,
     DK_LINEUP_SIZE,
     SALARY_CAP,
@@ -58,7 +62,18 @@ from yak_core.live import fetch_injury_updates  # noqa: E402
 # Constants
 # ---------------------------------------------------------------------------
 
-_PROJ_SOURCES = ["salary_implied", "regression", "model", "blend", "parquet"]
+# User-facing projection model labels → internal PROJ_SOURCE values
+_PROJ_MODELS = {
+    "YakOS Model": "model",        # historical + salary + position priors + Tank01
+    "Salary Baseline": "salary_implied",  # salary × 4.0 / 1000, quick testing
+    "Ensemble": "ensemble",        # blends YakOS + Tank01 + RG when all available
+}
+_PROJ_MODEL_LABELS = list(_PROJ_MODELS.keys())
+
+# game_type_ids that represent Showdown contests
+_SHOWDOWN_GAME_TYPE_IDS = {
+    gid for gid, label in DK_GAME_TYPE_LABELS.items() if "Showdown" in label
+}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -74,6 +89,18 @@ def _rules_from_preset(preset: dict) -> dict:
         "salary_cap": SALARY_CAP,
         "is_showdown": is_showdown,
     }
+
+
+def _normalize_dk_pool(pool: pd.DataFrame) -> pd.DataFrame:
+    """Normalize column names from fetch_dk_draftables to YakOS conventions."""
+    pool = pool.copy()
+    if "name" in pool.columns and "player_name" not in pool.columns:
+        pool = pool.rename(columns={"name": "player_name"})
+    if "positions" in pool.columns and "pos" not in pool.columns:
+        pool = pool.rename(columns={"positions": "pos"})
+    if "display_name" in pool.columns and "player_name" not in pool.columns:
+        pool = pool.rename(columns={"display_name": "player_name"})
+    return pool
 
 
 def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
@@ -124,6 +151,50 @@ def _render_status_bar(slate: "SlateState") -> None:
             st.success(f"✅ Slate published at {slate.published_at}")
 
 
+def _match_contests_to_preset(lobby_df: pd.DataFrame, preset: dict) -> pd.DataFrame:
+    """Filter lobby contests to those whose game_type_id matches the preset's slate type."""
+    if lobby_df.empty:
+        return lobby_df
+    is_showdown = preset.get("slate_type") == "Showdown Captain"
+    if is_showdown:
+        mask = lobby_df["game_type_id"].isin(_SHOWDOWN_GAME_TYPE_IDS)
+    else:
+        mask = ~lobby_df["game_type_id"].isin(_SHOWDOWN_GAME_TYPE_IDS)
+    return lobby_df[mask].drop_duplicates(subset=["draft_group_id"]).reset_index(drop=True)
+
+
+def _extract_games(pool: pd.DataFrame) -> list[str]:
+    """Extract unique game matchup strings from the pool."""
+    opp_col = "opp" if "opp" in pool.columns else (
+        "opponent" if "opponent" in pool.columns else None
+    )
+    if opp_col and "team" in pool.columns:
+        teams = pool["team"].str.strip().str.upper().fillna("")
+        opps = pool[opp_col].str.strip().str.upper().fillna("")
+        pairs = {
+            " vs ".join(sorted([t, o]))
+            for t, o in zip(teams, opps)
+            if t and o
+        }
+        return sorted(pairs)
+    elif "team" in pool.columns:
+        return sorted(pool["team"].dropna().str.strip().str.upper().unique().tolist())
+    return []
+
+
+def _filter_pool_by_games(pool: pd.DataFrame, selected_games: list[str], opp_col: str) -> pd.DataFrame:
+    """Return rows whose team+opponent matchup is in the selected games list."""
+    if not selected_games:
+        return pool
+    teams = pool["team"].str.strip().str.upper().fillna("")
+    opps = pool[opp_col].str.strip().str.upper().fillna("")
+    keys = pd.Series(
+        [" vs ".join(sorted([t, o])) if t and o else t for t, o in zip(teams, opps)],
+        index=pool.index,
+    )
+    return pool[keys.isin(selected_games)].reset_index(drop=True)
+
+
 # ---------------------------------------------------------------------------
 # Main page
 # ---------------------------------------------------------------------------
@@ -136,7 +207,7 @@ def main() -> None:
     _render_status_bar(slate)
     st.divider()
 
-    # ── Row 1: Sport, Date, Data Mode ─────────────────────────────────────
+    # ── Row 1: Sport, Date, Tank01 API Key ────────────────────────────────
     col1, col2, col3 = st.columns(3)
     with col1:
         sport = st.selectbox("Sport", ["NBA", "PGA"], index=0 if slate.sport == "NBA" else 1)
@@ -146,87 +217,197 @@ def main() -> None:
         slate_date = st.date_input("Date", value=pd.to_datetime(slate.slate_date or _today))
         slate_date_str = str(slate_date)
     with col3:
-        data_mode = st.selectbox("Data Mode", ["Live", "Historical"], index=0)
+        rapidapi_key = st.text_input(
+            "Tank01 RapidAPI Key",
+            value=st.session_state.get("rapidapi_key", ""),
+            type="password",
+            help="Required for stats enrichment and injury refresh.",
+            key="_hub_rapidapi_key",
+        )
+        if rapidapi_key:
+            st.session_state["rapidapi_key"] = rapidapi_key
 
     # ── Row 2: Contest Type ────────────────────────────────────────────────
     contest_type_label = st.selectbox("Contest Type", CONTEST_PRESET_LABELS)
     preset = CONTEST_PRESETS[contest_type_label]
     st.caption(preset.get("description", ""))
 
-    # ── Row 3: Projection Source ───────────────────────────────────────────
-    _proj_idx = _PROJ_SOURCES.index(slate.proj_source) if slate.proj_source in _PROJ_SOURCES else 0
-    proj_source = st.selectbox("Projection Source", _PROJ_SOURCES, index=_proj_idx)
+    # ── Row 3: Projection Model ────────────────────────────────────────────
+    # Map stored proj_source (internal) back to a user-facing label
+    _reverse_proj = {v: k for k, v in _PROJ_MODELS.items()}
+    _stored_label = _reverse_proj.get(slate.proj_source, _PROJ_MODEL_LABELS[0])
+    _proj_idx = _PROJ_MODEL_LABELS.index(_stored_label) if _stored_label in _PROJ_MODEL_LABELS else 0
+    proj_model_label = st.selectbox("Projection Model", _PROJ_MODEL_LABELS, index=_proj_idx)
+    proj_source = _PROJ_MODELS[proj_model_label]
 
-    # ── Row 4: Live → Draft Group ID / Historical → auto-detect ───────────
+    # ── Row 4: DK Lobby Contests ───────────────────────────────────────────
+    st.subheader("DK Contest Selection")
+
+    # Auto-detect live vs historical from the date
+    _is_live = slate_date_str == _today
+    if _is_live:
+        st.caption("📡 Live slate — fetching from DK lobby.")
+    else:
+        st.caption(f"📂 Historical slate — date: {slate_date_str}. Enter Draft Group ID directly.")
+
+    lobby_key = f"_hub_lobby_{sport}_{slate_date_str}"
+    lobby_df: Optional[pd.DataFrame] = st.session_state.get(lobby_key)
+
+    col_fetch, col_clear = st.columns([2, 1])
+    with col_fetch:
+        if st.button("🔍 Fetch Contests from DK", help="Pulls current DK lobby contests for this sport."):
+            with st.spinner("Fetching DK lobby…"):
+                try:
+                    fetched = fetch_dk_lobby_contests(sport)
+                    st.session_state[lobby_key] = fetched
+                    lobby_df = fetched
+                    if fetched.empty:
+                        st.warning("No contests found in DK lobby for this sport/date.")
+                    else:
+                        st.success(f"Found {len(fetched)} contests.")
+                except Exception as exc:
+                    st.error(f"Failed to fetch DK lobby: {exc}")
+    with col_clear:
+        if lobby_df is not None and st.button("Clear"):
+            st.session_state.pop(lobby_key, None)
+            lobby_df = None
+            st.rerun()
+
+    # Contest selector or manual entry
     draft_group_id: Optional[int] = None
-    if data_mode == "Live":
+
+    if lobby_df is not None and not lobby_df.empty:
+        matched = _match_contests_to_preset(lobby_df, preset)
+        if not matched.empty:
+            contest_options = {
+                f"{row['name']} (DG {row['draft_group_id']})": int(row["draft_group_id"])
+                for _, row in matched.iterrows()
+            }
+            selected_label = st.selectbox("Select Contest", list(contest_options.keys()))
+            draft_group_id = contest_options[selected_label]
+            st.caption(f"Draft Group ID: **{draft_group_id}**")
+        else:
+            st.info("No contests matched the selected Contest Type. Enter Draft Group ID manually.")
+
+    # Manual Draft Group ID override (always available)
+    with st.expander("Manual Draft Group ID override", expanded=draft_group_id is None):
         dg_val = st.number_input(
             "Draft Group ID",
             min_value=0,
             step=1,
-            value=int(slate.draft_group_id or 0),
-            help="DraftKings draft group ID (visible in DK contest URLs).",
+            value=int(draft_group_id or slate.draft_group_id or 0),
+            help="DraftKings draft group ID (visible in DK contest URLs). Overrides lobby selection.",
+            key="_hub_dg_manual",
         )
-        draft_group_id = int(dg_val) if dg_val > 0 else None
-    else:
-        date_compact = slate_date_str.replace("-", "")
-        st.info(
-            f"Historical mode: will look for `tank_opt_pool_{date_compact}.parquet` "
-            f"or `*DK{date_compact}*.csv` in the `data/` folder."
-        )
+        if dg_val > 0:
+            draft_group_id = int(dg_val)
 
     # ── Row 5: Load Player Pool ────────────────────────────────────────────
     if st.button("📥 Load Player Pool", type="primary"):
-        with st.spinner("Loading player pool…"):
-            try:
-                if data_mode == "Historical":
-                    pool = load_historical_slate(slate_date_str, YAKOS_ROOT)
-                    if pool.empty:
-                        st.error(
-                            f"No historical data found for {slate_date_str}. "
-                            f"Make sure a `tank_opt_pool_{date_compact}.parquet` or "
-                            f"`*DK{date_compact}*.csv` file exists in the `data/` folder."
-                        )
-                        return
-                    parsed_rules = _rules_from_preset(preset)
-                else:
-                    if not draft_group_id:
-                        st.warning("Enter a Draft Group ID to load a live slate.")
-                        return
+        if not draft_group_id:
+            st.warning("Select a contest or enter a Draft Group ID to load the player pool.")
+        else:
+            with st.spinner("Loading player pool…"):
+                try:
+                    # Step 1: Fetch DK draftables (salaries, positions, teams)
                     pool = fetch_dk_draftables(draft_group_id)
+                    if pool.empty:
+                        st.error(f"No players found for Draft Group ID {draft_group_id}.")
+                        st.stop()
+
+                    # Step 2: Normalize column names
+                    pool = _normalize_dk_pool(pool)
+
+                    # Normalize salary
+                    if "salary" not in pool.columns:
+                        pool["salary"] = 0
+                    pool["salary"] = pd.to_numeric(pool["salary"], errors="coerce").fillna(0)
+
+                    # Step 3: Optionally enrich with Tank01 stats (game logs, rolling avgs, Vegas)
+                    _api_key = st.session_state.get("rapidapi_key", "")
+                    if _api_key:
+                        try:
+                            from yak_core.live import fetch_live_opt_pool
+                            tank01_pool = fetch_live_opt_pool(
+                                slate_date_str,
+                                {"RAPIDAPI_KEY": _api_key},
+                            )
+                            if not tank01_pool.empty:
+                                # Rename 'proj' → 'tank01_proj' before merge to preserve the
+                                # DK salary-based proj that will be overwritten by apply_projections.
+                                if "proj" in tank01_pool.columns and "tank01_proj" not in tank01_pool.columns:
+                                    tank01_pool = tank01_pool.rename(columns={"proj": "tank01_proj"})
+                                # Select only useful columns for the merge
+                                merge_cols = ["player_name"]
+                                for col in ("opp", "opponent", "tank01_proj", "own_proj", "actual_fp"):
+                                    if col in tank01_pool.columns:
+                                        merge_cols.append(col)
+                                pool = pool.merge(
+                                    tank01_pool[merge_cols],
+                                    on="player_name",
+                                    how="left",
+                                    suffixes=("", "_tank01"),
+                                )
+                                st.caption(f"✅ Tank01 stats merged for {len(tank01_pool)} players.")
+                        except Exception as t01_exc:
+                            st.caption(f"ℹ️ Tank01 stats not available: {t01_exc}")
+
+                    # Step 4: Apply projection pipeline
                     parsed_rules = _rules_from_preset(preset)
+                    cfg = merge_config({
+                        "PROJ_SOURCE": proj_source,
+                        "SLATE_DATE": slate_date_str,
+                        "CONTEST_TYPE": preset["internal_contest"],
+                    })
+                    pool = apply_projections(pool, cfg)
 
-                # Normalize salary column
-                if "salary" not in pool.columns:
-                    pool["salary"] = 0
-                pool["salary"] = pd.to_numeric(pool["salary"], errors="coerce").fillna(0)
+                    # Step 5: Add floor/ceil/minutes/ownership per player
+                    pool = _enrich_pool(pool)
 
-                # Apply full projection pipeline
-                cfg = merge_config({
-                    "PROJ_SOURCE": proj_source,
-                    "SLATE_DATE": slate_date_str,
-                    "CONTEST_TYPE": preset["internal_contest"],
-                })
-                pool = apply_projections(pool, cfg)
-
-                # Add floor/ceil/minutes/ownership per player
-                pool = _enrich_pool(pool)
-
-                st.session_state["_hub_pool"] = pool
-                st.session_state["_hub_rules"] = parsed_rules
-                st.session_state["_hub_draft_group_id"] = draft_group_id
-                st.success(f"Loaded {len(pool)} players. Roster: {parsed_rules['slots']}")
-            except Exception as exc:
-                st.error(f"Failed to load player pool: {exc}")
+                    st.session_state["_hub_pool"] = pool
+                    st.session_state["_hub_rules"] = parsed_rules
+                    st.session_state["_hub_draft_group_id"] = draft_group_id
+                    st.success(f"Loaded {len(pool)} players. Roster: {parsed_rules['slots']}")
+                except Exception as exc:
+                    st.error(f"Failed to load player pool: {exc}")
 
     # ── Pool Preview ──────────────────────────────────────────────────────
     hub_pool: Optional[pd.DataFrame] = st.session_state.get("_hub_pool")
     hub_rules: Optional[dict] = st.session_state.get("_hub_rules")
 
     if hub_pool is not None:
+        # ── Game Selector ─────────────────────────────────────────────────
+        all_games = _extract_games(hub_pool)
+        is_showdown = (hub_rules or {}).get("is_showdown", False)
+
+        if all_games:
+            st.subheader("Game Filter")
+            if is_showdown:
+                st.caption("Showdown: select exactly 1 game.")
+                sel_game = st.selectbox("Game", all_games, key="_hub_game_sd")
+                selected_games = [sel_game]
+            else:
+                selected_games = st.multiselect(
+                    "Filter to games (leave empty to keep all)",
+                    all_games,
+                    default=[],
+                    key="_hub_games_multi",
+                )
+
+            if selected_games:
+                # Determine opponent column
+                opp_col = "opp" if "opp" in hub_pool.columns else (
+                    "opponent" if "opponent" in hub_pool.columns else None
+                )
+                if opp_col:
+                    filtered_pool = _filter_pool_by_games(hub_pool, selected_games, opp_col)
+                    if not filtered_pool.empty:
+                        hub_pool = filtered_pool
+                        st.caption(f"Showing {len(hub_pool)} players in selected games.")
+
         st.subheader("Player Pool Preview")
         preview_cols = [c for c in [
-            "player_name", "pos", "team", "opp", "salary",
+            "player_name", "pos", "team", "opp", "opponent", "salary",
             "proj", "floor", "ceil", "proj_minutes", "ownership", "status", "sim_eligible",
             "actual_fp",
         ] if c in hub_pool.columns]
@@ -250,7 +431,7 @@ def main() -> None:
                     st.session_state["_hub_rg_df"] = rg_df
                     st.success(f"RotoGrinders: {len(rg_df)} rows loaded.")
                     if st.button("Merge RG Projections into Pool"):
-                        merged = merge_rg_with_pool(hub_pool, rg_df)
+                        merged = merge_rg_with_pool(st.session_state["_hub_pool"], rg_df)
                         st.session_state["_hub_pool"] = merged
                         st.success(f"Merged RG data into pool ({len(merged)} rows).")
                         st.rerun()
@@ -259,29 +440,24 @@ def main() -> None:
 
         # ── S1.7 — Late Swap / Refresh ────────────────────────────────────
         st.subheader("Injury / News Refresh (Late Swap)")
-        rapidapi_key = st.text_input(
-            "Tank01 RapidAPI Key",
-            value=st.session_state.get("rapidapi_key", ""),
-            type="password",
-            key="_hub_rapidapi_key",
-        )
-        if rapidapi_key:
-            st.session_state["rapidapi_key"] = rapidapi_key
 
         if st.button("🔃 Refresh Injuries & News"):
             _key = st.session_state.get("rapidapi_key", "")
             if not _key:
-                st.warning("Enter your Tank01 RapidAPI key to refresh injuries.")
+                st.warning("Enter your Tank01 RapidAPI key (Row 1) to refresh injuries.")
             else:
                 with st.spinner("Fetching latest injury updates…"):
                     try:
-                        updates = fetch_injury_updates(_key)
+                        updates = fetch_injury_updates(
+                            slate_date_str,
+                            {"RAPIDAPI_KEY": _key},
+                        )
                         if updates:
                             st.session_state["_hub_injury_updates"] = updates
                             st.success(f"Fetched {len(updates)} injury updates.")
 
                             # Flag affected players in current pool
-                            pool_copy = hub_pool.copy()
+                            pool_copy = st.session_state["_hub_pool"].copy()
                             affected = []
                             for update in updates:
                                 pname = update.get("player_name", "")
@@ -314,7 +490,7 @@ def main() -> None:
             if hub_rules:
                 slate.apply_roster_rules(hub_rules)
 
-            slate.player_pool = hub_pool
+            slate.player_pool = st.session_state["_hub_pool"]
             slate.published = True
             slate.published_at = _ts
 
@@ -322,7 +498,8 @@ def main() -> None:
                 slate.active_layers = ["Base"]
 
             set_slate_state(slate)
-            st.success(f"✅ Slate published! {len(hub_pool)} players, cap ${slate.salary_cap:,}, slots: {slate.roster_slots}")
+            _pub_pool = st.session_state["_hub_pool"]
+            st.success(f"✅ Slate published! {len(_pub_pool)} players, cap ${slate.salary_cap:,}, slots: {slate.roster_slots}")
             st.balloons()
     else:
         st.info("Click **Load Player Pool** to load the player pool.")

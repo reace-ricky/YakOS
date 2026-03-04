@@ -599,10 +599,22 @@ def apply_projections(
         df["proj"] = proj_model(df, cfg)
         print("[projections] Using model (historical + salary + position)")
 
+    elif method == "ensemble":
+        # Blend YakOS model + Tank01 + RG projections.
+        # Requires yakos_ensemble(); missing sources are handled gracefully.
+        yakos_series = proj_model(df, cfg)
+        tank01_vals = df["tank01_proj"].tolist() if "tank01_proj" in df.columns else [None] * len(df)
+        rg_vals = df["rg_proj"].tolist() if "rg_proj" in df.columns else [None] * len(df)
+        df["proj"] = [
+            yakos_ensemble(float(y), t, r)
+            for y, t, r in zip(yakos_series, tank01_vals, rg_vals)
+        ]
+        print("[projections] Using ensemble (YakOS + Tank01 + RG blend)")
+
     else:
         raise ValueError(
             f"Unknown PROJ_SOURCE '{method}'. "
-            f"Expected: parquet, salary_implied, regression, blend, model"
+            f"Expected: parquet, salary_implied, regression, blend, model, ensemble"
         )
 
     # Add salary-implied as reference column
