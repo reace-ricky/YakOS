@@ -410,3 +410,39 @@ class TestDkConfigImports:
     def test_DK_POLLING_FREQ_MINUTES(self):
         mod = importlib.import_module("yak_core.config")
         assert hasattr(mod, "DK_POLLING_FREQ_MINUTES")
+
+
+class TestStateImports:
+    """Smoke tests for yak_core.state – Sprint 1 shared state objects."""
+
+    def test_SlateState(self):
+        mod = importlib.import_module("yak_core.state")
+        assert hasattr(mod, "SlateState")
+
+    def test_RickyEdgeState(self):
+        mod = importlib.import_module("yak_core.state")
+        assert hasattr(mod, "RickyEdgeState")
+
+    def test_LineupSetState(self):
+        mod = importlib.import_module("yak_core.state")
+        assert hasattr(mod, "LineupSetState")
+
+    def test_SimState(self):
+        mod = importlib.import_module("yak_core.state")
+        assert hasattr(mod, "SimState")
+
+    def test_get_slate_state(self):
+        mod = importlib.import_module("yak_core.state")
+        assert hasattr(mod, "get_slate_state")
+
+    def test_get_edge_state(self):
+        mod = importlib.import_module("yak_core.state")
+        assert hasattr(mod, "get_edge_state")
+
+    def test_get_lineup_state(self):
+        mod = importlib.import_module("yak_core.state")
+        assert hasattr(mod, "get_lineup_state")
+
+    def test_get_sim_state(self):
+        mod = importlib.import_module("yak_core.state")
+        assert hasattr(mod, "get_sim_state")
