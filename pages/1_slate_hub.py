@@ -3,17 +3,18 @@
 Responsibilities
 ----------------
 - Date + Sport picker (date alone determines live vs historical — no Data Mode toggle).
-- Tank01 RapidAPI Key in Row 1 (required for stats enrichment and injury refresh).
 - Contest Type picker from CONTEST_PRESETS.
-- Projection Model picker: YakOS Model / Salary Baseline / Ensemble.
 - Fetch DK Lobby Contests → auto-resolves draft_group_id by matching contest type.
 - Load Player Pool via DK draftables API (always API-first, no local files).
-  Optionally enriches with Tank01 stats when API key is present.
+  Optionally enriches with Tank01 stats when TANK01_RAPIDAPI_KEY secret is present.
 - Game selector (multiselect) after pool loads to filter by matchup.
 - Optional RG CSV overlay via merge_rg_with_pool().
 - S1.7: Refresh action that re-pulls injuries via Tank01 API.
 - Provide a "Publish Slate" action that writes the full configuration
   into SlateState.
+
+Projection model is always YakOS Model (proj_source = "model").
+Tank01 RapidAPI key is read from st.secrets["TANK01_RAPIDAPI_KEY"] — not prompted on this page.
 
 All state is written exclusively to SlateState.
 """
@@ -61,14 +62,6 @@ from yak_core.live import fetch_injury_updates  # noqa: E402
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-# User-facing projection model labels → internal PROJ_SOURCE values
-_PROJ_MODELS = {
-    "YakOS Model": "model",        # historical + salary + position priors + Tank01
-    "Salary Baseline": "salary_implied",  # salary × 4.0 / 1000, quick testing
-    "Ensemble": "ensemble",        # blends YakOS + Tank01 + RG when all available
-}
-_PROJ_MODEL_LABELS = list(_PROJ_MODELS.keys())
 
 # game_type_ids that represent Showdown contests
 _SHOWDOWN_GAME_TYPE_IDS = {
@@ -207,8 +200,8 @@ def main() -> None:
     _render_status_bar(slate)
     st.divider()
 
-    # ── Row 1: Sport, Date, Tank01 API Key ────────────────────────────────
-    col1, col2, col3 = st.columns(3)
+    # ── Row 1: Sport, Date ────────────────────────────────────────────────
+    col1, col2 = st.columns(2)
     with col1:
         sport = st.selectbox("Sport", ["NBA", "PGA"], index=0 if slate.sport == "NBA" else 1)
     with col2:
@@ -216,29 +209,21 @@ def main() -> None:
         _today = pd.Timestamp.now(tz=ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
         slate_date = st.date_input("Date", value=pd.to_datetime(slate.slate_date or _today))
         slate_date_str = str(slate_date)
-    with col3:
-        rapidapi_key = st.text_input(
-            "Tank01 RapidAPI Key",
-            value=st.session_state.get("rapidapi_key", ""),
-            type="password",
-            help="Required for stats enrichment and injury refresh.",
-            key="_hub_rapidapi_key",
-        )
-        if rapidapi_key:
-            st.session_state["rapidapi_key"] = rapidapi_key
+
+    # Read Tank01 RapidAPI key from secrets (not prompted on this page)
+    rapidapi_key = st.secrets.get("TANK01_RAPIDAPI_KEY")
+    if rapidapi_key:
+        st.session_state["rapidapi_key"] = rapidapi_key
+    else:
+        st.info("ℹ️ Tank01 stats enrichment and injury refresh are disabled. Set `TANK01_RAPIDAPI_KEY` in `.streamlit/secrets.toml` or Streamlit Cloud secrets to enable.")
 
     # ── Row 2: Contest Type ────────────────────────────────────────────────
     contest_type_label = st.selectbox("Contest Type", CONTEST_PRESET_LABELS)
     preset = CONTEST_PRESETS[contest_type_label]
     st.caption(preset.get("description", ""))
 
-    # ── Row 3: Projection Model ────────────────────────────────────────────
-    # Map stored proj_source (internal) back to a user-facing label
-    _reverse_proj = {v: k for k, v in _PROJ_MODELS.items()}
-    _stored_label = _reverse_proj.get(slate.proj_source, _PROJ_MODEL_LABELS[0])
-    _proj_idx = _PROJ_MODEL_LABELS.index(_stored_label) if _stored_label in _PROJ_MODEL_LABELS else 0
-    proj_model_label = st.selectbox("Projection Model", _PROJ_MODEL_LABELS, index=_proj_idx)
-    proj_source = _PROJ_MODELS[proj_model_label]
+    # Projection model is always YakOS Model
+    proj_source = "model"
 
     # ── Row 4: DK Lobby Contests ───────────────────────────────────────────
     st.subheader("DK Contest Selection")
@@ -444,7 +429,7 @@ def main() -> None:
         if st.button("🔃 Refresh Injuries & News"):
             _key = st.session_state.get("rapidapi_key", "")
             if not _key:
-                st.warning("Enter your Tank01 RapidAPI key (Row 1) to refresh injuries.")
+                st.warning("Tank01 RapidAPI key not configured. Set `TANK01_RAPIDAPI_KEY` in `.streamlit/secrets.toml` or Streamlit Cloud secrets to enable injury refresh.")
             else:
                 with st.spinner("Fetching latest injury updates…"):
                     try:
