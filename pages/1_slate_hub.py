@@ -57,7 +57,7 @@ from yak_core.config import (  # noqa: E402
     DK_SHOWDOWN_LINEUP_SIZE,
         DK_CONTEST_MATCH_RULES,
 )
-from yak_core.sims import compute_sim_eligible  # noqa: E402
+from yak_core.sims import compute_sim_eligible, _INELIGIBLE_STATUSES  # noqa: E402
 from yak_core.live import fetch_injury_updates  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -110,6 +110,10 @@ def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
     Ownership is computed pool-wide via salary_rank_ownership (from
     yak_core.ownership) which uses salary rank percentile and position
     scarcity — no external RG data required.
+
+    Players with ineligible status (OUT, IR, DND, etc.) have their
+    proj_minutes forced to 0 so the minutes-based sim_eligible filter
+    correctly excludes them regardless of their salary.
     """
     has_floor = "floor" in pool.columns and pool["floor"].notna().any()
     has_ceil = "ceil" in pool.columns and pool["ceil"].notna().any()
@@ -129,12 +133,56 @@ def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
         pool["ceil"] = ceils
     pool["proj_minutes"] = mins_proj
 
+    # Force proj_minutes = 0 for players with ineligible status so the
+    # minutes-based sim_eligible filter (min_proj_minutes=4.0) correctly
+    # excludes them even when salary-based projection is non-zero.
+    if "status" in pool.columns:
+        inelig_mask = (
+            pool["status"].fillna("").astype(str).str.strip().str.upper()
+            .isin(_INELIGIBLE_STATUSES)
+        )
+        pool.loc[inelig_mask, "proj_minutes"] = 0.0
+
     # Pool-level ownership model (salary rank + position scarcity).
     # Replaces the broken per-row yakos_ownership_projection call which
     # required proj and rg_ownership features we don't have here.
     pool = apply_ownership(pool)
 
     return compute_sim_eligible(pool)
+
+
+def _filter_ineligible_players(pool: pd.DataFrame) -> pd.DataFrame:
+    """Remove players that should never appear in an optimisable pool.
+
+    A player is removed when **either** condition is true:
+      1. ``status`` is an ineligible designation (OUT, IR, DND, G-League,
+         Suspended, etc.) – the player was not available for that slate.
+      2. ``proj_minutes`` is zero (or missing) – no projected playing time,
+         so the player contributes nothing to any lineup.
+
+    This filter is applied before the pool is displayed AND before it is
+    published to ``SlateState`` so that downstream pages (The Lab, Build &
+    Publish) never see players who are ineligible for the slate date.
+    """
+    df = pool.copy()
+
+    # Status-based removal
+    if "status" in df.columns:
+        inelig_mask = (
+            df["status"].fillna("").astype(str).str.strip().str.upper()
+            .isin(_INELIGIBLE_STATUSES)
+        )
+        df = df[~inelig_mask]
+
+    # Minutes-based removal (zero projected minutes → no playing time)
+    mins_col = "proj_minutes" if "proj_minutes" in df.columns else (
+        "minutes" if "minutes" in df.columns else None
+    )
+    if mins_col is not None:
+        mins = pd.to_numeric(df[mins_col], errors="coerce").fillna(0)
+        df = df[mins > 0]
+
+    return df.reset_index(drop=True)
 
 
 def _render_status_bar(slate: "SlateState") -> None:
@@ -497,9 +545,12 @@ def main() -> None:
                                 # DK salary-based proj that will be overwritten by apply_projections.
                                 if "proj" in tank01_pool.columns and "tank01_proj" not in tank01_pool.columns:
                                     tank01_pool = tank01_pool.rename(columns={"proj": "tank01_proj"})
-                                # Select only useful columns for the merge
+                                # Select only useful columns for the merge.
+                                # Include 'status' so Tank01's date-specific injury status
+                                # (e.g. OUT on 2026-03-03) overrides the DK draftables
+                                # status, which may reflect a different point in time.
                                 merge_cols = ["player_name"]
-                                for col in ("opp", "opponent", "tank01_proj", "own_proj", "actual_fp"):
+                                for col in ("opp", "opponent", "tank01_proj", "own_proj", "actual_fp", "status"):
                                     if col in tank01_pool.columns:
                                         merge_cols.append(col)
                                 pool = pool.merge(
@@ -508,6 +559,23 @@ def main() -> None:
                                     how="left",
                                     suffixes=("", "_tank01"),
                                 )
+                                # Prefer Tank01 status when it is more restrictive.
+                                # Tank01 fetches data for the specific slate date so its
+                                # injury/availability status is authoritative.
+                                if "status_tank01" in pool.columns:
+                                    tank01_norm = (
+                                        pool["status_tank01"]
+                                        .fillna("")
+                                        .astype(str)
+                                        .str.strip()
+                                        .str.upper()
+                                    )
+                                    # Use Tank01 status wherever it is non-empty
+                                    has_tank01_status = tank01_norm != ""
+                                    pool.loc[has_tank01_status, "status"] = pool.loc[
+                                        has_tank01_status, "status_tank01"
+                                    ]
+                                    pool = pool.drop(columns=["status_tank01"])
                                 st.caption(f"✅ Tank01 stats merged for {len(tank01_pool)} players.")
                         except Exception as t01_exc:
                             st.caption(f"ℹ️ Tank01 stats not available: {t01_exc}")
@@ -549,6 +617,14 @@ def main() -> None:
                             pool = pool.sort_values("proj", ascending=False)
                         pool = pool.drop_duplicates(subset=[dedup_key], keep="first")
                     pool = pool.reset_index(drop=True)
+
+                    # Step 7: Remove players who are ineligible for this slate
+                    # (OUT/DND/IR status or zero projected minutes).
+                    _before = len(pool)
+                    pool = _filter_ineligible_players(pool)
+                    _removed = _before - len(pool)
+                    if _removed:
+                        st.caption(f"ℹ️ {_removed} player(s) removed (OUT/DND/IR or 0 proj minutes).")
 
                     st.session_state["_hub_pool"] = pool
                     st.session_state["_hub_rules"] = parsed_rules
