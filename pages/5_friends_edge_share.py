@@ -31,6 +31,7 @@ from yak_core.state import (  # noqa: E402
     get_lineup_state,
     get_sim_state,
 )
+from yak_core.components import render_lineup_cards_paged  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -90,26 +91,12 @@ def _render_edge_panel(edge: "RickyEdgeState") -> None:
 
 
 def _render_lineup_card(lu_df: pd.DataFrame, lineup_index: int) -> None:
-    """Render a single lineup card."""
+    """Render a single lineup card (legacy shim — delegates to shared component)."""
+    from yak_core.components import render_lineup_card  # noqa: PLC0415
     if "lineup_index" not in lu_df.columns:
         return
     lu = lu_df[lu_df["lineup_index"] == lineup_index]
-    if lu.empty:
-        return
-
-    show_cols = [c for c in ["slot", "player_name", "pos", "team", "salary", "proj", "ownership"] if c in lu.columns]
-    st.dataframe(lu[show_cols], use_container_width=True, hide_index=True)
-
-    # Footer totals
-    if "salary" in lu.columns:
-        total_salary = pd.to_numeric(lu["salary"], errors="coerce").sum()
-    else:
-        total_salary = 0
-    if "proj" in lu.columns:
-        total_proj = pd.to_numeric(lu["proj"], errors="coerce").sum()
-    else:
-        total_proj = 0
-    st.caption(f"💰 Salary: ${total_salary:,.0f} | 📊 Proj: {total_proj:.1f}")
+    render_lineup_card(lineup_rows=lu, sim_metrics=None, show_rating=False)
 
 
 # ---------------------------------------------------------------------------
@@ -186,27 +173,16 @@ def main() -> None:
                 n_lineups = len(pub_df["lineup_index"].unique()) if "lineup_index" in pub_df.columns else 0
                 st.markdown(f"**{n_lineups} lineup(s)**")
 
-                # Navigate through lineups
-                lu_idx_key = f"_fes_lu_nav_{label}"
-                if lu_idx_key not in st.session_state:
-                    st.session_state[lu_idx_key] = 0
+                # Pull pipeline metrics from SimState if available
+                sim_state = get_sim_state()
+                pipeline_df = sim_state.pipeline_output.get(label) or sim_state.pipeline_output.get("GPP_20")
 
-                nav_col1, nav_col2, nav_col3 = st.columns([1, 3, 1])
-                with nav_col1:
-                    if st.button("◀", key=f"_fes_prev_{label}") and st.session_state[lu_idx_key] > 0:
-                        st.session_state[lu_idx_key] -= 1
-                with nav_col2:
-                    current_idx = st.session_state[lu_idx_key]
-                    unique_idxs = sorted(pub_df["lineup_index"].unique().tolist()) if "lineup_index" in pub_df.columns else [0]
-                    st.markdown(f"<center>Lineup {current_idx + 1} of {n_lineups}</center>", unsafe_allow_html=True)
-                with nav_col3:
-                    if st.button("▶", key=f"_fes_next_{label}") and st.session_state[lu_idx_key] < n_lineups - 1:
-                        st.session_state[lu_idx_key] += 1
-
-                cur_lu_idx = st.session_state[lu_idx_key]
-                if unique_idxs:
-                    actual_idx = unique_idxs[min(cur_lu_idx, len(unique_idxs) - 1)]
-                    _render_lineup_card(pub_df, actual_idx)
+                render_lineup_cards_paged(
+                    lineups_df=pub_df,
+                    sim_results_df=pipeline_df,
+                    salary_cap=slate.salary_cap,
+                    nav_key=f"fes_lu_{label}",
+                )
 
     st.divider()
 

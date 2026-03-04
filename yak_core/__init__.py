@@ -45,6 +45,22 @@ from .rg_loader import (
     hit_rate,
 )
 
+from .sim_rating import (
+    yakos_sim_rating,
+    compute_pipeline_ratings,
+    compare_rating_weights,
+    get_weight_sets,
+    get_bucket_label,
+)
+
+from .sims import (
+    run_sims_pipeline,
+    run_calibration_pipeline,
+    load_pipeline_output,
+)
+
+from .components import render_lineup_card, render_lineup_cards_paged
+
 __all__ = [
     # config
     "YAKOS_ROOT",
@@ -82,4 +98,17 @@ __all__ = [
     "load_rg_contest",
     "merge_rg_with_pool",
     "hit_rate",
+    # sim_rating
+    "yakos_sim_rating",
+    "compute_pipeline_ratings",
+    "compare_rating_weights",
+    "get_weight_sets",
+    "get_bucket_label",
+    # sims pipeline
+    "run_sims_pipeline",
+    "run_calibration_pipeline",
+    "load_pipeline_output",
+    # components
+    "render_lineup_card",
+    "render_lineup_cards_paged",
 ]

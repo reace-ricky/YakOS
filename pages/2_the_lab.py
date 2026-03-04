@@ -44,6 +44,8 @@ from yak_core.sims import (  # noqa: E402
     run_monte_carlo_for_lineups,
     build_sim_player_accuracy_table,
     compute_player_anomaly_table,
+    run_sims_pipeline,
+    run_calibration_pipeline,
     ContestType,
 )
 from yak_core.calibration import (  # noqa: E402
@@ -57,6 +59,7 @@ from yak_core.right_angle import (  # noqa: E402
     compute_stack_scores,
     compute_value_scores,
 )
+from yak_core.sim_rating import compare_rating_weights, get_weight_sets  # noqa: E402
 # get_lab_analysis() exposes the finalized player pool and sim metrics produced
 # by this page so downstream pages (Ricky Edge, Build & Publish) can consume it.
 from yak_core.context import get_lab_analysis  # noqa: E402
@@ -237,12 +240,34 @@ def main() -> None:
 
     pool: pd.DataFrame = slate.player_pool if slate.player_pool is not None else pd.DataFrame()
 
+    # Contest type selector for pipeline
+    pipeline_contest_options = ["GPP_150", "GPP_20", "SE_3MAX", "CASH"]
+    pipeline_contest = st.selectbox(
+        "Contest type for pipeline / rating",
+        pipeline_contest_options,
+        index=1,
+        key="_lab_pipeline_contest",
+    )
+
     if not pool.empty:
-        if st.button("▶️ Run Sims", type="primary", key="_lab_run_sims"):
+        if st.button("▶️ Run Sims Pipeline", type="primary", key="_lab_run_sims"):
             with st.spinner(f"Running {sim.n_sims:,} Monte Carlo iterations…"):
                 try:
                     player_results = _build_player_level_sim_results(pool, sim.variance)
                     sim.player_results = player_results
+                    # Also run the batch pipeline to compute lineup-level metrics and rating
+                    dummy_lineups = _make_dummy_lineups_df(pool)
+                    if not dummy_lineups.empty:
+                        pipeline_df = run_sims_pipeline(
+                            pool=pool,
+                            lineups_df=dummy_lineups,
+                            contest_type=pipeline_contest,
+                            n_sims=sim.n_sims,
+                            variance=sim.variance,
+                            slate_date=slate.slate_date,
+                            draft_group_id=sim.draft_group_id,
+                        )
+                        sim.pipeline_output[pipeline_contest] = pipeline_df
                     set_sim_state(sim)
                     st.success(f"Sims complete — {len(player_results)} players.")
                 except Exception as exc:
@@ -271,6 +296,16 @@ def main() -> None:
             st.dataframe(styled, use_container_width=True, hide_index=True)
         except Exception:
             st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    # Show pipeline output if available
+    pipeline_output = sim.pipeline_output.get(pipeline_contest)
+    if pipeline_output is not None and not pipeline_output.empty:
+        with st.expander("📊 Pipeline Lineup Ratings", expanded=False):
+            show_cols = [c for c in ["lineup_index", "projection", "total_pown", "top_x_rate",
+                                     "itm_rate", "sim_roi", "leverage",
+                                     "yakos_sim_rating", "rating_bucket"]
+                         if c in pipeline_output.columns]
+            st.dataframe(pipeline_output[show_cols], use_container_width=True, hide_index=True)
 
     st.divider()
 
@@ -464,6 +499,73 @@ def main() -> None:
         else:
             st.info("Publish a slate to see calibration buckets.")
 
+    # Historical calibration pipeline (rating-bucket level)
+    with st.expander("📈 Historical Calibration Pipeline (Bucket-level)", expanded=False):
+        st.caption(
+            "Accumulates historical sims output and computes realized ROI / top-finish rates "
+            "per YakOS Sim Rating bucket (A/B/C/D).  Weights are updated in bulk once enough "
+            "volume per bucket is collected."
+        )
+        if st.button("🔄 Run Calibration Pipeline", key="_lab_run_cal_pipeline"):
+            with st.spinner("Running calibration pipeline…"):
+                try:
+                    cal_summary = run_calibration_pipeline()
+                    if not cal_summary.empty:
+                        st.dataframe(cal_summary, use_container_width=True, hide_index=True)
+                        _buckets_ready = cal_summary[cal_summary.get("meets_threshold", False)]["rating_bucket"].tolist() if "meets_threshold" in cal_summary.columns else []
+                        if _buckets_ready:
+                            st.success(f"Buckets with sufficient volume: {', '.join(_buckets_ready)}")
+                        else:
+                            st.info("Not enough volume yet to update weights. Run more slates first.")
+                    else:
+                        st.info("No historical pipeline data found. Run sims on more slates first.")
+                except Exception as exc:
+                    st.error(f"Calibration pipeline failed: {exc}")
+
+    # Rating weight update tester
+    with st.expander("🧪 Rating Weight Update Tester", expanded=False):
+        st.caption(
+            "Compare two sets of rating weights on historical data before committing new weights. "
+            "Uses bucket-level realized ROI and top-finish rates."
+        )
+        default_weights = get_weight_sets().get("GPP_20", {})
+        weight_keys = list(default_weights.keys())
+
+        st.markdown("**Old weights (current):**")
+        old_w_cols = st.columns(len(weight_keys))
+        old_weights: dict = {}
+        for i, k in enumerate(weight_keys):
+            with old_w_cols[i]:
+                old_weights[k] = st.number_input(
+                    k, min_value=0.0, max_value=1.0, step=0.01,
+                    value=float(default_weights.get(k, 0.0)),
+                    key=f"_lab_old_w_{k}",
+                )
+
+        st.markdown("**New weights (proposed):**")
+        new_w_cols = st.columns(len(weight_keys))
+        new_weights: dict = {}
+        for i, k in enumerate(weight_keys):
+            with new_w_cols[i]:
+                new_weights[k] = st.number_input(
+                    k, min_value=0.0, max_value=1.0, step=0.01,
+                    value=float(default_weights.get(k, 0.0)),
+                    key=f"_lab_new_w_{k}",
+                )
+
+        if st.button("🔍 Compare Weights", key="_lab_compare_weights"):
+            with st.spinner("Running before/after comparison…"):
+                try:
+                    comparison_df = compare_rating_weights(
+                        old_params={"weights": old_weights},
+                        new_params={"weights": new_weights},
+                        contest_type=pipeline_contest,
+                    )
+                    st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+                    st.caption("Higher-bucket rows should show better realized ROI / top-finish rates.")
+                except Exception as exc:
+                    st.error(f"Weight comparison failed: {exc}")
+
     st.divider()
 
     # ─────────────────────────────────────────────────────────────────────
@@ -501,6 +603,5 @@ def main() -> None:
             "⛔ **Ricky Edge Check not approved.** "
             "Go to **Ricky Edge** page to approve the Edge Check before publishing lineups."
         )
-
 
 main()

@@ -225,6 +225,7 @@ class SimState:
     calibration_profiles: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     active_profile: Optional[str] = None
     contest_gauges: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    pipeline_output: Dict[str, Optional[pd.DataFrame]] = field(default_factory=dict)
 
     def apply_learning(self, player_name: str, boost: float, reason: str = "") -> None:
         """Write a sim learning boost for a player (capped at ±15%)."""

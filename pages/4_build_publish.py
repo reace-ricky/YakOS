@@ -43,6 +43,7 @@ from yak_core.lineups import (  # noqa: E402
 )
 from yak_core.calibration import apply_archetype, DFS_ARCHETYPES  # noqa: E402
 from yak_core.config import CONTEST_PRESETS, CONTEST_PRESET_LABELS  # noqa: E402
+from yak_core.components import render_lineup_cards_paged  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -389,8 +390,18 @@ def main() -> None:
         view_df = lu_state.lineups.get(view_label)
 
         if view_df is not None and not view_df.empty:
-            st.caption(f"{len(view_df['lineup_index'].unique()) if 'lineup_index' in view_df.columns else '?'} lineups")
-            st.dataframe(view_df, use_container_width=True, hide_index=True)
+            n_lu = len(view_df["lineup_index"].unique()) if "lineup_index" in view_df.columns else 0
+            st.caption(f"{n_lu} lineup(s)")
+
+            # Pull pipeline metrics from SimState if available
+            pipeline_df = sim.pipeline_output.get(contest_label) or sim.pipeline_output.get("GPP_20")
+
+            render_lineup_cards_paged(
+                lineups_df=view_df,
+                sim_results_df=pipeline_df,
+                salary_cap=slate.salary_cap,
+                nav_key=f"bp_lu_{view_label}",
+            )
 
             # Exposure view
             expo_df = lu_state.exposures.get(view_label)

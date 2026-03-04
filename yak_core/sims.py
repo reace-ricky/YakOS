@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import dataclasses
 import enum
+import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -943,3 +945,351 @@ def build_sim_player_accuracy_table(
         "r2": round(r2, 3),
         "n_players": n,
     }
+
+
+# ---------------------------------------------------------------------------
+# Sims Pipeline
+# ---------------------------------------------------------------------------
+
+_DEFAULT_DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "sims"
+
+
+def run_sims_pipeline(
+    pool: pd.DataFrame,
+    lineups_df: pd.DataFrame,
+    contest_type: str = "GPP_20",
+    n_sims: int = 10000,
+    variance: float = 1.0,
+    slate_date: str = "",
+    draft_group_id: Optional[int] = None,
+    output_dir: Optional[str] = None,
+    top_x_pct: float = 0.15,
+    itm_pct: float = 0.50,
+) -> pd.DataFrame:
+    """Run the full sims pipeline for a slate and persist lineup-level metrics.
+
+    Generates lineup-level metrics (projection, total_pown, top_X% finish
+    rate, ITM rate, sim ROI, leverage) for every lineup in *lineups_df*,
+    computes the YakOS Sim Rating, and writes the results to a Parquet file
+    under *output_dir* for later calibration.
+
+    Parameters
+    ----------
+    pool : pd.DataFrame
+        Player pool with ``player_name``, ``proj``, ``ownership`` columns.
+    lineups_df : pd.DataFrame
+        Lineup rows in long format (one player per row) with at least
+        ``lineup_index`` and ``player_name`` columns.
+    contest_type : str
+        Contest archetype (e.g. "GPP_150", "GPP_20", "SE_3MAX", "CASH").
+    n_sims : int
+        Monte Carlo iterations.
+    variance : float
+        Variance multiplier applied to player score distributions.
+    slate_date : str
+        ISO date string used for the output filename.
+    draft_group_id : int, optional
+        DK draft group ID; stored in the output for join-back during
+        calibration.
+    output_dir : str, optional
+        Directory to write the Parquet file.  Defaults to
+        ``data/sims/`` relative to the repo root.
+    top_x_pct : float
+        Fraction of the field considered "top-X%".  Default 0.15 (top 15%).
+    itm_pct : float
+        In-the-money fraction.  Default 0.50 (cash-line).
+
+    Returns
+    -------
+    pd.DataFrame
+        Lineup-level pipeline output with one row per lineup_index.
+        Columns: ``lineup_index``, ``projection``, ``total_pown``,
+        ``top_x_rate``, ``itm_rate``, ``sim_roi``, ``leverage``,
+        ``yakos_sim_rating``, ``rating_bucket``.
+    """
+    from yak_core.sim_rating import compute_pipeline_ratings  # noqa: PLC0415
+
+    if pool.empty or lineups_df.empty:
+        return pd.DataFrame()
+
+    # Build a player-level projection/ownership lookup
+    p_proj: Dict[str, float] = {}
+    p_own: Dict[str, float] = {}
+    p_ceil: Dict[str, float] = {}
+    p_floor: Dict[str, float] = {}
+
+    for _, row in pool.iterrows():
+        pname = str(row.get("player_name", ""))
+        if not pname:
+            continue
+        proj_val = float(row.get("proj", 0) or 0)
+        ceil_val = float(row.get("ceil", proj_val * 1.4) or proj_val * 1.4)
+        floor_val = float(row.get("floor", proj_val * 0.7) or proj_val * 0.7)
+        own_val = float(row.get("ownership", 5.0) or 5.0)
+        p_proj[pname] = proj_val
+        p_ceil[pname] = ceil_val
+        p_floor[pname] = floor_val
+        p_own[pname] = own_val
+
+    # Monte Carlo: simulate lineup totals
+    rng = np.random.default_rng(seed=42)
+    lineup_indices = sorted(lineups_df["lineup_index"].unique().tolist()) if "lineup_index" in lineups_df.columns else []
+    records: List[Dict[str, Any]] = []
+
+    # Pre-simulate all player scores for all iterations
+    all_player_sims: Dict[str, np.ndarray] = {}
+    for pname, proj in p_proj.items():
+        ceil = p_ceil[pname]
+        floor_val = p_floor[pname]
+        std = max((ceil - floor_val) / 4.0 * variance, 0.5)
+        all_player_sims[pname] = rng.normal(proj, std, n_sims)
+
+    # Build per-lineup totals across all simulations
+    all_lineup_totals: Dict[Any, np.ndarray] = {}
+    for lu_idx in lineup_indices:
+        lu = lineups_df[lineups_df["lineup_index"] == lu_idx]
+        players = lu["player_name"].dropna().tolist() if "player_name" in lu.columns else []
+        lu_totals = np.zeros(n_sims)
+        for pname in players:
+            if pname in all_player_sims:
+                lu_totals += all_player_sims[pname]
+        all_lineup_totals[lu_idx] = lu_totals
+
+    # Derive field-wide percentile thresholds from the pooled sim distributions
+    if all_lineup_totals:
+        pooled_totals = np.concatenate(list(all_lineup_totals.values()))
+        top_x_threshold = float(np.nanpercentile(pooled_totals, (1.0 - top_x_pct) * 100))
+        itm_threshold = float(np.nanpercentile(pooled_totals, (1.0 - itm_pct) * 100))
+    else:
+        top_x_threshold = 0.0
+        itm_threshold = 0.0
+
+    for lu_idx in lineup_indices:
+        lu = lineups_df[lineups_df["lineup_index"] == lu_idx]
+        players = lu["player_name"].dropna().tolist() if "player_name" in lu.columns else []
+
+        # Lineup-level base metrics
+        projection = sum(p_proj.get(p, 0) for p in players)
+        total_pown_raw = sum(p_own.get(p, 0) for p in players)
+        total_pown_frac = total_pown_raw / 100.0  # convert pct to fraction
+
+        lu_totals = all_lineup_totals.get(lu_idx, np.zeros(n_sims))
+        median_total = float(np.nanmedian(lu_totals))
+
+        # Top-X% finish rate (fraction of sims where lineup beats top_x threshold)
+        top_x_rate = float(np.mean(lu_totals >= top_x_threshold))
+
+        # ITM rate (fraction of sims where lineup beats cash line)
+        itm_rate = float(np.mean(lu_totals >= itm_threshold))
+
+        # Sim ROI = (median_sim_total - projected_total) / projected_total
+        sim_roi = float((median_total - projection) / max(projection, 1.0))
+
+        # Leverage: top_x_rate relative to field-average ownership
+        avg_own = float(np.mean([p_own.get(p, 5.0) for p in players])) if players else 5.0
+        own_frac = max(avg_own / 100.0, 0.01)
+        leverage = float(top_x_rate / own_frac) if own_frac > 0 else 1.0
+
+        records.append({
+            "lineup_index":  lu_idx,
+            "projection":    round(projection, 2),
+            "total_pown":    round(total_pown_frac, 4),
+            "top_x_rate":   round(top_x_rate, 4),
+            "itm_rate":      round(itm_rate, 4),
+            "sim_roi":       round(sim_roi, 4),
+            "leverage":      round(leverage, 3),
+            "contest_type":  contest_type,
+            "slate_date":    slate_date,
+            "draft_group_id": draft_group_id,
+        })
+
+    if not records:
+        return pd.DataFrame()
+
+    pipeline_df = pd.DataFrame(records)
+    pipeline_df = compute_pipeline_ratings(pipeline_df, contest_type=contest_type)
+
+    # Persist to Parquet
+    _save_pipeline_output(pipeline_df, slate_date=slate_date,
+                          draft_group_id=draft_group_id,
+                          contest_type=contest_type,
+                          output_dir=output_dir)
+
+    return pipeline_df
+
+
+def _save_pipeline_output(
+    df: pd.DataFrame,
+    slate_date: str = "",
+    draft_group_id: Optional[int] = None,
+    contest_type: str = "",
+    output_dir: Optional[str] = None,
+) -> Optional[Path]:
+    """Write pipeline output to a Parquet file.
+
+    Returns the Path written, or None if write failed.
+    """
+    try:
+        base = Path(output_dir) if output_dir else _DEFAULT_DATA_DIR
+        base.mkdir(parents=True, exist_ok=True)
+        dg_part = f"_dg{draft_group_id}" if draft_group_id else ""
+        ct_part = f"_{contest_type.lower()}" if contest_type else ""
+        date_part = slate_date.replace("-", "") if slate_date else "nodate"
+        fname = f"sims_{date_part}{dg_part}{ct_part}.parquet"
+        out_path = base / fname
+        df.to_parquet(out_path, index=False)
+        return out_path
+    except Exception:
+        return None
+
+
+def load_pipeline_output(
+    slate_date: str = "",
+    draft_group_id: Optional[int] = None,
+    contest_type: str = "",
+    output_dir: Optional[str] = None,
+) -> pd.DataFrame:
+    """Load a previously saved pipeline output Parquet file.
+
+    Parameters
+    ----------
+    slate_date : str
+        ISO date string matching the filename.
+    draft_group_id : int, optional
+        DK draft group ID.
+    contest_type : str
+        Contest archetype string.
+    output_dir : str, optional
+        Directory to search.  Defaults to ``data/sims/``.
+
+    Returns
+    -------
+    pd.DataFrame
+        Pipeline output, or empty DataFrame if not found.
+    """
+    base = Path(output_dir) if output_dir else _DEFAULT_DATA_DIR
+    dg_part = f"_dg{draft_group_id}" if draft_group_id else ""
+    ct_part = f"_{contest_type.lower()}" if contest_type else ""
+    date_part = slate_date.replace("-", "") if slate_date else "nodate"
+    fname = f"sims_{date_part}{dg_part}{ct_part}.parquet"
+    path = base / fname
+    if path.exists():
+        try:
+            return pd.read_parquet(path)
+        except Exception:
+            return pd.DataFrame()
+    return pd.DataFrame()
+
+
+def run_calibration_pipeline(
+    historical_sims_dir: Optional[str] = None,
+    dk_results_df: Optional[pd.DataFrame] = None,
+    min_bucket_samples: int = 20,
+) -> pd.DataFrame:
+    """Load historical sims output and compute bucket-level realized ROI.
+
+    Joins the pipeline output (from ``run_sims_pipeline``) to actual DK
+    results (payouts, finish positions) and computes bucket-level realized
+    ROI and top-finish rates.  Results are accumulated across all Parquet
+    files found in *historical_sims_dir*.
+
+    This function performs bulk bucket updates only — it does not
+    micro-adjust individual lineup weights.  The intention is to collect
+    sufficient volume per bucket (≥ *min_bucket_samples*) before updating
+    rating weights.
+
+    Parameters
+    ----------
+    historical_sims_dir : str, optional
+        Directory containing historical ``sims_*.parquet`` files.
+        Defaults to ``data/sims/``.
+    dk_results_df : pd.DataFrame, optional
+        Actual DK contest results.  Must contain ``lineup_index``
+        (or ``entry_id``), ``payout`` (float), ``finish_position`` (int),
+        and ``total_entries`` (int) columns.  When *None*, only the pipeline
+        metrics are aggregated (no realized ROI).
+    min_bucket_samples : int
+        Minimum rows per bucket before that bucket's summary is reported.
+
+    Returns
+    -------
+    pd.DataFrame
+        Bucket-level calibration summary with columns:
+        ``rating_bucket``, ``n``, ``avg_yakos_rating``,
+        ``avg_top_x_rate``, ``avg_itm_rate``, ``avg_sim_roi``,
+        ``realized_roi`` (if DK results provided),
+        ``top_finish_rate`` (if DK results provided),
+        ``meets_threshold`` (bool: n >= min_bucket_samples).
+    """
+    base = Path(historical_sims_dir) if historical_sims_dir else _DEFAULT_DATA_DIR
+    parquet_files = sorted(base.glob("sims_*.parquet")) if base.exists() else []
+
+    frames: List[pd.DataFrame] = []
+    for pf in parquet_files:
+        try:
+            frames.append(pd.read_parquet(pf))
+        except Exception:
+            continue
+
+    if not frames:
+        return pd.DataFrame()
+
+    all_sims = pd.concat(frames, ignore_index=True)
+
+    # Join actual DK results if provided
+    if dk_results_df is not None and not dk_results_df.empty:
+        dk = dk_results_df.copy()
+        # Normalise join key
+        if "entry_id" in dk.columns and "lineup_index" not in dk.columns:
+            dk = dk.rename(columns={"entry_id": "lineup_index"})
+        if "lineup_index" in dk.columns:
+            all_sims = all_sims.merge(
+                dk[["lineup_index"] + [c for c in ["payout", "finish_position", "total_entries"]
+                                       if c in dk.columns]],
+                on="lineup_index",
+                how="left",
+            )
+            if "payout" in all_sims.columns and "finish_position" in all_sims.columns:
+                all_sims["realized_roi"] = (
+                    pd.to_numeric(all_sims["payout"], errors="coerce").fillna(0) - 1.0
+                )
+                all_sims["top_finish"] = (
+                    pd.to_numeric(all_sims["finish_position"], errors="coerce").le(
+                        pd.to_numeric(
+                            all_sims.get("total_entries", pd.Series(dtype=float)),
+                            errors="coerce",
+                        ).fillna(1000) * 0.15
+                    )
+                ).astype(int)
+
+    if "rating_bucket" not in all_sims.columns:
+        return pd.DataFrame()
+
+    agg_dict: Dict[str, Any] = {
+        "yakos_sim_rating":  ("yakos_sim_rating", "mean"),
+        "avg_top_x_rate":    ("top_x_rate", "mean"),
+        "avg_itm_rate":      ("itm_rate", "mean"),
+        "avg_sim_roi":       ("sim_roi", "mean"),
+    }
+    if "realized_roi" in all_sims.columns:
+        agg_dict["realized_roi"] = ("realized_roi", "mean")
+    if "top_finish" in all_sims.columns:
+        agg_dict["top_finish_rate"] = ("top_finish", "mean")
+
+    # Build named aggregation
+    named_agg = {k: pd.NamedAgg(column=v[0], aggfunc=v[1]) for k, v in agg_dict.items()}
+
+    summary = (
+        all_sims.groupby("rating_bucket", as_index=False)
+        .agg(n=("lineup_index", "count"), **named_agg)
+        .rename(columns={"yakos_sim_rating": "avg_yakos_rating"})
+    )
+    summary["meets_threshold"] = summary["n"] >= min_bucket_samples
+
+    # Round for readability
+    for col in ["avg_yakos_rating", "avg_top_x_rate", "avg_itm_rate", "avg_sim_roi",
+                "realized_roi", "top_finish_rate"]:
+        if col in summary.columns:
+            summary[col] = summary[col].round(4)
+
+    return summary.sort_values("rating_bucket").reset_index(drop=True)

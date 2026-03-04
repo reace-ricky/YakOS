@@ -466,3 +466,55 @@ class TestContextImports:
     def test_SlateContext(self):
         mod = importlib.import_module("yak_core.context")
         assert hasattr(mod, "SlateContext")
+
+
+class TestSimRatingImports:
+    """Smoke tests for yak_core.sim_rating – YakOS Sim Rating system."""
+
+    def test_yakos_sim_rating(self):
+        mod = importlib.import_module("yak_core.sim_rating")
+        assert hasattr(mod, "yakos_sim_rating")
+
+    def test_compute_pipeline_ratings(self):
+        mod = importlib.import_module("yak_core.sim_rating")
+        assert hasattr(mod, "compute_pipeline_ratings")
+
+    def test_compare_rating_weights(self):
+        mod = importlib.import_module("yak_core.sim_rating")
+        assert hasattr(mod, "compare_rating_weights")
+
+    def test_get_weight_sets(self):
+        mod = importlib.import_module("yak_core.sim_rating")
+        assert hasattr(mod, "get_weight_sets")
+
+    def test_get_bucket_label(self):
+        mod = importlib.import_module("yak_core.sim_rating")
+        assert hasattr(mod, "get_bucket_label")
+
+
+class TestSimsPipelineImports:
+    """Smoke tests for new pipeline functions in yak_core.sims."""
+
+    def test_run_sims_pipeline(self):
+        mod = importlib.import_module("yak_core.sims")
+        assert hasattr(mod, "run_sims_pipeline")
+
+    def test_run_calibration_pipeline(self):
+        mod = importlib.import_module("yak_core.sims")
+        assert hasattr(mod, "run_calibration_pipeline")
+
+    def test_load_pipeline_output(self):
+        mod = importlib.import_module("yak_core.sims")
+        assert hasattr(mod, "load_pipeline_output")
+
+
+class TestComponentsImports:
+    """Smoke tests for yak_core.components – reusable Streamlit components."""
+
+    def test_render_lineup_card(self):
+        mod = importlib.import_module("yak_core.components")
+        assert hasattr(mod, "render_lineup_card")
+
+    def test_render_lineup_cards_paged(self):
+        mod = importlib.import_module("yak_core.components")
+        assert hasattr(mod, "render_lineup_cards_paged")
