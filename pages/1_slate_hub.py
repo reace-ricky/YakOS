@@ -59,6 +59,7 @@ from yak_core.config import (  # noqa: E402
 )
 from yak_core.sims import compute_sim_eligible, _INELIGIBLE_STATUSES  # noqa: E402
 from yak_core.live import fetch_injury_updates  # noqa: E402
+from yak_core.salary_history import SalaryHistoryClient  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -475,6 +476,10 @@ def main() -> None:
                 _debug_draft_group_id = int(dg_val)
 
     # ── Row 5: Load Player Pool ────────────────────────────────────────────
+    _today_date = pd.Timestamp.now(tz=ZoneInfo("America/New_York")).date()
+    _is_historical = pd.to_datetime(slate_date_str).date() < _today_date
+    _salary_client = SalaryHistoryClient()
+
     if st.button("📥 Load Player Pool", type="primary"):
         # Resolve draft_group_id:
         # • Debug mode  → use the manually selected / entered value.
@@ -484,6 +489,30 @@ def main() -> None:
 
         with st.spinner("Loading player pool…"):
             try:
+                # ── Historical salary path ────────────────────────────────
+                # For historical dates use the SalaryHistoryClient pipeline
+                # (FantasyLabs + DK draftables) instead of the live DK lobby.
+                _historical_salary_df: Optional[pd.DataFrame] = None
+                _historical_dg_id: Optional[int] = None
+
+                if _is_historical and not draft_group_id:
+                    # Check cache first
+                    _cached = _salary_client.load_cached_salaries(slate_date_str)
+                    if _cached is not None and not _cached.empty:
+                        _historical_salary_df = _cached
+                        st.info(f"Historical salaries loaded from cache for {slate_date_str}.")
+                    else:
+                        with st.spinner("Fetching historical salaries from DK…"):
+                            _hist_df = _salary_client.get_historical_salaries(slate_date_str)
+                        if not _hist_df.empty:
+                            _historical_salary_df = _hist_df
+                            _historical_dg_id = _hist_df.attrs.get("draft_group_id")
+                            if _historical_dg_id:
+                                st.info(
+                                    f"Historical salaries loaded from DK "
+                                    f"(DraftGroup {_historical_dg_id})"
+                                )
+
                 # Auto-pick contest when no override is set
                 if not draft_group_id:
                     _lobby = lobby_df
@@ -495,7 +524,7 @@ def main() -> None:
                     if draft_group_id:
                         st.caption(f"ℹ️ Auto-selected Draft Group ID: **{draft_group_id}**")
 
-                if not draft_group_id:
+                if not draft_group_id and _historical_salary_df is None:
                     st.warning(
                         "Could not determine a Draft Group ID for the selected Contest Type. "
                         "No matching contests were found in the DK lobby. "
@@ -503,10 +532,21 @@ def main() -> None:
                     )
                 else:
                     # Step 1: Fetch DK draftables (salaries, positions, teams)
-                    pool = fetch_dk_draftables(draft_group_id)
-                    if pool.empty:
-                        st.error(f"No players found for Draft Group ID {draft_group_id}.")
-                        st.stop()
+                    # Use historical salary cache when available; fall back to live DK API.
+                    if _historical_salary_df is not None and not _historical_salary_df.empty:
+                        pool = _historical_salary_df.copy()
+                        # Rename SalaryHistoryClient columns to YakOS conventions
+                        if "position" in pool.columns and "pos" not in pool.columns:
+                            pool = pool.rename(columns={"position": "pos"})
+                        if "player_dk_id" in pool.columns and "dk_player_id" not in pool.columns:
+                            pool = pool.rename(columns={"player_dk_id": "dk_player_id"})
+                        if _historical_dg_id and not draft_group_id:
+                            draft_group_id = _historical_dg_id
+                    else:
+                        pool = fetch_dk_draftables(draft_group_id)
+                        if pool.empty:
+                            st.error(f"No players found for Draft Group ID {draft_group_id}.")
+                            st.stop()
 
                     # Step 2: Normalize column names
                     pool = _normalize_dk_pool(pool)
@@ -515,6 +555,19 @@ def main() -> None:
                     if "salary" not in pool.columns:
                         pool["salary"] = 0
                     pool["salary"] = pd.to_numeric(pool["salary"], errors="coerce").fillna(0)
+
+                    # Auto-save live salary data to cache for future historical lookups
+                    if not _is_historical and not pool.empty:
+                        _cache_col_map = {"pos": "position", "dk_player_id": "player_dk_id"}
+                        _save_cols = [
+                            c for c in ("player_name", "pos", "team", "salary", "dk_player_id")
+                            if c in pool.columns
+                        ]
+                        if _save_cols:
+                            _salary_client.save_salaries(
+                                slate_date_str,
+                                pool[_save_cols].rename(columns=_cache_col_map),
+                            )
 
                     # Step 3: Optionally enrich with Tank01 stats (game logs, rolling avgs, Vegas)
                     _api_key = st.session_state.get("rapidapi_key", "")
