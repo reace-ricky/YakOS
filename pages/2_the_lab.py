@@ -25,7 +25,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Dict, Optional
 
 import numpy as np
 import pandas as pd
@@ -69,6 +69,10 @@ from yak_core.sim_rating import compare_rating_weights, get_weight_sets  # noqa:
 # get_lab_analysis() exposes the finalized player pool and sim metrics produced
 # by this page so downstream pages (Ricky Edge, Build & Publish) can consume it.
 from yak_core.context import get_lab_analysis  # noqa: E402
+from yak_core.rci import (  # noqa: E402
+    compute_rci,
+    DEFAULT_WEIGHTS as RCI_DEFAULT_WEIGHTS,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -727,6 +731,116 @@ def main() -> None:
                     st.caption("Higher-bucket rows should show better realized ROI / top-finish rates.")
                 except Exception as exc:
                     st.error(f"Weight comparison failed: {exc}")
+
+    st.divider()
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Section 4B: RCI — Ricky Confidence Index
+    # ─────────────────────────────────────────────────────────────────────
+    st.subheader("🎯 Ricky Confidence Index (RCI)")
+    st.caption(
+        "Multi-signal gauge that combines Projection Confidence, Sim Alignment, "
+        "Ownership Accuracy, and Historical ROI into a per-contest 0–100 score. "
+        "Green = calibration stable (focus on methodology). "
+        "Yellow = decent, tune more. Red = calibration needs work."
+    )
+
+    rci_contests = list(edge.edge_analysis_by_contest.keys()) or list(CONTEST_PRESETS.keys())
+
+    if not rci_contests:
+        st.info("Run Edge Analysis on the Ricky Edge page to enable RCI gauges.")
+    else:
+        # Per-contest RCI computation
+        rci_cols = st.columns(min(len(rci_contests), 3))
+        for ci, contest_label in enumerate(rci_contests):
+            col_idx = ci % len(rci_cols)
+            with rci_cols[col_idx]:
+                edge_payload = edge.edge_analysis_by_contest.get(contest_label, {})
+                custom_weights = sim.get_rci_weights(contest_label)
+                try:
+                    rci_result = compute_rci(
+                        contest_label=contest_label,
+                        edge_payload=edge_payload,
+                        sim_results=sim.player_results,
+                        weights=custom_weights,
+                    )
+                    sim.set_rci_result(contest_label, rci_result)
+
+                    pct = int(rci_result.rci_score)
+                    color = (
+                        "green" if rci_result.rci_status == "green"
+                        else "orange" if rci_result.rci_status == "yellow"
+                        else "red"
+                    )
+                    st.markdown(f"**{contest_label}**")
+                    st.progress(pct)
+                    st.markdown(
+                        f"<span style='color:{color}'>RCI: {pct}/100</span>",
+                        unsafe_allow_html=True,
+                    )
+                    st.caption(rci_result.recommendation)
+                except Exception as _rci_err:
+                    st.warning(f"{contest_label}: RCI error — {_rci_err}")
+
+        # Signal breakdown expander
+        with st.expander("📊 RCI Signal Breakdown", expanded=False):
+            st.caption("Individual signal scores feeding the composite RCI for each contest.")
+            for contest_label in rci_contests:
+                stored = sim.get_rci_result(contest_label)
+                if stored and stored.get("signals"):
+                    st.markdown(f"**{contest_label}** — RCI {stored['rci_score']:.0f}/100")
+                    signal_rows = [
+                        {
+                            "Signal": s["name"].replace("_", " ").title(),
+                            "Score": f"{s['value']:.0f}/100",
+                            "Weight": f"{s['weight']:.0%}",
+                            "Status": s["status"].upper(),
+                            "Description": s["description"],
+                        }
+                        for s in stored["signals"]
+                    ]
+                    st.dataframe(
+                        pd.DataFrame(signal_rows),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+        # Tunable weights expander
+        with st.expander("⚙️ Tune RCI Weights", expanded=False):
+            st.caption(
+                "Override the default signal weights for each contest type. "
+                "Weights are normalized to sum to 1."
+            )
+            tune_contest = st.selectbox(
+                "Contest type to tune",
+                rci_contests,
+                key="_lab_rci_tune_contest",
+            )
+            if tune_contest:
+                existing_w = sim.get_rci_weights(tune_contest) or dict(RCI_DEFAULT_WEIGHTS)
+                w_cols = st.columns(len(RCI_DEFAULT_WEIGHTS))
+                new_w: Dict[str, float] = {}
+                for wi, (wk, wv) in enumerate(RCI_DEFAULT_WEIGHTS.items()):
+                    with w_cols[wi]:
+                        new_w[wk] = st.number_input(
+                            wk.replace("_", " ").title(),
+                            min_value=0.0,
+                            max_value=1.0,
+                            step=0.05,
+                            value=float(existing_w.get(wk, wv)),
+                            key=f"_lab_rci_w_{tune_contest}_{wk}",
+                        )
+                if st.button("💾 Save RCI Weights", key="_lab_rci_save_weights"):
+                    sim.set_rci_weights(tune_contest, new_w)
+                    set_sim_state(sim)
+                    st.success(f"RCI weights saved for '{tune_contest}'.")
+                if st.button("↩️ Reset to Defaults", key="_lab_rci_reset_weights"):
+                    if tune_contest in sim.rci_weights:
+                        del sim.rci_weights[tune_contest]
+                    set_sim_state(sim)
+                    st.success(f"RCI weights reset to defaults for '{tune_contest}'.")
+
+    set_sim_state(sim)
 
     st.divider()
 

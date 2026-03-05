@@ -526,3 +526,39 @@ class TestComponentsImports:
     def test_render_lineup_cards_paged(self):
         mod = importlib.import_module("yak_core.components")
         assert hasattr(mod, "render_lineup_cards_paged")
+
+
+class TestRCIImports:
+    """Smoke tests for yak_core.rci — RCI engine."""
+
+    def test_rci_signal(self):
+        mod = importlib.import_module("yak_core.rci")
+        assert hasattr(mod, "RCISignal")
+
+    def test_rci_result(self):
+        mod = importlib.import_module("yak_core.rci")
+        assert hasattr(mod, "RCIResult")
+
+    def test_default_weights(self):
+        mod = importlib.import_module("yak_core.rci")
+        assert hasattr(mod, "DEFAULT_WEIGHTS")
+
+    def test_compute_projection_confidence_signal(self):
+        mod = importlib.import_module("yak_core.rci")
+        assert hasattr(mod, "compute_projection_confidence_signal")
+
+    def test_compute_sim_alignment_signal(self):
+        mod = importlib.import_module("yak_core.rci")
+        assert hasattr(mod, "compute_sim_alignment_signal")
+
+    def test_compute_ownership_accuracy_signal(self):
+        mod = importlib.import_module("yak_core.rci")
+        assert hasattr(mod, "compute_ownership_accuracy_signal")
+
+    def test_compute_historical_roi_signal(self):
+        mod = importlib.import_module("yak_core.rci")
+        assert hasattr(mod, "compute_historical_roi_signal")
+
+    def test_compute_rci(self):
+        mod = importlib.import_module("yak_core.rci")
+        assert hasattr(mod, "compute_rci")
