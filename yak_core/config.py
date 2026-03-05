@@ -1,7 +1,7 @@
 """YakOS Core – configuration constants and helpers."""
 import os
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Tuple
 
 # ----- Canonical YakOS root -----
 # Prefer the YAKOS_ROOT environment variable; fall back to the repo root so the
@@ -112,6 +112,22 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "default_lineups": 150,
         "default_max_exposure": 0.35,
         "min_salary": 46000,
+        # Pool sizing
+        "pool_size_min": 40,
+        "pool_size_max": 70,
+        # Tagging mode
+        "tagging_mode": "ceiling",
+        "show_leverage": True,
+        # Ownership strategy
+        "eat_chalk": False,
+        "target_avg_ownership_min": 10,
+        "target_avg_ownership_max": 20,
+        "ownership_caps_by_tier": {"premium_8k": 40, "mid_5k": 30, "value_sub5k": 25},
+        # Correlation rules
+        "not_with_auto": True,
+        "max_per_team": 2,
+        # Exposure
+        "exposure_rules": True,
     },
     "GPP - 20 Max": {
         "description": "GPP - 20 Max — ceiling-focused, 20 lineups, high volatility",
@@ -124,6 +140,22 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "default_lineups": 20,
         "default_max_exposure": 0.5,
         "min_salary": 47000,
+        # Pool sizing
+        "pool_size_min": 25,
+        "pool_size_max": 45,
+        # Tagging mode
+        "tagging_mode": "ceiling",
+        "show_leverage": True,
+        # Ownership strategy
+        "eat_chalk": False,
+        "target_avg_ownership_min": 15,
+        "target_avg_ownership_max": 25,
+        "ownership_caps_by_tier": {"premium_8k": 50, "mid_5k": 40, "value_sub5k": 35},
+        # Correlation rules
+        "not_with_auto": True,
+        "max_per_team": 2,
+        # Exposure
+        "exposure_rules": True,
     },
     "Single Entry / 3-Max": {
         "description": "Single Entry / 3-Max — balanced upside, 1–3 lineups, moderate volatility",
@@ -136,6 +168,22 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "default_lineups": 3,
         "default_max_exposure": 1.0,
         "min_salary": 48000,
+        # Pool sizing
+        "pool_size_min": 20,
+        "pool_size_max": 35,
+        # Tagging mode
+        "tagging_mode": "ceiling",
+        "show_leverage": True,
+        # Ownership strategy
+        "eat_chalk": False,
+        "target_avg_ownership_min": 20,
+        "target_avg_ownership_max": 30,
+        "ownership_caps_by_tier": {"premium_8k": 60, "mid_5k": 50, "value_sub5k": 40},
+        # Correlation rules
+        "not_with_auto": True,
+        "max_per_team": 2,
+        # Exposure
+        "exposure_rules": False,
     },
     "50/50 / Double-Up": {
         "description": "50/50 / Double-Up — high-floor plays, 1 lineup, low volatility",
@@ -148,6 +196,22 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "default_lineups": 1,
         "default_max_exposure": 0.8,
         "min_salary": 49000,
+        # Pool sizing
+        "pool_size_min": 15,
+        "pool_size_max": 25,
+        # Tagging mode
+        "tagging_mode": "floor",
+        "show_leverage": False,
+        # Ownership strategy
+        "eat_chalk": True,
+        "target_avg_ownership_min": None,
+        "target_avg_ownership_max": None,
+        "ownership_caps_by_tier": None,
+        # Correlation rules
+        "not_with_auto": False,
+        "max_per_team": None,
+        # Exposure
+        "exposure_rules": False,
     },
     "Showdown": {
         "description": "Showdown — single-game Captain mode, 3 lineups, high volatility",
@@ -160,6 +224,24 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "default_lineups": 3,
         "default_max_exposure": 0.6,
         "min_salary": 45000,
+        # Pool sizing
+        "pool_size_min": 10,
+        "pool_size_max": 16,
+        # Tagging mode
+        "tagging_mode": "ceiling",
+        "show_leverage": True,
+        # Ownership strategy
+        "eat_chalk": False,
+        "target_avg_ownership_min": 15,
+        "target_avg_ownership_max": 25,
+        "ownership_caps_by_tier": None,
+        # Correlation rules
+        "not_with_auto": True,
+        "max_per_team": None,
+        # Exposure
+        "exposure_rules": False,
+        # Showdown-specific
+        "captain_aware": True,
     },
 }
 
@@ -268,3 +350,40 @@ def merge_config(overrides: Dict[str, Any]) -> Dict[str, Any]:
             normalized[canon] = v
         cfg.update(normalized)
     return cfg
+
+
+_METHODOLOGY_KEYS: List[str] = [
+    "pool_size_min",
+    "pool_size_max",
+    "tagging_mode",
+    "show_leverage",
+    "eat_chalk",
+    "target_avg_ownership_min",
+    "target_avg_ownership_max",
+    "ownership_caps_by_tier",
+    "not_with_auto",
+    "max_per_team",
+    "exposure_rules",
+]
+
+
+def get_pool_size_range(contest_label: str) -> Tuple[int, int]:
+    """Return (min, max) pool size for the given contest preset."""
+    if contest_label not in CONTEST_PRESETS:
+        raise KeyError(
+            f"Unknown contest label '{contest_label}'. "
+            f"Valid labels: {list(CONTEST_PRESETS.keys())}"
+        )
+    preset = CONTEST_PRESETS[contest_label]
+    return preset["pool_size_min"], preset["pool_size_max"]
+
+
+def get_methodology_rules(contest_label: str) -> Dict[str, Any]:
+    """Return the full methodology rules dict for a contest preset."""
+    if contest_label not in CONTEST_PRESETS:
+        raise KeyError(
+            f"Unknown contest label '{contest_label}'. "
+            f"Valid labels: {list(CONTEST_PRESETS.keys())}"
+        )
+    preset = CONTEST_PRESETS[contest_label]
+    return {k: preset[k] for k in _METHODOLOGY_KEYS if k in preset}
