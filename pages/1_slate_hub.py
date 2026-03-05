@@ -340,7 +340,7 @@ def _filter_lobby_by_date(lobby_df: pd.DataFrame, target_date: str) -> pd.DataFr
             lambda ts: ts.strftime("%Y-%m-%d") == target_date if ts is not None else False
         )
         filtered = lobby_df[mask].reset_index(drop=True)
-        return filtered if not filtered.empty else lobby_df
+        return filtered
     except Exception:
         return lobby_df
 
@@ -402,21 +402,6 @@ def main() -> None:
     rapidapi_key = st.secrets.get("TANK01_RAPIDAPI_KEY")
     if rapidapi_key:
         st.session_state["rapidapi_key"] = rapidapi_key
-    else:
-        # Show a dismissible info banner only when the key is absent.
-        # Once dismissed it stays hidden for the remainder of the session.
-        if not st.session_state.get("_tank01_banner_dismissed", False):
-            banner_col, dismiss_col = st.columns([6, 1])
-            with banner_col:
-                st.info(
-                    "ℹ️ Tank01 stats enrichment and injury refresh are disabled. "
-                    "Set `TANK01_RAPIDAPI_KEY` in `.streamlit/secrets.toml` or "
-                    "Streamlit Cloud secrets to enable."
-                )
-            with dismiss_col:
-                if st.button("Dismiss", key="_dismiss_tank01_banner", help="Hide this message for the session"):
-                    st.session_state["_tank01_banner_dismissed"] = True
-                    st.rerun()
 
     # ── Row 2: Contest Type ────────────────────────────────────────────────
     contest_type_label = st.selectbox("Contest Type", CONTEST_PRESET_LABELS)
