@@ -67,6 +67,8 @@ from .publishing import build_ricky_lineups, publish_edge_and_lineups
 
 from .components import render_lineup_card, render_lineup_cards_paged
 
+from .salary_history import SalaryHistoryClient
+
 __all__ = [
     # config
     "YAKOS_ROOT",
@@ -124,4 +126,6 @@ __all__ = [
     # components
     "render_lineup_card",
     "render_lineup_cards_paged",
+    # salary history
+    "SalaryHistoryClient",
 ]
