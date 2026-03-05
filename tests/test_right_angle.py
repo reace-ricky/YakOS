@@ -8,6 +8,7 @@ from yak_core.right_angle import (
     _assign_tag,
     _calibration_confidence,
     detect_high_value_plays,
+    detect_minute_cannibals,
     detect_pace_environment,
     detect_stack_alerts,
     ricky_annotate,
@@ -231,3 +232,106 @@ class TestDetectHighValuePlays:
         pool["proj"] = 3.0  # below default min_proj of 8
         plays = detect_high_value_plays(pool, min_proj=8.0)
         assert plays == []
+
+
+class TestDetectMinuteCannibals:
+    """Tests for detect_minute_cannibals()."""
+
+    def _make_pool(self, rows: list[dict]) -> pd.DataFrame:
+        return pd.DataFrame(rows)
+
+    def test_two_pgs_same_team_flagged(self):
+        """Two PGs on same team with 18 and 15 min → flagged."""
+        pool = self._make_pool([
+            {"player_name": "PG_A", "team": "GSW", "pos": "PG", "proj_minutes": 18.0},
+            {"player_name": "PG_B", "team": "GSW", "pos": "PG", "proj_minutes": 15.0},
+        ])
+        pairs = detect_minute_cannibals(pool)
+        assert len(pairs) == 1
+        pair = pairs[0]
+        assert {pair["player_a"], pair["player_b"]} == {"PG_A", "PG_B"}
+        assert pair["team"] == "GSW"
+        assert pair["position_group"] == "backcourt"
+
+    def test_starter_pgs_not_flagged(self):
+        """Two PGs on same team with 32 and 28 min → NOT flagged (starters)."""
+        pool = self._make_pool([
+            {"player_name": "PG_Starter", "team": "LAL", "pos": "PG", "proj_minutes": 32.0},
+            {"player_name": "PG_Starter2", "team": "LAL", "pos": "PG", "proj_minutes": 28.0},
+        ])
+        pairs = detect_minute_cannibals(pool)
+        assert pairs == []
+
+    def test_different_position_groups_not_flagged(self):
+        """PG and SF on same team with 15 min each → NOT flagged (different groups)."""
+        pool = self._make_pool([
+            {"player_name": "PG_X", "team": "BOS", "pos": "PG", "proj_minutes": 15.0},
+            {"player_name": "SF_X", "team": "BOS", "pos": "SF", "proj_minutes": 15.0},
+        ])
+        pairs = detect_minute_cannibals(pool)
+        assert pairs == []
+
+    def test_empty_pool_returns_empty(self):
+        """Empty pool → returns empty list."""
+        assert detect_minute_cannibals(pd.DataFrame()) == []
+
+    def test_pool_with_no_cannibals_returns_empty(self):
+        """Pool where no cannibal conditions are met → empty list."""
+        pool = self._make_pool([
+            # Different teams
+            {"player_name": "A", "team": "T1", "pos": "SG", "proj_minutes": 20.0},
+            {"player_name": "B", "team": "T2", "pos": "SG", "proj_minutes": 20.0},
+        ])
+        assert detect_minute_cannibals(pool) == []
+
+    def test_returns_list_of_dicts(self):
+        pool = self._make_pool([
+            {"player_name": "P1", "team": "MIA", "pos": "PF", "proj_minutes": 18.0},
+            {"player_name": "P2", "team": "MIA", "pos": "PF", "proj_minutes": 16.0},
+        ])
+        pairs = detect_minute_cannibals(pool)
+        assert isinstance(pairs, list)
+        if pairs:
+            assert isinstance(pairs[0], dict)
+            assert "player_a" in pairs[0]
+            assert "player_b" in pairs[0]
+            assert "team" in pairs[0]
+            assert "position_group" in pairs[0]
+            assert "combined_minutes" in pairs[0]
+            assert "reason" in pairs[0]
+
+    def test_custom_threshold(self):
+        """Players below threshold are excluded."""
+        pool = self._make_pool([
+            {"player_name": "PG_Low", "team": "CLE", "pos": "PG", "proj_minutes": 10.0},
+            {"player_name": "PG_Low2", "team": "CLE", "pos": "PG", "proj_minutes": 10.0},
+        ])
+        # Default threshold=12 → 10 min is below threshold, not included
+        assert detect_minute_cannibals(pool, threshold=12.0) == []
+        # Lower threshold=8 → 10 min is in [8, 24], so pair is flagged
+        pairs = detect_minute_cannibals(pool, threshold=8.0)
+        assert len(pairs) == 1
+
+    def test_high_minutes_not_flagged(self):
+        """Players above 24 min are starters and not included."""
+        pool = self._make_pool([
+            # Both above 24 min → excluded (starters)
+            {"player_name": "SG_A", "team": "PHX", "pos": "SG", "proj_minutes": 36.0},
+            {"player_name": "SG_B", "team": "PHX", "pos": "SG", "proj_minutes": 30.0},
+        ])
+        assert detect_minute_cannibals(pool) == []
+
+    def test_frontcourt_cannibals_flagged(self):
+        """Two PFs on same team with bench-range minutes → flagged."""
+        pool = self._make_pool([
+            {"player_name": "PF_A", "team": "DEN", "pos": "PF", "proj_minutes": 22.0},
+            {"player_name": "PF_B", "team": "DEN", "pos": "PF", "proj_minutes": 22.0},
+        ])
+        pairs = detect_minute_cannibals(pool)
+        assert len(pairs) == 1
+        assert pairs[0]["position_group"] == "frontcourt"
+
+    def test_missing_columns_returns_empty(self):
+        """Pool missing required columns → empty list."""
+        pool = pd.DataFrame({"player_name": ["A", "B"], "team": ["T1", "T1"]})
+        assert detect_minute_cannibals(pool) == []

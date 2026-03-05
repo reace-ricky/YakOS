@@ -66,6 +66,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "LOCK": [],            # player names forced into every lineup
     "EXCLUDE": [],         # player names removed from pool
     "BUMP": {},            # {player_name: multiplier} e.g. {"LeBron": 1.2}
+    "NOT_WITH": [],        # list of [player_a, player_b] pairs that must not appear together
     # Lineup diversity controls
     "MAX_PAIR_APPEARANCES": 0,   # 0 = disabled; N = max times any two players can share a lineup
     # Model projection tuning

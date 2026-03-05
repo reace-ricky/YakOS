@@ -116,6 +116,8 @@ class RickyEdgeState:
     slate_notes         : free-text notes for the slate
     ricky_edge_check    : True when Ricky has approved this slate for publishing
     edge_check_ts       : ISO datetime of last edge check approval
+    approved_not_with_pairs : list of approved minute-cannibal "not together" pairs,
+                              each dict has keys player_a, player_b, team, position_group
     """
 
     player_tags: Dict[str, Dict[str, Any]] = field(default_factory=dict)
@@ -125,6 +127,7 @@ class RickyEdgeState:
     slate_notes: str = ""
     ricky_edge_check: bool = False
     edge_check_ts: str = ""
+    approved_not_with_pairs: List[Dict[str, str]] = field(default_factory=list)
 
     def tag_player(self, player_name: str, tag: str, conviction: int = 3) -> None:
         """Set tag and conviction for a player."""

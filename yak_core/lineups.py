@@ -272,6 +272,13 @@ def build_multiple_lineups_with_exposure(
     pos_caps = cfg.get("POS_CAPS", {})
     lock_names = [n.strip() for n in cfg.get("LOCK", [])]
     max_pair_appearances = int(cfg.get("MAX_PAIR_APPEARANCES", 0))
+    # NOT_WITH: list of [player_a, player_b] pairs that must not appear together
+    not_with_raw = cfg.get("NOT_WITH", [])
+    not_with_pairs: list[tuple[str, str]] = [
+        (str(pair[0]).strip(), str(pair[1]).strip())
+        for pair in not_with_raw
+        if isinstance(pair, (list, tuple)) and len(pair) >= 2
+    ]
 
     players = player_pool.to_dict("records")
     n = len(players)
@@ -375,6 +382,21 @@ def build_multiple_lineups_with_exposure(
                     prob += pulp.lpSum(
                         x[(j, s)] for s in DK_POS_SLOTS
                     ) == 1
+
+        # NOT_WITH: pairs of players that must never appear in the same lineup.
+        # Enforced by constraining the sum of slot-assignment variables for both
+        # players to at most 1 (so only one of the pair can be selected).
+        if not_with_pairs:
+            name_to_idx = {players[i]["player_name"]: i for i in range(n)}
+            for pa, pb in not_with_pairs:
+                ia = name_to_idx.get(pa)
+                ib = name_to_idx.get(pb)
+                if ia is not None and ib is not None:
+                    prob += (
+                        pulp.lpSum(x[(ia, s)] for s in DK_POS_SLOTS)
+                        + pulp.lpSum(x[(ib, s)] for s in DK_POS_SLOTS)
+                        <= 1
+                    )
 
         # Exposure cap across lineups
         for i in range(n):
