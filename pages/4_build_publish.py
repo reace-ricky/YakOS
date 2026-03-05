@@ -46,6 +46,7 @@ from yak_core.config import CONTEST_PRESETS, CONTEST_PRESET_LABELS  # noqa: E402
 from yak_core.components import render_lineup_cards_paged  # noqa: E402
 from yak_core.publishing import publish_edge_and_lineups  # noqa: E402
 from yak_core.edge import compute_edge_metrics  # noqa: E402
+from yak_core.lineup_scoring import compute_lineup_boom_bust, GRADE_COLORS as _GRADE_COLORS_HEX  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -382,6 +383,15 @@ def main() -> None:
                 )
                 if expo_df is not None:
                     lu_state.exposures[contest_label] = expo_df
+                # ── Boom/bust ranking ─────────────────────────────────────
+                player_results = sim.player_results
+                if player_results is not None and not player_results.empty:
+                    bb_rankings = compute_lineup_boom_bust(
+                        lineups_df=lineups_df,
+                        sim_player_results=player_results,
+                        contest_label=contest_label,
+                    )
+                    lu_state.set_boom_bust(contest_label, bb_rankings)
                 set_lineup_state(lu_state)
                 st.success(f"Built {num_lineups} lineups for **{contest_label}**.")
 
@@ -398,11 +408,15 @@ def main() -> None:
             # Pull pipeline metrics from SimState if available
             pipeline_df = sim.pipeline_output.get(contest_label) or sim.pipeline_output.get("GPP_20")
 
+            # Pull boom/bust rankings for this label
+            bb_df = lu_state.get_boom_bust(view_label)
+
             render_lineup_cards_paged(
                 lineups_df=view_df,
                 sim_results_df=pipeline_df,
                 salary_cap=slate.salary_cap,
                 nav_key=f"bp_lu_{view_label}",
+                boom_bust_df=bb_df,
             )
 
             # Exposure view
@@ -410,6 +424,61 @@ def main() -> None:
             if expo_df is not None and not expo_df.empty:
                 with st.expander("Player Exposures", expanded=False):
                     st.dataframe(expo_df, use_container_width=True, hide_index=True)
+
+            # ── Boom/Bust Rankings ────────────────────────────────────────
+            if bb_df is not None and not bb_df.empty:
+                st.divider()
+                st.subheader("🏆 Lineup Rankings (Boom/Bust)")
+
+                # Contest-aware description
+                _preset = CONTEST_PRESETS.get(view_label, {})
+                _mode = _preset.get("tagging_mode", "ceiling")
+                if _mode == "floor":
+                    st.caption(
+                        "Lineups ranked by **floor safety** — boom_score weights "
+                        "floor (60%), projection (30%), and low bust risk (10%)."
+                    )
+                else:
+                    st.caption(
+                        "Lineups ranked by **ceiling upside** — boom_score weights "
+                        "ceiling (50%), smash probability (30%), and low bust risk (20%)."
+                    )
+
+                # Grade colour map for styling
+                def _colour_grade(val: str) -> str:
+                    color = _GRADE_COLORS_HEX.get(str(val), "")
+                    if color:
+                        return f"background-color:{color};color:#fff;font-weight:700;"
+                    return ""
+
+                display_bb = bb_df.rename(columns={
+                    "lineup_index": "Lineup #",
+                    "total_proj": "Total Proj",
+                    "total_ceil": "Total Ceil",
+                    "total_floor": "Total Floor",
+                    "avg_smash_prob": "Avg Smash%",
+                    "avg_bust_prob": "Avg Bust%",
+                    "boom_score": "Boom Score",
+                    "bust_risk": "Bust Risk",
+                    "boom_bust_rank": "Rank",
+                    "lineup_grade": "Grade",
+                }).copy()
+
+                # Format percentage columns
+                for c in ["Avg Smash%", "Avg Bust%"]:
+                    if c in display_bb.columns:
+                        display_bb[c] = (
+                            pd.to_numeric(display_bb[c], errors="coerce")
+                            .apply(lambda v: f"{v*100:.1f}%" if pd.notna(v) else "")
+                        )
+
+                styled = display_bb.style.applymap(_colour_grade, subset=["Grade"])
+                st.dataframe(styled, use_container_width=True, hide_index=True)
+
+                # Summary line
+                n_ab = int((bb_df["lineup_grade"].isin(["A", "B"])).sum())
+                type_label = "safe floor for cash" if _mode == "floor" else "high ceiling for GPP"
+                st.caption(f"**{n_ab} lineup(s)** graded A or B ({type_label}).")
 
             st.divider()
 

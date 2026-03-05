@@ -26,6 +26,8 @@ try:
 except ImportError:  # allow import outside Streamlit (tests, etc.)
     st = None  # type: ignore[assignment]
 
+from yak_core.lineup_scoring import GRADE_COLORS as _GRADE_COLORS, GRADE_EMOJI as _GRADE_EMOJI  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Colour palette (dark-mode)
@@ -110,6 +112,7 @@ def render_lineup_card(
     lineup_label: str = "",
     salary_cap: int = 50000,
     show_rating: bool = True,
+    boom_bust_row: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Render a SimLabs-style lineup card in the current Streamlit context.
 
@@ -140,6 +143,10 @@ def render_lineup_card(
         DK salary cap used to compute remaining salary.
     show_rating : bool
         If False, the footer rating panel is omitted.
+    boom_bust_row : dict, optional
+        A single row from the boom/bust rankings DataFrame (as a dict).
+        When provided, a grade badge is shown in the header.
+        Expected keys: ``lineup_grade``, ``boom_score``, ``bust_risk``.
     """
     if st is None:
         raise RuntimeError("Streamlit is not available.")
@@ -163,12 +170,33 @@ def render_lineup_card(
     yakos_rating = float(metrics.get("yakos_sim_rating") or 0.0)
     bucket = str(metrics.get("rating_bucket") or "-")
 
+    # ── Boom/bust grade badge ─────────────────────────────────────────────
+    grade_badge_html = ""
+    if boom_bust_row:
+        grade = str(boom_bust_row.get("lineup_grade", ""))
+        boom  = boom_bust_row.get("boom_score", None)
+        bust  = boom_bust_row.get("bust_risk", None)
+        if grade:
+            color = _GRADE_COLORS.get(grade, "#9da5b4")
+            emoji = _GRADE_EMOJI.get(grade, "")
+            tooltip = ""
+            if boom is not None and bust is not None:
+                tooltip = f" | Boom: {boom:.0f} | Bust Risk: {bust:.0f}"
+            grade_badge_html = (
+                f"<span style='margin-left:8px;padding:2px 8px;"
+                f"border-radius:12px;background:{color};color:#fff;"
+                f"font-size:0.8rem;font-weight:700;'>"
+                f"Grade: {grade} {emoji}</span>"
+                f"<span style='font-size:0.75rem;color:#9da5b4;margin-left:6px;'>{tooltip}</span>"
+            )
+
     # ── Header ───────────────────────────────────────────────────────────
     header_html = (
         f"<div style='background:{_HEADER_BG};border-radius:8px 8px 0 0;"
         f"padding:10px 14px;margin-bottom:0;'>"
         f"<span style='font-weight:700;font-size:1rem;color:{_TEXT_PRIMARY};'>"
         f"{'📋 ' + lineup_label if lineup_label else '📋 Lineup'}</span>"
+        f"{grade_badge_html}"
         f"<span style='float:right;font-size:0.85rem;color:{_TEXT_SECONDARY};'>"
         f"Remaining: <b style='color:{'#28a745' if remaining_salary >= 0 else '#dc3545'};'>"
         f"${remaining_salary:+,}</b>"
@@ -253,6 +281,7 @@ def render_lineup_cards_paged(
     contest_type: str = "GPP_20",
     salary_cap: int = 50000,
     nav_key: str = "lineup_nav",
+    boom_bust_df: Optional[pd.DataFrame] = None,
 ) -> None:
     """Render a paginated set of lineup cards with navigation controls.
 
@@ -272,6 +301,9 @@ def render_lineup_cards_paged(
     nav_key : str
         Base key for Streamlit session-state navigation.  Use unique values
         per call site to avoid key collisions.
+    boom_bust_df : pd.DataFrame, optional
+        Rankings DataFrame from ``compute_lineup_boom_bust``.  When provided,
+        a grade badge is shown in each lineup card header.
     """
     if st is None:
         raise RuntimeError("Streamlit is not available.")
@@ -314,10 +346,18 @@ def render_lineup_cards_paged(
         if not match.empty:
             sim_metrics = match.iloc[0].to_dict()
 
+    # Resolve boom/bust row for this lineup
+    bb_row: Optional[Dict[str, Any]] = None
+    if boom_bust_df is not None and not boom_bust_df.empty and "lineup_index" in boom_bust_df.columns:
+        bb_match = boom_bust_df[boom_bust_df["lineup_index"] == actual_idx]
+        if not bb_match.empty:
+            bb_row = bb_match.iloc[0].to_dict()
+
     render_lineup_card(
         lineup_rows=lu_rows,
         sim_metrics=sim_metrics if sim_metrics else None,
         lineup_label=f"Lineup {cur + 1} of {n_lineups}",
         salary_cap=salary_cap,
         show_rating=bool(sim_metrics),
+        boom_bust_row=bb_row,
     )

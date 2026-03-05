@@ -243,6 +243,26 @@ class TestLineupSetState:
         assert "Cash" in labels
         assert "GPP" in labels
 
+    def test_set_boom_bust_stores_dataframe(self):
+        lu = LineupSetState()
+        rankings = pd.DataFrame([
+            {"lineup_index": 0, "boom_score": 80.0, "bust_risk": 20.0, "lineup_grade": "A"},
+            {"lineup_index": 1, "boom_score": 60.0, "bust_risk": 40.0, "lineup_grade": "C"},
+        ])
+        lu.set_boom_bust("GPP - 20 Max", rankings)
+        retrieved = lu.get_boom_bust("GPP - 20 Max")
+        assert retrieved is not None
+        assert len(retrieved) == 2
+        assert list(retrieved["lineup_index"]) == [0, 1]
+
+    def test_get_boom_bust_missing_contest_returns_none(self):
+        lu = LineupSetState()
+        assert lu.get_boom_bust("Nonexistent Contest") is None
+
+    def test_boom_bust_rankings_default_empty(self):
+        lu = LineupSetState()
+        assert lu.boom_bust_rankings == {}
+
 
 # ---------------------------------------------------------------------------
 # SimState
