@@ -642,6 +642,7 @@ def compute_player_anomaly_table(
     if lu_name_col != "player_name":
         lu = lu.rename(columns={lu_name_col: "player_name"})
     # Normalise ownership column in lineup if present
+    # ownership column used here: first available from lu[_src] in priority order ("own_proj" → "ownership" → "Own%" → "proj_own"), renamed to "own%"
     for _src in ("own_proj", "ownership", "Own%", "proj_own"):
         if _src in lu.columns and "own%" not in lu.columns:
             lu = lu.rename(columns={_src: "own%"})
@@ -657,6 +658,7 @@ def compute_player_anomaly_table(
         pool = pool_df.copy()
         if "player_name" in pool.columns and "name" not in pool.columns:
             pool = pool.rename(columns={"player_name": "name"})
+        # ownership column used here: first available from pool[_src] in priority order ("own_proj" → "ownership" → "Own%" → "proj_own"), renamed to "own%"
         for _src in ("own_proj", "ownership", "Own%", "proj_own"):
             if _src in pool.columns and "own%" not in pool.columns:
                 pool = pool.rename(columns={_src: "own%"})
@@ -1025,7 +1027,7 @@ def run_sims_pipeline(
         proj_val = float(row.get("proj", 0) or 0)
         ceil_val = float(row.get("ceil", proj_val * 1.4) or proj_val * 1.4)
         floor_val = float(row.get("floor", proj_val * 0.7) or proj_val * 0.7)
-        own_val = float(row.get("ownership", 5.0) or 5.0)
+        own_val = float(row.get("ownership", 5.0) or 5.0)  # ownership column used here: pool["ownership"] (default 5.0 if missing)
         p_proj[pname] = proj_val
         p_ceil[pname] = ceil_val
         p_floor[pname] = floor_val

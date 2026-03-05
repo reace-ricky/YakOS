@@ -82,7 +82,7 @@ def apply_ownership(pool_df: pd.DataFrame) -> pd.DataFrame:
         if c in pool_df.columns and pool_df[c].notna().any() and (pool_df[c] > 0).any():
             # Normalize to "ownership" column name if needed
             if c != "ownership":
-                pool_df["ownership"] = pool_df[c]
+                pool_df["ownership"] = pool_df[c]  # ownership column used here: pool_df[c] normalized to pool_df["ownership"]
             print(f"[ownership] Using existing '{c}' column "
                   f"(mean={pool_df['ownership'].mean():.1f}%)")
             return pool_df
@@ -130,7 +130,7 @@ def compute_leverage(pool_df, own_col=None):
         return df
 
     proj = df["proj"].astype(float).clip(lower=0.1)
-    own = df[own_col].astype(float).clip(lower=0.5)
+    own = df[own_col].astype(float).clip(lower=0.5)  # ownership column used here: df[own_col] ("own_proj" if present, else "ownership")
 
     # Raw leverage: projection points per ownership %
     raw_leverage = proj / own
@@ -257,7 +257,7 @@ def ownership_kpis(pool_df):
     """Compute ownership-related KPIs for display."""
     kpis = {}
     if "ownership" in pool_df.columns:
-        own = pool_df["ownership"].dropna()
+        own = pool_df["ownership"].dropna()  # ownership column used here: pool_df["ownership"]
         kpis["avg_own"] = round(own.mean(), 1)
         kpis["max_own"] = round(own.max(), 1)
         kpis["min_own"] = round(own.min(), 1)
