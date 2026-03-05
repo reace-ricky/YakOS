@@ -44,6 +44,8 @@ from yak_core.lineups import (  # noqa: E402
 from yak_core.calibration import apply_archetype, DFS_ARCHETYPES  # noqa: E402
 from yak_core.config import CONTEST_PRESETS, CONTEST_PRESET_LABELS  # noqa: E402
 from yak_core.components import render_lineup_cards_paged  # noqa: E402
+from yak_core.publishing import publish_edge_and_lineups  # noqa: E402
+from yak_core.edge import compute_edge_metrics  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -440,6 +442,35 @@ def main() -> None:
                 set_lineup_state(lu_state)
                 st.success(f"✅ **{view_label}** published to Edge Share at {_ts}")
                 st.balloons()
+
+            # ── Publish to Friends (Edge Share payload) ───────────────────
+            if st.button(f"👥 Publish {view_label} to Friends", key="_bp_publish_friends"):
+                try:
+                    # Ensure edge_df is populated; fall back to compute on the fly
+                    _eff_edge_df = slate.edge_df
+                    if _eff_edge_df is None or _eff_edge_df.empty:
+                        _eff_edge_df = compute_edge_metrics(
+                            pool,
+                            calibration_state=slate.calibration_state,
+                        )
+                        slate.edge_df = _eff_edge_df
+                        from yak_core.state import set_slate_state  # noqa: PLC0415
+                        set_slate_state(slate)
+                    payload = publish_edge_and_lineups(slate, view_df)
+                    st.session_state["_friends_payload"] = payload
+                    st.success(
+                        f"✅ **{view_label}** payload ready for Friends / Edge Share. "
+                        f"Core plays: {', '.join(payload['edge_sections']['core'][:5]) or '—'}"
+                    )
+                    with st.expander("📋 Payload preview", expanded=False):
+                        st.json({
+                            "slate_meta": payload["slate_meta"],
+                            "edge_sections": {k: v for k, v in payload["edge_sections"].items() if k != "notes"},
+                            "lineups_count": len(payload["lineups"]),
+                            "published_at": payload["published_at"],
+                        })
+                except Exception as exc:
+                    st.error(f"Friends publish failed: {exc}")
 
     else:
         st.info("Build lineups above to see results and export options.")

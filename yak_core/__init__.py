@@ -12,6 +12,7 @@ from .config import (
 from .lineups import (
     load_opt_pool_from_config,
     build_player_pool,
+    build_slate_pool,
     build_multiple_lineups_with_exposure,
     run_lineups_from_config,
     to_dk_upload_format,
@@ -57,7 +58,12 @@ from .sims import (
     run_sims_pipeline,
     run_calibration_pipeline,
     load_pipeline_output,
+    run_sims_for_contest_type,
 )
+
+from .edge import compute_edge_metrics
+
+from .publishing import build_ricky_lineups, publish_edge_and_lineups
 
 from .components import render_lineup_card, render_lineup_cards_paged
 
@@ -72,6 +78,7 @@ __all__ = [
     # lineups
     "load_opt_pool_from_config(",
     "build_player_pool",
+    "build_slate_pool",
     "build_multiple_lineups_with_exposure",
     "run_lineups_from_config",
     "to_dk_upload_format",
@@ -108,6 +115,12 @@ __all__ = [
     "run_sims_pipeline",
     "run_calibration_pipeline",
     "load_pipeline_output",
+    "run_sims_for_contest_type",
+    # edge metrics
+    "compute_edge_metrics",
+    # publishing
+    "build_ricky_lineups",
+    "publish_edge_and_lineups",
     # components
     "render_lineup_card",
     "render_lineup_cards_paged",

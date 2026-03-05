@@ -136,6 +136,21 @@ def main() -> None:
     # Section 1: Ricky's Edge Analysis (read-only)
     # ─────────────────────────────────────────────────────────────────────
     _render_edge_panel(edge)
+
+    # Show centralized edge_df (Best Tournament Plays) if available
+    _friends_edge_df = slate.edge_df
+    if _friends_edge_df is not None and not _friends_edge_df.empty:
+        with st.expander("📈 Best Tournament Plays (Edge Metrics)", expanded=False):
+            _show_cols = [c for c in ["player_name", "salary", "proj", "own_pct",
+                                       "leverage", "smash_prob", "bust_prob",
+                                       "edge_score", "edge_label"]
+                          if c in _friends_edge_df.columns]
+            st.dataframe(
+                _friends_edge_df[_show_cols].head(20),
+                use_container_width=True,
+                hide_index=True,
+            )
+
     st.divider()
 
     # ─────────────────────────────────────────────────────────────────────

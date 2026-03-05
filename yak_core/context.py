@@ -120,6 +120,7 @@ def get_lab_analysis() -> Dict[str, Any]:
         "sim_learnings": {},
         "variance": 1.0,
         "n_sims": 10000,
+        "edge_df": pd.DataFrame(),
     }
 
     try:
@@ -146,6 +147,7 @@ def get_lab_analysis() -> Dict[str, Any]:
         result["sim_learnings"] = dict(sim.sim_learnings) if sim.sim_learnings else {}
         result["variance"] = float(sim.variance)
         result["n_sims"] = int(sim.n_sims)
+        result["edge_df"] = slate.edge_df if slate.edge_df is not None else pd.DataFrame()
 
     except Exception:
         pass

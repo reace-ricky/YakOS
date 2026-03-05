@@ -166,6 +166,76 @@ def build_player_pool(opt_pool: pd.DataFrame,
     return df
 
 
+def build_slate_pool(
+    opt_pool: pd.DataFrame,
+    slate_players: pd.DataFrame,
+    cfg: Dict[str, Any],
+) -> pd.DataFrame:
+    """Build a player pool restricted to players actually on the DK slate.
+
+    This is the **correct** function to use for live / pre-slate sims.  It
+    performs an **inner join** of *opt_pool* (which may contain projections for
+    every rostered player) with *slate_players* (the official DK draftables for
+    the selected draft group).  Players that are not on the slate are silently
+    dropped; this prevents off-day players (e.g. Shai on a rest night) from
+    appearing in projections or lineups.
+
+    An assertion verifies the invariant: no ``player_id`` in the returned pool
+    is absent from *slate_players*.
+
+    The function intentionally does **not** filter by ``proj_minutes`` or any
+    minutes threshold — that is the responsibility of
+    :func:`yak_core.sims.compute_sim_eligible` (used only in post-slate
+    analysis contexts).
+
+    Parameters
+    ----------
+    opt_pool : pd.DataFrame
+        Raw projection pool.  Must have a ``player_id`` column.
+    slate_players : pd.DataFrame
+        DK draftables for the target draft group (from
+        ``fetch_dk_draftables``).  Must have a ``player_id`` column.
+    cfg : dict
+        Optimizer config dict (same shape as expected by :func:`build_player_pool`).
+
+    Returns
+    -------
+    pd.DataFrame
+        Filtered, normalised player pool ready for the optimizer.
+
+    Raises
+    ------
+    ValueError
+        If *opt_pool* or *slate_players* is missing a ``player_id`` column.
+    AssertionError
+        If any ``player_id`` in the returned pool is not in *slate_players*
+        (should never happen — indicates a bug in the join logic).
+    """
+    if "player_id" not in opt_pool.columns:
+        raise ValueError(
+            "build_slate_pool: opt_pool must have a 'player_id' column."
+        )
+    if "player_id" not in slate_players.columns:
+        raise ValueError(
+            "build_slate_pool: slate_players must have a 'player_id' column."
+        )
+
+    slate_ids = set(slate_players["player_id"].astype(str).str.strip())
+
+    # Inner join: only keep players whose player_id appears in slate_players
+    merged = opt_pool[opt_pool["player_id"].astype(str).str.strip().isin(slate_ids)].copy()
+
+    # Assertion: every player_id in the pool must be a slate player
+    bad_ids = set(merged["player_id"].astype(str)) - slate_ids
+    assert not bad_ids, (
+        f"build_slate_pool: {len(bad_ids)} player_id(s) in pool not found in "
+        f"slate_players after join: {bad_ids}"
+    )
+
+    # Delegate remaining normalisation to build_player_pool
+    return build_player_pool(merged, cfg)
+
+
 # --------------------------------------------------------------------
 # Optimizer
 # --------------------------------------------------------------------

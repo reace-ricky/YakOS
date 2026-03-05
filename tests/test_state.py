@@ -46,6 +46,9 @@ class TestSlateState:
         assert not s.is_showdown
         assert s.captain_multiplier == 1.0
         assert not s.published
+        # New fields
+        assert s.edge_df is None
+        assert s.calibration_state == {}
 
     def test_is_ready_false_when_not_published(self):
         s = SlateState()
@@ -109,6 +112,26 @@ class TestSlateState:
     def test_active_layers_defaults_to_base(self):
         s = SlateState()
         assert "Base" in s.active_layers
+
+    def test_edge_df_can_be_assigned(self):
+        s = SlateState()
+        df = _make_pool()
+        s.edge_df = df
+        assert s.edge_df is not None
+        assert len(s.edge_df) == len(df)
+
+    def test_calibration_state_can_be_updated(self):
+        s = SlateState()
+        s.calibration_state = {"proj_multiplier": 1.1, "ceiling_boost": 0.05}
+        assert s.calibration_state["proj_multiplier"] == 1.1
+        assert s.calibration_state["ceiling_boost"] == 0.05
+
+    def test_calibration_state_default_is_empty_dict(self):
+        s1 = SlateState()
+        s2 = SlateState()
+        # Each instance must have its own dict (not shared)
+        s1.calibration_state["key"] = "val"
+        assert "key" not in s2.calibration_state
 
 
 # ---------------------------------------------------------------------------
