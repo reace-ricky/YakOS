@@ -331,3 +331,69 @@ class TestSimState:
         s.clone_profile("v1", "v2")
         s.calibration_profiles["v1"]["a"] = 99
         assert s.calibration_profiles["v2"]["a"] == 1  # Not affected
+
+    def test_rci_weights_default_empty(self):
+        s = SimState()
+        assert s.rci_weights == {}
+
+    def test_set_and_get_rci_weights(self):
+        s = SimState()
+        weights = {"projection_confidence": 0.4, "sim_alignment": 0.3,
+                   "ownership_accuracy": 0.2, "historical_roi": 0.1}
+        s.set_rci_weights("GPP - 20 Max", weights)
+        result = s.get_rci_weights("GPP - 20 Max")
+        assert result == weights
+
+    def test_get_rci_weights_missing_returns_none(self):
+        s = SimState()
+        assert s.get_rci_weights("Nonexistent") is None
+
+    def test_set_rci_result_stores_in_contest_gauges(self):
+        from yak_core.rci import compute_rci
+        s = SimState()
+        payload = {"core_value_players": [{"confidence": 0.8}] * 3}
+        rci_result = compute_rci("Cash", payload)
+        s.set_rci_result("Cash", rci_result)
+        stored = s.contest_gauges.get("Cash")
+        assert stored is not None
+        assert "rci_score" in stored
+        assert "rci_status" in stored
+        assert "recommendation" in stored
+        assert "calibration_stable" in stored
+        assert "signals" in stored
+        assert len(stored["signals"]) == 4
+
+    def test_get_rci_result_returns_stored(self):
+        from yak_core.rci import compute_rci
+        s = SimState()
+        payload = {"core_value_players": [{"confidence": 0.7}] * 2}
+        rci_result = compute_rci("SE", payload)
+        s.set_rci_result("SE", rci_result)
+        retrieved = s.get_rci_result("SE")
+        assert retrieved is not None
+        assert abs(retrieved["rci_score"] - rci_result.rci_score) < 0.01
+
+    def test_get_rci_result_missing_returns_none(self):
+        s = SimState()
+        assert s.get_rci_result("Nonexistent") is None
+
+    def test_is_calibration_stable_true(self):
+        from yak_core.rci import compute_rci
+        s = SimState()
+        # High-confidence payload → all signals non-red + potentially high score
+        payload = {"core_value_players": [{"confidence": 1.0}] * 10,
+                   "leverage_players": [{"confidence": 1.0}] * 5}
+        rci_result = compute_rci("Cash", payload)
+        s.set_rci_result("Cash", rci_result)
+        # is_calibration_stable should match the RCI result
+        assert s.is_calibration_stable("Cash") == rci_result.calibration_stable
+
+    def test_is_calibration_stable_missing_contest_returns_false(self):
+        s = SimState()
+        assert s.is_calibration_stable("Missing Contest") is False
+
+    def test_rci_weights_independent_per_instance(self):
+        s1 = SimState()
+        s2 = SimState()
+        s1.set_rci_weights("GPP", {"projection_confidence": 0.9})
+        assert s2.get_rci_weights("GPP") is None

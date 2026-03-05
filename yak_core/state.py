@@ -335,6 +335,9 @@ class SimState:
     active_profile: Optional[str] = None
     contest_gauges: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     pipeline_output: Dict[str, Optional[pd.DataFrame]] = field(default_factory=dict)
+    rci_weights: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    # {contest_label: {"projection_confidence": 0.4, "sim_alignment": 0.2, ...}}
+    # If empty for a contest, compute_rci uses DEFAULT_WEIGHTS from yak_core.rci
 
     def apply_learning(self, player_name: str, boost: float, reason: str = "") -> None:
         """Write a sim learning boost for a player (capped at ±15%)."""
@@ -355,6 +358,42 @@ class SimState:
             self.calibration_profiles[new_name] = dict(self.calibration_profiles[source_name])
             return True
         return False
+
+    def set_rci_result(self, contest_label: str, rci_result: "RCIResult") -> None:
+        """Store an RCI result for a contest type."""
+        self.contest_gauges[contest_label] = {
+            "rci_score": rci_result.rci_score,
+            "rci_status": rci_result.rci_status,
+            "recommendation": rci_result.recommendation,
+            "calibration_stable": rci_result.calibration_stable,
+            "signals": [
+                {
+                    "name": s.name,
+                    "value": s.value,
+                    "weight": s.weight,
+                    "description": s.description,
+                    "status": s.status,
+                }
+                for s in rci_result.signals
+            ],
+        }
+
+    def get_rci_result(self, contest_label: str) -> Optional[Dict[str, Any]]:
+        """Get stored RCI result for a contest type."""
+        return self.contest_gauges.get(contest_label)
+
+    def is_calibration_stable(self, contest_label: str) -> bool:
+        """Check if calibration is stable for a contest type."""
+        gauge = self.contest_gauges.get(contest_label)
+        return gauge.get("calibration_stable", False) if gauge else False
+
+    def set_rci_weights(self, contest_label: str, weights: Dict[str, float]) -> None:
+        """Set custom RCI weights for a contest type."""
+        self.rci_weights[contest_label] = weights
+
+    def get_rci_weights(self, contest_label: str) -> Optional[Dict[str, float]]:
+        """Get custom RCI weights for a contest type, or None to use defaults."""
+        return self.rci_weights.get(contest_label)
 
 
 # ---------------------------------------------------------------------------
