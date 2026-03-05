@@ -252,6 +252,14 @@ class TestConfigImports:
         mod = importlib.import_module("yak_core.config")
         assert hasattr(mod, "CONTEST_PRESET_ARCH_LABELS")
 
+    def test_get_pool_size_range(self):
+        mod = importlib.import_module("yak_core.config")
+        assert hasattr(mod, "get_pool_size_range")
+
+    def test_get_methodology_rules(self):
+        mod = importlib.import_module("yak_core.config")
+        assert hasattr(mod, "get_methodology_rules")
+
 
 class TestInjuryCascadeImports:
     def test_apply_injury_cascade(self):
