@@ -40,6 +40,7 @@ from yak_core.lineups import (  # noqa: E402
     to_dk_upload_format,
     build_showdown_lineups,
     to_dk_showdown_upload_format,
+    compute_exposure_summary,
 )
 from yak_core.calibration import apply_archetype, DFS_ARCHETYPES  # noqa: E402
 from yak_core.config import CONTEST_PRESETS, CONTEST_PRESET_LABELS  # noqa: E402
@@ -63,6 +64,11 @@ _CONTEST_TO_BUILD_MODE = {
     "50/50 / Double-Up": "floor",
     "Showdown": "ceiling",
 }
+
+# Exposure review thresholds
+_INTENTIONAL_LEVERAGE_DELTA = 10   # delta > this → green (you're intentionally overweight)
+_ACCIDENTAL_OVEREXP_DELTA = 20     # delta > this AND field_own > _CHALK_OWN_THRESHOLD → red
+_CHALK_OWN_THRESHOLD = 25          # field_own > this marks a chalk player
 
 
 def _render_status_bar(slate: "SlateState", edge: "RickyEdgeState") -> None:
@@ -368,6 +374,7 @@ def main() -> None:
                 exclude_names=list(exclude_names),
             )
             if lineups_df is not None:
+                _built_at = datetime.now(timezone.utc).isoformat()
                 lu_state.set_lineups(
                     contest_label,
                     lineups_df,
@@ -379,11 +386,27 @@ def main() -> None:
                         "archetype": archetype,
                         "proj_col": proj_col,
                     },
+                    built_at=_built_at,
                 )
                 if expo_df is not None:
                     lu_state.exposures[contest_label] = expo_df
+                # Compute and store rich exposure summary for the review panel
+                lu_state.exposures[f"{contest_label}__summary"] = compute_exposure_summary(
+                    lineups_df, pool, int(num_lineups)
+                )
                 set_lineup_state(lu_state)
                 st.success(f"Built {num_lineups} lineups for **{contest_label}**.")
+
+    # ── Stale indicator ───────────────────────────────────────────────────
+    _edge_updated = edge.edge_updated_at or ""
+    for _lbl in lu_state.lineups:
+        _built_at_ts = lu_state.lineups_built_at.get(_lbl, "")
+        if _edge_updated and _built_at_ts and _edge_updated > _built_at_ts:
+            st.warning(
+                "⚠️ Edge analysis has changed since these lineups were built. "
+                "Consider re-building."
+            )
+            break
 
     # ── Show lineups ──────────────────────────────────────────────────────
     built_labels = [lbl for lbl, df in lu_state.lineups.items() if df is not None and not df.empty]
@@ -405,11 +428,48 @@ def main() -> None:
                 nav_key=f"bp_lu_{view_label}",
             )
 
-            # Exposure view
-            expo_df = lu_state.exposures.get(view_label)
-            if expo_df is not None and not expo_df.empty:
-                with st.expander("Player Exposures", expanded=False):
-                    st.dataframe(expo_df, use_container_width=True, hide_index=True)
+            # ── Exposure Review (heatmap panel) ───────────────────────────
+            exp_summary = lu_state.exposures.get(f"{view_label}__summary")
+            if exp_summary is not None and not exp_summary.empty:
+                st.subheader("📊 Exposure Review")
+                st.caption(
+                    "Review exposures before publishing. "
+                    "🟢 Green = intentional leverage. 🔴 Red = possible accidental overexposure."
+                )
+
+                def _row_color(row: pd.Series) -> list:
+                    """Return a list of CSS background-color styles for one row."""
+                    delta = row.get("delta", 0)
+                    field_own = row.get("field_own_pct", 0)
+                    if float(delta) > _ACCIDENTAL_OVEREXP_DELTA and float(field_own) > _CHALK_OWN_THRESHOLD:
+                        # Accidental overexposure on chalk
+                        bg = "background-color: #5c1a1a; color: #ffb3b3"
+                    elif float(delta) > _INTENTIONAL_LEVERAGE_DELTA:
+                        # Intentional leverage
+                        bg = "background-color: #1a3a1a; color: #b3ffb3"
+                    else:
+                        # Neutral
+                        bg = "background-color: #1e1e1e; color: #cccccc"
+                    return [bg] * len(row)
+
+                styled = (
+                    exp_summary.style
+                    .apply(_row_color, axis=1)
+                    .format({
+                        "your_exposure_pct": "{:.1f}%",
+                        "field_own_pct": "{:.1f}%",
+                        "delta": "{:+.1f}",
+                        "leverage_ratio": lambda v: "∞" if v == float("inf") else f"{v:.2f}x",
+                        "salary": "${:,}",
+                    })
+                )
+                st.dataframe(styled, use_container_width=True, hide_index=True)
+            elif lu_state.exposures.get(view_label) is not None:
+                # Fallback: show raw exposures if summary not available
+                expo_df = lu_state.exposures.get(view_label)
+                if expo_df is not None and not expo_df.empty:
+                    with st.expander("Player Exposures", expanded=False):
+                        st.dataframe(expo_df, use_container_width=True, hide_index=True)
 
             st.divider()
 

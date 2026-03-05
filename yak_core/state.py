@@ -118,6 +118,7 @@ class RickyEdgeState:
     edge_check_ts       : ISO datetime of last edge check approval
     approved_not_with_pairs : list of approved minute-cannibal "not together" pairs,
                               each dict has keys player_a, player_b, team, position_group
+    edge_updated_at     : ISO datetime of the last time tags/stacks/notes were changed
     """
 
     player_tags: Dict[str, Dict[str, Any]] = field(default_factory=dict)
@@ -128,6 +129,7 @@ class RickyEdgeState:
     ricky_edge_check: bool = False
     edge_check_ts: str = ""
     approved_not_with_pairs: List[Dict[str, str]] = field(default_factory=list)
+    edge_updated_at: str = ""
 
     def tag_player(self, player_name: str, tag: str, conviction: int = 3) -> None:
         """Set tag and conviction for a player."""
@@ -171,6 +173,7 @@ class LineupSetState:
     exposures           : {contest_label: pd.DataFrame of per-player exposure}
     published_sets      : {contest_label: {"lineups_df": ..., "published_at": str}}
     snapshot_times      : {contest_label: ISO datetime string}
+    lineups_built_at    : {contest_label: ISO datetime string of when lineups were last built}
     """
 
     lineups: Dict[str, Optional[pd.DataFrame]] = field(default_factory=dict)
@@ -178,11 +181,14 @@ class LineupSetState:
     exposures: Dict[str, Optional[pd.DataFrame]] = field(default_factory=dict)
     published_sets: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     snapshot_times: Dict[str, str] = field(default_factory=dict)
+    lineups_built_at: Dict[str, str] = field(default_factory=dict)
 
-    def set_lineups(self, contest_label: str, lineups_df: pd.DataFrame, config: Dict[str, Any]) -> None:
+    def set_lineups(self, contest_label: str, lineups_df: pd.DataFrame, config: Dict[str, Any], built_at: str = "") -> None:
         """Store built lineups and config for a contest type."""
         self.lineups[contest_label] = lineups_df
         self.build_configs[contest_label] = config
+        if built_at:
+            self.lineups_built_at[contest_label] = built_at
 
     def publish(self, contest_label: str, ts: str) -> None:
         """Publish lineups for a contest type to Edge Share."""

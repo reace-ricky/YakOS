@@ -71,6 +71,12 @@ def _render_status_bar(slate: "SlateState", edge: "RickyEdgeState") -> None:
             st.markdown(f"**Layers:** {chips}")
 
 
+def _save_edge(edge: "RickyEdgeState") -> None:
+    """Stamp edge_updated_at and persist to session state."""
+    edge.edge_updated_at = datetime.now(timezone.utc).isoformat()
+    set_edge_state(edge)
+
+
 # ---------------------------------------------------------------------------
 # Main page
 # ---------------------------------------------------------------------------
@@ -110,7 +116,7 @@ def main() -> None:
     )
     if notes != edge.slate_notes:
         edge.slate_notes = notes
-        set_edge_state(edge)
+        _save_edge(edge)
 
     st.divider()
 
@@ -145,12 +151,12 @@ def main() -> None:
         with col_add:
             if st.button("➕ Tag", key="_re_add_tag") and pick_player:
                 edge.tag_player(pick_player, pick_tag, pick_conviction)
-                set_edge_state(edge)
+                _save_edge(edge)
                 st.success(f"Tagged {pick_player} → {pick_tag} ({pick_conviction})")
         with col_rm:
             if st.button("➖ Remove", key="_re_rm_tag") and pick_player:
                 edge.remove_tag(pick_player)
-                set_edge_state(edge)
+                _save_edge(edge)
                 st.info(f"Removed tag for {pick_player}")
 
     with col_right:
@@ -196,7 +202,7 @@ def main() -> None:
                 if suggestions:
                     for p, tag, conv in suggestions:
                         edge.tag_player(p, tag, conv)
-                    set_edge_state(edge)
+                    _save_edge(edge)
                     st.success(f"Auto-tagged {len(suggestions)} players.")
                 else:
                     st.info("No auto-tag suggestions (pool may have minimal signal).")
@@ -223,6 +229,7 @@ def main() -> None:
 
     if games:
         with st.expander("Tag game environments", expanded=False):
+            _prev_game_tags = {k: dict(v) for k, v in edge.game_tags.items()}
             for game_key in games:
                 parts = game_key.split(" @ ")
                 home = parts[1] if len(parts) > 1 else game_key
@@ -267,7 +274,12 @@ def main() -> None:
                     "environment": environment,
                     "stack_target": stack_target,
                 }
-            set_edge_state(edge)
+            # Stamp edge_updated_at only when a game tag actually changed
+            _new_game_tags = {k: dict(v) for k, v in edge.game_tags.items()}
+            if _new_game_tags != _prev_game_tags:
+                _save_edge(edge)
+            else:
+                set_edge_state(edge)
     else:
         st.info("No games available. Publish a slate first to tag game environments.")
 
@@ -296,7 +308,7 @@ def main() -> None:
         if st.button("➕ Add Stack", key="_re_add_stack"):
             if stack_team and len(stack_players) >= 2:
                 edge.add_stack(stack_team, stack_players, stack_rationale)
-                set_edge_state(edge)
+                _save_edge(edge)
                 st.success(f"Stack added: {stack_team} – {', '.join(stack_players)}")
             else:
                 st.warning("Select a team and at least 2 players.")
@@ -315,7 +327,7 @@ def main() -> None:
 
         if st.button("🗑️ Clear all stacks", key="_re_clear_stacks"):
             edge.stacks = []
-            set_edge_state(edge)
+            _save_edge(edge)
             st.info("All stacks cleared.")
     else:
         st.info("No stacks defined yet.")
@@ -378,7 +390,7 @@ def main() -> None:
                     pass
 
             edge.edge_labels = labels
-            set_edge_state(edge)
+            _save_edge(edge)
             st.success(f"Generated {len(labels)} edge labels.")
 
     if edge.edge_labels:

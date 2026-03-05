@@ -31,6 +31,10 @@ class TestLineupsImports:
         mod = importlib.import_module("yak_core.lineups")
         assert hasattr(mod, "to_dk_showdown_upload_format")
 
+    def test_compute_exposure_summary(self):
+        mod = importlib.import_module("yak_core.lineups")
+        assert hasattr(mod, "compute_exposure_summary")
+
 
 class TestCalibrationImports:
     def test_run_backtest_lineups(self):

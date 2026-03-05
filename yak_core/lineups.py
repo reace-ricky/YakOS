@@ -557,6 +557,107 @@ def build_multiple_lineups_with_exposure(
 
 
 # --------------------------------------------------------------------
+# Exposure summary (for heatmap review panel)
+# --------------------------------------------------------------------
+
+def compute_exposure_summary(
+    lineups_df: pd.DataFrame,
+    pool_df: pd.DataFrame,
+    n_lineups: int,
+) -> pd.DataFrame:
+    """Compute per-player exposure across all built lineups vs field ownership.
+
+    Parameters
+    ----------
+    lineups_df : pd.DataFrame
+        Long-format lineups produced by ``build_multiple_lineups_with_exposure``
+        or ``build_showdown_lineups``.  Must contain a ``player_name`` column
+        and a ``lineup_index`` column.
+    pool_df : pd.DataFrame
+        Full player pool (SlateState.player_pool).  Used to look up salary,
+        team, and projected field ownership (``own_proj`` or ``ownership``
+        column).
+    n_lineups : int
+        Total number of lineups built (used as the denominator for exposure %).
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns:
+        - player          : player name
+        - team            : team abbreviation
+        - salary          : DK salary
+        - your_exposure_pct : % of your lineups containing this player (0–100)
+        - field_own_pct   : projected field ownership (0–100), from pool_df
+        - delta           : your_exposure_pct − field_own_pct
+        - leverage_ratio  : your_exposure_pct / field_own_pct (inf when field_own=0)
+
+        Sorted by abs(delta) descending.
+    """
+    if lineups_df is None or lineups_df.empty or n_lineups <= 0:
+        return pd.DataFrame(
+            columns=["player", "team", "salary",
+                     "your_exposure_pct", "field_own_pct", "delta", "leverage_ratio"]
+        )
+
+    # Count how many lineups each player appears in
+    name_col = "player_name" if "player_name" in lineups_df.columns else "player"
+    appearances = (
+        lineups_df.groupby(name_col)["lineup_index"]
+        .nunique()
+        .reset_index()
+        .rename(columns={name_col: "player", "lineup_index": "n_lineups"})
+    )
+    appearances["your_exposure_pct"] = (appearances["n_lineups"] / float(n_lineups)) * 100.0
+
+    # Resolve ownership column from pool
+    pool_name_col = "player_name" if "player_name" in pool_df.columns else "player"
+    own_col = None
+    for c in ["own_proj", "ownership", "proj_own", "POWN", "OWNERSHIP"]:
+        if c in pool_df.columns:
+            own_col = c
+            break
+
+    pool_slim = pool_df[[pool_name_col]].copy().rename(columns={pool_name_col: "player"})
+    if "team" in pool_df.columns:
+        pool_slim["team"] = pool_df["team"].values
+    else:
+        pool_slim["team"] = ""
+    if "salary" in pool_df.columns:
+        pool_slim["salary"] = pd.to_numeric(pool_df["salary"], errors="coerce").fillna(0).astype(int).values
+    else:
+        pool_slim["salary"] = 0
+    if own_col:
+        raw_own = pd.to_numeric(pool_df[own_col], errors="coerce").fillna(0)
+        # Normalize: if values are in [0,1] range, convert to percentage
+        if raw_own.max() <= 1.0:
+            raw_own = raw_own * 100.0
+        pool_slim["field_own_pct"] = raw_own.values
+    else:
+        pool_slim["field_own_pct"] = 0.0
+
+    # Merge
+    summary = appearances.merge(pool_slim, on="player", how="left")
+    summary["team"] = summary["team"].fillna("")
+    summary["salary"] = summary["salary"].fillna(0).astype(int)
+    summary["field_own_pct"] = summary["field_own_pct"].fillna(0.0)
+
+    summary["delta"] = summary["your_exposure_pct"] - summary["field_own_pct"]
+    summary["leverage_ratio"] = summary.apply(
+        lambda r: (r["your_exposure_pct"] / r["field_own_pct"])
+        if r["field_own_pct"] > 0
+        else float("inf"),
+        axis=1,
+    )
+
+    summary = summary.drop(columns=["n_lineups"], errors="ignore")
+    summary = summary.sort_values("delta", key=lambda s: s.abs(), ascending=False)
+    summary = summary.reset_index(drop=True)
+
+    return summary[["player", "team", "salary", "your_exposure_pct", "field_own_pct", "delta", "leverage_ratio"]]
+
+
+# --------------------------------------------------------------------
 # DraftKings upload format export
 # --------------------------------------------------------------------
 
