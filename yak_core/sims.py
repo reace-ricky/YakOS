@@ -641,8 +641,9 @@ def compute_player_anomaly_table(
     lu = lineup_df.copy()
     if lu_name_col != "player_name":
         lu = lu.rename(columns={lu_name_col: "player_name"})
-    # Normalise ownership column in lineup if present
-    # ownership column used here: first available from lu[_src] in priority order ("own_proj" → "ownership" → "Own%" → "proj_own"), renamed to "own%"
+    # Normalise ownership column in lineup_df to "own%" for internal use.
+    # own_proj is the canonical column; ownership/Own%/proj_own accepted as legacy aliases.
+    # ownership column used here: first available from lu in priority order ("own_proj" → "ownership" → "Own%" → "proj_own"), renamed to "own%"
     for _src in ("own_proj", "ownership", "Own%", "proj_own"):
         if _src in lu.columns and "own%" not in lu.columns:
             lu = lu.rename(columns={_src: "own%"})
@@ -651,18 +652,20 @@ def compute_player_anomaly_table(
     if "lineup_index" not in lu.columns:
         return pd.DataFrame()
 
-    # Build pool lookup keyed by name
-    _pool_sim_cols = ("name", "proj", "salary", "own%", "ownership", "Own%", "own_proj", "proj_own", "ceil", "floor")
+    # Build pool lookup keyed by name.
+    # own_proj is the required canonical ownership column on pool_df.
+    # For backward compatibility, fall back to "ownership" alias when own_proj absent.
+    _pool_sim_cols = ("name", "proj", "salary", "own%", "ceil", "floor")
     pool_lookup: dict = {}
     if not pool_df.empty:
         pool = pool_df.copy()
         if "player_name" in pool.columns and "name" not in pool.columns:
             pool = pool.rename(columns={"player_name": "name"})
-        # ownership column used here: first available from pool[_src] in priority order ("own_proj" → "ownership" → "Own%" → "proj_own"), renamed to "own%"
-        for _src in ("own_proj", "ownership", "Own%", "proj_own"):
-            if _src in pool.columns and "own%" not in pool.columns:
-                pool = pool.rename(columns={_src: "own%"})
-                break
+        # Map own_proj → own% (canonical); fall back to ownership alias if needed
+        if "own_proj" in pool.columns:
+            pool = pool.rename(columns={"own_proj": "own%"})  # ownership column used here: pool["own_proj"] (canonical), renamed to "own%"
+        elif "ownership" in pool.columns and "own%" not in pool.columns:
+            pool = pool.rename(columns={"ownership": "own%"})  # ownership column used here: pool["ownership"] (backward-compat alias), renamed to "own%"
         if "name" in pool.columns:
             _keep = [c for c in _pool_sim_cols if c in pool.columns]
             pool_lookup = (
@@ -1014,6 +1017,16 @@ def run_sims_pipeline(
     if pool.empty or lineups_df.empty:
         return pd.DataFrame()
 
+    # Require the canonical projected ownership column.
+    # apply_ownership() (in yak_core/ownership.py) populates own_proj from
+    # external POWN data, legacy columns, or a salary-rank fallback.
+    if "own_proj" not in pool.columns:
+        raise ValueError(
+            "Expected 'own_proj' column on pool before running sims. "
+            "Call apply_ownership() (yak_core/ownership.py) to populate "
+            "own_proj from external POWN data or a salary-rank estimate."
+        )
+
     # Build a player-level projection/ownership lookup
     p_proj: Dict[str, float] = {}
     p_own: Dict[str, float] = {}
@@ -1027,7 +1040,7 @@ def run_sims_pipeline(
         proj_val = float(row.get("proj", 0) or 0)
         ceil_val = float(row.get("ceil", proj_val * 1.4) or proj_val * 1.4)
         floor_val = float(row.get("floor", proj_val * 0.7) or proj_val * 0.7)
-        own_val = float(row.get("ownership", 5.0) or 5.0)  # ownership column used here: pool["ownership"] (default 5.0 if missing)
+        own_val = float(row.get("own_proj", 5.0) or 5.0)  # ownership column used here: pool["own_proj"] (canonical projected ownership)
         p_proj[pname] = proj_val
         p_ceil[pname] = ceil_val
         p_floor[pname] = floor_val
