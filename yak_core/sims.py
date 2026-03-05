@@ -1296,6 +1296,120 @@ def run_calibration_pipeline(
 
 
 # ---------------------------------------------------------------------------
+# Contest-type sims wrapper
+# ---------------------------------------------------------------------------
+
+# Contest-specific parameter presets.
+# field_size: approximate number of entrants (used for payout/odds estimates).
+# top_x_pct: fraction of field considered "top-X%".
+# itm_pct: fraction of field that finishes in-the-money.
+# stack_min: minimum players from same team encouraged in a lineup.
+_CONTEST_PARAMS: Dict[str, Dict[str, Any]] = {
+    "GPP_150": {"field_size": 150, "top_x_pct": 0.10, "itm_pct": 0.25, "stack_min": 2},
+    "GPP_20":  {"field_size": 20,  "top_x_pct": 0.15, "itm_pct": 0.35, "stack_min": 2},
+    "SE_3MAX": {"field_size": 3,   "top_x_pct": 0.33, "itm_pct": 0.50, "stack_min": 1},
+    "CASH":    {"field_size": 2,   "top_x_pct": 0.50, "itm_pct": 0.50, "stack_min": 0},
+}
+_DEFAULT_CONTEST_PARAMS: Dict[str, Any] = {
+    "field_size": 20,
+    "top_x_pct": 0.15,
+    "itm_pct": 0.35,
+    "stack_min": 1,
+}
+
+
+def run_sims_for_contest_type(
+    edge_df: pd.DataFrame,
+    contest_type: str,
+    lineup_filter: Optional[List[str]] = None,
+    n_sims: int = 10000,
+    variance: float = 1.0,
+) -> pd.DataFrame:
+    """Run player-level Monte Carlo sims scoped to a specific contest type.
+
+    Uses contest-specific parameters (field size, payout structure, stack rules)
+    to shape the smash/bust thresholds and compute player-level sim metrics.
+
+    Parameters
+    ----------
+    edge_df : pd.DataFrame
+        Player edge metrics table (output of ``compute_edge_metrics``).
+        Required columns: ``player_name``, ``proj``, ``own_pct``.
+        Optional: ``floor``, ``ceil``.
+    contest_type : str
+        Contest archetype key: ``"GPP_150"``, ``"GPP_20"``, ``"SE_3MAX"``,
+        ``"CASH"``.  Unknown values fall back to ``_DEFAULT_CONTEST_PARAMS``.
+    lineup_filter : list of str, optional
+        When provided, restrict the simulation to only the player names in
+        this list.  Useful for backtesting a specific set of lineups.
+    n_sims : int
+        Number of Monte Carlo iterations (default 10 000).
+    variance : float
+        Variance multiplier applied to player score distributions (default 1.0).
+
+    Returns
+    -------
+    pd.DataFrame
+        Player-level sim results with columns:
+        ``player_name``, ``proj``, ``own_pct``, ``smash_prob``, ``bust_prob``,
+        ``leverage``, ``contest_type``.
+        Always sorted by ``smash_prob`` descending.
+    """
+    if edge_df is None or edge_df.empty:
+        return pd.DataFrame(columns=["player_name", "proj", "own_pct",
+                                     "smash_prob", "bust_prob", "leverage",
+                                     "contest_type"])
+
+    params = _CONTEST_PARAMS.get(contest_type.upper(), _DEFAULT_CONTEST_PARAMS)
+    top_x_pct: float = params["top_x_pct"]
+
+    df = edge_df.copy()
+
+    # Apply lineup filter when provided
+    if lineup_filter:
+        df = df[df["player_name"].isin(lineup_filter)].copy()
+
+    if df.empty:
+        return pd.DataFrame(columns=["player_name", "proj", "own_pct",
+                                     "smash_prob", "bust_prob", "leverage",
+                                     "contest_type"])
+
+    proj = pd.to_numeric(df.get("proj", 0), errors="coerce").fillna(0)
+    ceil = pd.to_numeric(df.get("ceil", proj * 1.4), errors="coerce").fillna(proj * 1.4)
+    floor_ = pd.to_numeric(df.get("floor", proj * 0.7), errors="coerce").fillna(proj * 0.7)
+    own = pd.to_numeric(df.get("own_pct", 5.0), errors="coerce").fillna(5.0)
+
+    rng = np.random.default_rng(seed=42)
+    std = ((ceil - floor_) / 4.0 * variance).clip(lower=0.5).values
+    proj_vals = proj.values
+
+    # Simulate n_sims score draws per player
+    scores = rng.normal(loc=proj_vals[:, None], scale=std[:, None], size=(len(df), n_sims))
+
+    # Derive thresholds from the contest-type top-X percentile
+    field_median = float(np.median(scores))
+    smash_thresh = float(np.percentile(scores, (1.0 - top_x_pct) * 100))
+    bust_thresh = float(np.percentile(scores, params["itm_pct"] * 50))
+
+    smash_prob = (scores >= smash_thresh).mean(axis=1)
+    bust_prob = (scores <= bust_thresh).mean(axis=1)
+
+    own_safe = own.values.clip(0.1)
+    leverage = np.where(own.values >= 0.1, proj_vals / own_safe, np.nan)
+
+    out = df[["player_name"]].copy()
+    out["proj"] = proj_vals
+    out["own_pct"] = own.values
+    out["smash_prob"] = smash_prob
+    out["bust_prob"] = bust_prob
+    out["leverage"] = leverage
+    out["contest_type"] = contest_type
+    out["field_median"] = field_median
+
+    return out.sort_values("smash_prob", ascending=False).reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
 # Display Helpers
 # ---------------------------------------------------------------------------
 

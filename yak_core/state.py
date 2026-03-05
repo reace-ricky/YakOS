@@ -49,6 +49,8 @@ class SlateState:
     captain_multiplier  : float (1.5 for Showdown Captain, 1.0 otherwise)
     scoring_rules       : dict of scoring rule overrides
     player_pool         : full player pool DataFrame
+    edge_df             : computed edge metrics DataFrame (output of compute_edge_metrics)
+    calibration_state   : dict of active calibration adjustments keyed by contest type
     proj_source         : active projection source label
     published           : True once Publish Slate has been confirmed
     published_at        : ISO datetime string of last publish
@@ -70,6 +72,8 @@ class SlateState:
     captain_multiplier: float = 1.0
     scoring_rules: Dict[str, Any] = field(default_factory=dict)
     player_pool: Optional[pd.DataFrame] = None
+    edge_df: Optional[pd.DataFrame] = None
+    calibration_state: Dict[str, Any] = field(default_factory=dict)
     proj_source: str = "salary_implied"
     published: bool = False
     published_at: str = ""

@@ -48,7 +48,10 @@ from yak_core.sims import (  # noqa: E402
     run_calibration_pipeline,
     prepare_sims_table,
     ContestType,
+    run_sims_for_contest_type,
 )
+from yak_core.edge import compute_edge_metrics  # noqa: E402
+from yak_core.publishing import build_ricky_lineups, publish_edge_and_lineups  # noqa: E402
 from yak_core.calibration import (  # noqa: E402
     load_calibration_config,
     save_calibration_config,
@@ -303,6 +306,19 @@ def main() -> None:
                         )
                         sim.pipeline_output[pipeline_contest] = pipeline_df
                     set_sim_state(sim)
+
+                    # Compute edge_df using centralized compute_edge_metrics and
+                    # store it on SlateState so all pages share the same metrics.
+                    new_edge_df = compute_edge_metrics(
+                        pool,
+                        calibration_state=slate.calibration_state,
+                        variance=sim.variance,
+                    )
+                    slate.edge_df = new_edge_df
+                    if "Edge" not in slate.active_layers:
+                        slate.active_layers.append("Edge")
+                    set_slate_state(slate)
+
                     st.success(f"Sims complete — {len(player_results)} players.")
                 except Exception as exc:
                     st.error(f"Sim failed: {exc}")
@@ -482,6 +498,14 @@ def main() -> None:
     # ─────────────────────────────────────────────────────────────────────
     st.subheader("🔬 Calibration")
 
+    # Show read-only slate identity — no separate date picker in Calibration.
+    # Calibration is always tied to the slate selected in Slate Hub.
+    _cal_slate_label = (
+        f"{slate.sport or '—'} | {slate.site or '—'} | "
+        f"{slate.slate_date or '—'} | DG {slate.draft_group_id or '—'}"
+    )
+    st.info(f"**Calibrating:** {_cal_slate_label}")
+
     with st.expander("Calibration Profiles", expanded=False):
         # Profile management
         existing_profiles = list(sim.calibration_profiles.keys())
@@ -496,9 +520,19 @@ def main() -> None:
                     except Exception:
                         current_cal = {}
                     sim.save_calibration_profile(new_profile_name, current_cal)
+                    # Persist calibration adjustments to SlateState so compute_edge_metrics
+                    # always uses the same calibration as the active profile.
+                    slate.calibration_state = dict(current_cal)
                     if "Calibration" not in slate.active_layers:
                         slate.active_layers.append("Calibration")
-                        set_slate_state(slate)
+                    # Recompute edge_df with updated calibration
+                    if pool is not None and not pool.empty:
+                        slate.edge_df = compute_edge_metrics(
+                            pool,
+                            calibration_state=slate.calibration_state,
+                            variance=sim.variance,
+                        )
+                    set_slate_state(slate)
                     set_sim_state(sim)
                     st.success(f"Profile '{new_profile_name}' saved.")
 
@@ -507,6 +541,16 @@ def main() -> None:
                 active_profile = st.selectbox("Active profile", ["(none)"] + existing_profiles, key="_lab_active_profile")
                 if active_profile != "(none)" and active_profile != sim.active_profile:
                     sim.active_profile = active_profile
+                    # Load chosen profile into slate.calibration_state so edge_df stays in sync
+                    profile_cal = sim.calibration_profiles.get(active_profile, {})
+                    slate.calibration_state = dict(profile_cal)
+                    if pool is not None and not pool.empty:
+                        slate.edge_df = compute_edge_metrics(
+                            pool,
+                            calibration_state=slate.calibration_state,
+                            variance=sim.variance,
+                        )
+                    set_slate_state(slate)
                     set_sim_state(sim)
                     st.success(f"Profile '{active_profile}' activated.")
 
