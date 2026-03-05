@@ -251,6 +251,7 @@ class LineupSetState:
     exposures           : {contest_label: pd.DataFrame of per-player exposure}
     published_sets      : {contest_label: {"lineups_df": ..., "published_at": str}}
     snapshot_times      : {contest_label: ISO datetime string}
+    boom_bust_rankings  : {contest_label: pd.DataFrame from compute_lineup_boom_bust}
     """
 
     lineups: Dict[str, Optional[pd.DataFrame]] = field(default_factory=dict)
@@ -258,6 +259,7 @@ class LineupSetState:
     exposures: Dict[str, Optional[pd.DataFrame]] = field(default_factory=dict)
     published_sets: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     snapshot_times: Dict[str, str] = field(default_factory=dict)
+    boom_bust_rankings: Dict[str, Optional[pd.DataFrame]] = field(default_factory=dict)
 
     def set_lineups(self, contest_label: str, lineups_df: pd.DataFrame, config: Dict[str, Any]) -> None:
         """Store built lineups and config for a contest type."""
@@ -278,6 +280,14 @@ class LineupSetState:
     def get_published_labels(self) -> List[str]:
         """Return list of contest labels that have published lineups."""
         return list(self.published_sets.keys())
+
+    def set_boom_bust(self, contest_label: str, rankings_df: pd.DataFrame) -> None:
+        """Store boom/bust rankings for a contest type."""
+        self.boom_bust_rankings[contest_label] = rankings_df
+
+    def get_boom_bust(self, contest_label: str) -> Optional[pd.DataFrame]:
+        """Get boom/bust rankings for a contest type."""
+        return self.boom_bust_rankings.get(contest_label)
 
 
 # ---------------------------------------------------------------------------
