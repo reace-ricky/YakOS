@@ -37,7 +37,7 @@ if _repo_root not in sys.path:
 
 from yak_core.state import (  # noqa: E402
     get_slate_state, set_slate_state,
-    get_edge_state,
+    get_edge_state, set_edge_state,
     get_sim_state, set_sim_state,
 )
 from yak_core.sims import (  # noqa: E402
@@ -59,9 +59,11 @@ from yak_core.calibration import (  # noqa: E402
     DK_CONTEST_TYPES,
     DFS_ARCHETYPES,
 )
+from yak_core.config import CONTEST_PRESETS  # noqa: E402
 from yak_core.right_angle import (  # noqa: E402
     compute_stack_scores,
     compute_value_scores,
+    detect_minute_cannibals,
 )
 from yak_core.sim_rating import compare_rating_weights, get_weight_sets  # noqa: E402
 # get_lab_analysis() exposes the finalized player pool and sim metrics produced
@@ -423,6 +425,71 @@ def main() -> None:
                 st.dataframe(stack_scores[show_cols].head(10), use_container_width=True, hide_index=True)
         except Exception as exc:
             st.info(f"Stack scores unavailable: {exc}")
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Minute-Cannibal "Not-Together" Suggestions (GPP contest types only)
+    # ─────────────────────────────────────────────────────────────────────
+    _preset = CONTEST_PRESETS.get(pipeline_contest_display_name, {})
+    if not pool.empty and _preset.get("not_with_auto", False):
+        st.markdown("---")
+        st.markdown("### ⚠️ Suggested Not-Together Rules")
+        st.caption(
+            "Players on the same team who compete for the same rotation minutes. "
+            "Approve pairs to enforce 'not with' constraints in the optimizer."
+        )
+        try:
+            edge_state = get_edge_state()
+            cannibal_pairs = detect_minute_cannibals(pool)
+            if cannibal_pairs:
+                approved_keys = {
+                    (p["player_a"], p["player_b"])
+                    for p in edge_state.approved_not_with_pairs
+                }
+                any_change = False
+                for pair in cannibal_pairs:
+                    pa, pb = pair["player_a"], pair["player_b"]
+                    key = (pa, pb)
+                    is_approved = key in approved_keys
+                    col_cb, col_info = st.columns([1, 5])
+                    with col_cb:
+                        checked = st.checkbox(
+                            "Approve",
+                            value=is_approved,
+                            key=f"_not_with_{pa}_{pb}",
+                            label_visibility="collapsed",
+                        )
+                    with col_info:
+                        st.markdown(
+                            f"**{pa}** + **{pb}** | 🏀 {pair['team']} | "
+                            f"{pair['position_group'].title()} | "
+                            f"{pair['combined_minutes']} combined min  \n"
+                            f"_{pair['reason']}_"
+                        )
+                    if checked and key not in approved_keys:
+                        edge_state.approved_not_with_pairs.append({
+                            "player_a": pa,
+                            "player_b": pb,
+                            "team": pair["team"],
+                            "position_group": pair["position_group"],
+                        })
+                        approved_keys.add(key)
+                        any_change = True
+                    elif not checked and key in approved_keys:
+                        edge_state.approved_not_with_pairs = [
+                            p for p in edge_state.approved_not_with_pairs
+                            if not (p["player_a"] == pa and p["player_b"] == pb)
+                        ]
+                        approved_keys.discard(key)
+                        any_change = True
+                if any_change:
+                    set_edge_state(edge_state)
+                n_approved = len(edge_state.approved_not_with_pairs)
+                if n_approved:
+                    st.success(f"✅ {n_approved} pair(s) approved — will be enforced in optimizer.")
+            else:
+                st.info("No minute-cannibal pairs detected in current pool.")
+        except Exception as exc:
+            st.info(f"Minute-cannibal detection unavailable: {exc}")
 
     st.divider()
 

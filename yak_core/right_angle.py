@@ -766,3 +766,112 @@ def compute_game_environment_cards(pool_df: pd.DataFrame) -> list:
 
     cards.sort(key=lambda x: x["combined_ou"], reverse=True)
     return cards
+
+
+# ---------------------------------------------------------------------------
+# Minute-Cannibal Detection
+# ---------------------------------------------------------------------------
+
+#: Position groups used to identify players competing for the same minutes.
+_BACKCOURT_POS = frozenset({"PG", "SG"})
+_FRONTCOURT_POS = frozenset({"SF", "PF", "C"})
+
+
+def _position_group(pos_str: str) -> str | None:
+    """Return 'backcourt', 'frontcourt', or None for an unknown / multi-group position."""
+    if not isinstance(pos_str, str):
+        return None
+    parts = frozenset(p.strip().upper() for p in pos_str.split("/"))
+    has_back = bool(parts & _BACKCOURT_POS)
+    has_front = bool(parts & _FRONTCOURT_POS)
+    if has_back and not has_front:
+        return "backcourt"
+    if has_front and not has_back:
+        return "frontcourt"
+    # Mixed (e.g. PG/SF) or unrecognised – skip
+    return None
+
+
+def detect_minute_cannibals(
+    pool_df: pd.DataFrame,
+    minutes_col: str = "proj_minutes",
+    threshold: float = 12.0,
+) -> list[dict]:
+    """Find pairs of players on the same team who compete for the same minutes.
+
+    Logic: Two players on the same team, same position group (backcourt: PG/SG,
+    frontcourt: SF/PF/C), where BOTH have proj_minutes between *threshold* and 24
+    (bench-level, splitting time). These are candidates for "not together" rules.
+
+    Parameters
+    ----------
+    pool_df : pd.DataFrame
+        Player pool with at least ``player_name``, ``team``, ``pos``, and the
+        *minutes_col* column.
+    minutes_col : str
+        Column name containing projected minutes (default ``"proj_minutes"``).
+    threshold : float
+        Minimum projected minutes to consider a player a cannibal candidate
+        (default ``12.0``).  Players with minutes below this floor or above 24
+        are excluded (the latter are likely starters not splitting time).
+
+    Returns
+    -------
+    list[dict]
+        Each dict has keys: ``player_a``, ``player_b``, ``team``,
+        ``position_group``, ``combined_minutes``, ``reason``.
+    """
+    if pool_df.empty:
+        return []
+
+    required = {"player_name", "team", "pos", minutes_col}
+    if not required.issubset(pool_df.columns):
+        return []
+
+    df = pool_df.copy()
+    df["_pos_group"] = df["pos"].apply(_position_group)
+    df["_minutes"] = pd.to_numeric(df[minutes_col], errors="coerce")
+
+    # Only bench-range splitters: threshold ≤ minutes ≤ 24
+    candidates = df[
+        df["_pos_group"].notna()
+        & (df["_minutes"] >= threshold)
+        & (df["_minutes"] <= 24.0)
+    ].copy()
+
+    if candidates.empty:
+        return []
+
+    pairs: list[dict] = []
+    group_keys = candidates.groupby(["team", "_pos_group"])
+
+    for (team, pos_group), grp in group_keys:
+        players = grp.reset_index(drop=True)
+        if len(players) < 2:
+            continue
+
+        for i in range(len(players)):
+            for j in range(i + 1, len(players)):
+                pa = players.loc[i, "player_name"]
+                pb = players.loc[j, "player_name"]
+                ma = float(players.loc[i, "_minutes"])
+                mb = float(players.loc[j, "_minutes"])
+                combined = round(ma + mb, 1)
+
+                reason = (
+                    f"Both {pa} ({ma:.0f} min) and {pb} ({mb:.0f} min) "
+                    f"are bench-range {pos_group} players on {team} projecting "
+                    f"{combined} combined minutes — rotation overlap likely."
+                )
+                pairs.append({
+                    "player_a": pa,
+                    "player_b": pb,
+                    "team": team,
+                    "position_group": pos_group,
+                    "combined_minutes": combined,
+                    "reason": reason,
+                })
+
+    # Sort by combined minutes descending (biggest overlap first)
+    pairs.sort(key=lambda d: d["combined_minutes"], reverse=True)
+    return pairs
