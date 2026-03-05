@@ -176,4 +176,6 @@ For any non-trivial change, aim to provide:
   - They are reachable from the UI
   - They update the correct state
   - There is a visible effect that can be sanity-checked
+ 
+- Before marking any PR ready: run python scripts/qa_regression.py AND manually verify the changed page loads correctly with a real slate date. If the QA script doesn't exist or doesn't pass, the PR is not done.
 
