@@ -100,7 +100,7 @@ def ownership_kpis(
     for i, lu in enumerate(lineups):
         players = lu["players"]
         mask = pool_df["name"].isin(players)
-        owns = pool_df.loc[mask, ownership_col].fillna(0)
+        owns = pool_df.loc[mask, ownership_col].fillna(0)  # ownership column used here: pool_df[ownership_col] (default "ownership")
         own_sum = round(owns.sum(), 2)
         own_avg = round(owns.mean(), 2) if len(owns) > 0 else 0.0
         own_max = round(owns.max(), 2) if len(owns) > 0 else 0.0

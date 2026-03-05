@@ -72,45 +72,67 @@ def salary_rank_ownership(pool_df: pd.DataFrame, col: str = "ownership") -> pd.D
 
 
 def apply_ownership(pool_df: pd.DataFrame) -> pd.DataFrame:
-    """Apply ownership model if no ownership column exists.
+    """Ensure pool_df has a canonical ``own_proj`` column and a backward-compat ``ownership`` alias.
 
-    Checks for existing ownership columns (ownership, proj_own, POWN).
-    If none found, generates salary-rank estimates.
+    Ownership column semantics
+    --------------------------
+    * ``own_proj``   — canonical projected ownership used by optimizer/sims.
+                       Never overwritten if already present.
+    * ``ownership``  — read-only backward-compat alias for ``own_proj``.
+                       Always kept in sync so legacy code continues to work.
+    * ``actual_own`` — realized ownership from contest results.  Never touched here.
+
+    Resolution order when ``own_proj`` is absent:
+      1. ``POWN``     — raw RotoGrinders / FantasyPros site export column
+      2. ``proj_own`` — alternate legacy column name
+      3. ``Own%``     — another common alias used in some imports
+      4. Fallback: salary-rank estimate (stored in ``own_proj`` directly)
     """
-    # Check for existing ownership data
-    for c in ["ownership", "proj_own", "OWNERSHIP", "POWN"]:
+    # If canonical column already exists, only sync the alias — never overwrite.
+    if "own_proj" in pool_df.columns:
+        pool_df["ownership"] = pool_df["own_proj"]  # ownership column used here: pool_df["own_proj"] (canonical)
+        mean_own = pool_df["own_proj"].mean()
+        print(f"[ownership] own_proj already present (mean={mean_own:.1f}%)")
+        return pool_df
+
+    # Normalize legacy/source columns → own_proj, then alias
+    for c in ["POWN", "proj_own", "Own%"]:
         if c in pool_df.columns and pool_df[c].notna().any() and (pool_df[c] > 0).any():
-            # Normalize to "ownership" column name if needed
-            if c != "ownership":
-                pool_df["ownership"] = pool_df[c]
-            print(f"[ownership] Using existing '{c}' column "
-                  f"(mean={pool_df['ownership'].mean():.1f}%)")
+            pool_df["own_proj"] = pool_df[c]
+            pool_df["ownership"] = pool_df["own_proj"]  # ownership column used here: pool_df[c] normalized to pool_df["own_proj"]
+            mean_own = pool_df["own_proj"].mean()
+            print(f"[ownership] Normalized '{c}' → own_proj (mean={mean_own:.1f}%)")
             return pool_df
 
-    # No ownership data found — generate from salary rank
-    pool_df = salary_rank_ownership(pool_df, col="ownership")
-    print(f"[ownership] Generated salary-rank ownership "
-          f"(mean={pool_df['ownership'].mean():.1f}%, "
-          f"min={pool_df['ownership'].min():.1f}%, "
-          f"max={pool_df['ownership'].max():.1f}%)")
+    # Fallback: generate from salary rank → write directly into own_proj
+    pool_df = salary_rank_ownership(pool_df, col="own_proj")
+    pool_df["ownership"] = pool_df["own_proj"]
+    print(f"[ownership] Generated salary-rank own_proj "
+          f"(mean={pool_df['own_proj'].mean():.1f}%, "
+          f"min={pool_df['own_proj'].min():.1f}%, "
+          f"max={pool_df['own_proj'].max():.1f}%)")
     return pool_df
 
 
 
-def compute_leverage(pool_df, own_col=None):
-    """Compute leverage score: proj / ownership.
+def compute_leverage(pool_df: pd.DataFrame, own_col: str = "own_proj") -> pd.DataFrame:
+    """Compute leverage score: proj / own_proj.
 
     Higher leverage = better value for GPP (high proj, low ownership).
     Used by optimizer to weight the objective toward contrarian picks.
 
-    Ownership column priority: ``own_proj`` (external POWN-based) →
-    ``ownership`` (legacy) → any column passed via *own_col*.
-
     Parameters
     ----------
-    pool_df : DataFrame with 'proj' and ownership column.
-    own_col : column name for ownership.  When *None*, ``own_proj`` is used
-              if present, otherwise ``ownership``.
+    pool_df : DataFrame with 'proj' and the projected-ownership column.
+    own_col : Projected ownership column name.  Defaults to ``"own_proj"``
+              (the canonical column set by :func:`apply_ownership`).
+              Pass an explicit column name only when you have a specific
+              alternative; do **not** pass ``"ownership"`` directly.
+
+    Raises
+    ------
+    ValueError
+        If *own_col* is not present in *pool_df*.
 
     Returns
     -------
@@ -118,19 +140,24 @@ def compute_leverage(pool_df, own_col=None):
     """
     df = pool_df.copy()
 
-    # Resolve ownership column: prefer own_proj (external POWN) over legacy ownership
-    if own_col is None:
-        if "own_proj" in df.columns and df["own_proj"].notna().any():
-            own_col = "own_proj"
+    if own_col not in df.columns:
+        if own_col == "own_proj":
+            raise ValueError(
+                f"Expected projected ownership column 'own_proj' not found in df. "
+                "Run apply_ownership() or apply_ownership_pipeline() first to ensure own_proj is populated."
+            )
         else:
-            own_col = "ownership"
+            raise ValueError(
+                f"Expected ownership column '{own_col}' not found in df. "
+                "Ensure the column is present before calling compute_leverage()."
+            )
 
-    if "proj" not in df.columns or own_col not in df.columns:
+    if "proj" not in df.columns:
         df["leverage"] = 0.0
         return df
 
     proj = df["proj"].astype(float).clip(lower=0.1)
-    own = df[own_col].astype(float).clip(lower=0.5)
+    own = df[own_col].astype(float).clip(lower=0.5)  # ownership column used here: df[own_col] (canonical "own_proj")
 
     # Raw leverage: projection points per ownership %
     raw_leverage = proj / own
@@ -143,7 +170,7 @@ def compute_leverage(pool_df, own_col=None):
     else:
         df["leverage"] = 0.5
 
-    print(f"[ownership] Leverage computed: "
+    print(f"[ownership] Leverage computed using '{own_col}': "
           f"mean={df['leverage'].mean():.3f}, "
           f"min={df['leverage'].min():.3f}, "
           f"max={df['leverage'].max():.3f}")
@@ -254,10 +281,16 @@ def apply_ownership_pipeline(
 
 
 def ownership_kpis(pool_df):
-    """Compute ownership-related KPIs for display."""
+    """Compute ownership-related KPIs for display.
+
+    Reads ``own_proj`` (canonical) and falls back to ``ownership`` for
+    backward compatibility with callers that haven't run apply_ownership yet.
+    """
     kpis = {}
-    if "ownership" in pool_df.columns:
-        own = pool_df["ownership"].dropna()
+    # Prefer canonical own_proj; fall back to backward-compat ownership alias
+    own_col = "own_proj" if "own_proj" in pool_df.columns else "ownership"
+    if own_col in pool_df.columns:
+        own = pool_df[own_col].dropna()  # ownership column used here: pool_df[own_col] ("own_proj" preferred, "ownership" fallback)
         kpis["avg_own"] = round(own.mean(), 1)
         kpis["max_own"] = round(own.max(), 1)
         kpis["min_own"] = round(own.min(), 1)
@@ -266,8 +299,11 @@ def ownership_kpis(pool_df):
     if "leverage" in pool_df.columns:
         lev = pool_df["leverage"].dropna()
         kpis["avg_leverage"] = round(lev.mean(), 3)
+        own_display_col = "own_proj" if "own_proj" in pool_df.columns else "ownership"
+        top5_cols = ["player_name", "proj", own_display_col, "leverage"]
+        available = [c for c in top5_cols if c in pool_df.columns]
         kpis["top_leverage_players"] = (
-            pool_df.nlargest(5, "leverage")[["player_name", "proj", "ownership", "leverage"]]
+            pool_df.nlargest(5, "leverage")[available]
             .to_dict("records")
         )
     return kpis

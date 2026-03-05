@@ -124,21 +124,21 @@ class TestComputePlayerAnomalyTableEdgeCases:
         assert not df.empty
         assert (df["Own%"] == 0).all()
 
-    def test_proj_own_column_used_when_own_pct_absent(self):
-        """Pool with proj_own (not own%) should still populate Own% via column normalisation."""
+    def test_own_proj_column_used_when_own_pct_absent(self):
+        """Pool with own_proj (canonical, not own%) should still populate Own% via column normalisation."""
         pool = _make_pool().drop(columns=["own%"])
-        pool["proj_own"] = [15.0, 5.0, 40.0, 12.0, 25.0]
+        pool["own_proj"] = [15.0, 5.0, 40.0, 12.0, 25.0]
         lu = _make_lineups(_make_pool())
         df = compute_player_anomaly_table(pool, lu)
         assert not df.empty
-        # At least one player should have non-zero ownership from proj_own
+        # At least one player should have non-zero ownership from own_proj
         assert (df["Own%"] > 0).any()
 
-    def test_proj_own_leverages_low_ownership_player(self):
-        """Player with low proj_own should have higher leverage than high-proj_own player."""
+    def test_own_proj_leverages_low_ownership_player(self):
+        """Player with low own_proj should have higher leverage than high-own_proj player."""
         pool = pd.DataFrame([
-            {"player_name": "LowOwn", "proj": 35.0, "salary": 6500, "proj_own": 2.0},
-            {"player_name": "HighOwn", "proj": 35.0, "salary": 8500, "proj_own": 30.0},
+            {"player_name": "LowOwn", "proj": 35.0, "salary": 6500, "own_proj": 2.0},
+            {"player_name": "HighOwn", "proj": 35.0, "salary": 8500, "own_proj": 30.0},
         ])
         lu = pd.DataFrame([
             {"player_name": "LowOwn", "lineup_index": 1},
