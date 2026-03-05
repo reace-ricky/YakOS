@@ -400,15 +400,19 @@ def main() -> None:
         slate_date = st.date_input("Date", value=pd.to_datetime(_today))
         slate_date_str = str(slate_date)
 
-    # Clear cached pool when date changes to prevent stale data
+    # Clear cached pool when date or sport changes to prevent stale data
     _prev_date = st.session_state.get("_hub_prev_date")
-    if _prev_date and _prev_date != slate_date_str:
+    _prev_sport = st.session_state.get("_hub_prev_sport")
+    _date_changed = _prev_date is not None and _prev_date != slate_date_str
+    _sport_changed = _prev_sport is not None and _prev_sport != sport
+    if _date_changed or _sport_changed:
         for key in ["_hub_pool", "_hub_rules", "_hub_draft_group_id"]:
             st.session_state.pop(key, None)
-        # Also clear lobby cache for old date
-        old_lobby_key = f"_hub_lobby_{sport}_{_prev_date}"
+        # Clear lobby cache keyed to the previous sport + previous date
+        old_lobby_key = f"_hub_lobby_{_prev_sport or sport}_{_prev_date or slate_date_str}"
         st.session_state.pop(old_lobby_key, None)
     st.session_state["_hub_prev_date"] = slate_date_str
+    st.session_state["_hub_prev_sport"] = sport
 
     # Read Tank01 RapidAPI key from secrets (not prompted on this page)
     rapidapi_key = st.secrets.get("TANK01_RAPIDAPI_KEY")
@@ -479,7 +483,7 @@ def main() -> None:
                 "Draft Group ID",
                 min_value=0,
                 step=1,
-                value=int(_debug_draft_group_id or slate.draft_group_id or 0),
+                value=int(_debug_draft_group_id or 0),
                 help="DraftKings draft group ID (visible in DK contest URLs). Overrides lobby selection.",
                 key="_hub_dg_manual",
             )
