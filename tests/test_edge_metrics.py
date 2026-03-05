@@ -1,10 +1,18 @@
-"""Tests for yak_core/edge.py – compute_edge_metrics."""
+"""Tests for yak_core/edge.py – compute_edge_metrics
+and yak_core/edge_metrics.py – Ricky Confidence helpers.
+"""
 from __future__ import annotations
 
 import pandas as pd
 import pytest
 
 from yak_core.edge import compute_edge_metrics, EDGE_DF_COLUMNS
+from yak_core.edge_metrics import (
+    compute_player_confidence,
+    compute_pool_confidence,
+    compute_ricky_confidence_for_contest,
+    get_confidence_color,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -132,3 +140,110 @@ class TestComputeEdgeMetrics:
         result = compute_edge_metrics(pool)
         assert len(result) == 1
         assert result.iloc[0]["player_name"] == "Solo"
+
+
+# ---------------------------------------------------------------------------
+# yak_core/edge_metrics.py — Ricky Confidence helpers
+# ---------------------------------------------------------------------------
+
+class TestComputePlayerConfidence:
+    def test_high_smash_low_bust_high_confidence(self):
+        row = pd.Series({"proj": 30.0, "floor": 20.0, "ceil": 40.0, "smash_prob": 0.7, "bust_prob": 0.1})
+        score = compute_player_confidence(row)
+        assert score > 0.7
+
+    def test_high_bust_low_smash_low_confidence(self):
+        row = pd.Series({"proj": 30.0, "floor": 10.0, "ceil": 50.0, "smash_prob": 0.1, "bust_prob": 0.8})
+        score = compute_player_confidence(row)
+        assert score < 0.4
+
+    def test_zero_proj_returns_zero(self):
+        row = pd.Series({"proj": 0.0, "floor": 0.0, "ceil": 10.0, "smash_prob": 0.5, "bust_prob": 0.1})
+        assert compute_player_confidence(row) == 0.0
+
+    def test_result_within_0_and_1(self):
+        row = pd.Series({"proj": 25.0, "floor": 18.0, "ceil": 35.0, "smash_prob": 0.5, "bust_prob": 0.2})
+        score = compute_player_confidence(row)
+        assert 0.0 <= score <= 1.0
+
+    def test_percentage_probabilities_normalized(self):
+        """smash/bust values > 1 (i.e., 0–100 scale) are normalized."""
+        row = pd.Series({"proj": 30.0, "floor": 20.0, "ceil": 40.0, "smash_prob": 70.0, "bust_prob": 10.0})
+        score = compute_player_confidence(row)
+        assert score > 0.7
+
+
+class TestComputePoolConfidence:
+    def test_returns_series_same_length(self):
+        pool = pd.DataFrame({
+            "proj": [20.0, 30.0, 0.0],
+            "floor": [14.0, 22.0, 0.0],
+            "ceil": [28.0, 40.0, 10.0],
+            "smash_prob": [0.5, 0.7, 0.0],
+            "bust_prob": [0.2, 0.1, 0.0],
+        })
+        result = compute_pool_confidence(pool)
+        assert isinstance(result, pd.Series)
+        assert len(result) == len(pool)
+
+    def test_zero_proj_rows_score_zero(self):
+        pool = pd.DataFrame({
+            "proj": [0.0],
+            "floor": [0.0],
+            "ceil": [10.0],
+            "smash_prob": [0.5],
+            "bust_prob": [0.1],
+        })
+        result = compute_pool_confidence(pool)
+        assert result.iloc[0] == 0.0
+
+
+class TestComputeRickyConfidenceForContest:
+    def test_core_value_and_leverage_combined(self):
+        payload = {
+            "core_value_players": [{"confidence": 0.8}] * 5,
+            "leverage_players": [{"confidence": 0.6}] * 3,
+        }
+        score = compute_ricky_confidence_for_contest(payload)
+        # 0.6 * 0.8 + 0.4 * 0.6 = 0.72  → 72.0
+        assert 71.0 <= score <= 75.0
+
+    def test_empty_payload_returns_zero(self):
+        assert compute_ricky_confidence_for_contest({}) == 0.0
+
+    def test_only_core_value_players(self):
+        payload = {"core_value_players": [{"confidence": 0.9}]}
+        score = compute_ricky_confidence_for_contest(payload)
+        assert score == pytest.approx(90.0, abs=1.0)
+
+    def test_only_leverage_players(self):
+        payload = {"leverage_players": [{"confidence": 0.5}]}
+        score = compute_ricky_confidence_for_contest(payload)
+        assert score == pytest.approx(50.0, abs=1.0)
+
+    def test_result_between_0_and_100(self):
+        payload = {
+            "core_value_players": [{"confidence": 1.0}] * 3,
+            "leverage_players": [{"confidence": 1.0}] * 3,
+        }
+        assert 0.0 <= compute_ricky_confidence_for_contest(payload) <= 100.0
+
+
+class TestGetConfidenceColor:
+    def test_high_score_green(self):
+        assert get_confidence_color(85) == "green"
+
+    def test_mid_score_yellow(self):
+        assert get_confidence_color(65) == "yellow"
+
+    def test_low_score_red(self):
+        assert get_confidence_color(40) == "red"
+
+    def test_boundary_80_green(self):
+        assert get_confidence_color(80) == "green"
+
+    def test_boundary_60_yellow(self):
+        assert get_confidence_color(60) == "yellow"
+
+    def test_boundary_59_red(self):
+        assert get_confidence_color(59) == "red"
