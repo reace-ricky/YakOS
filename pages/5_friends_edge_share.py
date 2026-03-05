@@ -1,16 +1,13 @@
-"""Friends / Edge Share – YakOS Sprint 1 page.
+"""Edge Share – YakOS page.
 
-Responsibilities (S1.6)
------------------------
-- Read-only view of published lineups by contest type.
-- Show Ricky's edge analysis: slate notes, edge labels, core/value/fade
-  reasoning.
-- Simple lineup builder for friends constrained to Ricky's tagged pool.
-- Show last updated timestamps and late swap status.
+Responsibilities
+----------------
+- Read-only view of Ricky's Edge Analysis and Optimizer results.
+- Cross-contest Ricky Confidence strip (one pill per contest with data).
+- Per-contest blocks: Edge Analysis (left) + Optimizer/lineups (right).
 
 State read: LineupSetState (published_sets), RickyEdgeState, SlateState
-State written: None (read-only for published data; friend builder writes to
-               a local session key only)
+State written: None (fully read-only)
 """
 
 from __future__ import annotations
@@ -32,18 +29,24 @@ from yak_core.state import (  # noqa: E402
     get_sim_state,
 )
 from yak_core.components import render_lineup_cards_paged  # noqa: E402
+from yak_core.edge_metrics import (  # noqa: E402
+    compute_ricky_confidence_for_contest,
+    get_confidence_color,
+)
+from yak_core.config import CONTEST_PRESETS  # noqa: E402
+
+# Fixed display order — must use the canonical labels from CONTEST_PRESETS
+CONTEST_ORDER = [
+    "50/50 / Double-Up",
+    "Single Entry / 3-Max",
+    "GPP - 20 Max",
+    "GPP - 150 Max",
+    "Showdown",
+]
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-_TAG_COLORS = {
-    "core": "🟢",
-    "secondary": "🔵",
-    "value": "🟡",
-    "punt": "⚪",
-    "fade": "🔴",
-}
 
 
 def _render_status_bar(slate: "SlateState") -> None:
@@ -58,246 +61,202 @@ def _render_status_bar(slate: "SlateState") -> None:
         st.metric("Contest", slate.contest_type or "—")
     with cols[4]:
         if slate.active_layers:
-            chips = " ".join(f"`{l}`" for l in slate.active_layers)
+            chips = " ".join(f"`{layer}`" for layer in slate.active_layers)
             st.markdown(f"**Layers:** {chips}")
 
 
-def _render_edge_panel(edge: "RickyEdgeState") -> None:
-    """Read-only display of Ricky's edge analysis."""
-    st.subheader("🎯 Ricky's Edge Analysis")
+def _render_confidence_strip(edge: "RickyEdgeState") -> None:
+    """Render the cross-contest Ricky Confidence strip."""
+    available_contests = [c for c in CONTEST_ORDER if c in edge.edge_analysis_by_contest]
 
-    if edge.slate_notes:
-        st.markdown(f"**Slate Notes:** {edge.slate_notes}")
-
-    if edge.edge_labels:
-        st.markdown("**Edge Labels:**")
-        for lbl in edge.edge_labels:
-            st.markdown(f"- {lbl}")
-
-    if edge.player_tags:
-        st.markdown("**Player Tags:**")
-        for tag_type in ["core", "secondary", "value", "punt", "fade"]:
-            tagged = edge.get_tagged(tag_type)
-            if tagged:
-                icon = _TAG_COLORS.get(tag_type, "")
-                st.markdown(f"{icon} **{tag_type.title()}:** {', '.join(tagged)}")
-
-    if edge.stacks:
-        st.markdown("**Stacks:**")
-        for s in edge.stacks:
-            players_str = ", ".join(s.get("players", []))
-            rationale = s.get("rationale", "")
-            st.markdown(f"- **{s.get('team', '')}**: {players_str}" + (f" — {rationale}" if rationale else ""))
-
-
-def _render_lineup_card(lu_df: pd.DataFrame, lineup_index: int) -> None:
-    """Render a single lineup card (legacy shim — delegates to shared component)."""
-    from yak_core.components import render_lineup_card  # noqa: PLC0415
-    if "lineup_index" not in lu_df.columns:
+    if not available_contests:
+        st.info("No edge analysis published yet. Run Edge Analysis on Ricky Edge to populate this view.")
         return
-    lu = lu_df[lu_df["lineup_index"] == lineup_index]
-    render_lineup_card(lineup_rows=lu, sim_metrics=None, show_rating=False)
+
+    st.subheader("🎯 Ricky Confidence by Contest")
+    cols = st.columns(len(available_contests))
+    for col, contest_label in zip(cols, available_contests, strict=True):
+        payload = edge.edge_analysis_by_contest[contest_label]
+        score = compute_ricky_confidence_for_contest(payload)
+        color = get_confidence_color(score)
+        with col:
+            if color == "green":
+                st.success(f"**{contest_label}**\n\nConfidence: {score:.0f}/100")
+            elif color == "yellow":
+                st.warning(f"**{contest_label}**\n\nConfidence: {score:.0f}/100")
+            else:
+                st.error(f"**{contest_label}**\n\nConfidence: {score:.0f}/100")
+
+
+def _render_edge_analysis_col(edge: "RickyEdgeState", contest_label: str) -> None:
+    """Render the left (Edge Analysis) column for a single contest block."""
+    st.markdown("#### 🎯 Ricky's Edge Analysis")
+
+    payload = edge.edge_analysis_by_contest.get(contest_label)
+    if payload is None:
+        st.info("No edge analysis for this contest type yet.")
+        return
+
+    summary = payload.get("edge_summary", "")
+    if summary:
+        st.markdown(summary)
+
+    core_value = payload.get("core_value_players", [])
+    leverage = payload.get("leverage_players", [])
+    fades = payload.get("fade_players", [])
+
+    _PLAYER_COLS = ["Player", "Team", "Salary", "Proj", "Ceil", "Own", "Confidence", "Tag", "Suggestion"]
+
+    def _to_df(players: list) -> pd.DataFrame:
+        if not players:
+            return pd.DataFrame(columns=_PLAYER_COLS)
+        rows = []
+        for p in players:
+            if not isinstance(p, dict):
+                continue
+            rows.append({
+                "Player": p.get("player_name", p.get("Player", "")),
+                "Team": p.get("team", p.get("Team", "")),
+                "Salary": p.get("salary", p.get("Salary", "")),
+                "Proj": p.get("proj", p.get("Proj", "")),
+                "Ceil": p.get("ceil", p.get("Ceil", "")),
+                "Own": p.get("own", p.get("Own", p.get("own_pct", ""))),
+                "Confidence": p.get("confidence", p.get("Confidence", "")),
+                "Tag": p.get("tag", p.get("Tag", "")),
+                "Suggestion": p.get("suggestion", p.get("Suggestion", "")),
+            })
+        return pd.DataFrame(rows, columns=_PLAYER_COLS)
+
+    tab1, tab2, tab3 = st.tabs(["Core & Value", "Leverage", "Fades / Risky Chalk"])
+    with tab1:
+        df = _to_df(core_value)
+        if df.empty:
+            st.caption("No core/value players tagged.")
+        else:
+            st.dataframe(df, use_container_width=True, hide_index=True)
+    with tab2:
+        df = _to_df(leverage)
+        if df.empty:
+            st.caption("No leverage players tagged.")
+        else:
+            st.dataframe(df, use_container_width=True, hide_index=True)
+    with tab3:
+        df = _to_df(fades)
+        if df.empty:
+            st.caption("No fade players tagged.")
+        else:
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
+    warnings = payload.get("contest_fit_warnings", [])
+    for w in warnings:
+        st.caption(f"⚠️ {w}")
+
+
+def _render_optimizer_col(
+    lu_state: "LineupSetState",
+    sim_state: "SimState",
+    slate: "SlateState",
+    contest_label: str,
+) -> None:
+    """Render the right (Optimizer) column for a single contest block."""
+    st.markdown("#### ⚡ Ricky's Optimizer")
+
+    pub = lu_state.published_sets.get(contest_label)
+    if pub is None:
+        st.info("No lineups published for this contest type.")
+        return
+
+    pub_ts = pub.get("published_at", "")
+    if pub_ts:
+        st.caption(f"Published: {pub_ts}")
+
+    config = pub.get("config", {})
+    if config:
+        st.caption(
+            f"Mode: {config.get('build_mode', '?')} | "
+            f"Lineups: {config.get('num_lineups', '?')}"
+        )
+
+    pub_df: pd.DataFrame = pub.get("lineups_df", pd.DataFrame())
+    if pub_df.empty:
+        st.info("No lineup data.")
+        return
+
+    # Fall back to "GPP_20" — the internal sim key for GPP - 20 Max runs, which is
+    # the most common contest type and a reasonable proxy when the exact label is absent.
+    pipeline_df = (
+        sim_state.pipeline_output.get(contest_label)
+        or sim_state.pipeline_output.get("GPP_20")
+    )
+
+    render_lineup_cards_paged(
+        lineups_df=pub_df,
+        sim_results_df=pipeline_df,
+        salary_cap=slate.salary_cap,
+        nav_key=f"es_{contest_label}",
+    )
 
 
 # ---------------------------------------------------------------------------
 # Main page
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
-    st.title("👥 Friends / Edge Share")
-    st.caption("View Ricky's published lineups and build your own from his tagged pool.")
+    st.title("📊 Edge Share")
+    st.caption("Ricky's Edge Analysis and Optimizer results — all contest types.")
 
     slate = get_slate_state()
     edge = get_edge_state()
     lu_state = get_lineup_state()
+    sim_state = get_sim_state()
 
     _render_status_bar(slate)
     st.divider()
 
-    # ── Published lineup status ───────────────────────────────────────────
-    published_labels = lu_state.get_published_labels()
+    # Determine which contests have data (edge analysis OR published lineups)
+    contests_with_data = [
+        c for c in CONTEST_ORDER
+        if c in edge.edge_analysis_by_contest or c in lu_state.published_sets
+    ]
 
-    if not published_labels:
+    # Empty state
+    if not edge.edge_analysis_by_contest and not lu_state.published_sets:
         st.info(
-            "No lineups published yet. "
-            "Ricky needs to complete the Edge Check and publish lineups in **Build & Publish**."
+            "No Edge Share data yet. Run Edge Analysis on Ricky Edge and publish "
+            "lineups from Build & Publish."
         )
-    else:
-        # Show late swap status
-        injury_updates = st.session_state.get("_hub_injury_updates", [])
-        if injury_updates:
-            st.warning(f"⚠️ **Late Swap Active** — {len(injury_updates)} injury updates since last publish.")
-        else:
-            st.success("✅ No late swap flags.")
-
-    st.divider()
-
-    # ─────────────────────────────────────────────────────────────────────
-    # Section 1: Ricky's Edge Analysis (read-only)
-    # ─────────────────────────────────────────────────────────────────────
-    _render_edge_panel(edge)
-
-    # Show centralized edge_df (Best Tournament Plays) if available
-    _friends_edge_df = slate.edge_df
-    if _friends_edge_df is not None and not _friends_edge_df.empty:
-        with st.expander("📈 Best Tournament Plays (Edge Metrics)", expanded=False):
-            _show_cols = [c for c in ["player_name", "salary", "proj", "own_pct",
-                                       "leverage", "smash_prob", "bust_prob",
-                                       "edge_score", "edge_label"]
-                          if c in _friends_edge_df.columns]
-            st.dataframe(
-                _friends_edge_df[_show_cols].head(20),
-                use_container_width=True,
-                hide_index=True,
-            )
-
-    st.divider()
-
-    # ─────────────────────────────────────────────────────────────────────
-    # Section 2: Published Lineups by Contest Type (read-only)
-    # ─────────────────────────────────────────────────────────────────────
-    st.subheader("📋 Published Lineups")
-
-    if not published_labels:
-        st.info("No published lineups available.")
-    else:
-        tab_labels = published_labels
-        tabs = st.tabs(tab_labels)
-
-        for tab, label in zip(tabs, tab_labels):
-            with tab:
-                pub = lu_state.published_sets.get(label, {})
-                pub_df: pd.DataFrame = pub.get("lineups_df", pd.DataFrame())
-                pub_ts = pub.get("published_at", "")
-                pub_config = pub.get("config", {})
-
-                # Timestamp and metadata
-                if pub_ts:
-                    st.caption(f"📅 Published: {pub_ts}")
-                if pub_config:
-                    st.caption(
-                        f"Build mode: {pub_config.get('build_mode', '?')} | "
-                        f"Archetype: {pub_config.get('archetype', '?')} | "
-                        f"# Lineups: {pub_config.get('num_lineups', '?')}"
-                    )
-
-                if pub_df.empty:
-                    st.info("No lineup data.")
-                    continue
-
-                n_lineups = len(pub_df["lineup_index"].unique()) if "lineup_index" in pub_df.columns else 0
-                st.markdown(f"**{n_lineups} lineup(s)**")
-
-                # Pull pipeline metrics from SimState if available
-                sim_state = get_sim_state()
-                pipeline_df = sim_state.pipeline_output.get(label) or sim_state.pipeline_output.get("GPP_20")
-
-                render_lineup_cards_paged(
-                    lineups_df=pub_df,
-                    sim_results_df=pipeline_df,
-                    salary_cap=slate.salary_cap,
-                    nav_key=f"fes_lu_{label}",
-                )
-
-    st.divider()
-
-    # ─────────────────────────────────────────────────────────────────────
-    # Section 3: Friend Lineup Builder
-    # ─────────────────────────────────────────────────────────────────────
-    st.subheader("🛠️ Friend Lineup Builder")
-    st.caption(
-        "Build your own lineup constrained to Ricky's tagged pool. "
-        "Only core / secondary / value players are available."
-    )
-
-    pool: pd.DataFrame = slate.player_pool if slate.player_pool is not None else pd.DataFrame()
-
-    if pool.empty:
-        st.info("No player pool available. Ricky must publish a slate first.")
         return
 
-    # Filter to Ricky's tagged pool (exclude fades/punts)
-    allowed_tags = {"core", "secondary", "value"}
-    tagged_players = {p for p, v in edge.player_tags.items() if v.get("tag") in allowed_tags}
-    fade_players = edge.get_tagged("fade")
+    # ── Cross-contest Ricky Confidence strip ──────────────────────────────
+    _render_confidence_strip(edge)
+    st.divider()
 
-    if tagged_players:
-        filtered_pool = pool[
-            pool["player_name"].isin(tagged_players) &
-            ~pool["player_name"].isin(fade_players)
-        ].copy()
-        st.caption(f"Showing {len(filtered_pool)} tagged players (core/secondary/value)")
-    else:
-        # No tags yet — show full pool but exclude fades
-        filtered_pool = pool[~pool["player_name"].isin(fade_players)].copy()
-        st.caption(f"No tags set yet. Showing all {len(filtered_pool)} non-faded players.")
+    # ── Per-contest blocks ─────────────────────────────────────────────────
+    for contest_label in contests_with_data:
+        preset = CONTEST_PRESETS.get(contest_label, {})
+        desc = preset.get("description", "")
+        pool_min = preset.get("pool_size_min", "?")
+        pool_max = preset.get("pool_size_max", "?")
+        own_min = preset.get("target_avg_ownership_min")
+        own_max = preset.get("target_avg_ownership_max")
 
-    if filtered_pool.empty:
-        st.info("No players in tagged pool. Ricky needs to tag players in **Ricky Edge**.")
-        return
+        st.markdown(f"### {contest_label}")
+        caption_parts = []
+        if desc:
+            caption_parts.append(desc)
+        caption_parts.append(f"Target pool: {pool_min}–{pool_max}")
+        if own_min is not None:
+            caption_parts.append(f"Avg own: {own_min}–{own_max}%")
+        st.caption(" | ".join(caption_parts))
 
-    # Show available pool
-    pool_display_cols = [c for c in ["player_name", "pos", "team", "salary", "proj", "ceil", "ownership"] if c in filtered_pool.columns]
-    display_pool = filtered_pool[pool_display_cols].sort_values("proj", ascending=False).copy()
-    _float_cols = [c for c in ["proj", "ceil", "ownership"] if c in display_pool.columns]
-    if _float_cols:
-        display_pool[_float_cols] = display_pool[_float_cols].round(1)
-    if "salary" in display_pool.columns:
-        display_pool["salary"] = pd.to_numeric(display_pool["salary"], errors="coerce").fillna(0).astype(int)
-    st.dataframe(display_pool, use_container_width=True, hide_index=True)
+        left_col, right_col = st.columns(2)
+        with left_col:
+            _render_edge_analysis_col(edge, contest_label)
+        with right_col:
+            _render_optimizer_col(lu_state, sim_state, slate, contest_label)
 
-    # Friend's lineup builder — manual player selection
-    st.markdown("**Pick your lineup:**")
-    slots = slate.roster_slots or ["PG", "SG", "SF", "PF", "C", "G", "F", "UTIL"]
-    salary_cap = slate.salary_cap or 50000
-
-    player_choices = [""] + sorted(filtered_pool["player_name"].dropna().tolist())
-    friend_lineup: list[dict] = []
-    total_salary = 0
-
-    with st.form("_fes_builder_form"):
-        for slot in slots:
-            col_a, col_b = st.columns([3, 1])
-            with col_a:
-                pick = st.selectbox(slot, player_choices, key=f"_fes_{slot}_pick")
-            with col_b:
-                if pick and "salary" in filtered_pool.columns:
-                    sal = filtered_pool[filtered_pool["player_name"] == pick]["salary"].values
-                    sal_val = int(sal[0]) if len(sal) > 0 else 0
-                    st.caption(f"${sal_val:,}")
-                    total_salary += sal_val
-                else:
-                    st.caption("")
-
-            if pick:
-                friend_lineup.append({"slot": slot, "player_name": pick})
-
-        submitted = st.form_submit_button("📊 Evaluate Lineup")
-
-    if submitted and friend_lineup:
-        total_salary = 0
-        total_proj = 0.0
-        for entry in friend_lineup:
-            pname = entry["player_name"]
-            row = filtered_pool[filtered_pool["player_name"] == pname]
-            if not row.empty:
-                total_salary += int(row.iloc[0].get("salary", 0) or 0)
-                total_proj += float(row.iloc[0].get("proj", 0) or 0)
-
-        col_a, col_b, col_c = st.columns(3)
-        with col_a:
-            st.metric("Total Salary", f"${total_salary:,}")
-        with col_b:
-            st.metric("Cap Remaining", f"${salary_cap - total_salary:,}")
-        with col_c:
-            st.metric("Projected Points", f"{total_proj:.1f}")
-
-        if total_salary > salary_cap:
-            st.error(f"❌ Over salary cap by ${total_salary - salary_cap:,}. Adjust your picks.")
-        elif len(friend_lineup) == len(slots):
-            st.success("✅ Valid lineup! You're within the salary cap.")
-        else:
-            st.warning(f"Fill all {len(slots)} slots to complete your lineup.")
+        st.divider()
 
 
 main()
