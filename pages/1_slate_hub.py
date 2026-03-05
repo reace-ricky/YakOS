@@ -49,6 +49,7 @@ from yak_core.rg_loader import load_rg_projections, merge_rg_with_pool  # noqa: 
 from yak_core.config import (  # noqa: E402
     CONTEST_PRESETS,
     CONTEST_PRESET_LABELS,
+    get_pool_size_range,
     merge_config,
     DK_POS_SLOTS,
     DK_LINEUP_SIZE,
@@ -721,6 +722,25 @@ def main() -> None:
             hide_index=True,
         )
 
+        # ── Pool Size Gauge ───────────────────────────────────────────────
+        pool_count = len(hub_pool)
+        pmin, pmax = get_pool_size_range(contest_type_label)
+        if pmin <= pool_count <= pmax:
+            st.success(
+                f"✅ {pool_count} players — in range for {contest_type_label}"
+                f" (target {pmin}–{pmax})"
+            )
+        elif pool_count < pmin:
+            st.warning(
+                f"⚠️ {pool_count} players — below target for {contest_type_label}"
+                f" (need {pmin}–{pmax}). Edge may be too concentrated."
+            )
+        else:
+            st.warning(
+                f"⚠️ {pool_count} players — above target for {contest_type_label}"
+                f" (target {pmin}–{pmax}). Edge may be diluted."
+            )
+
         if hub_rules:
             with st.expander("Roster Rules", expanded=False):
                 st.json(hub_rules)
@@ -793,6 +813,12 @@ def main() -> None:
 
             if hub_rules:
                 slate.apply_roster_rules(hub_rules)
+
+            # Store the full contest type label (e.g. "GPP - 150 Max") so
+            # downstream pages can read it from SlateState.contest_type.
+            # apply_roster_rules sets contest_type to "Classic"/"Showdown Captain",
+            # so we overwrite it with the user-selected preset label here.
+            slate.contest_type = contest_type_label
 
             # Publish the filtered pool (game filter applied) rather than the
             # raw session-state pool so Lab and other pages see the same set.
