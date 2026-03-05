@@ -406,10 +406,17 @@ def main() -> None:
     _date_changed = _prev_date is not None and _prev_date != slate_date_str
     _sport_changed = _prev_sport is not None and _prev_sport != sport
     if _date_changed or _sport_changed:
-        for key in ["_hub_pool", "_hub_rules", "_hub_draft_group_id"]:
+        # Clear previous date's cached pool data (date-scoped keys) to free memory
+        _stale_date = _prev_date or slate_date_str
+        _stale_sport = _prev_sport or sport
+        for key in [
+            f"_hub_pool_{_stale_date}",
+            f"_hub_rules_{_stale_date}",
+            f"_hub_draft_group_id_{_stale_date}",
+        ]:
             st.session_state.pop(key, None)
         # Clear lobby cache keyed to the previous sport + previous date
-        old_lobby_key = f"_hub_lobby_{_prev_sport or sport}_{_prev_date or slate_date_str}"
+        old_lobby_key = f"_hub_lobby_{_stale_sport}_{_stale_date}"
         st.session_state.pop(old_lobby_key, None)
     st.session_state["_hub_prev_date"] = slate_date_str
     st.session_state["_hub_prev_sport"] = sport
@@ -679,9 +686,9 @@ def main() -> None:
                     if _removed:
                         st.caption(f"ℹ️ {_removed} player(s) removed (OUT/DND/IR or 0 proj minutes).")
 
-                    st.session_state["_hub_pool"] = pool
-                    st.session_state["_hub_rules"] = parsed_rules
-                    st.session_state["_hub_draft_group_id"] = draft_group_id
+                    st.session_state[f"_hub_pool_{slate_date_str}"] = pool
+                    st.session_state[f"_hub_rules_{slate_date_str}"] = parsed_rules
+                    st.session_state[f"_hub_draft_group_id_{slate_date_str}"] = draft_group_id
                     st.success(f"Loaded {len(pool)} players. Roster: {parsed_rules['slots']}")
                     # Sanity check: warn if draft group changed from what was previously published
                     if draft_group_id and slate.draft_group_id and draft_group_id != slate.draft_group_id:
@@ -693,8 +700,8 @@ def main() -> None:
                 st.error(f"Failed to load player pool: {exc}")
 
     # ── Pool Preview ──────────────────────────────────────────────────────
-    hub_pool: Optional[pd.DataFrame] = st.session_state.get("_hub_pool")
-    hub_rules: Optional[dict] = st.session_state.get("_hub_rules")
+    hub_pool: Optional[pd.DataFrame] = st.session_state.get(f"_hub_pool_{slate_date_str}")
+    hub_rules: Optional[dict] = st.session_state.get(f"_hub_rules_{slate_date_str}")
 
     if hub_pool is not None:
         # ── Game Selector ─────────────────────────────────────────────────
@@ -775,8 +782,8 @@ def main() -> None:
                     st.session_state["_hub_rg_df"] = rg_df
                     st.success(f"RotoGrinders: {len(rg_df)} rows loaded.")
                     if st.button("Merge RG Projections into Pool"):
-                        merged = merge_rg_with_pool(st.session_state["_hub_pool"], rg_df)
-                        st.session_state["_hub_pool"] = merged
+                        merged = merge_rg_with_pool(st.session_state[f"_hub_pool_{slate_date_str}"], rg_df)
+                        st.session_state[f"_hub_pool_{slate_date_str}"] = merged
                         st.success(f"Merged RG data into pool ({len(merged)} rows).")
                         st.rerun()
                 except Exception as exc:
@@ -801,7 +808,7 @@ def main() -> None:
                             st.success(f"Fetched {len(updates)} injury updates.")
 
                             # Flag affected players in current pool
-                            pool_copy = st.session_state["_hub_pool"].copy()
+                            pool_copy = st.session_state[f"_hub_pool_{slate_date_str}"].copy()
                             affected = []
                             for update in updates:
                                 pname = update.get("player_name", "")
@@ -829,7 +836,7 @@ def main() -> None:
             slate.slate_date = slate_date_str
             slate.proj_source = proj_source
             slate.contest_name = contest_type_label
-            slate.draft_group_id = st.session_state.get("_hub_draft_group_id")
+            slate.draft_group_id = st.session_state.get(f"_hub_draft_group_id_{slate_date_str}")
 
             if hub_rules:
                 slate.apply_roster_rules(hub_rules)
