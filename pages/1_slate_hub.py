@@ -397,8 +397,18 @@ def main() -> None:
     with col2:
         from zoneinfo import ZoneInfo
         _today = pd.Timestamp.now(tz=ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
-        slate_date = st.date_input("Date", value=pd.to_datetime(slate.slate_date or _today))
+        slate_date = st.date_input("Date", value=pd.to_datetime(_today))
         slate_date_str = str(slate_date)
+
+    # Clear cached pool when date changes to prevent stale data
+    _prev_date = st.session_state.get("_hub_prev_date")
+    if _prev_date and _prev_date != slate_date_str:
+        for key in ["_hub_pool", "_hub_rules", "_hub_draft_group_id"]:
+            st.session_state.pop(key, None)
+        # Also clear lobby cache for old date
+        old_lobby_key = f"_hub_lobby_{sport}_{_prev_date}"
+        st.session_state.pop(old_lobby_key, None)
+    st.session_state["_hub_prev_date"] = slate_date_str
 
     # Read Tank01 RapidAPI key from secrets (not prompted on this page)
     rapidapi_key = st.secrets.get("TANK01_RAPIDAPI_KEY")
@@ -669,6 +679,12 @@ def main() -> None:
                     st.session_state["_hub_rules"] = parsed_rules
                     st.session_state["_hub_draft_group_id"] = draft_group_id
                     st.success(f"Loaded {len(pool)} players. Roster: {parsed_rules['slots']}")
+                    # Sanity check: warn if draft group changed from what was previously published
+                    if draft_group_id and slate.draft_group_id and draft_group_id != slate.draft_group_id:
+                        st.warning(
+                            f"⚠️ Draft Group changed from {slate.draft_group_id} to {draft_group_id}. "
+                            "Verify contest settings and re-publish the slate before building lineups."
+                        )
             except Exception as exc:
                 st.error(f"Failed to load player pool: {exc}")
 
