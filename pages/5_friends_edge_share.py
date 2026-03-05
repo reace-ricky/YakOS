@@ -182,6 +182,30 @@ def _render_optimizer_col(
         st.info("No lineup data.")
         return
 
+    boom_bust_df = pub.get("boom_bust_df")
+    exposure_df = pub.get("exposure_df")
+
+    # ── Boom/bust summary strip ────────────────────────────────────────────
+    if boom_bust_df is not None and not boom_bust_df.empty:
+        n_lineups = len(boom_bust_df)
+        n_ab = len(boom_bust_df[boom_bust_df["lineup_grade"].isin(["A", "B"])]) if "lineup_grade" in boom_bust_df.columns else 0
+        avg_boom = boom_bust_df["boom_score"].mean() if "boom_score" in boom_bust_df.columns else 0.0
+        avg_bust = boom_bust_df["bust_risk"].mean() if "bust_risk" in boom_bust_df.columns else 0.0
+
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.metric("Lineups", n_lineups)
+        with m2:
+            st.metric("A/B Grades", f"{n_ab}/{n_lineups}")
+        with m3:
+            st.metric("Avg Boom", f"{avg_boom:.0f}")
+
+        preset = CONTEST_PRESETS.get(contest_label, {})
+        if preset.get("tagging_mode") == "ceiling":
+            st.caption(f"GPP lineup set — {n_ab} high-ceiling lineups, avg bust risk {avg_bust:.0f}/100")
+        else:
+            st.caption(f"Cash lineup set — {n_ab} safe-floor lineups, avg bust risk {avg_bust:.0f}/100")
+
     # Fall back to "GPP_20" — the internal sim key for GPP - 20 Max runs, which is
     # the most common contest type and a reasonable proxy when the exact label is absent.
     pipeline_df = (
@@ -194,7 +218,21 @@ def _render_optimizer_col(
         sim_results_df=pipeline_df,
         salary_cap=slate.salary_cap,
         nav_key=f"es_{contest_label}",
+        boom_bust_df=boom_bust_df,
     )
+
+    # ── Exposure summary expander ──────────────────────────────────────────
+    if exposure_df is not None and not exposure_df.empty:
+        with st.expander("📊 Exposure Summary", expanded=False):
+            display_cols = [c for c in [
+                "player", "team", "salary", "your_exposure_pct",
+                "field_own_pct", "delta", "leverage_ratio",
+            ] if c in exposure_df.columns]
+            st.dataframe(
+                exposure_df[display_cols].head(25),
+                use_container_width=True,
+                hide_index=True,
+            )
 
 
 # ---------------------------------------------------------------------------

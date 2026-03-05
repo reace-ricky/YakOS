@@ -274,6 +274,18 @@ class LineupSetState:
                 "lineups_df": df.copy(),
                 "config": self.build_configs.get(contest_label, {}),
                 "published_at": ts,
+                "boom_bust_df": (
+                    self.boom_bust_rankings[contest_label].copy()
+                    if contest_label in self.boom_bust_rankings
+                    and self.boom_bust_rankings[contest_label] is not None
+                    else None
+                ),
+                "exposure_df": (
+                    self.exposures[contest_label].copy()
+                    if contest_label in self.exposures
+                    and self.exposures[contest_label] is not None
+                    else None
+                ),
             }
             self.snapshot_times[contest_label] = ts
 
