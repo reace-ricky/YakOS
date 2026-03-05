@@ -296,5 +296,12 @@ def main() -> None:
 
         st.divider()
 
+    # ── Friend lineup builder ─────────────────────────────────────────────
+    st.warning(
+        "⚠️ **Friend Lineup Builder not yet wired.** "
+        "The simple lineup builder constrained to Ricky's tagged pool (S1.6) "
+        "is pending implementation. Use Build & Publish to build your lineups."
+    )
+
 
 main()

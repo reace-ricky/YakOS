@@ -79,7 +79,7 @@ def main() -> None:
     st.title("🎯 Ricky Edge")
     st.caption("Tag players, environments, and stacks for this slate.")
 
-    # Nav order: Slate Hub → The Lab → Ricky Edge → Build & Publish → Friends / Edge Share
+    # Nav order: Slate Hub → Ricky Edge → The Lab → Build & Publish → Friends / Edge Share
     slate = get_slate_state()
     edge = get_edge_state()
     _render_status_bar(slate, edge)
