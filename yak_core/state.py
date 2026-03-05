@@ -25,6 +25,14 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 # ---------------------------------------------------------------------------
+# Type alias used by RickyEdgeState helper methods
+# ---------------------------------------------------------------------------
+# Keys: "edge_summary" (str), "core_value_players" (list[dict]),
+#        "leverage_players" (list[dict]), "fade_players" (list[dict]),
+#        "contest_fit_warnings" (list[str])
+_EdgePayload = Dict[str, Any]
+
+# ---------------------------------------------------------------------------
 # SlateState
 # ---------------------------------------------------------------------------
 
@@ -129,6 +137,38 @@ class RickyEdgeState:
     edge_check_ts: str = ""
     approved_not_with_pairs: List[Dict[str, str]] = field(default_factory=list)
 
+    # ------------------------------------------------------------------
+    # Step 5 extensions — contest-goal auto-tagging & confidence
+    # ------------------------------------------------------------------
+
+    # Auto-generated tags from contest-goal analysis (Step 3A)
+    auto_tags: Dict[str, str] = field(default_factory=dict)
+    # {player_name: "core"|"value"|"leverage"|"fade"|"neutral"}
+
+    auto_tag_reasons: Dict[str, str] = field(default_factory=dict)
+    # {player_name: "gpp_leverage: high ceiling, low ownership"}
+
+    confidence_scores: Dict[str, float] = field(default_factory=dict)
+    # {player_name: 0.0–1.0 confidence score}
+
+    # Manual overrides (Step 3B) — separate from existing player_tags
+    player_tags_manual: Dict[str, str] = field(default_factory=dict)
+    # {player_name: "core"|"value"|"leverage"|"fade"|"neutral"}
+    # Empty means "use auto_tag"
+
+    # Edge Analysis payloads keyed by contest label (Step 4)
+    edge_analysis_by_contest: Dict[str, _EdgePayload] = field(default_factory=dict)
+    # {contest_label: {
+    #     "edge_summary": str,
+    #     "core_value_players": list[dict],
+    #     "leverage_players": list[dict],
+    #     "fade_players": list[dict],
+    #     "contest_fit_warnings": list[str],
+    # }}
+
+    edge_suggestions_dismissed: Dict[str, List[str]] = field(default_factory=dict)
+    # {contest_label: [player_name, ...]} — dismissed suggestions per contest
+
     def tag_player(self, player_name: str, tag: str, conviction: int = 3) -> None:
         """Set tag and conviction for a player."""
         self.player_tags[player_name] = {"tag": tag, "conviction": max(1, min(5, conviction))}
@@ -154,6 +194,46 @@ class RickyEdgeState:
         """Revoke the Ricky Edge Check approval."""
         self.ricky_edge_check = False
         self.edge_check_ts = ""
+
+    # ------------------------------------------------------------------
+    # Step 5 helper methods
+    # ------------------------------------------------------------------
+
+    def get_effective_tag(self, player_name: str) -> str:
+        """Return manual tag if present, else auto_tag, else 'neutral'."""
+        if player_name in self.player_tags_manual:
+            return self.player_tags_manual[player_name]
+        return self.auto_tags.get(player_name, "neutral")
+
+    def get_effective_tags_df(self, player_names: List[str]) -> pd.DataFrame:
+        """Return DataFrame with player_name, auto_tag, manual_tag, effective_tag, confidence."""
+        rows = []
+        for p in player_names:
+            rows.append({
+                "player_name": p,
+                "auto_tag": self.auto_tags.get(p, "neutral"),
+                "manual_tag": self.player_tags_manual.get(p),
+                "effective_tag": self.get_effective_tag(p),
+                "confidence": self.confidence_scores.get(p, 0.0),
+                "auto_tag_reason": self.auto_tag_reasons.get(p, ""),
+                "is_manual_override": p in self.player_tags_manual,
+            })
+        return pd.DataFrame(rows)
+
+    def set_edge_analysis(self, contest_label: str, payload: dict) -> None:
+        """Store a Step 4 edge analysis payload for a contest type."""
+        self.edge_analysis_by_contest[contest_label] = payload
+
+    def dismiss_suggestion(self, contest_label: str, player_name: str) -> None:
+        """Mark a suggestion as dismissed for a contest type."""
+        if contest_label not in self.edge_suggestions_dismissed:
+            self.edge_suggestions_dismissed[contest_label] = []
+        if player_name not in self.edge_suggestions_dismissed[contest_label]:
+            self.edge_suggestions_dismissed[contest_label].append(player_name)
+
+    def reset_manual_overrides(self) -> None:
+        """Clear all manual tag overrides."""
+        self.player_tags_manual.clear()
 
 
 # ---------------------------------------------------------------------------
