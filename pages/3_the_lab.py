@@ -224,7 +224,7 @@ def main() -> None:
     st.title("🧪 The Lab")
     st.caption("Run sims, analyze edge, calibrate projections.")
 
-    # Nav order: Slate Hub → The Lab → Ricky Edge → Build & Publish → Friends / Edge Share
+    # Nav order: Slate Hub → Ricky Edge → The Lab → Build & Publish → Friends / Edge Share
     slate = get_slate_state()
     edge = get_edge_state()
     sim = get_sim_state()

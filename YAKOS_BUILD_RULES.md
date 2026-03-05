@@ -92,7 +92,7 @@
 
 - [x] Read-only view of published lineups by contest type with ◀ ▶ navigation
 - [x] Ricky's edge analysis: slate notes, edge labels, core / value / fade reasoning
-- [x] Simple lineup builder for friends constrained to Ricky's tagged pool
+- [ ] Simple lineup builder for friends constrained to Ricky's tagged pool (pending — visible warning shown in UI)
 - [x] Last updated timestamps and late swap status banner
 
 ---

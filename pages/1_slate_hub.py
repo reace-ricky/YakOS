@@ -400,27 +400,6 @@ def main() -> None:
         slate_date = st.date_input("Date", value=pd.to_datetime(_today))
         slate_date_str = str(slate_date)
 
-    # Clear cached pool when date or sport changes to prevent stale data
-    _prev_date = st.session_state.get("_hub_prev_date")
-    _prev_sport = st.session_state.get("_hub_prev_sport")
-    _date_changed = _prev_date is not None and _prev_date != slate_date_str
-    _sport_changed = _prev_sport is not None and _prev_sport != sport
-    if _date_changed or _sport_changed:
-        # Clear previous date's cached pool data (date-scoped keys) to free memory
-        _stale_date = _prev_date or slate_date_str
-        _stale_sport = _prev_sport or sport
-        for key in [
-            f"_hub_pool_{_stale_date}",
-            f"_hub_rules_{_stale_date}",
-            f"_hub_draft_group_id_{_stale_date}",
-        ]:
-            st.session_state.pop(key, None)
-        # Clear lobby cache keyed to the previous sport + previous date
-        old_lobby_key = f"_hub_lobby_{_stale_sport}_{_stale_date}"
-        st.session_state.pop(old_lobby_key, None)
-    st.session_state["_hub_prev_date"] = slate_date_str
-    st.session_state["_hub_prev_sport"] = sport
-
     # Read Tank01 RapidAPI key from secrets (not prompted on this page)
     rapidapi_key = st.secrets.get("TANK01_RAPIDAPI_KEY")
     if rapidapi_key:
@@ -430,6 +409,38 @@ def main() -> None:
     contest_type_label = st.selectbox("Contest Type", CONTEST_PRESET_LABELS)
     preset = CONTEST_PRESETS[contest_type_label]
     st.caption(preset.get("description", ""))
+
+    # Clear cached pool when date, sport, or contest type changes to prevent stale data.
+    # Cache key includes both date and contest type so switching contests forces a fresh load.
+    _contest_safe = contest_type_label.lower().replace(" ", "_").replace("/", "-").replace("-", "_")
+    _prev_date = st.session_state.get("_hub_prev_date")
+    _prev_sport = st.session_state.get("_hub_prev_sport")
+    _prev_contest = st.session_state.get("_hub_prev_contest")
+    _date_changed = _prev_date is not None and _prev_date != slate_date_str
+    _sport_changed = _prev_sport is not None and _prev_sport != sport
+    _contest_changed = _prev_contest is not None and _prev_contest != contest_type_label
+    if _date_changed or _sport_changed or _contest_changed:
+        # Clear previous pool data for the old date + contest combination.
+        # Use explicit `if … else` guards so we never accidentally key on the
+        # *current* value when a previous value was not recorded yet.
+        _stale_date = _prev_date if _prev_date is not None else slate_date_str
+        _stale_sport = _prev_sport if _prev_sport is not None else sport
+        _stale_contest = _prev_contest if _prev_contest is not None else contest_type_label
+        _stale_contest_safe = (
+            _stale_contest.lower().replace(" ", "_").replace("/", "-").replace("-", "_")
+        )
+        for key in [
+            f"_hub_pool_{_stale_date}_{_stale_contest_safe}",
+            f"_hub_rules_{_stale_date}_{_stale_contest_safe}",
+            f"_hub_draft_group_id_{_stale_date}_{_stale_contest_safe}",
+        ]:
+            st.session_state.pop(key, None)
+        # Clear lobby cache keyed to the previous sport + previous date
+        old_lobby_key = f"_hub_lobby_{_stale_sport}_{_stale_date}"
+        st.session_state.pop(old_lobby_key, None)
+    st.session_state["_hub_prev_date"] = slate_date_str
+    st.session_state["_hub_prev_sport"] = sport
+    st.session_state["_hub_prev_contest"] = contest_type_label
 
     # Projection model is always YakOS Model
     proj_source = "model"
@@ -686,9 +697,11 @@ def main() -> None:
                     if _removed:
                         st.caption(f"ℹ️ {_removed} player(s) removed (OUT/DND/IR or 0 proj minutes).")
 
-                    st.session_state[f"_hub_pool_{slate_date_str}"] = pool
-                    st.session_state[f"_hub_rules_{slate_date_str}"] = parsed_rules
-                    st.session_state[f"_hub_draft_group_id_{slate_date_str}"] = draft_group_id
+                    st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"] = pool
+                    st.session_state[f"_hub_rules_{slate_date_str}_{_contest_safe}"] = parsed_rules
+                    st.session_state[f"_hub_draft_group_id_{slate_date_str}_{_contest_safe}"] = draft_group_id
+                    _salary_mode = "Historical" if _is_historical else "Live"
+                    st.info(f"✅ {_salary_mode} salaries loaded for {slate_date_str}")
                     st.success(f"Loaded {len(pool)} players. Roster: {parsed_rules['slots']}")
                     # Sanity check: warn if draft group changed from what was previously published
                     if draft_group_id and slate.draft_group_id and draft_group_id != slate.draft_group_id:
@@ -700,8 +713,8 @@ def main() -> None:
                 st.error(f"Failed to load player pool: {exc}")
 
     # ── Pool Preview ──────────────────────────────────────────────────────
-    hub_pool: Optional[pd.DataFrame] = st.session_state.get(f"_hub_pool_{slate_date_str}")
-    hub_rules: Optional[dict] = st.session_state.get(f"_hub_rules_{slate_date_str}")
+    hub_pool: Optional[pd.DataFrame] = st.session_state.get(f"_hub_pool_{slate_date_str}_{_contest_safe}")
+    hub_rules: Optional[dict] = st.session_state.get(f"_hub_rules_{slate_date_str}_{_contest_safe}")
 
     if hub_pool is not None:
         # ── Game Selector ─────────────────────────────────────────────────
@@ -782,8 +795,8 @@ def main() -> None:
                     st.session_state["_hub_rg_df"] = rg_df
                     st.success(f"RotoGrinders: {len(rg_df)} rows loaded.")
                     if st.button("Merge RG Projections into Pool"):
-                        merged = merge_rg_with_pool(st.session_state[f"_hub_pool_{slate_date_str}"], rg_df)
-                        st.session_state[f"_hub_pool_{slate_date_str}"] = merged
+                        merged = merge_rg_with_pool(st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"], rg_df)
+                        st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"] = merged
                         st.success(f"Merged RG data into pool ({len(merged)} rows).")
                         st.rerun()
                 except Exception as exc:
@@ -808,7 +821,8 @@ def main() -> None:
                             st.success(f"Fetched {len(updates)} injury updates.")
 
                             # Flag affected players in current pool
-                            pool_copy = st.session_state[f"_hub_pool_{slate_date_str}"].copy()
+                            _hub_pool_val = st.session_state.get(f"_hub_pool_{slate_date_str}_{_contest_safe}")
+                            pool_copy = _hub_pool_val.copy() if _hub_pool_val is not None else pd.DataFrame()
                             affected = []
                             for update in updates:
                                 pname = update.get("player_name", "")
@@ -833,10 +847,11 @@ def main() -> None:
             _ts = datetime.now(timezone.utc).isoformat()
 
             slate.sport = sport
+            slate.site = "DK"
             slate.slate_date = slate_date_str
             slate.proj_source = proj_source
             slate.contest_name = contest_type_label
-            slate.draft_group_id = st.session_state.get(f"_hub_draft_group_id_{slate_date_str}")
+            slate.draft_group_id = st.session_state.get(f"_hub_draft_group_id_{slate_date_str}_{_contest_safe}")
 
             if hub_rules:
                 slate.apply_roster_rules(hub_rules)
