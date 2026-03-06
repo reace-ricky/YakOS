@@ -66,6 +66,7 @@ from yak_core.config import (  # noqa: E402
 from yak_core.sims import compute_sim_eligible, _INELIGIBLE_STATUSES  # noqa: E402
 from yak_core.live import fetch_injury_updates, fetch_player_game_logs, fetch_betting_odds  # noqa: E402
 from yak_core.salary_history import SalaryHistoryClient  # noqa: E402
+from yak_core.dff_ingest import fetch_dff_pool  # noqa: E402
 
 
 def _fetch_dk_draft_groups(sport: str = "NBA") -> list:
@@ -408,16 +409,32 @@ def main() -> None:
                         raw_dgs = _fetch_historical_draft_groups(slate_date_str)
                         _source = "FantasyLabs"
                     else:
-                        # Live: use DK lobby API
-                        raw_dgs = _fetch_dk_draft_groups(sport)
-                        _source = "DraftKings"
+                        # Live: try DK lobby API first, then fall back to FantasyLabs
+                        try:
+                            raw_dgs = _fetch_dk_draft_groups(sport)
+                            _source = "DraftKings"
+                        except Exception as _dk_exc:
+                            import requests as _req
+                            _is_403 = (
+                                isinstance(_dk_exc, _req.HTTPError)
+                                and getattr(getattr(_dk_exc, "response", None), "status_code", None) == 403
+                            )
+                            if _is_403:
+                                st.caption(
+                                    "⚠️ DraftKings API blocked (HTTP 403). "
+                                    "Falling back to FantasyLabs for slate list…"
+                                )
+                            else:
+                                st.caption(f"⚠️ DraftKings API unavailable ({_dk_exc}). Trying FantasyLabs…")
+                            raw_dgs = _fetch_historical_draft_groups(slate_date_str)
+                            _source = "FantasyLabs"
                     if not raw_dgs:
                         st.warning(f"No slates found on {_source} for {slate_date_str}. Try a different date.")
                     else:
                         slate_options = build_slate_options(raw_dgs)
                         st.session_state[_slate_cache_key] = slate_options
                         _cached_slates = slate_options
-                        st.success(f"Found {len(slate_options)} slate(s) from {_source}.")
+                        st.success(f"Found {len(slate_options)} slate(s) via {_source}.")
                 except Exception as exc:
                     st.error(f"Failed to fetch slates: {exc}")
     with col_clear_slate:
@@ -518,18 +535,44 @@ def main() -> None:
                             "The draft group may not exist or the DK API may be unavailable."
                         )
 
-                if not draft_group_id and _historical_salary_df is None:
+                if not draft_group_id and _historical_salary_df is None and not _is_historical:
+                    # ── Path 3: Live, no draft group → load directly from DFF ──────
+                    # No slate was selected and DK lobby is unavailable.  Fall back to
+                    # DFF which publishes today's full DK pool without requiring auth.
+                    with st.spinner("No slate selected — loading today's pool from DailyFantasyFuel…"):
+                        _dff_pool = fetch_dff_pool(sport=sport, date_str=slate_date_str)
+                    if _dff_pool.empty:
+                        st.warning(
+                            "No slate selected and DailyFantasyFuel returned no players. "
+                            "Use \"Fetch Available Slates\" to pick a slate, "
+                            "or enter a Draft Group ID manually in the advanced section above."
+                        )
+                    else:
+                        _historical_salary_df = _dff_pool
+                        st.info(
+                            f"📡 Loaded {len(_dff_pool)} players directly from DailyFantasyFuel "
+                            f"(no draft group available)."
+                        )
+                elif not draft_group_id and _historical_salary_df is None:
                     st.warning(
                         "No slate selected. Use \"Fetch Available Slates\" to pick a slate, "
                         "or enter a Draft Group ID manually in the advanced section above."
                     )
-                elif _is_historical and draft_group_id and _historical_salary_df is None:
-                    # SalaryHistoryClient returned empty for this draft group —
-                    # warning was already shown above; nothing more to do.
-                    pass
-                else:
+
+                # _proceed = True when we have enough data to build the pool.
+                # Guard: skip steps if historical+DG failed (warning already shown),
+                # or no data at all.
+                _proceed = (
+                    _historical_salary_df is not None and not _historical_salary_df.empty
+                ) or (
+                    draft_group_id is not None
+                    and not (_is_historical and _historical_salary_df is None)
+                )
+
+                if _proceed:
                     # Step 1: Fetch DK draftables (salaries, positions, teams)
-                    # Use historical salary cache when available; fall back to live DK API.
+                    # Use historical salary cache when available; fall back to live DK API,
+                    # then DFF when the DK API is blocked (HTTP 403).
                     if _historical_salary_df is not None and not _historical_salary_df.empty:
                         pool = _historical_salary_df.copy()
                         # Rename SalaryHistoryClient columns to YakOS conventions
@@ -540,10 +583,35 @@ def main() -> None:
                         if _historical_dg_id and not draft_group_id:
                             draft_group_id = _historical_dg_id
                     else:
-                        pool = fetch_dk_draftables(draft_group_id)
+                        # ── Path 2: DK draftables → DFF fallback ─────────────────
+                        _pool_source = "DraftKings"
+                        try:
+                            pool = fetch_dk_draftables(draft_group_id)
+                            if pool.empty:
+                                raise ValueError(f"No players returned for DraftGroup {draft_group_id}")
+                        except Exception as _dk_pool_exc:
+                            import requests as _req
+                            _is_403 = (
+                                isinstance(_dk_pool_exc, _req.HTTPError)
+                                and getattr(
+                                    getattr(_dk_pool_exc, "response", None), "status_code", None
+                                ) == 403
+                            )
+                            st.caption(
+                                f"⚠️ DraftKings API {'blocked (HTTP 403)' if _is_403 else f'error: {_dk_pool_exc}'}. "
+                                "Falling back to DailyFantasyFuel…"
+                            )
+                            with st.spinner("Loading player pool from DailyFantasyFuel…"):
+                                pool = fetch_dff_pool(sport=sport, date_str=slate_date_str)
+                            _pool_source = "DailyFantasyFuel"
                         if pool.empty:
-                            st.error(f"No players found for Draft Group ID {draft_group_id}.")
+                            st.error(
+                                f"No players found for Draft Group ID {draft_group_id} "
+                                f"(tried DraftKings and DailyFantasyFuel)."
+                            )
                             st.stop()
+                        if _pool_source == "DailyFantasyFuel":
+                            st.info(f"📡 Player pool loaded via DailyFantasyFuel ({len(pool)} players).")
 
                     # Step 2: Normalize column names
                     pool = _normalize_dk_pool(pool)
