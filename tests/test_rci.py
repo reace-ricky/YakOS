@@ -103,9 +103,9 @@ class TestProjectionConfidenceSignal:
 
     def test_status_reflects_score(self):
         sig = compute_projection_confidence_signal(_edge_payload_full())
-        if sig.value >= 80:
+        if sig.value >= 70:
             assert sig.status == "green"
-        elif sig.value >= 60:
+        elif sig.value >= 45:
             assert sig.status == "yellow"
         else:
             assert sig.status == "red"
@@ -120,14 +120,16 @@ class TestProjectionConfidenceSignal:
 # ---------------------------------------------------------------------------
 
 class TestSimAlignmentSignal:
-    def test_returns_neutral_when_no_data(self):
+    def test_returns_low_when_no_data(self):
         sig = compute_sim_alignment_signal(None, None)
-        assert sig.value == 50.0
-        assert sig.status == "yellow"
+        assert sig.value == 0.0
+        assert sig.status == "red"
 
-    def test_returns_neutral_when_actual_empty(self):
+    def test_uses_sim_distribution_when_no_actuals(self):
         sig = compute_sim_alignment_signal(_sim_results_df(), pd.DataFrame())
-        assert sig.value == 50.0
+        # Should compute from sim distribution quality, not return neutral 50
+        assert sig.value > 0.0
+        assert sig.name == "sim_alignment"
 
     def test_with_data_returns_signal(self):
         sig = compute_sim_alignment_signal(_sim_results_df(), _actual_results_df())
@@ -160,10 +162,10 @@ class TestSimAlignmentSignal:
 # ---------------------------------------------------------------------------
 
 class TestOwnershipAccuracySignal:
-    def test_returns_neutral_when_no_data(self):
+    def test_returns_low_when_no_data(self):
         sig = compute_ownership_accuracy_signal(None, None)
-        assert sig.value == 50.0
-        assert sig.status == "yellow"
+        assert sig.value == 0.0
+        assert sig.status == "red"
 
     def test_with_data_returns_signal(self):
         sig = compute_ownership_accuracy_signal(
@@ -201,12 +203,13 @@ class TestOwnershipAccuracySignal:
         sig = compute_ownership_accuracy_signal(None, None)
         assert sig.weight == DEFAULT_WEIGHTS["ownership_accuracy"]
 
-    def test_missing_columns_returns_neutral(self):
-        """DataFrames without 'own' columns → neutral 50."""
+    def test_missing_columns_returns_low(self):
+        """DataFrames without 'own' columns and no pool → low score."""
         proj = pd.DataFrame({"player_name": ["A"], "salary": [5000]})
         actual = pd.DataFrame({"player_name": ["A"], "salary": [5000]})
         sig = compute_ownership_accuracy_signal(proj, actual)
-        assert sig.value == 50.0
+        # No ownership columns in actual comparison, no player_pool → 0
+        assert sig.value == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -279,18 +282,25 @@ class TestComputeRCI:
         total = sum(s.weight for s in result.signals)
         assert abs(total - 1.0) < 1e-9
 
-    def test_calibration_stable_when_rci_high_no_red(self):
-        """All signals green + score >= 70 → calibration_stable=True."""
+    def test_calibration_stable_when_all_data_present(self):
+        """All signals with data + score >= 70 → calibration_stable=True."""
         payload = {
             "core_value_players": [{"confidence": 1.0}] * 5,
             "leverage_players": [{"confidence": 1.0}] * 3,
         }
-        result = compute_rci("GPP - 20 Max", payload)
-        # Score should be high but only projection_confidence will be high;
-        # sim/ownership/roi are neutral 50 → all yellow, not red
+        result = compute_rci(
+            "GPP - 20 Max", payload,
+            sim_results=_sim_results_df(),
+            actual_results=_actual_results_df(),
+            projected_ownership=_projected_ownership_df(),
+            actual_ownership=_actual_ownership_df(),
+            backtest_results=_backtest_df(),
+        )
+        # With full data, projection confidence is high, sim alignment good,
+        # ownership accurate, ROI positive → should be stable
+        assert result.rci_score >= 70
         assert not any(s.status == "red" for s in result.signals)
-        if result.rci_score >= 70:
-            assert result.calibration_stable is True
+        assert result.calibration_stable is True
 
     def test_calibration_not_stable_when_red_signal(self):
         """If any signal is red, calibration is not stable even if RCI >= 70."""
@@ -323,9 +333,9 @@ class TestComputeRCI:
 
     def test_rci_status_matches_score(self):
         result = compute_rci("GPP - 20 Max", _edge_payload_full())
-        if result.rci_score >= 80:
+        if result.rci_score >= 70:
             assert result.rci_status == "green"
-        elif result.rci_score >= 60:
+        elif result.rci_score >= 45:
             assert result.rci_status == "yellow"
         else:
             assert result.rci_status == "red"

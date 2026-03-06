@@ -1714,6 +1714,7 @@ def main() -> None:
                         edge_payload=edge_payload,
                         sim_results=sim.player_results,
                         weights=custom_weights,
+                        player_pool=pool,
                     )
                     sim.set_rci_result(contest_label, rci_result)
                     pct = int(rci_result.rci_score)

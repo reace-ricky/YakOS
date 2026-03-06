@@ -7,9 +7,9 @@ Used to determine:
 - When to freeze a calibration profile and shift focus
 
 Signals:
-1. Projection Confidence (from edge_metrics — how confident are we in player tags/projections)
-2. Sim Alignment (how well do sims match realized results from backtests)
-3. Ownership Accuracy (how close projected ownership was to actual)
+1. Projection Confidence (how strong are the player projections & edge tags)
+2. Sim Alignment (how well-distributed are sim probabilities — smash/bust spread)
+3. Ownership Accuracy (how complete and differentiated are ownership projections)
 4. Historical ROI (backtest ROI for this contest type over recent slates)
 """
 from __future__ import annotations
@@ -51,135 +51,301 @@ DEFAULT_WEIGHTS: Dict[str, float] = {
 }
 
 
+def _get_color(score: float) -> str:
+    """Return status color for a 0-100 score."""
+    if score >= 70:
+        return "green"
+    elif score >= 45:
+        return "yellow"
+    else:
+        return "red"
+
+
 def compute_projection_confidence_signal(
     edge_payload: dict,
+    player_pool: Optional[pd.DataFrame] = None,
+    contest_label: str = "",
 ) -> RCISignal:
     """
     Signal 1: How confident are we in the player projections/tags?
-    Uses compute_ricky_confidence_for_contest from edge_metrics.
+
+    Primary: uses edge analysis payload (core/value/leverage players with confidence).
+    Fallback: uses player pool smash/bust/floor/ceil to measure projection quality.
     """
-    from yak_core.edge_metrics import compute_ricky_confidence_for_contest, get_confidence_color
-    score = compute_ricky_confidence_for_contest(edge_payload)
+    # Try edge payload first (has real edge analysis data)
+    core_value = edge_payload.get("core_value_players", [])
+    leverage = edge_payload.get("leverage_players", [])
+
+    if core_value or leverage:
+        # Edge analysis exists — use player confidence from tagged players
+        def _avg_conf(players: list) -> float:
+            confs = [p.get("confidence", 0) for p in players if isinstance(p, dict)]
+            return sum(confs) / len(confs) if confs else 0.0
+
+        cv_conf = _avg_conf(core_value)
+        lev_conf = _avg_conf(leverage)
+
+        if not leverage:
+            raw = cv_conf
+        elif not core_value:
+            raw = lev_conf
+        else:
+            raw = 0.6 * cv_conf + 0.4 * lev_conf
+
+        score = round(max(0.0, min(100.0, raw * 100)), 1)
+        desc = f"Edge analysis confidence: {score:.0f}/100 ({len(core_value)} core/value, {len(leverage)} leverage)"
+        return RCISignal(
+            name="projection_confidence",
+            value=score,
+            weight=DEFAULT_WEIGHTS["projection_confidence"],
+            description=desc,
+            status=_get_color(score),
+        )
+
+    # Fallback: derive from player pool quality
+    if player_pool is not None and not player_pool.empty:
+        import numpy as np
+        proj = pd.to_numeric(player_pool["proj"], errors="coerce").fillna(0) if "proj" in player_pool.columns else pd.Series([0.0] * len(player_pool))
+        floor_col = pd.to_numeric(player_pool["floor"], errors="coerce").fillna(0) if "floor" in player_pool.columns else pd.Series([0.0] * len(player_pool))
+        ceil_col = pd.to_numeric(player_pool["ceil"], errors="coerce").fillna(0) if "ceil" in player_pool.columns else pd.Series([0.0] * len(player_pool))
+
+        has_proj = (proj > 0).sum()
+        total = len(player_pool)
+
+        # Score components:
+        # 1) Coverage: what % of pool has non-zero projections (0-40 points)
+        coverage_pct = has_proj / max(total, 1)
+        coverage_score = coverage_pct * 40
+
+        # 2) Spread quality: players with distinct proj/floor/ceil (not all same) (0-30 points)
+        has_spread = ((ceil_col > proj) & (floor_col < proj) & (proj > 0)).sum()
+        spread_pct = has_spread / max(has_proj, 1)
+        spread_score = spread_pct * 30
+
+        # 3) Differentiation: how much do projections vary across players? (0-30 points)
+        if has_proj > 2:
+            proj_valid = proj[proj > 0]
+            cv = proj_valid.std() / max(proj_valid.mean(), 1)  # coefficient of variation
+            # CV of ~0.3-0.5 is good differentiation; <0.1 means projections are too similar
+            diff_score = min(30.0, cv * 75)
+        else:
+            diff_score = 0.0
+
+        score = round(max(0.0, min(100.0, coverage_score + spread_score + diff_score)), 1)
+        desc = (
+            f"Pool projection quality: {score:.0f}/100 "
+            f"({has_proj}/{total} with proj, {has_spread} with spreads)"
+        )
+        return RCISignal(
+            name="projection_confidence",
+            value=score,
+            weight=DEFAULT_WEIGHTS["projection_confidence"],
+            description=desc,
+            status=_get_color(score),
+        )
+
+    # No data at all
     return RCISignal(
         name="projection_confidence",
-        value=score,
+        value=0.0,
         weight=DEFAULT_WEIGHTS["projection_confidence"],
-        description=f"Edge analysis confidence: {score:.0f}/100",
-        status=get_confidence_color(score),
+        description="No projections or edge analysis available",
+        status="red",
     )
 
 
 def compute_sim_alignment_signal(
     sim_results: Optional[pd.DataFrame],
-    actual_results: Optional[pd.DataFrame],
+    actual_results: Optional[pd.DataFrame] = None,
+    contest_label: str = "",
 ) -> RCISignal:
     """
-    Signal 2: How well do sim distributions match realized outcomes?
+    Signal 2: How well-distributed are sim outputs?
 
-    If actual_results available (from historical backtest):
-    - Compare sim predicted smash rates vs actual smash rates
-    - Compare sim predicted bust rates vs actual bust rates
-    - Compare sim mean vs actual mean fantasy points
-    - Score = 100 - (mean absolute error across metrics, scaled)
-
-    If no actual_results: return neutral 50 with "yellow" status.
+    If actual_results available: compare sim predicted vs actual smash/bust rates.
+    If only sim_results: measure quality of sim distribution (smash/bust spread,
+    leverage differentiation — do sims actually separate players?).
+    If no sim data: return low score indicating sims need to be run.
     """
-    if sim_results is None or actual_results is None or actual_results.empty:
+    # Full comparison mode: sim vs actuals
+    if sim_results is not None and not sim_results.empty and actual_results is not None and not actual_results.empty:
+        merged = sim_results.merge(
+            actual_results, on="player_name", how="inner", suffixes=("_sim", "_actual")
+        )
+        errors = []
+        if "sim_mean" in merged.columns and "actual_fp" in merged.columns:
+            fp_mae = (merged["sim_mean"] - merged["actual_fp"]).abs().mean()
+            fp_score = max(0.0, 100.0 - fp_mae * 10.0)
+            errors.append(fp_score)
+        if "smash_prob" in merged.columns and "actual_smash" in merged.columns:
+            smash_mae = (merged["smash_prob"] - merged["actual_smash"]).abs().mean()
+            smash_score = max(0.0, 100.0 - smash_mae * 200.0)
+            errors.append(smash_score)
+
+        score = sum(errors) / len(errors) if errors else 50.0
+        score = max(0.0, min(100.0, score))
         return RCISignal(
             name="sim_alignment",
-            value=50.0,
+            value=round(score, 1),
             weight=DEFAULT_WEIGHTS["sim_alignment"],
-            description="No backtest data available — neutral score",
-            status="yellow",
+            description=f"Sim vs actual alignment: {score:.0f}/100",
+            status=_get_color(score),
         )
 
-    # Compare sim predictions to actuals
-    # Merge on player_name
-    merged = sim_results.merge(
-        actual_results, on="player_name", how="inner", suffixes=("_sim", "_actual")
-    )
+    # Sim-only mode: measure distribution quality
+    if sim_results is not None and not sim_results.empty:
+        import numpy as np
+        smash = pd.to_numeric(sim_results["smash_prob"], errors="coerce").fillna(0) if "smash_prob" in sim_results.columns else pd.Series([0.0] * len(sim_results))
+        bust = pd.to_numeric(sim_results["bust_prob"], errors="coerce").fillna(0) if "bust_prob" in sim_results.columns else pd.Series([0.0] * len(sim_results))
+        leverage = pd.to_numeric(sim_results["leverage"], errors="coerce").fillna(0) if "leverage" in sim_results.columns else pd.Series([0.0] * len(sim_results))
 
-    errors = []
-    # Mean FP error
-    if "sim_mean" in merged.columns and "actual_fp" in merged.columns:
-        fp_mae = (merged["sim_mean"] - merged["actual_fp"]).abs().mean()
-        # Normalize: 0 error = 100, 10+ error = 0
-        fp_score = max(0.0, 100.0 - fp_mae * 10.0)
-        errors.append(fp_score)
+        score_parts = []
 
-    # Smash rate accuracy
-    if "smash_prob" in merged.columns and "actual_smash" in merged.columns:
-        smash_mae = (merged["smash_prob"] - merged["actual_smash"]).abs().mean()
-        smash_score = max(0.0, 100.0 - smash_mae * 200.0)
-        errors.append(smash_score)
+        # 1) Smash spread: do sims differentiate players? (0-35 pts)
+        if smash.any():
+            smash_std = smash.std()
+            smash_range = smash.max() - smash.min()
+            # Good sims have spread: std > 0.08, range > 0.2
+            spread_quality = min(1.0, smash_std / 0.10) * 0.6 + min(1.0, smash_range / 0.25) * 0.4
+            score_parts.append(spread_quality * 35)
+        else:
+            score_parts.append(0)
 
-    score = sum(errors) / len(errors) if errors else 50.0
-    score = max(0.0, min(100.0, score))
+        # 2) Bust differentiation (0-25 pts)
+        if bust.any():
+            bust_std = bust.std()
+            bust_quality = min(1.0, bust_std / 0.08)
+            score_parts.append(bust_quality * 25)
+        else:
+            score_parts.append(0)
 
-    from yak_core.edge_metrics import get_confidence_color
+        # 3) Leverage differentiation (0-25 pts)
+        if leverage.any() and leverage.std() > 0:
+            lev_cv = leverage.std() / max(leverage.mean(), 0.01)
+            lev_quality = min(1.0, lev_cv / 0.5)
+            score_parts.append(lev_quality * 25)
+        else:
+            score_parts.append(0)
+
+        # 4) Coverage: how many players have sim data (0-15 pts)
+        n_players = len(sim_results)
+        coverage_score = min(15.0, (n_players / 40) * 15)
+        score_parts.append(coverage_score)
+
+        score = round(max(0.0, min(100.0, sum(score_parts))), 1)
+        desc = (
+            f"Sim distribution quality: {score:.0f}/100 "
+            f"({n_players} players, smash spread {smash.std():.2f})"
+        )
+        return RCISignal(
+            name="sim_alignment",
+            value=score,
+            weight=DEFAULT_WEIGHTS["sim_alignment"],
+            description=desc,
+            status=_get_color(score),
+        )
+
+    # No sim data at all
     return RCISignal(
         name="sim_alignment",
-        value=round(score, 1),
+        value=0.0,
         weight=DEFAULT_WEIGHTS["sim_alignment"],
-        description=f"Sim vs actual alignment: {score:.0f}/100",
-        status=get_confidence_color(score),
+        description="No sim results — run sims first",
+        status="red",
     )
 
 
 def compute_ownership_accuracy_signal(
-    projected_ownership: Optional[pd.DataFrame],
-    actual_ownership: Optional[pd.DataFrame],
+    projected_ownership: Optional[pd.DataFrame] = None,
+    actual_ownership: Optional[pd.DataFrame] = None,
+    player_pool: Optional[pd.DataFrame] = None,
+    contest_label: str = "",
 ) -> RCISignal:
     """
-    Signal 3: How accurate were our ownership projections?
+    Signal 3: How accurate/complete are ownership projections?
 
-    Compare projected ownership % vs actual ownership % per player.
-    Score = 100 - mean absolute ownership error (scaled).
-
-    If no actual ownership data: return neutral 50.
+    If actual_ownership available: compare projected vs actual.
+    If only projected_ownership or player_pool: measure ownership quality
+    (coverage, differentiation, realistic distribution).
     """
-    if projected_ownership is None or actual_ownership is None or actual_ownership.empty:
+    # Full comparison mode
+    if projected_ownership is not None and actual_ownership is not None and not actual_ownership.empty:
+        merged = projected_ownership.merge(
+            actual_ownership, on="player_name", how="inner", suffixes=("_proj", "_actual")
+        )
+        own_proj_col = [c for c in merged.columns if "own" in c.lower() and "proj" in c.lower()]
+        own_act_col = [c for c in merged.columns if "own" in c.lower() and "actual" in c.lower()]
+
+        if own_proj_col and own_act_col:
+            mae = (
+                pd.to_numeric(merged[own_proj_col[0]], errors="coerce")
+                - pd.to_numeric(merged[own_act_col[0]], errors="coerce")
+            ).abs().mean()
+            score = max(0.0, min(100.0, 100.0 - mae * (100.0 / 15.0)))
+            return RCISignal(
+                name="ownership_accuracy",
+                value=round(score, 1),
+                weight=DEFAULT_WEIGHTS["ownership_accuracy"],
+                description=f"Ownership accuracy: {score:.0f}/100 (avg error {mae:.1f}%)",
+                status=_get_color(score),
+            )
+
+    # Ownership quality mode: use player_pool ownership column
+    pool = player_pool
+    if pool is None or pool.empty:
+        pool = projected_ownership
+
+    if pool is not None and not pool.empty and "ownership" in pool.columns:
+        own = pd.to_numeric(pool["ownership"], errors="coerce").fillna(0)
+        total = len(pool)
+
+        # 1) Coverage: how many players have ownership > 0 (0-40 pts)
+        has_own = (own > 0).sum()
+        coverage_pct = has_own / max(total, 1)
+        coverage_score = coverage_pct * 40
+
+        # 2) Differentiation: are ownership values varied? (0-35 pts)
+        if has_own > 2:
+            own_valid = own[own > 0]
+            own_std = own_valid.std()
+            own_range = own_valid.max() - own_valid.min()
+            # Good ownership has std > 3, range > 15
+            diff_quality = min(1.0, own_std / 5.0) * 0.5 + min(1.0, own_range / 20.0) * 0.5
+            diff_score = diff_quality * 35
+        else:
+            diff_score = 0.0
+
+        # 3) Realism: total ownership shouldn't be wildly off
+        #    (sum should be ~700-900% for an 8-man slate with ~80-100 players) (0-25 pts)
+        own_sum = own.sum()
+        if total > 0 and own_sum > 0:
+            avg_own = own_sum / total
+            # Avg ownership per player around 5-15% is realistic
+            realism = 1.0 - min(1.0, abs(avg_own - 8.0) / 15.0)
+            realism_score = realism * 25
+        else:
+            realism_score = 0.0
+
+        score = round(max(0.0, min(100.0, coverage_score + diff_score + realism_score)), 1)
+        desc = (
+            f"Ownership quality: {score:.0f}/100 "
+            f"({has_own}/{total} with ownership, std {own.std():.1f})"
+        )
         return RCISignal(
             name="ownership_accuracy",
-            value=50.0,
+            value=score,
             weight=DEFAULT_WEIGHTS["ownership_accuracy"],
-            description="No actual ownership data — neutral score",
-            status="yellow",
+            description=desc,
+            status=_get_color(score),
         )
 
-    merged = projected_ownership.merge(
-        actual_ownership, on="player_name", how="inner", suffixes=("_proj", "_actual")
-    )
-
-    own_proj_col = [c for c in merged.columns if "own" in c.lower() and "proj" in c.lower()]
-    own_act_col = [c for c in merged.columns if "own" in c.lower() and "actual" in c.lower()]
-
-    if not own_proj_col or not own_act_col:
-        return RCISignal(
-            name="ownership_accuracy",
-            value=50.0,
-            weight=DEFAULT_WEIGHTS["ownership_accuracy"],
-            description="Ownership columns not found — neutral score",
-            status="yellow",
-        )
-
-    # Prefer the most specific match; take the first candidate if multiple exist
-    proj_col = own_proj_col[0]
-    act_col = own_act_col[0]
-    mae = (
-        pd.to_numeric(merged[proj_col], errors="coerce")
-        - pd.to_numeric(merged[act_col], errors="coerce")
-    ).abs().mean()
-    # 0% error = 100, 15%+ avg error = 0
-    score = max(0.0, min(100.0, 100.0 - mae * (100.0 / 15.0)))
-
-    from yak_core.edge_metrics import get_confidence_color
+    # No ownership data
     return RCISignal(
         name="ownership_accuracy",
-        value=round(score, 1),
+        value=0.0,
         weight=DEFAULT_WEIGHTS["ownership_accuracy"],
-        description=f"Ownership accuracy: {score:.0f}/100 (avg error {mae:.1f}%)",
-        status=get_confidence_color(score),
+        description="No ownership data available",
+        status="red",
     )
 
 
@@ -195,7 +361,7 @@ def compute_historical_roi_signal(
     - Compute average ROI (profit / entry fee)
     - Score: 50 = breakeven, 100 = +50% ROI, 0 = -50% ROI
 
-    If no backtest data: return neutral 50.
+    If no backtest data: return neutral 50 (doesn't penalize or reward).
     """
     if backtest_results is None or backtest_results.empty:
         return RCISignal(
@@ -225,13 +391,12 @@ def compute_historical_roi_signal(
     # Map: -50% ROI → 0, 0% → 50, +50% → 100
     score = max(0.0, min(100.0, 50.0 + avg_roi * 100.0))
 
-    from yak_core.edge_metrics import get_confidence_color
     return RCISignal(
         name="historical_roi",
         value=round(score, 1),
         weight=DEFAULT_WEIGHTS["historical_roi"],
         description=f"Historical ROI: {avg_roi:+.1%} → score {score:.0f}/100",
-        status=get_confidence_color(score),
+        status=_get_color(score),
     )
 
 
@@ -244,6 +409,7 @@ def compute_rci(
     actual_ownership: Optional[pd.DataFrame] = None,
     backtest_results: Optional[pd.DataFrame] = None,
     weights: Optional[Dict[str, float]] = None,
+    player_pool: Optional[pd.DataFrame] = None,
 ) -> RCIResult:
     """
     Compute the full RCI for one contest type.
@@ -254,7 +420,7 @@ def compute_rci(
     Parameters
     ----------
     contest_label : str
-        Human-readable contest label (e.g. "GPP - 20 Max").
+        Human-readable contest label (e.g. "GPP Main").
     edge_payload : dict
         Edge Analysis payload from RickyEdgeState.edge_analysis_by_contest.
     sim_results : pd.DataFrame, optional
@@ -270,6 +436,9 @@ def compute_rci(
     weights : dict, optional
         Override dict e.g. {"projection_confidence": 0.4, ...}.
         If provided, uses these instead of DEFAULT_WEIGHTS.
+    player_pool : pd.DataFrame, optional
+        Full player pool with proj, floor, ceil, ownership columns.
+        Used as fallback data when edge_payload or sim_results are sparse.
 
     Returns
     -------
@@ -278,9 +447,9 @@ def compute_rci(
     w = weights or DEFAULT_WEIGHTS
 
     signals = [
-        compute_projection_confidence_signal(edge_payload),
-        compute_sim_alignment_signal(sim_results, actual_results),
-        compute_ownership_accuracy_signal(projected_ownership, actual_ownership),
+        compute_projection_confidence_signal(edge_payload, player_pool, contest_label),
+        compute_sim_alignment_signal(sim_results, actual_results, contest_label),
+        compute_ownership_accuracy_signal(projected_ownership, actual_ownership, player_pool, contest_label),
         compute_historical_roi_signal(backtest_results, contest_label),
     ]
 
@@ -299,8 +468,7 @@ def compute_rci(
     rci_score = sum(s.value * s.weight for s in signals)
     rci_score = round(max(0.0, min(100.0, rci_score)), 1)
 
-    from yak_core.edge_metrics import get_confidence_color
-    rci_status = get_confidence_color(rci_score)
+    rci_status = _get_color(rci_score)
 
     # Calibration stability decision:
     # "Stable" when RCI >= 70 AND no individual signal is red
@@ -316,10 +484,15 @@ def compute_rci(
             "Calibration is decent but has room to improve. "
             "Consider tuning projections or sim parameters."
         )
+    elif rci_score >= 35:
+        recommendation = (
+            "Calibration needs work. Run sims and edge analysis "
+            "to improve projection confidence."
+        )
     else:
         recommendation = (
-            "Calibration needs work. Focus on projection accuracy and sim alignment "
-            "before trusting methodology conclusions."
+            "Calibration not started. Load a slate, run sims, and "
+            "complete edge analysis to build confidence."
         )
 
     return RCIResult(
