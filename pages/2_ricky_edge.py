@@ -178,7 +178,7 @@ def main() -> None:
         breakout_df = compute_breakout_candidates(pool, top_n=10)
         if not breakout_df.empty:
             # Group by salary tier for clean display
-            for tier_label, tier_emoji in [("Cheap", "\u2b06"), ("Mid", "\ud83d\udcc8"), ("Stud", "\ud83d\udd25")]:
+            for tier_label, tier_emoji in [("Cheap", "\u2b06"), ("Mid", "\U0001F4C8"), ("Stud", "\U0001F525")]:
                 tier_rows = breakout_df[breakout_df["salary_tier"] == tier_label]
                 if tier_rows.empty:
                     continue
