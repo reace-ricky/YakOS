@@ -825,6 +825,27 @@ def main() -> None:
                     if _removed:
                         st.caption(f"ℹ️ {_removed} player(s) removed (OUT/DND/IR or 0 proj minutes).")
 
+                    # For HISTORICAL slates, cross-reference box scores to drop
+                    # players who got 0 actual minutes (DNP-CD, inactive, etc.)
+                    if _is_historical and _api_key:
+                        try:
+                            from yak_core.live import fetch_actuals_from_api
+                            _box_date = slate_date_str.replace("-", "")
+                            _actuals = fetch_actuals_from_api(_box_date, {"RAPIDAPI_KEY": _api_key})
+                            if not _actuals.empty and "actual_fp" in _actuals.columns:
+                                # Players who appeared in box scores with > 0 FP
+                                _played = set(_actuals[_actuals["actual_fp"] > 0]["player_name"].values)
+                                if _played:
+                                    _before_box = len(pool)
+                                    pool = pool[
+                                        pool["player_name"].isin(_played)
+                                    ].reset_index(drop=True)
+                                    _dnp_removed = _before_box - len(pool)
+                                    if _dnp_removed:
+                                        st.caption(f"ℹ️ {_dnp_removed} DNP player(s) removed via box score cross-ref.")
+                        except Exception as _box_exc:
+                            st.caption(f"ℹ️ Box score filter skipped: {_box_exc}")
+
                     # Store in session state
                     st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"] = pool
                     st.session_state[f"_hub_rules_{slate_date_str}_{_contest_safe}"] = parsed_rules
