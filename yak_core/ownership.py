@@ -1,8 +1,17 @@
 
-"""Salary-rank ownership model for YakOS.
+"""Field-simulation ownership model for YakOS.
 
-Generates estimated ownership percentages from salary data when
-real ownership data is not available (e.g., historical parquet mode).
+Replaces the old salary-rank heuristic with a SaberSim-style approach:
+  1. Jitter projections with Gaussian noise to simulate diverse field builders.
+  2. Run the PuLP optimizer N times (default 1000) with these varied projections.
+  3. Count how often each player appears across all simulated lineups.
+  4. That exposure rate IS the ownership projection.
+
+Key advantages over salary-rank:
+  - Captures salary-cap construction interactions (two $10K guys can't coexist)
+  - Contest-type aware (single-entry = low variance, MME = high variance)
+  - Instantly re-derives when news breaks (just re-run)
+  - Adjusted ownership compares field popularity to sim upside → leverage signal
 
 Model logic:
   - Higher salary → higher expected ownership (stars get more roster %)
@@ -12,9 +21,38 @@ Model logic:
 """
 import numpy as np
 import pandas as pd
+import pulp
 
-# Position scarcity multipliers (positions with fewer viable options
-# tend to have higher ownership concentration)
+from .config import (
+    DK_LINEUP_SIZE,
+    DK_POS_SLOTS,
+    DK_SHOWDOWN_LINEUP_SIZE,
+    DK_SHOWDOWN_SLOTS,
+    DK_SHOWDOWN_CAPTAIN_MULTIPLIER,
+)
+
+
+# ---------------------------------------------------------------------------
+# Contest-type variance presets
+# ---------------------------------------------------------------------------
+# sigma_frac = standard deviation of projection noise as a fraction of proj.
+# Higher variance → more diverse lineups → less concentrated ownership.
+# Lower variance → field converges on "obvious" plays → chalk-heavy.
+
+CONTEST_VARIANCE = {
+    "mme_large":      {"sigma_frac": 0.30, "description": "Large-field MME (Milly Maker) — high variance, diverse field"},
+    "gpp_main":       {"sigma_frac": 0.25, "description": "Main GPP slate — moderate-high variance"},
+    "gpp_early":      {"sigma_frac": 0.25, "description": "Early GPP slate — same as main"},
+    "gpp_late":       {"sigma_frac": 0.22, "description": "Late GPP (smaller pool) — slightly lower variance"},
+    "single_entry":   {"sigma_frac": 0.15, "description": "Single-entry GPP — sharper field, lower variance"},
+    "cash":           {"sigma_frac": 0.10, "description": "Cash/50-50 — very low variance, chalk-heavy"},
+    "showdown":       {"sigma_frac": 0.28, "description": "Showdown Captain — moderate-high variance, fewer players"},
+}
+
+
+# ---------------------------------------------------------------------------
+# Position scarcity multipliers (kept from original for backward compat)
+# ---------------------------------------------------------------------------
 POS_MULTIPLIER = {
     "PG": 1.05,
     "SG": 1.00,
@@ -27,6 +65,10 @@ POS_MULTIPLIER = {
     "PF/C":  1.04,
 }
 
+
+# ---------------------------------------------------------------------------
+# Legacy salary-rank model (kept as ultra-fast fallback)
+# ---------------------------------------------------------------------------
 
 def salary_rank_ownership(pool_df: pd.DataFrame, col: str = "ownership") -> pd.DataFrame:
     """Add estimated ownership column based on salary rank.
@@ -46,32 +88,410 @@ def salary_rank_ownership(pool_df: pd.DataFrame, col: str = "ownership") -> pd.D
         df[col] = 0.0
         return df
 
-    # Step 1: salary percentile rank (0 = cheapest, 1 = most expensive)
     sal = df["salary"].astype(float)
     sal_rank = sal.rank(pct=True, method="average")
 
-    # Step 2: base ownership from salary rank
-    # Uses a logistic-style curve: cheap guys ~2-5%, mid ~8-15%, stars ~20-40%
-    # Formula: base = 3 + 37 * rank^2  (quadratic curve, 3% floor, ~40% ceiling)
+    # Quadratic curve: cheap guys ~2-5%, mid ~8-15%, stars ~20-40%
     base_own = 3.0 + 37.0 * (sal_rank ** 2)
 
-    # Step 3: position scarcity adjustment
     if "pos" in df.columns:
         pos_mult = df["pos"].map(POS_MULTIPLIER).fillna(1.0)
         base_own = base_own * pos_mult
 
-    # Step 4: add small random noise to avoid identical ownership
     rng = np.random.default_rng(42)
     noise = rng.normal(0, 1.5, size=len(df))
     base_own = base_own + noise
 
-    # Step 5: clip to valid range
     df[col] = np.clip(base_own, 0.5, 60.0).round(2)
 
     return df
 
 
-def apply_ownership(pool_df: pd.DataFrame) -> pd.DataFrame:
+# ---------------------------------------------------------------------------
+# Lightweight optimizer for field simulation (no exposure caps, no locks)
+# ---------------------------------------------------------------------------
+
+def _eligible_slots(pos_str: str):
+    """Determine which DK slots a player's position string is eligible for."""
+    if not isinstance(pos_str, str):
+        return ("UTIL",)
+    parts = [p.strip().upper() for p in pos_str.split("/")]
+    slots = set()
+    for p in parts:
+        if p in ["PG", "SG"]:
+            slots.add(p)
+            slots.add("G")
+        elif p in ["SF", "PF"]:
+            slots.add(p)
+            slots.add("F")
+        elif p == "C":
+            slots.add("C")
+    slots.add("UTIL")
+    return tuple(sorted(slots))
+
+
+def _build_single_field_lineup(
+    players: list,
+    n: int,
+    salary_cap: int = 50000,
+    min_salary: int = 46000,
+    solver_time_limit: int = 10,
+) -> list:
+    """Build one field lineup using PuLP. Returns list of player indices selected.
+
+    This is a stripped-down version of the main optimizer — no exposure caps,
+    no locks, no pair constraints. It's meant to simulate what an "average"
+    field builder would do given these projections.
+    """
+    prob = pulp.LpProblem("field_sim", pulp.LpMaximize)
+    x = {}
+    for i in range(n):
+        for s in DK_POS_SLOTS:
+            x[(i, s)] = pulp.LpVariable(f"x_{i}_{s}", cat="Binary")
+
+    # Objective: maximise jittered projections
+    prob += pulp.lpSum(
+        players[i]["_jittered_proj"] * x[(i, s)]
+        for i in range(n)
+        for s in DK_POS_SLOTS
+    )
+
+    # Exactly one player per slot
+    for s in DK_POS_SLOTS:
+        prob += pulp.lpSum(x[(i, s)] for i in range(n)) == 1
+
+    # Each player in at most one slot
+    for i in range(n):
+        prob += pulp.lpSum(x[(i, s)] for s in DK_POS_SLOTS) <= 1
+
+    # Position eligibility
+    for i in range(n):
+        for s in DK_POS_SLOTS:
+            if s not in players[i]["_slots"]:
+                prob += x[(i, s)] == 0
+
+    # Salary band
+    salary_sum = pulp.lpSum(
+        players[i]["salary"] * x[(i, s)]
+        for i in range(n)
+        for s in DK_POS_SLOTS
+    )
+    prob += salary_sum <= salary_cap
+    prob += salary_sum >= min_salary
+
+    prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=solver_time_limit))
+
+    if prob.status != 1:
+        return []
+
+    selected = []
+    for i in range(n):
+        for s in DK_POS_SLOTS:
+            if pulp.value(x[(i, s)]) and pulp.value(x[(i, s)]) > 0.5:
+                selected.append(i)
+    return selected
+
+
+def _build_single_showdown_lineup(
+    base_players: list,
+    m: int,
+    salary_cap: int = 50000,
+    solver_time_limit: int = 10,
+) -> list:
+    """Build one Showdown field lineup. Returns list of (orig_idx, is_cpt) tuples."""
+    # CPT variants: index 0..m-1, FLEX variants: m..2m-1
+    players = []
+    for p in base_players:
+        cpt = dict(p)
+        cpt["salary"] = round(p["salary"] * DK_SHOWDOWN_CAPTAIN_MULTIPLIER)
+        cpt["_jittered_proj"] = p["_jittered_proj"] * DK_SHOWDOWN_CAPTAIN_MULTIPLIER
+        cpt["_is_cpt"] = True
+        players.append(cpt)
+    for p in base_players:
+        flex = dict(p)
+        flex["_is_cpt"] = False
+        players.append(flex)
+
+    n = len(players)
+    prob = pulp.LpProblem("showdown_field_sim", pulp.LpMaximize)
+    y = {i: pulp.LpVariable(f"y_{i}", cat="Binary") for i in range(n)}
+
+    prob += pulp.lpSum(players[i]["_jittered_proj"] * y[i] for i in range(n))
+
+    # 1 CPT, 5 FLEX
+    prob += pulp.lpSum(y[i] for i in range(m)) == 1
+    prob += pulp.lpSum(y[m + j] for j in range(m)) == 5
+
+    # Each player at most once
+    for j in range(m):
+        prob += y[j] + y[m + j] <= 1
+
+    # Salary cap
+    prob += pulp.lpSum(players[i]["salary"] * y[i] for i in range(n)) <= salary_cap
+
+    prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=solver_time_limit))
+
+    if prob.status != 1:
+        return []
+
+    selected = []
+    for j in range(m):
+        if pulp.value(y[j]) and pulp.value(y[j]) > 0.5:
+            selected.append(j)  # CPT
+        if pulp.value(y[m + j]) and pulp.value(y[m + j]) > 0.5:
+            selected.append(j)  # FLEX (same orig index)
+    return selected
+
+
+# ---------------------------------------------------------------------------
+# Core: Field Simulation Ownership
+# ---------------------------------------------------------------------------
+
+def field_sim_ownership(
+    pool_df: pd.DataFrame,
+    n_sims: int = 1000,
+    contest_type: str = "gpp_main",
+    salary_cap: int = 50000,
+    min_salary: int = 46000,
+    seed: int = 42,
+    solver_time_limit: int = 10,
+    progress_callback=None,
+) -> pd.DataFrame:
+    """Simulate the field and derive ownership from exposure rates.
+
+    This is the SaberSim-style approach: build N lineups with jittered
+    projections at contest-appropriate variance, then count how often
+    each player appears. Exposure rate = ownership projection.
+
+    Parameters
+    ----------
+    pool_df : pd.DataFrame
+        Player pool with at least: player_id, player_name, pos, salary, proj.
+    n_sims : int
+        Number of field lineups to simulate (default 1000).
+        More sims = smoother ownership distribution but slower.
+        Recommended: 500 for quick pass, 1000-2000 for production.
+    contest_type : str
+        Key into CONTEST_VARIANCE dict. Controls projection noise level.
+    salary_cap : int
+        DK salary cap (default 50000).
+    min_salary : int
+        Minimum salary floor for lineups (default 46000).
+    seed : int
+        Random seed for reproducibility.
+    solver_time_limit : int
+        Seconds per individual lineup solve (default 10).
+    progress_callback : callable, optional
+        Called as progress_callback(completed, total) after each sim.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input pool_df with new columns:
+        - ``own_field_sim`` : raw exposure rate (0-100 scale)
+        - ``own_proj``      : final ownership (= own_field_sim for now)
+    """
+    df = pool_df.copy()
+
+    if "proj" not in df.columns or "salary" not in df.columns:
+        print("[ownership] Missing proj or salary — falling back to salary-rank")
+        return salary_rank_ownership(df, col="own_proj")
+
+    # Resolve variance preset
+    preset = CONTEST_VARIANCE.get(contest_type, CONTEST_VARIANCE["gpp_main"])
+    sigma_frac = preset["sigma_frac"]
+    is_showdown = contest_type == "showdown"
+
+    # Prepare player list
+    players = df.to_dict("records")
+    n = len(players)
+
+    if not is_showdown and n < DK_LINEUP_SIZE:
+        print(f"[ownership] Only {n} players — need {DK_LINEUP_SIZE} for Classic. Falling back to salary-rank.")
+        return salary_rank_ownership(df, col="own_proj")
+
+    if is_showdown and n < DK_SHOWDOWN_LINEUP_SIZE:
+        print(f"[ownership] Only {n} players — need {DK_SHOWDOWN_LINEUP_SIZE} for Showdown. Falling back to salary-rank.")
+        return salary_rank_ownership(df, col="own_proj")
+
+    # Pre-compute eligible slots for classic mode
+    if not is_showdown:
+        for p in players:
+            p["_slots"] = _eligible_slots(p.get("pos", ""))
+
+    # Run simulations
+    rng = np.random.default_rng(seed)
+    appearance_count = np.zeros(n, dtype=int)
+    feasible_count = 0
+
+    for sim_idx in range(n_sims):
+        # Jitter projections: proj * (1 + N(0, sigma_frac))
+        # Clip to ensure no negative projections
+        for i, p in enumerate(players):
+            base_proj = float(p.get("proj", 0))
+            noise = rng.normal(0, sigma_frac)
+            p["_jittered_proj"] = max(0.1, base_proj * (1 + noise))
+
+        if is_showdown:
+            selected = _build_single_showdown_lineup(
+                players, n,
+                salary_cap=salary_cap,
+                solver_time_limit=solver_time_limit,
+            )
+        else:
+            selected = _build_single_field_lineup(
+                players, n,
+                salary_cap=salary_cap,
+                min_salary=min_salary,
+                solver_time_limit=solver_time_limit,
+            )
+
+        if selected:
+            feasible_count += 1
+            for idx in selected:
+                appearance_count[idx] += 1
+
+        if progress_callback is not None:
+            progress_callback(sim_idx + 1, n_sims)
+
+    # Convert exposure counts to ownership percentages
+    if feasible_count > 0:
+        own_pct = (appearance_count / feasible_count) * 100.0
+    else:
+        print("[ownership] WARNING: 0 feasible lineups in field sim — falling back to salary-rank")
+        return salary_rank_ownership(df, col="own_proj")
+
+    df["own_field_sim"] = np.round(own_pct, 2)
+    df["own_proj"] = df["own_field_sim"]
+    df["ownership"] = df["own_proj"]  # backward-compat alias
+
+    # Log diagnostics
+    feasible_pct = (feasible_count / n_sims) * 100
+    print(
+        f"[ownership] Field sim complete — {feasible_count}/{n_sims} feasible ({feasible_pct:.0f}%), "
+        f"contest_type={contest_type}, sigma={sigma_frac:.2f}"
+    )
+    print(
+        f"[ownership] own_proj: mean={df['own_proj'].mean():.1f}%, "
+        f"max={df['own_proj'].max():.1f}% ({df.loc[df['own_proj'].idxmax(), 'player_name']}), "
+        f"min={df['own_proj'].min():.1f}%, "
+        f"chalk(>25%)={int((df['own_proj'] >= 25).sum())} players"
+    )
+
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Adjusted Ownership — compares field popularity to sim upside
+# ---------------------------------------------------------------------------
+
+def compute_adjusted_ownership(
+    pool_df: pd.DataFrame,
+    own_col: str = "own_proj",
+    proj_col: str = "proj",
+    ceil_col: str = "ceil",
+) -> pd.DataFrame:
+    """Compute adjusted ownership that accounts for projection quality.
+
+    Adjusted ownership tells you whether a player's popularity is
+    justified by their upside. If adjusted_own > own_proj, the player
+    is over-owned (popularity exceeds performance). If adjusted_own <
+    own_proj, the player has hidden leverage.
+
+    This feeds into the Ricky Edge buckets:
+      - Over-owned + low ceiling → Fade Alert
+      - Under-owned + high ceiling → Leverage Play
+
+    Parameters
+    ----------
+    pool_df : pd.DataFrame
+        Must have own_proj and proj columns.
+    own_col : str
+        Projected ownership column.
+    proj_col : str
+        Projection column.
+    ceil_col : str
+        Ceiling projection column (optional, enhances signal).
+
+    Returns
+    -------
+    pd.DataFrame with new columns:
+        - ``adjusted_own``  : ownership adjusted for projection quality
+        - ``own_delta``     : adjusted_own - own_proj (positive = over-owned)
+        - ``leverage_grade``: categorical label (Heavy Chalk / Slight Chalk /
+                              Fair / Slight Leverage / Strong Leverage)
+    """
+    df = pool_df.copy()
+
+    if own_col not in df.columns or proj_col not in df.columns:
+        print(f"[ownership] Cannot compute adjusted ownership — missing {own_col} or {proj_col}")
+        return df
+
+    own = df[own_col].astype(float).clip(lower=0.1)
+    proj = df[proj_col].astype(float).clip(lower=0.1)
+
+    # Points-per-ownership-percent: how much projection value per % of ownership
+    # Higher = under-owned relative to projection
+    ppo = proj / own
+
+    # Normalize PPO to a percentile rank within the pool
+    ppo_rank = ppo.rank(pct=True)
+
+    # Adjusted ownership: scale raw ownership by inverse PPO rank
+    # Players with high PPO (good value per ownership%) get adjusted_own < own_proj
+    # Players with low PPO (poor value per ownership%) get adjusted_own > own_proj
+    adjustment_factor = 1.0 + 0.5 * (1.0 - ppo_rank)  # range: 1.0 to 1.5
+    df["adjusted_own"] = (own * adjustment_factor).round(2)
+
+    # If ceiling data available, further adjust
+    if ceil_col in df.columns:
+        ceil = df[ceil_col].astype(float).clip(lower=0.1)
+        ceil_rank = ceil.rank(pct=True)
+        # High ceiling players get a slight ownership reduction (leverage boost)
+        ceil_adj = 1.0 - 0.1 * ceil_rank  # range: 0.9 to 1.0
+        df["adjusted_own"] = (df["adjusted_own"] * ceil_adj).round(2)
+
+    # Delta: positive = over-owned, negative = under-owned (leverage)
+    df["own_delta"] = (df["adjusted_own"] - own).round(2)
+
+    # Leverage grade
+    def _grade(delta):
+        if delta >= 5.0:
+            return "Heavy Chalk"
+        elif delta >= 2.0:
+            return "Slight Chalk"
+        elif delta >= -2.0:
+            return "Fair"
+        elif delta >= -5.0:
+            return "Slight Leverage"
+        else:
+            return "Strong Leverage"
+
+    df["leverage_grade"] = df["own_delta"].apply(_grade)
+
+    print(
+        f"[ownership] Adjusted ownership computed — "
+        f"chalk(>2%)={int((df['own_delta'] >= 2).sum())}, "
+        f"leverage(<-2%)={int((df['own_delta'] <= -2).sum())}, "
+        f"fair={int((df['own_delta'].abs() < 2).sum())}"
+    )
+
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Unified apply_ownership (replaces old salary-rank default)
+# ---------------------------------------------------------------------------
+
+def apply_ownership(
+    pool_df: pd.DataFrame,
+    use_field_sim: bool = True,
+    n_sims: int = 1000,
+    contest_type: str = "gpp_main",
+    salary_cap: int = 50000,
+    min_salary: int = 46000,
+    progress_callback=None,
+) -> pd.DataFrame:
     """Ensure pool_df has a canonical ``own_proj`` column and a backward-compat ``ownership`` alias.
 
     Ownership column semantics
@@ -81,16 +501,17 @@ def apply_ownership(pool_df: pd.DataFrame) -> pd.DataFrame:
     * ``ownership``  — read-only backward-compat alias for ``own_proj``.
                        Always kept in sync so legacy code continues to work.
     * ``actual_own`` — realized ownership from contest results.  Never touched here.
+    * ``own_field_sim`` — raw field simulation exposure rate (when sim is used).
 
     Resolution order when ``own_proj`` is absent:
       1. ``POWN``     — raw RotoGrinders / FantasyPros site export column
       2. ``proj_own`` — alternate legacy column name
       3. ``Own%``     — another common alias used in some imports
-      4. Fallback: salary-rank estimate (stored in ``own_proj`` directly)
+      4. Field simulation (SaberSim-style, default) OR salary-rank fallback
     """
     # If canonical column already exists, only sync the alias — never overwrite.
     if "own_proj" in pool_df.columns:
-        pool_df["ownership"] = pool_df["own_proj"]  # ownership column used here: pool_df["own_proj"] (canonical)
+        pool_df["ownership"] = pool_df["own_proj"]
         mean_own = pool_df["own_proj"].mean()
         print(f"[ownership] own_proj already present (mean={mean_own:.1f}%)")
         return pool_df
@@ -99,20 +520,33 @@ def apply_ownership(pool_df: pd.DataFrame) -> pd.DataFrame:
     for c in ["POWN", "proj_own", "Own%"]:
         if c in pool_df.columns and pool_df[c].notna().any() and (pool_df[c] > 0).any():
             pool_df["own_proj"] = pool_df[c]
-            pool_df["ownership"] = pool_df["own_proj"]  # ownership column used here: pool_df[c] normalized to pool_df["own_proj"]
+            pool_df["ownership"] = pool_df["own_proj"]
             mean_own = pool_df["own_proj"].mean()
             print(f"[ownership] Normalized '{c}' → own_proj (mean={mean_own:.1f}%)")
             return pool_df
 
-    # Fallback: generate from salary rank → write directly into own_proj
-    pool_df = salary_rank_ownership(pool_df, col="own_proj")
-    pool_df["ownership"] = pool_df["own_proj"]
-    print(f"[ownership] Generated salary-rank own_proj "
-          f"(mean={pool_df['own_proj'].mean():.1f}%, "
-          f"min={pool_df['own_proj'].min():.1f}%, "
-          f"max={pool_df['own_proj'].max():.1f}%)")
-    return pool_df
+    # No external ownership available — use field simulation or salary-rank
+    if use_field_sim and "proj" in pool_df.columns and "salary" in pool_df.columns:
+        pool_df = field_sim_ownership(
+            pool_df,
+            n_sims=n_sims,
+            contest_type=contest_type,
+            salary_cap=salary_cap,
+            min_salary=min_salary,
+            progress_callback=progress_callback,
+        )
+    else:
+        # Ultra-fast fallback when projections aren't available yet
+        pool_df = salary_rank_ownership(pool_df, col="own_proj")
+        pool_df["ownership"] = pool_df["own_proj"]
+        print(
+            f"[ownership] Generated salary-rank own_proj "
+            f"(mean={pool_df['own_proj'].mean():.1f}%, "
+            f"min={pool_df['own_proj'].min():.1f}%, "
+            f"max={pool_df['own_proj'].max():.1f}%)"
+        )
 
+    return pool_df
 
 
 def compute_leverage(pool_df: pd.DataFrame, own_col: str = "own_proj") -> pd.DataFrame:
@@ -126,13 +560,6 @@ def compute_leverage(pool_df: pd.DataFrame, own_col: str = "own_proj") -> pd.Dat
     pool_df : DataFrame with 'proj' and the projected-ownership column.
     own_col : Projected ownership column name.  Defaults to ``"own_proj"``
               (the canonical column set by :func:`apply_ownership`).
-              Pass an explicit column name only when you have a specific
-              alternative; do **not** pass ``"ownership"`` directly.
-
-    Raises
-    ------
-    ValueError
-        If *own_col* is not present in *pool_df*.
 
     Returns
     -------
@@ -144,7 +571,7 @@ def compute_leverage(pool_df: pd.DataFrame, own_col: str = "own_proj") -> pd.Dat
         if own_col == "own_proj":
             raise ValueError(
                 f"Expected projected ownership column 'own_proj' not found in df. "
-                "Run apply_ownership() or apply_ownership_pipeline() first to ensure own_proj is populated."
+                "Run apply_ownership() first to ensure own_proj is populated."
             )
         else:
             raise ValueError(
@@ -157,12 +584,10 @@ def compute_leverage(pool_df: pd.DataFrame, own_col: str = "own_proj") -> pd.Dat
         return df
 
     proj = df["proj"].astype(float).clip(lower=0.1)
-    own = df[own_col].astype(float).clip(lower=0.5)  # ownership column used here: df[own_col] (canonical "own_proj")
+    own = df[own_col].astype(float).clip(lower=0.5)
 
-    # Raw leverage: projection points per ownership %
     raw_leverage = proj / own
 
-    # Normalize to 0-1 scale (min-max within pool)
     lev_min = raw_leverage.min()
     lev_max = raw_leverage.max()
     if lev_max > lev_min:
@@ -184,20 +609,21 @@ def apply_ownership_pipeline(
     model_path: str = None,
     alpha: float = 0.5,
     target_mean: float = None,
+    use_field_sim: bool = True,
+    n_sims: int = 1000,
+    contest_type: str = "gpp_main",
+    salary_cap: int = 50000,
+    min_salary: int = 46000,
+    progress_callback=None,
 ) -> pd.DataFrame:
     """Full ownership pipeline: ingest ext_own → predict own_model → blend → own_proj.
 
     External ownership (RG/FP POWN) is the **default source** for ``own_proj``.
-    When external data is present (``ext_own`` column populated with non-zero
-    values), ``own_proj`` is set directly from ``ext_own`` (alpha=1.0).  The
-    internal GBM/heuristic model is only used as a fallback when no external
-    file has been loaded for the current slate, in which case a warning is
-    logged.
+    When external data is present, ``own_proj`` is set from ``ext_own``.
 
-    This orchestrates the three-layer ownership system:
-      - ``ext_own``   : raw RG/FP site ownership (from *ext_df* or already in pool)
-      - ``own_model`` : GBM model prediction (fallback only)
-      - ``own_proj``  : final ownership used for Field% display and leverage
+    When no external data: uses field simulation (SaberSim-style) instead of
+    the old salary-rank heuristic. The field sim runs the optimizer N times
+    with jittered projections and derives ownership from exposure rates.
 
     Parameters
     ----------
@@ -205,19 +631,29 @@ def apply_ownership_pipeline(
         Player pool (YakOS schema).
     ext_df : pd.DataFrame, optional
         Output of :func:`yak_core.ext_ownership.ingest_ext_ownership`.
-        When provided, merged into *pool_df* by player key.
     model_path : str, optional
-        Path to ``ownership_model.pkl``.  Defaults to models/ownership_model.pkl.
+        Path to ``ownership_model.pkl``.
     alpha : float
         Blend weight on ``ext_own`` (0 = pure model, 1 = pure ext_own).
-        Overridden to 1.0 automatically when external data is present.
     target_mean : float, optional
         Optional target mean for distribution scaling.
+    use_field_sim : bool
+        If True (default), use field simulation when no external data.
+        If False, fall back to the old GBM + salary-rank model.
+    n_sims : int
+        Number of field simulations to run (default 1000).
+    contest_type : str
+        Contest type for variance preset.
+    salary_cap : int
+        DK salary cap.
+    min_salary : int
+        Minimum salary floor.
+    progress_callback : callable, optional
+        Progress callback for field sim.
 
     Returns
     -------
-    pd.DataFrame
-        pool_df with ``ext_own``, ``own_model``, and ``own_proj`` columns.
+    pd.DataFrame with ``ext_own``, ``own_model``, and ``own_proj`` columns.
     """
     from yak_core.ext_ownership import (
         merge_ext_ownership,
@@ -231,20 +667,16 @@ def apply_ownership_pipeline(
     if ext_df is not None and not ext_df.empty:
         pool = merge_ext_ownership(pool, ext_df)
     elif "proj_own" in pool.columns and "ext_own" not in pool.columns:
-        # Use proj_own from RG CSV load as ext_own when available
         ext_vals = pd.to_numeric(pool["proj_own"], errors="coerce")
         if ext_vals.notna().any() and (ext_vals > 0).any():
             pool["ext_own"] = ext_vals
 
-    # Diagnostic: log how many players received ext_own values after merge
     if "ext_own" in pool.columns:
         matched = int(pool["ext_own"].notna().sum())
         total = len(pool)
         pct = matched / total * 100 if total > 0 else 0.0
         print(f"[ownership] ext_own merge: {matched}/{total} players matched ({pct:.0f}%)")
 
-    # Determine whether we have valid external ownership data.
-    # Re-use the already-coerced series when ext_own was just set above.
     if "ext_own" in pool.columns:
         _ext_series = pd.to_numeric(pool["ext_own"], errors="coerce")
         has_ext = bool(_ext_series.notna().any() and (_ext_series > 0).any())
@@ -255,19 +687,38 @@ def apply_ownership_pipeline(
         # External ownership is the default source — use it exclusively.
         effective_alpha = 1.0
         print("[ownership] External ownership (RG/FP POWN) detected — using as sole own_proj source.")
+
+        # Step 2: predict own_model (always compute for diagnostics)
+        pool = predict_ownership(pool, model_path=model_path)
+
+        # Step 3: blend and normalize → own_proj
+        pool = blend_and_normalize(pool, alpha=effective_alpha, target_mean=target_mean)
     else:
-        # No external file loaded for this slate — fall back to internal model.
-        effective_alpha = 0.0
-        print(
-            "[ownership] WARNING: No external ownership file found — "
-            "using internal model (less accurate)."
-        )
-
-    # Step 2: predict own_model (always compute for diagnostics / fallback)
-    pool = predict_ownership(pool, model_path=model_path)
-
-    # Step 3: blend and normalize → own_proj
-    pool = blend_and_normalize(pool, alpha=effective_alpha, target_mean=target_mean)
+        # No external file — use field simulation instead of old GBM fallback
+        if use_field_sim and "proj" in pool.columns and "salary" in pool.columns:
+            print("[ownership] No external ownership — running field simulation model.")
+            pool = field_sim_ownership(
+                pool,
+                n_sims=n_sims,
+                contest_type=contest_type,
+                salary_cap=salary_cap,
+                min_salary=min_salary,
+                progress_callback=progress_callback,
+            )
+            # Still compute own_model for diagnostics comparison
+            try:
+                pool = predict_ownership(pool, model_path=model_path)
+            except Exception:
+                pass  # Model may not be trained yet — field sim is the primary
+        else:
+            # Ultimate fallback: old GBM + salary-rank
+            effective_alpha = 0.0
+            print(
+                "[ownership] WARNING: No external ownership, no projections — "
+                "using internal model (less accurate)."
+            )
+            pool = predict_ownership(pool, model_path=model_path)
+            pool = blend_and_normalize(pool, alpha=effective_alpha, target_mean=target_mean)
 
     own_model_mean = pool["own_model"].mean() if "own_model" in pool.columns else float("nan")
     own_proj_mean = pool["own_proj"].mean() if "own_proj" in pool.columns else float("nan")
@@ -281,16 +732,11 @@ def apply_ownership_pipeline(
 
 
 def ownership_kpis(pool_df):
-    """Compute ownership-related KPIs for display.
-
-    Reads ``own_proj`` (canonical) and falls back to ``ownership`` for
-    backward compatibility with callers that haven't run apply_ownership yet.
-    """
+    """Compute ownership-related KPIs for display."""
     kpis = {}
-    # Prefer canonical own_proj; fall back to backward-compat ownership alias
     own_col = "own_proj" if "own_proj" in pool_df.columns else "ownership"
     if own_col in pool_df.columns:
-        own = pool_df[own_col].dropna()  # ownership column used here: pool_df[own_col] ("own_proj" preferred, "ownership" fallback)
+        own = pool_df[own_col].dropna()
         kpis["avg_own"] = round(own.mean(), 1)
         kpis["max_own"] = round(own.max(), 1)
         kpis["min_own"] = round(own.min(), 1)
@@ -306,4 +752,12 @@ def ownership_kpis(pool_df):
             pool_df.nlargest(5, "leverage")[available]
             .to_dict("records")
         )
+    if "leverage_grade" in pool_df.columns:
+        grade_counts = pool_df["leverage_grade"].value_counts().to_dict()
+        kpis["leverage_grades"] = grade_counts
+    if "own_field_sim" in pool_df.columns:
+        kpis["field_sim_used"] = True
+        kpis["field_sim_mean"] = round(pool_df["own_field_sim"].mean(), 1)
+    else:
+        kpis["field_sim_used"] = False
     return kpis
