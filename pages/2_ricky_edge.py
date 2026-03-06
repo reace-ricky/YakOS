@@ -1,16 +1,11 @@
-"""Ricky Edge – YakOS Sprint 1 page.
+"""Ricky's Edge Analysis – pre-filled from Lab sims, approve before lineup build.
 
-Responsibilities
-----------------
-- Tag players as core / secondary / value / punt / fade with conviction
-  levels (1–5).
-- Tag game environments (pace, totals, game stack targets).
-- Define two- and three-man stacks.
-- Support free-text slate notes entry.
-- All tags, stacks, labels, and notes are persisted into RickyEdgeState only.
-
-State written: RickyEdgeState exclusively.
-State read:    SlateState.player_pool (for the player picker).
+Flow:
+  1. The Lab loads a slate, runs sims → edge_df is computed & stored.
+  2. This page reads the edge_df and auto-classifies players into
+     Core / Value / Leverage / Fade tiers.
+  3. User reviews, overrides tags if needed, and approves the Edge Check.
+  4. Build & Publish is gated on the Edge Check approval.
 """
 
 from __future__ import annotations
@@ -20,6 +15,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 import pandas as pd
+import numpy as np
 import streamlit as st
 
 _repo_root = str(Path(__file__).resolve().parent.parent)
@@ -31,372 +27,275 @@ from yak_core.state import (  # noqa: E402
     get_edge_state,
     set_edge_state,
 )
+from yak_core.edge import compute_edge_metrics  # noqa: E402
 from yak_core.right_angle import (  # noqa: E402
     compute_game_environment_cards,
     compute_tiered_stack_alerts,
 )
-# Shared slate context and lab analysis helpers (factored into yak_core.context
-# so The Lab, Ricky Edge, and Build & Publish all read the same data).
 from yak_core.context import get_slate_context, get_lab_analysis  # noqa: E402
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
+# ── Classification thresholds ──────────────────────────────────────────
+_CORE_SMASH = 0.20
+_VALUE_SMASH = 0.10
+_LEVERAGE_THRESH = 1.3
+_BUST_THRESH = 0.30
+_FADE_OWN = 25.0  # ownership >= this AND bust >= 0.25 → fade
 
-_PLAYER_TAGS = ["core", "secondary", "value", "punt", "fade"]
 _TAG_COLORS = {
-    "core": "🟢",
-    "secondary": "🔵",
-    "value": "🟡",
-    "punt": "⚪",
-    "fade": "🔴",
+    "core": "🟢", "secondary": "🔵", "value": "🟡",
+    "leverage": "⚡", "punt": "⚪", "fade": "🔴",
 }
-_CONV_LABELS = {1: "1 – Low", 2: "2", 3: "3 – Mid", 4: "4", 5: "5 – High"}
+_PLAYER_TAGS = ["core", "secondary", "value", "leverage", "punt", "fade"]
 
 
-# ---------------------------------------------------------------------------
-# Main page
-# ---------------------------------------------------------------------------
+def _auto_classify(row: pd.Series) -> str:
+    """Classify a player into a tier based on edge metrics."""
+    smash = float(row.get("smash_prob", 0) or 0)
+    bust = float(row.get("bust_prob", 0) or 0)
+    own = float(row.get("own_pct", 5) or 5)
+    lev = float(row.get("leverage", 0) or 0)
+
+    # Fade: high bust + high ownership
+    if bust >= 0.25 and own >= _FADE_OWN:
+        return "fade"
+    # Core: high smash probability
+    if smash >= _CORE_SMASH:
+        return "core"
+    # Leverage: good proj-to-ownership ratio, lower owned
+    if pd.notna(lev) and lev >= _LEVERAGE_THRESH and own < 20:
+        return "leverage"
+    # Value: moderate smash upside
+    if smash >= _VALUE_SMASH:
+        return "value"
+    # Bust risk → fade
+    if bust >= _BUST_THRESH:
+        return "fade"
+    return ""
+
 
 def main() -> None:
-    st.title("🎯 Ricky Edge")
-    st.caption("Tag players, environments, and stacks for this slate.")
+    st.title("Ricky's Edge Analysis")
+    st.caption("Auto-populated from Lab sims. Review, override, and approve before building lineups.")
 
     slate = get_slate_state()
     edge = get_edge_state()
 
     if not slate.is_ready():
-        st.warning("⚠️ No slate published yet. Go to **The Lab** and load a slate first.")
+        st.warning("No slate loaded yet. Go to **The Lab** and load a slate first.")
+        return
 
-    # Use get_lab_analysis() as the default data source for player pool and sim metrics.
-    # Falls back to the base player pool from SlateState when sims have not been run.
+    # ── Get pool & edge data ──────────────────────────────────────────
     _analysis = get_lab_analysis()
     pool: pd.DataFrame = _analysis["pool"] if not _analysis["pool"].empty else (
         slate.player_pool if slate.player_pool is not None else pd.DataFrame()
     )
-    player_names = sorted(pool["player_name"].dropna().tolist()) if not pool.empty and "player_name" in pool.columns else []
 
-    st.divider()
+    if pool.empty:
+        st.warning("No player pool available. Load a slate in The Lab first.")
+        return
 
-    # ─────────────────────────────────────────────────────────────────────
-    # Section 1: Slate Notes
-    # ─────────────────────────────────────────────────────────────────────
-    st.subheader("📝 Slate Notes")
-    notes = st.text_area(
-        "Notes for this slate",
-        value=edge.slate_notes,
-        height=100,
-        key="_re_notes",
-        placeholder="e.g. 'Heavy rain in Chicago – avoid pass-catchers. LAL pace game is a smash.'",
-    )
-    if notes != edge.slate_notes:
-        edge.slate_notes = notes
-        set_edge_state(edge)
+    # Compute edge if not already available
+    edge_df = slate.edge_df if hasattr(slate, "edge_df") and slate.edge_df is not None and not slate.edge_df.empty else None
+    if edge_df is None:
+        try:
+            edge_df = compute_edge_metrics(pool, calibration_state=slate.calibration_state)
+        except Exception:
+            edge_df = pool.copy()
 
-    st.divider()
-
-    # ─────────────────────────────────────────────────────────────────────
-    # Section 2: Player Tagging
-    # ─────────────────────────────────────────────────────────────────────
-    st.subheader("🏷️ Player Tags")
-
-    col_left, col_right = st.columns([2, 3])
-
-    with col_left:
-        st.caption("Add a tag for a player")
-        if player_names:
-            pick_player = st.selectbox("Player", [""] + player_names, key="_re_pick_player")
-        else:
-            pick_player = st.text_input("Player name", key="_re_pick_player_text")
-
-        pick_tag = st.selectbox(
-            "Tag",
-            _PLAYER_TAGS,
-            format_func=lambda t: f"{_TAG_COLORS.get(t, '')} {t.title()}",
-            key="_re_pick_tag",
-        )
-        pick_conviction = st.select_slider(
-            "Conviction", options=[1, 2, 3, 4, 5],
-            format_func=lambda v: _CONV_LABELS[v],
-            value=3,
-            key="_re_pick_conv",
-        )
-
-        col_add, col_rm = st.columns(2)
-        with col_add:
-            if st.button("➕ Tag", key="_re_add_tag") and pick_player:
-                edge.tag_player(pick_player, pick_tag, pick_conviction)
-                set_edge_state(edge)
-                st.success(f"Tagged {pick_player} → {pick_tag} ({pick_conviction})")
-        with col_rm:
-            if st.button("➖ Remove", key="_re_rm_tag") and pick_player:
-                edge.remove_tag(pick_player)
-                set_edge_state(edge)
-                st.info(f"Removed tag for {pick_player}")
-
-    with col_right:
-        st.caption("Current tags")
-        if edge.player_tags:
-            rows = [
-                {
-                    "Player": p,
-                    "Tag": f"{_TAG_COLORS.get(v['tag'], '')} {v['tag'].title()}",
-                    "Conviction": _CONV_LABELS.get(v["conviction"], str(v["conviction"])),
-                }
-                for p, v in sorted(edge.player_tags.items())
-            ]
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
-            # Quick summary per tag
-            for tag in _PLAYER_TAGS:
-                tagged = edge.get_tagged(tag)
-                if tagged:
-                    st.markdown(f"**{_TAG_COLORS.get(tag, '')} {tag.title()}**: {', '.join(tagged)}")
-        else:
-            st.info("No players tagged yet.")
-
-    # Auto-generate tags from pool signals
-    if not pool.empty and st.button("⚡ Auto-suggest tags from pool", key="_re_auto_tag"):
-        with st.spinner("Analyzing pool signals…"):
-            try:
-                suggestions = []
-                if "proj" in pool.columns and "salary" in pool.columns:
-                    top_proj = pool.nlargest(3, "proj")["player_name"].tolist()
-                    high_value = pool.copy()
-                    high_value["_vfp"] = high_value["proj"] / (high_value["salary"] / 1000.0)
-                    value_plays = high_value.nlargest(5, "_vfp")
-                    low_salary = value_plays[value_plays["salary"] < 6500]["player_name"].tolist()
-
-                    for p in top_proj:
-                        if p not in edge.player_tags:
-                            suggestions.append((p, "core", 3))
-                    for p in low_salary:
-                        if p not in edge.player_tags:
-                            suggestions.append((p, "value", 2))
-
-                if suggestions:
-                    for p, tag, conv in suggestions:
-                        edge.tag_player(p, tag, conv)
-                    set_edge_state(edge)
-                    st.success(f"Auto-tagged {len(suggestions)} players.")
-                else:
-                    st.info("No auto-tag suggestions (pool may have minimal signal).")
-            except Exception as exc:
-                st.error(f"Auto-tag failed: {exc}")
-
-    st.divider()
-
-    # ─────────────────────────────────────────────────────────────────────
-    # Section 3: Game Environment Tags
-    # ─────────────────────────────────────────────────────────────────────
-    st.subheader("🌡️ Game Environment Tags")
-
-    games = []
-    if not pool.empty and "team" in pool.columns and "opponent" in pool.columns:
-        seen = set()
-        for _, row in pool.iterrows():
-            t, o = row.get("team", ""), row.get("opponent", "")
-            if t and o:
-                key = tuple(sorted([t, o]))
-                if key not in seen:
-                    seen.add(key)
-                    games.append(f"{t} @ {o}")
-
-    if games:
-        with st.expander("Tag game environments", expanded=False):
-            for game_key in games:
-                parts = game_key.split(" @ ")
-                home = parts[1] if len(parts) > 1 else game_key
-                away = parts[0] if len(parts) > 0 else game_key
-                st.markdown(f"**{game_key}**")
-                c1, c2, c3, c4 = st.columns(4)
-                with c1:
-                    pace = st.selectbox(
-                        "Pace",
-                        ["neutral", "fast", "slow"],
-                        key=f"_re_pace_{game_key}",
-                        index=["neutral", "fast", "slow"].index(
-                            edge.game_tags.get(game_key, {}).get("pace", "neutral")
-                        ),
-                    )
-                with c2:
-                    total = st.number_input(
-                        "O/U Total",
-                        min_value=0.0, max_value=300.0, step=0.5,
-                        value=float(edge.game_tags.get(game_key, {}).get("total", 220.0)),
-                        key=f"_re_total_{game_key}",
-                    )
-                with c3:
-                    environment = st.selectbox(
-                        "Environment",
-                        ["neutral", "smash", "avoid"],
-                        key=f"_re_env_{game_key}",
-                        index=["neutral", "smash", "avoid"].index(
-                            edge.game_tags.get(game_key, {}).get("environment", "neutral")
-                        ),
-                    )
-                with c4:
-                    stack_target = st.checkbox(
-                        "Stack target",
-                        value=edge.game_tags.get(game_key, {}).get("stack_target", False),
-                        key=f"_re_stack_tgt_{game_key}",
-                    )
-
-                edge.game_tags[game_key] = {
-                    "pace": pace,
-                    "total": total,
-                    "environment": environment,
-                    "stack_target": stack_target,
-                }
-            set_edge_state(edge)
+    # Auto-classify players
+    if "smash_prob" in edge_df.columns:
+        edge_df["auto_tier"] = edge_df.apply(_auto_classify, axis=1)
     else:
-        st.info("No games available. Publish a slate first to tag game environments.")
+        edge_df["auto_tier"] = ""
+
+    player_names = sorted(edge_df["player_name"].dropna().tolist()) if "player_name" in edge_df.columns else []
+
+    # ── Slate header ──────────────────────────────────────────────────
+    st.markdown(f"**Slate:** {slate.slate_date} | **Contest:** {slate.contest_name} | **Players:** {len(edge_df)}")
 
     st.divider()
 
-    # ─────────────────────────────────────────────────────────────────────
-    # Section 4: Stack Definitions
-    # ─────────────────────────────────────────────────────────────────────
-    st.subheader("📚 Stack Definitions")
+    # =====================================================================
+    # SECTION 1: AUTO-FILLED EDGE TIERS
+    # =====================================================================
+    st.subheader("Edge Tiers")
+    st.caption("Auto-classified from sim results. Override any player below.")
 
-    with st.expander("Add a new stack", expanded=not bool(edge.stacks)):
-        teams = sorted(pool["team"].dropna().unique().tolist()) if not pool.empty and "team" in pool.columns else []
-        stack_team = st.selectbox("Team", [""] + teams, key="_re_stack_team")
+    # Core plays
+    cores = edge_df[edge_df["auto_tier"] == "core"].head(8)
+    if not cores.empty:
+        st.markdown("**🟢 Core** — high smash probability, build around these")
+        _show_cols = [c for c in ["player_name", "pos", "team", "salary", "proj", "own_pct", "smash_prob", "edge_score"] if c in cores.columns]
+        _fmt = {c: "{:.1f}" for c in ["proj", "own_pct", "edge_score"] if c in cores.columns}
+        _fmt.update({c: "{:.2f}" for c in ["smash_prob"] if c in cores.columns})
+        st.dataframe(cores[_show_cols].style.format(_fmt), use_container_width=True, hide_index=True)
 
-        # Players from that team
-        if stack_team and not pool.empty and "team" in pool.columns:
-            team_players = sorted(
-                pool[pool["team"] == stack_team]["player_name"].dropna().tolist()
-            )
-        else:
-            team_players = player_names
+    # Leverage plays
+    leverages = edge_df[edge_df["auto_tier"] == "leverage"].head(8)
+    if not leverages.empty:
+        st.markdown("**⚡ Leverage** — strong projection, low ownership, high upside-per-dollar-of-ownership")
+        _show_cols = [c for c in ["player_name", "pos", "team", "salary", "proj", "own_pct", "leverage", "smash_prob"] if c in leverages.columns]
+        _fmt = {c: "{:.1f}" for c in ["proj", "own_pct", "leverage"] if c in leverages.columns}
+        _fmt.update({c: "{:.2f}" for c in ["smash_prob"] if c in leverages.columns})
+        st.dataframe(leverages[_show_cols].style.format(_fmt), use_container_width=True, hide_index=True)
 
-        stack_players = st.multiselect("Players (2–3)", team_players, key="_re_stack_players")
-        stack_rationale = st.text_input("Rationale (optional)", key="_re_stack_rationale")
+    # Value plays
+    values = edge_df[edge_df["auto_tier"] == "value"].head(8)
+    if not values.empty:
+        st.markdown("**🟡 Value** — moderate upside, salary efficient")
+        _show_cols = [c for c in ["player_name", "pos", "team", "salary", "proj", "own_pct", "smash_prob", "edge_score"] if c in values.columns]
+        _fmt = {c: "{:.1f}" for c in ["proj", "own_pct", "edge_score"] if c in values.columns}
+        _fmt.update({c: "{:.2f}" for c in ["smash_prob"] if c in values.columns})
+        st.dataframe(values[_show_cols].style.format(_fmt), use_container_width=True, hide_index=True)
 
-        if st.button("➕ Add Stack", key="_re_add_stack"):
-            if stack_team and len(stack_players) >= 2:
-                edge.add_stack(stack_team, stack_players, stack_rationale)
+    # Fades
+    fades = edge_df[edge_df["auto_tier"] == "fade"].head(8)
+    if not fades.empty:
+        st.markdown("**🔴 Fade** — bust risk, over-owned, or both")
+        _show_cols = [c for c in ["player_name", "pos", "team", "salary", "proj", "own_pct", "bust_prob", "leverage"] if c in fades.columns]
+        _fmt = {c: "{:.1f}" for c in ["proj", "own_pct", "leverage"] if c in fades.columns}
+        _fmt.update({c: "{:.2f}" for c in ["bust_prob"] if c in fades.columns})
+        st.dataframe(fades[_show_cols].style.format(_fmt), use_container_width=True, hide_index=True)
+
+    # Empty tiers
+    _filled = sum(1 for t in ["core", "leverage", "value", "fade"] if not edge_df[edge_df["auto_tier"] == t].empty)
+    if _filled == 0:
+        st.info("No edge tiers populated. Run sims in The Lab first to generate edge data.")
+
+    st.divider()
+
+    # =====================================================================
+    # SECTION 2: TOP STACKS
+    # =====================================================================
+    st.subheader("Top Stacks")
+    try:
+        stack_alerts = compute_tiered_stack_alerts(pool)
+        if stack_alerts:
+            _stack_df = pd.DataFrame(stack_alerts).head(5)
+            _stack_cols = [c for c in ["team", "tier", "conditions_met", "key_players", "implied_total"] if c in _stack_df.columns]
+            st.dataframe(_stack_df[_stack_cols], use_container_width=True, hide_index=True)
+
+            # Auto-define stacks from top teams if no manual stacks exist
+            if not edge.stacks:
+                for srow in stack_alerts[:3]:
+                    team = srow.get("team", "")
+                    if team and not pool.empty and "player_name" in pool.columns:
+                        team_players = pool[pool["team"] == team].nlargest(3, "proj")["player_name"].tolist()
+                        if len(team_players) >= 2:
+                            edge.add_stack(team, team_players[:3], f"Auto: {srow.get('tier', '')} ({srow.get('conditions_met', 0)} conditions)")
                 set_edge_state(edge)
-                st.success(f"Stack added: {stack_team} – {', '.join(stack_players)}")
-            else:
-                st.warning("Select a team and at least 2 players.")
+        else:
+            st.info("No stack data available.")
+    except Exception:
+        st.info("Run sims in The Lab to generate stack analysis.")
 
+    # Show defined stacks
     if edge.stacks:
         st.caption(f"{len(edge.stacks)} stack(s) defined")
         rows = []
         for i, s in enumerate(edge.stacks):
             rows.append({
-                "#": i + 1,
                 "Team": s.get("team", ""),
                 "Players": ", ".join(s.get("players", [])),
                 "Rationale": s.get("rationale", ""),
             })
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-        if st.button("🗑️ Clear all stacks", key="_re_clear_stacks"):
-            edge.stacks = []
+    st.divider()
+
+    # =====================================================================
+    # SECTION 3: MANUAL OVERRIDES
+    # =====================================================================
+    with st.expander("Override Player Tags", expanded=False):
+        st.caption("Change any player's tier classification.")
+
+        col_left, col_right = st.columns([2, 3])
+
+        with col_left:
+            if player_names:
+                pick_player = st.selectbox("Player", [""] + player_names, key="_re_pick_player")
+            else:
+                pick_player = st.text_input("Player name", key="_re_pick_player_text")
+
+            pick_tag = st.selectbox(
+                "Tag",
+                _PLAYER_TAGS,
+                format_func=lambda t: f"{_TAG_COLORS.get(t, '')} {t.title()}",
+                key="_re_pick_tag",
+            )
+            pick_conviction = st.select_slider(
+                "Conviction", options=[1, 2, 3, 4, 5],
+                format_func=lambda v: {1: "1 – Low", 2: "2", 3: "3 – Mid", 4: "4", 5: "5 – High"}[v],
+                value=3,
+                key="_re_pick_conv",
+            )
+
+            col_add, col_rm = st.columns(2)
+            with col_add:
+                if st.button("Tag", key="_re_add_tag") and pick_player:
+                    edge.tag_player(pick_player, pick_tag, pick_conviction)
+                    set_edge_state(edge)
+                    st.success(f"Tagged {pick_player} → {pick_tag} ({pick_conviction})")
+            with col_rm:
+                if st.button("Remove", key="_re_rm_tag") and pick_player:
+                    edge.remove_tag(pick_player)
+                    set_edge_state(edge)
+                    st.info(f"Removed tag for {pick_player}")
+
+        with col_right:
+            if edge.player_tags:
+                st.caption("Manual overrides")
+                rows = [
+                    {
+                        "Player": p,
+                        "Tag": f"{_TAG_COLORS.get(v['tag'], '')} {v['tag'].title()}",
+                        "Conviction": v.get("conviction", 3),
+                    }
+                    for p, v in sorted(edge.player_tags.items())
+                ]
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            else:
+                st.info("No manual overrides. Auto-tiers are active.")
+
+    # =====================================================================
+    # SECTION 4: SLATE NOTES
+    # =====================================================================
+    with st.expander("Slate Notes", expanded=False):
+        notes = st.text_area(
+            "Notes for this slate",
+            value=edge.slate_notes,
+            height=80,
+            key="_re_notes",
+            placeholder="e.g. 'DEN in a pace-up spot, target Jokic stack. Fade CLE backs.'",
+        )
+        if notes != edge.slate_notes:
+            edge.slate_notes = notes
             set_edge_state(edge)
-            st.info("All stacks cleared.")
-    else:
-        st.info("No stacks defined yet.")
 
     st.divider()
 
-    # ─────────────────────────────────────────────────────────────────────
-    # Section 5: Edge Labels (auto-generated)
-    # ─────────────────────────────────────────────────────────────────────
-    st.subheader("🏷️ Edge Labels")
-
-    if st.button("⚡ Generate Edge Labels", key="_re_gen_labels"):
-        with st.spinner("Generating edge labels…"):
-            labels: list[str] = []
-
-            # Ownership edge labels
-            for p, v in edge.player_tags.items():
-                if v["tag"] == "core" and v["conviction"] >= 4:
-                    labels.append(f"SMASH: {p} (conviction {v['conviction']})")
-                elif v["tag"] == "fade":
-                    labels.append(f"FADE: {p} – ownership trap")
-                elif v["tag"] == "value" and v["conviction"] >= 3:
-                    labels.append(f"VALUE: {p} – low-owned upside play")
-
-            # Stack labels
-            for s in edge.stacks:
-                labels.append(f"STACK: {s['team']} ({', '.join(s.get('players', [])[:3])})")
-
-            # Game environment labels
-            for gk, gt in edge.game_tags.items():
-                if gt.get("environment") == "smash":
-                    labels.append(f"SMASH GAME: {gk} (O/U {gt.get('total', '?')})")
-                elif gt.get("pace") == "fast":
-                    labels.append(f"PACE GAME: {gk}")
-                elif gt.get("stack_target"):
-                    labels.append(f"STACK TARGET: {gk}")
-
-            # Auto-suggestions from pool signals
-            if not pool.empty:
-                try:
-                    env_cards = compute_game_environment_cards(pool)
-                    if env_cards:
-                        for card in env_cards[:3]:
-                            lbl = card.get("label", "")
-                            if lbl:
-                                labels.append(f"AUTO: {lbl}")
-                except Exception:
-                    pass
-
-                try:
-                    stack_alerts = compute_tiered_stack_alerts(pool)
-                    if isinstance(stack_alerts, pd.DataFrame) and not stack_alerts.empty:
-                        top = stack_alerts.head(3)
-                        for _, row in top.iterrows():
-                            team = row.get("team", "")
-                            score = row.get("stack_score", "")
-                            if team:
-                                labels.append(f"STACK ALERT: {team} (score {score:.1f})" if score else f"STACK ALERT: {team}")
-                except Exception:
-                    pass
-
-            edge.edge_labels = labels
-            set_edge_state(edge)
-            st.success(f"Generated {len(labels)} edge labels.")
-
-    if edge.edge_labels:
-        for lbl in edge.edge_labels:
-            st.markdown(f"- {lbl}")
-    else:
-        st.info("No edge labels yet. Click **Generate Edge Labels**.")
-
-    st.divider()
-
-    # ─────────────────────────────────────────────────────────────────────
-    # Section 6: Ricky Edge Check Gate
-    # ─────────────────────────────────────────────────────────────────────
-    st.subheader("🔐 Ricky Edge Check Gate")
+    # =====================================================================
+    # SECTION 5: EDGE CHECK GATE
+    # =====================================================================
+    st.subheader("Edge Check")
     st.caption(
-        "This gate must be approved before lineups can be published in Build & Publish. "
-        "Approve only when you are satisfied with the tags, stacks, and edge labels."
+        "Approve to unlock lineup building in Build & Publish. "
+        "Review the tiers above before approving."
     )
 
     if edge.ricky_edge_check:
-        st.success(f"✅ Ricky Edge Check approved at {edge.edge_check_ts} UTC")
-        if st.button("🔓 Revoke Edge Check", key="_re_revoke"):
+        st.success(f"Approved at {edge.edge_check_ts}")
+        if st.button("Revoke", key="_re_revoke"):
             edge.revoke_edge_check()
             set_edge_state(edge)
             st.warning("Edge Check revoked.")
     else:
-        st.error("⛔ Edge Check not approved")
-        has_work = bool(edge.player_tags) or bool(edge.stacks) or bool(edge.edge_labels)
-        if not has_work:
-            st.caption("No tags, stacks, or labels yet — you can still approve if you want to skip edge research.")
-
-        if st.button("✅ Approve Ricky Edge Check", type="primary", key="_re_approve"):
+        st.error("Not approved")
+        if st.button("Approve Edge Check", type="primary", key="_re_approve"):
             _ts = datetime.now(timezone.utc).isoformat()
             edge.approve_edge_check(_ts)
             set_edge_state(edge)
-            st.success(f"✅ Ricky Edge Check approved at {_ts} UTC")
-            st.balloons()
+            st.success(f"Approved at {_ts}")
 
 
 main()
