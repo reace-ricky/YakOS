@@ -369,7 +369,7 @@ def _color_bust(val: float) -> str:
     return ""
 
 
-def _make_dummy_lineups_df(pool: pd.DataFrame, n_lineups: int = 5) -> pd.DataFrame:
+def _make_real_lineups_df(pool: pd.DataFrame, n_lineups: int = 5) -> pd.DataFrame:
     slots = ["PG", "SG", "SF", "PF", "C", "G", "F", "UTIL"]
     rows = []
     available = pool.dropna(subset=["player_name"]).head(n_lineups * 8)
@@ -879,14 +879,7 @@ def main() -> None:
             preview_df[float_cols] = preview_df[float_cols].round(1)
             st.dataframe(preview_df, use_container_width=True, hide_index=True)
 
-            pool_count = len(hub_pool)
-            pmin, pmax = get_pool_size_range(contest_type_label)
-            if pmin <= pool_count <= pmax:
-                st.success(f"✅ {pool_count} players — in range for {contest_type_label} (target {pmin}–{pmax})")
-            elif pool_count < pmin:
-                st.warning(f"⚠️ {pool_count} players — below target (need {pmin}–{pmax})")
-            else:
-                st.warning(f"⚠️ {pool_count} players — above target (target {pmin}–{pmax})")
+            st.caption(f"{len(hub_pool)} players loaded.")
 
         # RG upload
         with st.expander("External Projections Upload", expanded=False):
@@ -996,11 +989,14 @@ def main() -> None:
                 try:
                     player_results = _build_player_level_sim_results(pool, sim.variance)
                     sim.player_results = player_results
-                    dummy_lineups = _make_dummy_lineups_df(pool)
-                    if not dummy_lineups.empty:
+                    # Build real optimized lineups instead of dummy placeholders
+                    _PIPELINE_TO_OPTIMIZER = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "CASH": "CASH"}
+                    optimizer_contest = _PIPELINE_TO_OPTIMIZER.get(pipeline_contest, "GPP_20")
+                    real_lineups = build_ricky_lineups(edge_df=compute_edge_metrics(pool, calibration_state=slate.calibration_state, variance=sim.variance), contest_type=optimizer_contest, calibration_state=slate.calibration_state, salary_cap=SALARY_CAP)
+                    if not real_lineups.empty:
                         pipeline_df = run_sims_pipeline(
                             pool=pool,
-                            lineups_df=dummy_lineups,
+                            lineups_df=real_lineups,
                             contest_type=pipeline_contest,
                             n_sims=sim.n_sims,
                             variance=sim.variance,
