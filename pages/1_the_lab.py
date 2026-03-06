@@ -1205,6 +1205,63 @@ def main() -> None:
                             _best_players["diff"] = (_best_players["actual_fp"] - _best_players["proj"]).round(1)
                         _bp_fmt = {c: "{:.1f}" for c in ["proj", "actual_fp", "diff"] if c in _best_players.columns}
                         st.dataframe(_best_players.style.format(_bp_fmt), use_container_width=True, hide_index=True)
+
+                    # ── Record Contest Result ────────────────────────────
+                    st.markdown("---")
+                    st.markdown("**Record Contest Result**")
+                    st.caption("Log how these lineups actually placed so the system learns which build strategies win.")
+
+                    _cr_key = f"_contest_results_{slate.slate_date}"
+                    if _cr_key not in st.session_state:
+                        st.session_state[_cr_key] = []
+
+                    _cr_c1, _cr_c2, _cr_c3 = st.columns(3)
+                    with _cr_c1:
+                        _cr_rank = st.number_input("Finish position", min_value=1, value=1, step=1, key="_cr_rank")
+                    with _cr_c2:
+                        _cr_entries = st.number_input("Field size", min_value=1, value=1000, step=100, key="_cr_entries")
+                    with _cr_c3:
+                        _cr_contest_label = st.text_input("Contest name", value=pipeline_contest_display_name, key="_cr_label")
+
+                    if st.button("Record Result", key="_cr_record"):
+                        _cr_pct = round((_cr_rank / _cr_entries) * 100, 2)
+                        _cr_record = {
+                            "slate_date": slate.slate_date,
+                            "contest": _cr_contest_label,
+                            "rank": _cr_rank,
+                            "field_size": _cr_entries,
+                            "finish_pct": _cr_pct,
+                            "best_lineup_actual": float(_best["actual_total"]),
+                            "avg_projected": float(_avg_proj),
+                            "avg_actual": float(_avg_actual),
+                            "num_lineups": len(_lu_summary),
+                        }
+                        st.session_state[_cr_key].append(_cr_record)
+
+                        # Also persist to calibration store
+                        if "_cal_fb_store" not in st.session_state:
+                            st.session_state["_cal_fb_store"] = {}
+                        _store = st.session_state["_cal_fb_store"]
+                        if "contest_results" not in _store:
+                            _store["contest_results"] = []
+                        _store["contest_results"].append(_cr_record)
+
+                        if _cr_pct <= 1:
+                            st.success(f"Top {_cr_pct}% — elite finish. Recorded.")
+                        elif _cr_pct <= 10:
+                            st.success(f"Top {_cr_pct}% — strong finish. Recorded.")
+                        elif _cr_pct <= 25:
+                            st.info(f"Top {_cr_pct}% — solid. Recorded.")
+                        else:
+                            st.warning(f"Top {_cr_pct}% — needs work. Recorded.")
+
+                    # Show history for this slate
+                    if st.session_state[_cr_key]:
+                        _cr_df = pd.DataFrame(st.session_state[_cr_key])
+                        _cr_show = _cr_df[["contest", "rank", "field_size", "finish_pct", "best_lineup_actual"]].copy()
+                        _cr_show.columns = ["Contest", "Rank", "Field", "Finish %", "Best Actual"]
+                        st.dataframe(_cr_show, use_container_width=True, hide_index=True)
+
             except Exception as _score_exc:
                 st.warning(f"Score vs Actuals failed: {_score_exc}")
 
