@@ -298,19 +298,75 @@ def _match_contests_to_preset(lobby_df: pd.DataFrame, preset: dict) -> pd.DataFr
     return lobby_df[mask].drop_duplicates(subset=["draft_group_id"]).reset_index(drop=True)
 
 
+# Substrings in contest names that indicate a non-main (mini/late/early) slate.
+_NON_MAIN_SLATE_KEYWORDS = [
+    "late", "early", "turbo", "afternoon", "morning",
+    "2 game", "2-game", "3 game", "3-game", "1 game", "1-game",
+    "showdown",
+]
+
+
 def _auto_pick_best_contest(lobby_df: pd.DataFrame, preset: dict) -> Optional[int]:
     """Pick the best-matching DraftKings draft_group_id for the given preset.
 
-    Filters lobby contests using DK_CONTEST_MATCH_RULES, then returns the
-    draft_group_id of the contest with the best sort key (highest prize pool
-    or highest entries, depending on the rule's 'prefer' setting).
-    Returns None if no matching contest is found.
+    Strategy (in order):
+    1. Filter matched contests to "main slate" candidates by excluding
+       draft groups whose names contain late/early/turbo/mini keywords.
+    2. Among main-slate candidates, pick the draft group with the most
+       draftable players (i.e., the largest player pool = most games).
+    3. If draftables counts are unavailable or tied, fall back to highest
+       prize pool or highest entries per the preset's match rules.
+    4. If no main-slate candidates remain after keyword filtering, fall
+       back to the full matched set (so we always return something).
+
+    Returns None if no matching contest is found at all.
     """
     matched = _match_contests_to_preset(lobby_df, preset)
     if matched.empty:
         return None
 
-    # Determine sort column from match rules
+    # --- Step 1: Prefer main-slate draft groups ---
+    # Exclude contests whose name contains late/early/turbo/mini keywords.
+    if "name" in matched.columns:
+        name_lower = matched["name"].str.lower().fillna("")
+        is_non_main = pd.Series(False, index=matched.index)
+        for kw in _NON_MAIN_SLATE_KEYWORDS:
+            is_non_main |= name_lower.str.contains(kw, na=False)
+        main_candidates = matched[~is_non_main]
+    else:
+        main_candidates = matched
+
+    # Fall back to full set if keyword filter removed everything
+    if main_candidates.empty:
+        main_candidates = matched
+
+    # Deduplicate to unique draft groups (keep the row with highest prize_pool
+    # per group so we have representative metadata).
+    if "prize_pool" in main_candidates.columns:
+        main_candidates = main_candidates.sort_values("prize_pool", ascending=False)
+    unique_dgs = main_candidates.drop_duplicates(subset=["draft_group_id"], keep="first")
+
+    # --- Step 2: Pick the draft group with the most players ---
+    # Fetch draftables count per unique draft_group_id.  This is a lightweight
+    # API call and ensures we always get the full main slate.
+    if len(unique_dgs) > 1:
+        dg_player_counts: dict = {}
+        for dg_id in unique_dgs["draft_group_id"].unique():
+            try:
+                draftables = fetch_dk_draftables(int(dg_id))
+                dg_player_counts[int(dg_id)] = len(draftables)
+            except Exception:
+                dg_player_counts[int(dg_id)] = 0
+
+        if dg_player_counts:
+            best_dg = max(dg_player_counts, key=dg_player_counts.get)
+            # Only use the draftables-based pick if it clearly has more players
+            # (at least 20% more than the runner-up to avoid noise).
+            counts_sorted = sorted(dg_player_counts.values(), reverse=True)
+            if len(counts_sorted) >= 2 and counts_sorted[0] > counts_sorted[1] * 1.2:
+                return best_dg
+
+    # --- Step 3: Fallback — highest prize pool or entries ---
     preset_label = None
     for label, p in CONTEST_PRESETS.items():
         if p is preset:
@@ -318,12 +374,12 @@ def _auto_pick_best_contest(lobby_df: pd.DataFrame, preset: dict) -> Optional[in
             break
     rules = DK_CONTEST_MATCH_RULES.get(preset_label or "", {})
     prefer = rules.get("prefer", "highest_prize")
-    if prefer == "highest_entries" and "current_entries" in matched.columns:
+    if prefer == "highest_entries" and "current_entries" in unique_dgs.columns:
         sort_col = "current_entries"
     else:
         sort_col = "prize_pool"
 
-    best_row = matched.sort_values(sort_col, ascending=False).iloc[0]
+    best_row = unique_dgs.sort_values(sort_col, ascending=False).iloc[0]
     return int(best_row["draft_group_id"])
 
 def _filter_lobby_by_date(lobby_df: pd.DataFrame, target_date: str) -> pd.DataFrame:
@@ -414,7 +470,7 @@ def main() -> None:
     _render_status_bar(slate)
     st.divider()
 
-    # ── Row 1: Sport, Date ────────────────────────────────────────────
+    # ── Row 1: Sport, Date ────────────────────────────────────────────────
     col1, col2 = st.columns(2)
     with col1:
         sport = st.selectbox("Sport", ["NBA", "PGA"], index=0 if slate.sport == "NBA" else 1)
@@ -429,7 +485,7 @@ def main() -> None:
     if rapidapi_key:
         st.session_state["rapidapi_key"] = rapidapi_key
 
-    # ── Row 2: Contest Type ────────────────────────────────────────────
+    # ── Row 2: Contest Type ────────────────────────────────────────────────
     contest_type_label = st.selectbox("Contest Type", CONTEST_PRESET_LABELS)
     preset = CONTEST_PRESETS[contest_type_label]
     st.caption(preset.get("description", ""))
@@ -546,7 +602,7 @@ def main() -> None:
 
         with st.spinner("Loading player pool…"):
             try:
-                # ── Historical salary path ──────────────────────────────────
+                # ── Historical salary path ────────────────────────────────
                 # For historical dates use the SalaryHistoryClient pipeline
                 # (FantasyLabs + DK draftables) instead of the live DK lobby.
                 _historical_salary_df: Optional[pd.DataFrame] = None
@@ -777,12 +833,12 @@ def main() -> None:
                     if _removed:
                         st.caption(f"ℹ️ {_removed} player(s) removed (OUT/DND/IR or 0 proj minutes).")
 
-                    # ── Diagnostic expander (post Step 7) ────────────────────────────────────
+                    # ── Diagnostic expander (post Step 7) ────────────────────────
                     with st.expander(
                         f"🔍 Pool Diagnostics — {_removed} player(s) dropped",
                         expanded=(_removed > 0),
                     ):
-                        # ── Dropped players breakdown ──────────────────────────────────────
+                        # ── Dropped players breakdown ─────────────────────────
                         _dropped_rows = _before_filter[
                             ~_before_filter.index.isin(
                                 _before_filter.merge(
@@ -833,7 +889,7 @@ def main() -> None:
 
                         st.divider()
 
-                        # ── Projection coverage stats ──────────────────────────────────────────
+                        # ── Projection coverage stats ─────────────────────────
                         st.markdown("**Projection coverage (active pool):**")
                         _total_active = len(pool)
 
@@ -890,7 +946,7 @@ def main() -> None:
     hub_rules: Optional[dict] = st.session_state.get(f"_hub_rules_{slate_date_str}_{_contest_safe}")
 
     if hub_pool is not None:
-        # ── Game Selector ────────────────────────────────────────────────────────
+        # ── Game Selector ─────────────────────────────────────────────────
         all_games = _extract_games(hub_pool)
         is_showdown = (hub_rules or {}).get("is_showdown", False)
 
@@ -935,7 +991,7 @@ def main() -> None:
             hide_index=True,
         )
 
-        # ── Pool Size Gauge ──────────────────────────────────────────────────────
+        # ── Pool Size Gauge ───────────────────────────────────────────────
         pool_count = len(hub_pool)
         pmin, pmax = get_pool_size_range(contest_type_label)
         if pmin <= pool_count <= pmax:
@@ -958,7 +1014,7 @@ def main() -> None:
             with st.expander("Roster Rules", expanded=False):
                 st.json(hub_rules)
 
-        # ── External Projections Upload ───────────────────────────────────────────────
+        # ── External Projections Upload ───────────────────────────────────
         with st.expander("External Projections Upload", expanded=False):
             st.caption("Upload a RotoGrinders CSV to merge projections into the pool.")
             rg_file = st.file_uploader("RotoGrinders CSV", type="csv", key="_hub_rg_upload")
@@ -975,7 +1031,7 @@ def main() -> None:
                 except Exception as exc:
                     st.error(f"Failed to read RG CSV: {exc}")
 
-        # ── S1.7 — Late Swap / Refresh ────────────────────────────────────────────
+        # ── S1.7 — Late Swap / Refresh ────────────────────────────────────
         st.subheader("Injury / News Refresh (Late Swap)")
 
         if st.button("🔃 Refresh Injuries & News"):
@@ -1010,7 +1066,7 @@ def main() -> None:
                     except Exception as exc:
                         st.error(f"Refresh failed: {exc}")
 
-        # ── Publish Slate ─────────────────────────────────────────────────────────────
+        # ── Publish Slate ─────────────────────────────────────────────────
         st.divider()
         st.subheader("Publish Slate")
         st.caption("Publishing writes the full slate configuration into SlateState for use by all other pages.")
