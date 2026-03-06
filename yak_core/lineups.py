@@ -92,6 +92,17 @@ def build_player_pool(opt_pool: pd.DataFrame,
     """
     df = opt_pool.copy()
 
+    # Ensure player_id exists (pool from The Lab may only have player_name / dk_player_id)
+    if "player_id" not in df.columns:
+        if "player_name" in df.columns:
+            df["player_id"] = df["player_name"]
+        elif "dk_player_id" in df.columns:
+            df["player_id"] = df["dk_player_id"]
+        elif "player" in df.columns:
+            df["player_id"] = df["player"]
+        else:
+            df["player_id"] = df.index.astype(str)
+
     proj_col = cfg.get("PROJ_COL", "proj")
     if proj_col not in df.columns:
         raise ValueError(

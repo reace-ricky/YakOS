@@ -102,6 +102,14 @@ def _build_lineups(
     exclude_names: list,
 ) -> tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
     """Build lineups using the appropriate engine (Classic / Showdown)."""
+    # Ensure player_id column exists (pool from The Lab may only have player_name)
+    if "player_id" not in pool.columns:
+        if "player_name" in pool.columns:
+            pool = pool.copy()
+            pool["player_id"] = pool["player_name"]
+        elif "dk_player_id" in pool.columns:
+            pool = pool.copy()
+            pool["player_id"] = pool["dk_player_id"]
     try:
         cfg = {
             "NUM_LINEUPS": num_lineups,
