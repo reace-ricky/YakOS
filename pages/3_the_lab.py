@@ -273,15 +273,15 @@ def main() -> None:
 
     # Contest type selector for pipeline
     # Friendly contest names matching Slate Hub dropdown
-    pipeline_contest_display = ["GPP - 150 Max", "GPP - 20 Max", "Single Entry / 3-Max", "50/50 / Double-Up"]
+    pipeline_contest_display = ["GPP Main", "GPP Early", "GPP Late", "Cash Main"]
     # Map Slate Hub contest names to pipeline rating types. Showdown uses GPP_20
     # as its closest equivalent since there is no dedicated Showdown pipeline type.
     _CONTEST_NAME_TO_PIPELINE = {
-        "GPP - 150 Max": "GPP_150",
-        "GPP - 20 Max": "GPP_20",
-        "Single Entry / 3-Max": "SE_3MAX",
-        "50/50 / Double-Up": "CASH",
-        "Showdown": "GPP_20",
+        "GPP Main": "GPP_MAIN",
+        "GPP Early": "GPP_EARLY",
+        "GPP Late": "GPP_LATE",
+        "Cash Main": "CASH",
+        "Showdown": "GPP_EARLY",
     }
     _default_display_idx = pipeline_contest_display.index(slate.contest_name) if slate.contest_name in pipeline_contest_display else 1
     pipeline_contest_display_name = st.selectbox(
