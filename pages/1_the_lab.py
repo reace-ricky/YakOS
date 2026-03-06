@@ -1133,6 +1133,75 @@ def main() -> None:
                          if c in pipeline_output.columns]
             st.dataframe(pipeline_output[show_cols], use_container_width=True, hide_index=True)
 
+    # ── Score vs Actuals ────────────────────────────────────────────────
+    if pipeline_output is not None and not pipeline_output.empty and "actual_fp" in pool.columns and pool["actual_fp"].notna().any():
+        with st.expander("🎯 Score vs Actuals", expanded=True):
+            st.caption("Lineup projections scored against real box-score results.")
+            _lu_col = "lineup_index"
+            _pn_col = "player_name"
+            # Get the long-form lineup data from build_ricky_lineups
+            # Reconstruct from the optimizer output stored during pipeline run
+            try:
+                from yak_core.edge import compute_edge_metrics
+                _edge_for_score = compute_edge_metrics(pool, calibration_state=slate.calibration_state, variance=sim.variance)
+                from yak_core.publishing import build_ricky_lineups
+                _PIPELINE_TO_OPTIMIZER = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "CASH": "CASH"}
+                _opt_contest = _PIPELINE_TO_OPTIMIZER.get(pipeline_contest, "GPP_20")
+                _lu_long = build_ricky_lineups(edge_df=_edge_for_score, contest_type=_opt_contest, calibration_state=slate.calibration_state, salary_cap=SALARY_CAP)
+
+                if not _lu_long.empty and _pn_col in _lu_long.columns and _lu_col in _lu_long.columns:
+                    # Map actuals onto lineup players
+                    _act_map = pool.dropna(subset=["actual_fp"]).set_index("player_name")["actual_fp"].to_dict()
+                    _lu_long["actual_fp"] = _lu_long[_pn_col].map(_act_map)
+
+                    # Summarise per lineup
+                    _lu_summary = _lu_long.groupby(_lu_col).agg(
+                        proj_total=("proj", "sum"),
+                        actual_total=("actual_fp", "sum"),
+                        salary_total=("salary", "sum"),
+                        players=(_pn_col, lambda x: ", ".join(x)),
+                    ).reset_index()
+                    _lu_summary["diff"] = (_lu_summary["actual_total"] - _lu_summary["proj_total"]).round(1)
+                    _lu_summary["proj_total"] = _lu_summary["proj_total"].round(1)
+                    _lu_summary["actual_total"] = _lu_summary["actual_total"].round(1)
+                    _lu_summary = _lu_summary.sort_values("actual_total", ascending=False).reset_index(drop=True)
+
+                    # Headline metrics
+                    _best = _lu_summary.iloc[0]
+                    _avg_proj = _lu_summary["proj_total"].mean()
+                    _avg_actual = _lu_summary["actual_total"].mean()
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Best Lineup Actual", f"{_best['actual_total']:.1f} FP")
+                    c2.metric("Avg Projected", f"{_avg_proj:.1f}", delta=f"{_avg_actual - _avg_proj:+.1f} vs actual")
+                    c3.metric("Lineups Built", len(_lu_summary))
+
+                    # Summary table
+                    _show = _lu_summary[[_lu_col, "proj_total", "actual_total", "diff", "salary_total"]].copy()
+                    _show.columns = ["Lineup", "Projected", "Actual", "Diff", "Salary"]
+
+                    def _color_diff(val):
+                        if val > 0:
+                            return "color: #4caf82"
+                        elif val < 0:
+                            return "color: #e05c5c"
+                        return ""
+
+                    st.dataframe(
+                        _show.style.applymap(_color_diff, subset=["Diff"]),
+                        use_container_width=True, hide_index=True,
+                    )
+
+                    # Best lineup detail
+                    with st.expander(f"🏆 Best Lineup Detail (#{int(_best[_lu_col])})", expanded=False):
+                        _best_players = _lu_long[_lu_long[_lu_col] == _best[_lu_col]][
+                            [c for c in ["slot", _pn_col, "pos", "team", "salary", "proj", "actual_fp"] if c in _lu_long.columns]
+                        ].copy()
+                        if "actual_fp" in _best_players.columns and "proj" in _best_players.columns:
+                            _best_players["diff"] = (_best_players["actual_fp"] - _best_players["proj"]).round(1)
+                        st.dataframe(_best_players, use_container_width=True, hide_index=True)
+            except Exception as _score_exc:
+                st.warning(f"Score vs Actuals failed: {_score_exc}")
+
     # ── Apply Learnings (inline, not separate section) ───────────────────
     if sim.player_results is not None and not sim.player_results.empty:
         with st.expander("⚡ Apply Sim Learnings", expanded=False):
