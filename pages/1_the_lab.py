@@ -1176,16 +1176,23 @@ def main() -> None:
                     # Summary table
                     _show = _lu_summary[[_lu_col, "proj_total", "actual_total", "diff", "salary_total"]].copy()
                     _show.columns = ["Lineup", "Projected", "Actual", "Diff", "Salary"]
+                    _show["Salary"] = _show["Salary"].astype(int)
+
+                    _num_fmt = {"Projected": "{:.1f}", "Actual": "{:.1f}", "Diff": "{:+.1f}"}
 
                     def _color_diff(val):
-                        if val > 0:
+                        try:
+                            v = float(val)
+                        except (ValueError, TypeError):
+                            return ""
+                        if v > 0:
                             return "color: #4caf82"
-                        elif val < 0:
+                        elif v < 0:
                             return "color: #e05c5c"
                         return ""
 
                     st.dataframe(
-                        _show.style.applymap(_color_diff, subset=["Diff"]),
+                        _show.style.applymap(_color_diff, subset=["Diff"]).format(_num_fmt),
                         use_container_width=True, hide_index=True,
                     )
 
@@ -1196,7 +1203,8 @@ def main() -> None:
                         ].copy()
                         if "actual_fp" in _best_players.columns and "proj" in _best_players.columns:
                             _best_players["diff"] = (_best_players["actual_fp"] - _best_players["proj"]).round(1)
-                        st.dataframe(_best_players, use_container_width=True, hide_index=True)
+                        _bp_fmt = {c: "{:.1f}" for c in ["proj", "actual_fp", "diff"] if c in _best_players.columns}
+                        st.dataframe(_best_players.style.format(_bp_fmt), use_container_width=True, hide_index=True)
             except Exception as _score_exc:
                 st.warning(f"Score vs Actuals failed: {_score_exc}")
 

@@ -295,6 +295,7 @@ def build_multiple_lineups_with_exposure(
     # pair_appearances[(i, j)] = number of lineups where both player i and j appear
     pair_appearances: dict[tuple[int, int], int] = {}
     all_lineups = []
+    _prev_lineups: list[list[int]] = []  # player-index sets for uniqueness constraints
     cancel_reasons: list[tuple[int, str]] = []
 
     for lu_num in range(num_lineups):
@@ -414,6 +415,15 @@ def build_multiple_lineups_with_exposure(
                         <= 1
                     )
 
+        # Uniqueness: each new lineup must differ by at least 3 players
+        # from every previously built lineup.
+        _MIN_DIFF = 3
+        for prev_indices in _prev_lineups:
+            # sum of slots assigned to prev players <= LINEUP_SIZE - _MIN_DIFF
+            prob += pulp.lpSum(
+                x[(pi, s)] for pi in prev_indices for s in DK_POS_SLOTS
+            ) <= DK_LINEUP_SIZE - _MIN_DIFF
+
         prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=solver_time_limit))
         if prob.status != 1:
             reason = pulp.LpStatus.get(prob.status, f"status={prob.status}")
@@ -492,6 +502,7 @@ def build_multiple_lineups_with_exposure(
                             for b in range(a + 1, len(selected_in_lu)):
                                 key = (selected_in_lu[a], selected_in_lu[b])
                                 pair_appearances[key] = pair_appearances.get(key, 0) + 1
+                    _prev_lineups.append(selected_in_lu)
                     if progress_callback is not None:
                         progress_callback(lu_num + 1, num_lineups)
                     continue
@@ -517,6 +528,8 @@ def build_multiple_lineups_with_exposure(
                 for b in range(a + 1, len(selected_in_lu)):
                     key = (selected_in_lu[a], selected_in_lu[b])
                     pair_appearances[key] = pair_appearances.get(key, 0) + 1
+
+        _prev_lineups.append(selected_in_lu)
 
         if progress_callback is not None:
             progress_callback(lu_num + 1, num_lineups)
