@@ -387,11 +387,11 @@ def main() -> None:
             st.warning("Edge Check revoked.")
     else:
         st.error("⛔ Edge Check not approved")
-        can_approve = bool(edge.player_tags) or bool(edge.stacks) or bool(edge.edge_labels)
-        if not can_approve:
-            st.info("Tag at least one player or define a stack before approving.")
+        has_work = bool(edge.player_tags) or bool(edge.stacks) or bool(edge.edge_labels)
+        if not has_work:
+            st.caption("No tags, stacks, or labels yet — you can still approve if you want to skip edge research.")
 
-        if st.button("✅ Approve Ricky Edge Check", type="primary", key="_re_approve", disabled=not can_approve):
+        if st.button("✅ Approve Ricky Edge Check", type="primary", key="_re_approve"):
             _ts = datetime.now(timezone.utc).isoformat()
             edge.approve_edge_check(_ts)
             set_edge_state(edge)

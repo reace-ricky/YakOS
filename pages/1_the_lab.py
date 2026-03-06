@@ -799,6 +799,17 @@ def main() -> None:
                         "CONTEST_TYPE": preset["internal_contest"],
                     })
                     pool = apply_projections(pool, cfg)
+
+                    # Apply calibration corrections from historical feedback
+                    try:
+                        from yak_core.calibration_feedback import get_correction_factors, apply_corrections
+                        _cf = get_correction_factors()
+                        if _cf.get("n_slates", 0) > 0:
+                            pool = apply_corrections(pool, _cf)
+                            st.caption(f"📐 Calibration corrections applied ({_cf['n_slates']} slate(s) of history)")
+                    except Exception as _cf_exc:
+                        pass  # silently skip if feedback module not ready
+
                     pool = _enrich_pool(pool)
 
                     # Dedup
@@ -836,6 +847,10 @@ def main() -> None:
                                 # Players who appeared in box scores with > 0 FP
                                 _played = set(_actuals[_actuals["actual_fp"] > 0]["player_name"].values)
                                 if _played:
+                                    # Merge actual_fp into pool before filtering
+                                    _act_map = _actuals.set_index("player_name")["actual_fp"].to_dict()
+                                    pool["actual_fp"] = pool["player_name"].map(_act_map)
+
                                     _before_box = len(pool)
                                     pool = pool[
                                         pool["player_name"].isin(_played)
@@ -843,6 +858,18 @@ def main() -> None:
                                     _dnp_removed = _before_box - len(pool)
                                     if _dnp_removed:
                                         st.caption(f"ℹ️ {_dnp_removed} DNP player(s) removed via box score cross-ref.")
+
+                                    # Auto-record projection errors for calibration feedback
+                                    if "proj" in pool.columns and "actual_fp" in pool.columns:
+                                        try:
+                                            from yak_core.calibration_feedback import record_slate_errors
+                                            _fb_result = record_slate_errors(slate_date_str, pool)
+                                            if "error" not in _fb_result:
+                                                _fb_mae = _fb_result.get("overall", {}).get("mae", "?")
+                                                _fb_corr = _fb_result.get("overall", {}).get("correlation", "?")
+                                                st.caption(f"📐 Calibration feedback recorded (MAE: {_fb_mae}, Corr: {_fb_corr})")
+                                        except Exception:
+                                            pass
                         except Exception as _box_exc:
                             st.caption(f"ℹ️ Box score filter skipped: {_box_exc}")
 
@@ -1382,6 +1409,65 @@ def main() -> None:
                 except Exception as exc:
                     st.error(f"Weight comparison failed: {exc}")
 
+    with st.expander("📐 Calibration Feedback (Actuals Loop)", expanded=True):
+        try:
+            from yak_core.calibration_feedback import get_calibration_summary, get_correction_factors, clear_calibration_history
+            _cal_fb = get_calibration_summary()
+            _fb_status = _cal_fb.get("status", "no_data")
+
+            if _fb_status == "no_data":
+                st.info(
+                    "No calibration data yet. Load a **historical slate** to auto-record "
+                    "projection errors. Each slate you run builds the correction model."
+                )
+            else:
+                # Status bar
+                _n = _cal_fb.get("n_slates", 0)
+                _status_emoji = "🟡" if _fb_status == "building" else "🟢"
+                _status_label = f"{_status_emoji} {_fb_status.upper()} — {_n} slate(s) recorded"
+                st.markdown(f"**{_status_label}**")
+
+                if _fb_status == "building":
+                    st.caption(f"Need {3 - _n} more slate(s) for full correction model. Keep running historical dates.")
+
+                # Key metrics
+                m1, m2, m3 = st.columns(3)
+                with m1:
+                    st.metric("Avg MAE", _cal_fb.get("avg_mae", "—"))
+                with m2:
+                    st.metric("Latest MAE", _cal_fb.get("latest_mae", "—"))
+                with m3:
+                    st.metric("Overall Bias", f"{_cal_fb.get('overall_bias', 0):+.2f}")
+
+                # Position corrections
+                _pos_corr = _cal_fb.get("position_corrections", [])
+                if _pos_corr:
+                    st.markdown("**Position corrections:**")
+                    _pos_df = pd.DataFrame(_pos_corr)
+                    _pos_df["correction"] = _pos_df["correction"].apply(lambda x: f"{x:+.2f}")
+                    st.dataframe(_pos_df, use_container_width=True, hide_index=True)
+
+                # Salary tier corrections
+                _tier_corr = _cal_fb.get("tier_corrections", [])
+                if _tier_corr:
+                    st.markdown("**Salary tier corrections:**")
+                    _tier_df = pd.DataFrame(_tier_corr)
+                    _tier_df["correction"] = _tier_df["correction"].apply(lambda x: f"{x:+.2f}")
+                    st.dataframe(_tier_df, use_container_width=True, hide_index=True)
+
+                # Dates used
+                _dates = _cal_fb.get("dates", [])
+                if _dates:
+                    st.caption(f"Slates: {', '.join(_dates)}")
+
+                # Reset button
+                if st.button("🗑️ Reset Calibration History", key="_lab_reset_cal_fb"):
+                    clear_calibration_history()
+                    st.info("Calibration feedback cleared.")
+
+        except Exception as _cal_fb_exc:
+            st.caption(f"Calibration feedback unavailable: {_cal_fb_exc}")
+
     st.divider()
 
     # =====================================================================
@@ -1497,16 +1583,39 @@ def main() -> None:
     st.divider()
 
     # =====================================================================
-    # SECTION 7: RICKY EDGE CHECK GATE (read-only)
+    # SECTION 7: RICKY EDGE CHECK GATE
     # =====================================================================
     st.subheader("🔐 Ricky Edge Check Gate")
-    if edge.ricky_edge_check:
+
+    # Historical slates auto-bypass the gate (no edge research needed for backtests)
+    _lab_is_historical = False
+    try:
+        _lab_is_historical = pd.to_datetime(slate.slate_date).date() < _today_date if slate.slate_date else False
+    except Exception:
+        pass
+
+    if _lab_is_historical:
+        if not edge.ricky_edge_check:
+            from datetime import datetime as _dt, timezone as _tz
+            edge.approve_edge_check(f"{_dt.now(_tz.utc).isoformat()} (auto-historical)")
+            set_edge_state(edge)
+        st.success(f"✅ Auto-approved for historical slate. Build & Publish is unlocked.")
+    elif edge.ricky_edge_check:
         st.success(f"✅ Ricky Edge Check approved at {edge.edge_check_ts}. Build & Publish is unlocked.")
+        if st.button("🔓 Revoke Edge Check", key="_lab_revoke_edge"):
+            edge.revoke_edge_check()
+            set_edge_state(edge)
+            st.rerun()
     else:
         st.warning(
             "⛔ **Ricky Edge Check not approved.** "
-            "Go to **Ricky Edge** page to approve the Edge Check before publishing lineups."
+            "Approve here or go to **Ricky Edge** for full tagging."
         )
+        if st.button("✅ Approve Edge Check", type="primary", key="_lab_approve_edge"):
+            from datetime import datetime as _dt, timezone as _tz
+            edge.approve_edge_check(_dt.now(_tz.utc).isoformat())
+            set_edge_state(edge)
+            st.rerun()
 
 
 main()

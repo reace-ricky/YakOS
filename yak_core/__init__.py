@@ -63,6 +63,13 @@ from .sims import (
 
 from .edge import compute_edge_metrics
 
+from .calibration_feedback import (
+    record_slate_errors,
+    get_correction_factors,
+    apply_corrections,
+    get_calibration_summary,
+    clear_calibration_history,
+)
 from .publishing import build_ricky_lineups, publish_edge_and_lineups
 
 from .components import render_lineup_card, render_lineup_cards_paged
@@ -120,6 +127,12 @@ __all__ = [
     "run_sims_for_contest_type",
     # edge metrics
     "compute_edge_metrics",
+    # calibration feedback
+    "record_slate_errors",
+    "get_correction_factors",
+    "apply_corrections",
+    "get_calibration_summary",
+    "clear_calibration_history",
     # publishing
     "build_ricky_lineups",
     "publish_edge_and_lineups",
