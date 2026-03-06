@@ -266,15 +266,50 @@ def yakos_fp_projection(player_features: dict) -> dict:
     if salary == 0:
         return {"proj": 0.0, "floor": 0.0, "ceil": 0.0}
 
-    # Try loading trained model first
-    model_path = os.path.join(YAKOS_ROOT, "models", "yakos_fp_model.pkl")
-    if os.path.isfile(model_path):
+    # Try loading trained model — prefer portable JSON, fall back to pkl
+    import json as _json
+    import numpy as _np
+
+    json_path = os.path.join(YAKOS_ROOT, "models", "yakos_fp_model.json")
+    pkl_path = os.path.join(YAKOS_ROOT, "models", "yakos_fp_model.pkl")
+
+    model_pred = None
+
+    # ── JSON model (portable, no sklearn version dependency) ─────────
+    if os.path.isfile(json_path):
+        try:
+            with open(json_path) as _f:
+                mdata = _json.load(_f)
+            features = mdata["features"]
+            fill_vals = mdata["imputer"]["fill_values"]
+            scaler_mean = _np.array(mdata["scaler"]["mean"])
+            scaler_scale = _np.array(mdata["scaler"]["scale"])
+            coef = _np.array(mdata["ridge"]["coef"])
+            intercept = float(mdata["ridge"]["intercept"])
+
+            # Build feature vector, impute missing
+            x = []
+            for i, feat in enumerate(features):
+                val = player_features.get(feat)
+                if val is None or (isinstance(val, float) and _np.isnan(val)):
+                    fv = fill_vals[i]
+                    val = fv if fv is not None and not (isinstance(fv, float) and _np.isnan(fv)) else 0.0
+                x.append(float(val))
+            x = _np.array(x)
+
+            # StandardScaler transform + Ridge predict
+            x_scaled = (x - scaler_mean) / _np.where(scaler_scale == 0, 1.0, scaler_scale)
+            model_pred = float(_np.dot(x_scaled, coef) + intercept)
+        except Exception:
+            pass
+
+    # ── Pkl model fallback ───────────────────────────────────────────
+    if model_pred is None and os.path.isfile(pkl_path):
         try:
             import joblib
             import pandas as _pd
-            model = joblib.load(model_path)
+            model = joblib.load(pkl_path)
             expected = list(getattr(model, "feature_names_in_", [
-                # Fallback list must stay in sync with FP_FEATURES in scripts/train_models.py
                 "salary", "tank01_proj", "rg_proj",
                 "rolling_fp_5", "rolling_fp_10", "rolling_fp_20",
                 "rolling_min_5", "rolling_min_10",
@@ -282,31 +317,29 @@ def yakos_fp_projection(player_features: dict) -> dict:
             ]))
             row = {col: player_features.get(col, float("nan")) for col in expected}
             feat_df = _pd.DataFrame([row])[expected]
-            pred = float(model.predict(feat_df)[0])
-            # Blend with rolling signal when provided so rolling averages
-            # remain influential even with model active
-            rolling_w_sum = 0.0
-            rolling_weighted = 0.0
-            for key, w in [("rolling_fp_5", 0.30), ("rolling_fp_10", 0.20), ("rolling_fp_20", 0.10)]:
-                val = player_features.get(key)
-                if val is not None:
-                    try:
-                        rolling_weighted += float(val) * w
-                        rolling_w_sum += w
-                    except (ValueError, TypeError):
-                        pass
-            if rolling_w_sum > 0:
-                rolling_signal = rolling_weighted / rolling_w_sum
-                # 60% weight on rolling signal (recent performance) vs 40% on model
-                # (which uses salary and context): ensures explicit rolling averages
-                # override model imputation of missing rolling features.
-                pred = pred * 0.4 + rolling_signal * 0.6
-            pred = max(0.0, pred)
-            floor = max(0.0, pred * 0.65)
-            ceil = pred * 1.45
-            return {"proj": round(pred, 2), "floor": round(floor, 2), "ceil": round(ceil, 2)}
+            model_pred = float(model.predict(feat_df)[0])
         except Exception:
-            pass  # fall through to formula approach
+            pass
+
+    # ── Blend model prediction with rolling signal ───────────────────
+    if model_pred is not None:
+        rolling_w_sum = 0.0
+        rolling_weighted = 0.0
+        for key, w in [("rolling_fp_5", 0.30), ("rolling_fp_10", 0.20), ("rolling_fp_20", 0.10)]:
+            val = player_features.get(key)
+            if val is not None:
+                try:
+                    rolling_weighted += float(val) * w
+                    rolling_w_sum += w
+                except (ValueError, TypeError):
+                    pass
+        if rolling_w_sum > 0:
+            rolling_signal = rolling_weighted / rolling_w_sum
+            model_pred = model_pred * 0.4 + rolling_signal * 0.6
+        model_pred = max(0.0, model_pred)
+        floor = max(0.0, model_pred * 0.65)
+        ceil = model_pred * 1.45
+        return {"proj": round(model_pred, 2), "floor": round(floor, 2), "ceil": round(ceil, 2)}
 
     sal_base = salary * DEFAULT_FP_PER_K / 1000.0
 
