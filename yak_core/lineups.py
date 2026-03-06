@@ -764,6 +764,7 @@ def build_showdown_lineups(
 
     appearance_count = [0] * m  # track per original player (both variants share the slot)
     pair_appearances: dict[tuple[int, int], int] = {}
+    _prev_lineups: list[list[int]] = []  # previous lineups as lists of original-player indices
     all_lineups = []
     cancel_reasons: list[tuple[int, str]] = []
 
@@ -810,6 +811,14 @@ def build_showdown_lineups(
                         (y[pi] + y[m + pi]) + (y[pj] + y[m + pj]) <= 1
                     )
 
+        # Lineup uniqueness: each new lineup must differ from every
+        # previous lineup by at least 2 original players (out of 6).
+        _SD_MIN_DIFF = 2
+        for prev_indices in _prev_lineups:
+            prob += pulp.lpSum(
+                y[j] + y[m + j] for j in prev_indices
+            ) <= DK_SHOWDOWN_LINEUP_SIZE - _SD_MIN_DIFF
+
         prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=solver_time_limit))
 
         if prob.status != 1:
@@ -845,6 +854,8 @@ def build_showdown_lineups(
                 for b in range(a + 1, len(selected_original)):
                     key = (selected_original[a], selected_original[b])
                     pair_appearances[key] = pair_appearances.get(key, 0) + 1
+
+        _prev_lineups.append(selected_original)
 
         if progress_callback is not None:
             progress_callback(lu_num + 1, num_lineups)
