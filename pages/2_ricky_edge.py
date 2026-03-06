@@ -172,7 +172,7 @@ def main() -> None:
         stack_alerts = compute_tiered_stack_alerts(pool)
         if stack_alerts:
             _stack_df = pd.DataFrame(stack_alerts).head(5)
-            _stack_cols = [c for c in ["team", "tier", "conditions_met", "key_players", "implied_total"] if c in _stack_df.columns]
+            _stack_cols = [c for c in ["team", "tier", "conditions_met", "key_players", "implied_total", "game_ou"] if c in _stack_df.columns]
             st.dataframe(_stack_df[_stack_cols], use_container_width=True, hide_index=True)
 
             # Auto-define stacks from top teams if no manual stacks exist

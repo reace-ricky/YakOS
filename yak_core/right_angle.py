@@ -509,10 +509,19 @@ def compute_tiered_stack_alerts(pool_df: pd.DataFrame) -> list:
     for team, grp in df.groupby("team"):
         top3 = grp.nlargest(3, "proj")
 
+        # vegas_total in the pool is the GAME over/under (both teams combined),
+        # NOT the team implied total.  Derive team implied total from:
+        #   team_implied = (game_ou / 2) - (spread / 2)
+        # where spread is from the home team's perspective (negative = favored).
         if has_vegas:
-            implied_total = float(top3["vegas_total"].mean())
+            game_ou = float(top3["vegas_total"].mean())  # game O/U
+            team_spread = float(grp["spread"].mean()) if has_spread else 0.0
+            # spread is typically home-relative; negative means team is favored.
+            # implied_total = game_ou/2 - spread/2  (favored team gets more)
+            implied_total = round(game_ou / 2.0 - team_spread / 2.0, 1)
         else:
             implied_total = float(top3["proj"].sum())
+            game_ou = 0.0
 
         opponent = None
         if "opponent" in df.columns:
@@ -520,14 +529,11 @@ def compute_tiered_stack_alerts(pool_df: pd.DataFrame) -> list:
             if len(opp_vals) > 0:
                 opponent = str(opp_vals[0])
 
-        game_ou: float = 0.0
-        if opponent:
+        # If we didn't get game_ou from vegas, try to compute from opponent proj
+        if game_ou == 0.0 and opponent:
             opp_rows = df[df["team"].fillna("").str.upper() == str(opponent).upper()]
             if not opp_rows.empty:
-                if has_vegas:
-                    opp_implied = float(opp_rows["vegas_total"].mean())
-                else:
-                    opp_implied = float(opp_rows.nlargest(3, "proj")["proj"].sum())
+                opp_implied = float(opp_rows.nlargest(3, "proj")["proj"].sum())
                 game_ou = round(implied_total + opp_implied, 1)
 
         abs_spread: float = 0.0
@@ -704,8 +710,18 @@ def compute_game_environment_cards(pool_df: pd.DataFrame) -> list:
         if trows.empty:
             return 0.0
         if has_vegas:
-            return round(float(trows["vegas_total"].mean()), 1)
+            # vegas_total is game O/U, not team implied total
+            game_ou = float(trows["vegas_total"].mean())
+            team_spread = float(trows["spread"].mean()) if has_spread else 0.0
+            return round(game_ou / 2.0 - team_spread / 2.0, 1)
         return round(float(trows.nlargest(3, "proj")["proj"].sum()), 1)
+
+    def _game_ou(team: str) -> float:
+        """Return the game over/under for this team's game."""
+        trows = df[df["team"].fillna("").str.upper() == team]
+        if trows.empty or not has_vegas:
+            return 0.0
+        return round(float(trows["vegas_total"].mean()), 1)
 
     def _team_spread(team: str) -> float:
         if not has_spread:
