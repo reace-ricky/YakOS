@@ -252,17 +252,23 @@ def main() -> None:
             preset = CONTEST_PRESETS.get(label, {})
             # Map preset label → gauge label
             _label_map = {
+                "GPP Main": "150-Max",
+                "GPP Early": "20-Max",
+                "GPP Late": "20-Max",
+                "Showdown": "3-Max",
+                "Cash Main": "Cash",
+                # Legacy labels
                 "Cash Game": "Cash",
                 "Single Entry": "SE",
                 "3-Max Tournament": "3-Max",
                 "20-Max GPP": "20-Max",
                 "MME (150-Max)": "150-Max",
-                "Showdown": "20-Max",
             }
             gauge_label = _label_map.get(label, "SE")
             gauge = gauge_summary.get(gauge_label, {})
             score = float(gauge.get("score", 0))
-            rec = "✅ Good" if score >= 0.60 else "⚠️ OK" if score >= 0.35 else "❌ Weak"
+            # Smash-based scores typically range 0.05–0.30; adjust thresholds
+            rec = "✅ Strong" if score >= 0.25 else "✅ Playable" if score >= 0.12 else "⚠️ Thin" if score >= 0.06 else "❌ Weak"
             advisor_rows.append({
                 "Contest": label,
                 "Build Mode": _CONTEST_TO_BUILD_MODE.get(label, "median"),
