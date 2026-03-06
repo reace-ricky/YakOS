@@ -69,11 +69,10 @@ from yak_core.salary_history import SalaryHistoryClient  # noqa: E402
 
 
 def _fetch_dk_draft_groups(sport: str = "NBA") -> list:
-    """Fetch DraftGroup metadata from the DK lobby API.
+    """Fetch DraftGroup metadata from the LIVE DK lobby API.
     
-    The lobby response contains both Contests and DraftGroups arrays.
-    This function extracts the DraftGroups array which has slate-level
-    metadata (GameCount, ContestStartTimeSuffix, GameStyle, etc.).
+    Only returns today's / upcoming slates.  For historical dates use
+    _fetch_historical_draft_groups() which queries FantasyLabs.
     """
     import requests
     url = "https://www.draftkings.com/lobby/getcontests"
@@ -88,6 +87,35 @@ def _fetch_dk_draft_groups(sport: str = "NBA") -> list:
     # Extract DraftGroups array
     draft_groups_raw = data.get("DraftGroups") or data.get("draftGroups") or []
     return draft_groups_raw
+
+
+def _fetch_historical_draft_groups(date_str: str) -> list:
+    """Fetch draft groups for a historical date via FantasyLabs → DK.
+    
+    Returns a list of dicts compatible with build_slate_options(),
+    with keys: DraftGroupId, GameCount, ContestStartTimeSuffix,
+    GameTypeId, GameStyle.
+    """
+    client = SalaryHistoryClient()
+    fl_groups = client.get_draft_group_ids(date_str)
+    
+    if not fl_groups:
+        return []
+    
+    # Convert FantasyLabs format to DK DraftGroup-like dicts
+    # so build_slate_options() can process them uniformly.
+    dk_format = []
+    for g in fl_groups:
+        dk_format.append({
+            "DraftGroupId": g.get("draft_group_id", 0),
+            "GameCount": g.get("game_count", 0),
+            "ContestStartTimeSuffix": g.get("suffix", g.get("display_name", "")),
+            "GameTypeId": 81 if "showdown" in str(g.get("display_name", "")).lower() else 70,
+            "GameStyle": "Showdown Captain Mode" if "showdown" in str(g.get("display_name", "")).lower() else "Classic",
+            "StartDate": g.get("start_time", ""),
+            "SortOrder": g.get("sort_order", 99),
+        })
+    return dk_format
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +383,17 @@ def main() -> None:
     proj_source = "model"
 
     # ── Slate Picker ──────────────────────────────────────────────────────
+    # Determine if this is a historical date (needed for slate picker routing)
+    from zoneinfo import ZoneInfo as _ZI2
+    _today_date = pd.Timestamp.now(tz=_ZI2("America/New_York")).date()
+    _is_historical = pd.to_datetime(slate_date_str).date() < _today_date
+    _salary_client = SalaryHistoryClient()
+
     st.subheader("Select Slate")
+    if _is_historical:
+        st.caption(f"📅 Historical mode — slates fetched from FantasyLabs for {slate_date_str}")
+    else:
+        st.caption("🟢 Live mode — slates from DraftKings lobby")
     
     _slate_cache_key = f"_hub_slates_{sport}_{slate_date_str}"
     _cached_slates = st.session_state.get(_slate_cache_key)
@@ -363,16 +401,23 @@ def main() -> None:
     col_fetch_slate, col_clear_slate = st.columns([2, 1])
     with col_fetch_slate:
         if st.button("🔍 Fetch Available Slates", type="secondary"):
-            with st.spinner("Fetching slates from DraftKings..."):
+            with st.spinner("Fetching slates…"):
                 try:
-                    raw_dgs = _fetch_dk_draft_groups(sport)
+                    if _is_historical:
+                        # Historical: use FantasyLabs → DK draftables pipeline
+                        raw_dgs = _fetch_historical_draft_groups(slate_date_str)
+                        _source = "FantasyLabs"
+                    else:
+                        # Live: use DK lobby API
+                        raw_dgs = _fetch_dk_draft_groups(sport)
+                        _source = "DraftKings"
                     if not raw_dgs:
-                        st.warning("No slates found on DraftKings for this sport. Try a different date.")
+                        st.warning(f"No slates found on {_source} for {slate_date_str}. Try a different date.")
                     else:
                         slate_options = build_slate_options(raw_dgs)
                         st.session_state[_slate_cache_key] = slate_options
                         _cached_slates = slate_options
-                        st.success(f"Found {len(slate_options)} slate(s).")
+                        st.success(f"Found {len(slate_options)} slate(s) from {_source}.")
                 except Exception as exc:
                     st.error(f"Failed to fetch slates: {exc}")
     with col_clear_slate:
@@ -418,9 +463,7 @@ def main() -> None:
             selected_slate_label = f"Manual (DG {manual_dg})"
 
     # ── Row 5: Load Player Pool ────────────────────────────────────────────
-    _today_date = pd.Timestamp.now(tz=ZoneInfo("America/New_York")).date()
-    _is_historical = pd.to_datetime(slate_date_str).date() < _today_date
-    _salary_client = SalaryHistoryClient()
+    # (_today_date, _is_historical, _salary_client already defined above in Slate Picker section)
 
     if st.button("📥 Load Player Pool", type="primary"):
         # Resolve draft_group_id from the slate picker or manual override.
@@ -435,7 +478,8 @@ def main() -> None:
                 _historical_dg_id: Optional[int] = None
 
                 if _is_historical and not draft_group_id:
-                    # Check cache first
+                    # No draft group selected — try salary cache or FantasyLabs
+                    # This is the fallback when user skips the slate picker.
                     _cached = _salary_client.load_cached_salaries(slate_date_str)
                     if _cached is not None and not _cached.empty:
                         _historical_salary_df = _cached
@@ -451,6 +495,11 @@ def main() -> None:
                                     f"Historical salaries loaded from DK "
                                     f"(DraftGroup {_historical_dg_id})"
                                 )
+                elif _is_historical and draft_group_id:
+                    # Draft group selected via slate picker — use DK draftables API
+                    # directly for that specific draft group (gives exact players for
+                    # that slate, not a generic cache).
+                    st.info(f"Loading players for DraftGroup {draft_group_id} ({slate_date_str})…")
 
                 if not draft_group_id and _historical_salary_df is None:
                     st.warning(
@@ -899,7 +948,7 @@ def main() -> None:
             if hub_rules:
                 slate.apply_roster_rules(hub_rules)
 
-            # Store the full contest type label (e.g. "GPP - 150 Max") so
+            # Store the full contest type label (e.g. "GPP Main") so
             # downstream pages can read it from SlateState.contest_type.
             # apply_roster_rules sets contest_type to "Classic"/"Showdown Captain",
             # so we overwrite it with the user-selected preset label here.
