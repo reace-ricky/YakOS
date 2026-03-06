@@ -585,8 +585,14 @@ def fetch_player_game_logs(
                         body = body[list_key]
                         break
                 else:
-                    list_vals = [v for v in body.values() if isinstance(v, list)]
-                    body = list_vals[0] if list_vals else []
+                    # Tank01 getNBAGamesForPlayer returns a dict of
+                    # {gameID: {stats...}} — convert to list of dicts.
+                    dict_vals = [v for v in body.values() if isinstance(v, dict)]
+                    if dict_vals:
+                        body = dict_vals
+                    else:
+                        list_vals = [v for v in body.values() if isinstance(v, list)]
+                        body = list_vals[0] if list_vals else []
 
             if not isinstance(body, list) or not body:
                 return None

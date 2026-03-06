@@ -146,43 +146,97 @@ def proj_model(
     cfg: Dict[str, Any],
 ) -> pd.Series:
     """
-    Real projection model that blends salary-implied with historical
-    player performance and position-level priors.
-    
-    For each player:
-      1. Compute salary-implied baseline (salary * FP_PER_K / 1000)
-      2. Look up historical avg actual_fp from prior slates
-      3. Compute position-level FP/$1K from historical data
-      4. Blend signals:
-         - If player has history: weight hist_avg vs salary_implied
-         - If no history: use position-adjusted salary_implied
-    
+    Real projection model that blends rolling game-log performance with a
+    salary-implied baseline.  Uses three signal tiers (in priority order):
+
+    1. **Rolling game logs** (from Tank01 ``getNBAGamesForPlayer``).  When
+       columns ``rolling_fp_5 / _10 / _20`` are present in *pool_df* the
+       model blends them with the salary baseline — this is the primary
+       live-slate path and produces projections that genuinely differ
+       from salary.
+    2. **Historical parquets** (from prior-slate ``actual_fp`` in
+       ``tank_opt_pool_*.parquet``).  Used when rolling columns are missing
+       but local parquets exist.
+    3. **Salary-implied** fallback (``salary * FP_PER_K / 1000``).
+       Only used when neither rolling stats nor parquets are available.
+
+    The function also populates ``floor`` and ``ceil`` columns (0.65× and
+    1.45× of proj) when it computes projections from rolling data, giving
+    the archetype system real ceiling/floor signals for the optimizer.
+
     Config keys:
       MODEL_HIST_WEIGHT : float, weight on historical avg (default 0.6)
       MODEL_POS_REGRESS : float, how much to regress toward position mean (default 0.2)
     """
     import os
     from yak_core.config import YAKOS_ROOT
-    
+
     fp_per_k = float(cfg.get("FP_PER_K", 4.0))
     hist_weight = float(cfg.get("MODEL_HIST_WEIGHT", 0.6))
     pos_regress = float(cfg.get("MODEL_POS_REGRESS", 0.2))
     noise_std = float(cfg.get("PROJ_NOISE", 0.05))
     slate_date = cfg.get("SLATE_DATE", "")
-    
+
     df = pool_df.copy()
-    
-    # 1. Salary-implied baseline
+
+    # 1. Salary-implied baseline (always computed)
     sal_proj = salary_implied_proj(df["salary"], fp_per_k=fp_per_k)
-    
-    # 2. Load historical data
+
+    # ── Tier 1: Rolling game-log columns from Tank01 ──────────────────
+    _rolling_cols = ["rolling_fp_5", "rolling_fp_10", "rolling_fp_20"]
+    _has_rolling_cols = all(c in df.columns for c in _rolling_cols)
+    if _has_rolling_cols:
+        # Count players that actually have rolling data (not all-NaN)
+        _any_rolling = df[_rolling_cols].notna().any(axis=1)
+        _n_with_rolling = int(_any_rolling.sum())
+    else:
+        _n_with_rolling = 0
+
+    if _n_with_rolling > 0:
+        # Vectorised blend: rolling signals (70%) + salary baseline (30%)
+        # Weighting scheme: fp_5 heaviest (recent form), fp_20 lightest
+        _rolling_weights = {
+            "rolling_fp_5":  0.50,
+            "rolling_fp_10": 0.30,
+            "rolling_fp_20": 0.20,
+        }
+        rolling_weighted = pd.Series(0.0, index=df.index)
+        rolling_w_sum = pd.Series(0.0, index=df.index)
+        for col, w in _rolling_weights.items():
+            vals = pd.to_numeric(df[col], errors="coerce")
+            valid = vals.notna() & (vals > 0)
+            rolling_weighted += vals.fillna(0) * w * valid.astype(float)
+            rolling_w_sum += w * valid.astype(float)
+
+        has_signal = rolling_w_sum > 0
+        rolling_avg = rolling_weighted / rolling_w_sum.replace(0, 1)
+
+        # Blend: 70% rolling signal, 30% salary baseline for players with data.
+        # Players with NO rolling data get pure salary-implied.
+        proj_series = sal_proj.copy()
+        proj_series[has_signal] = (
+            rolling_avg[has_signal] * 0.70
+            + sal_proj[has_signal] * 0.30
+        )
+        proj_series = proj_series.clip(lower=0)
+
+        # Populate floor / ceil so the archetype system can use them
+        pool_df["floor"] = (proj_series * 0.65).round(2)
+        pool_df["ceil"]  = (proj_series * 1.45).round(2)
+
+        print(f"[proj_model] {_n_with_rolling}/{len(df)} players had Tank01 "
+              f"rolling game-log data — projections differentiated from salary")
+
+        return noisy_proj(proj_series, noise_std=noise_std)
+
+    # ── Tier 2: Historical parquets ───────────────────────────────────
     hist = load_historical_pool(slate_date, YAKOS_ROOT)
-    
+
     if len(hist) == 0:
-        # No history available: fall back to salary-implied + noise
-        print("[proj_model] No historical data found, using salary_implied")
+        # No rolling data AND no historical parquets — pure salary fallback
+        print("[proj_model] No rolling stats or historical data — using salary_implied")
         return noisy_proj(sal_proj, noise_std=noise_std)
-    
+
     # 3. Compute per-player historical averages
     player_hist = hist.groupby("player_name").agg(
         hist_avg=("actual_fp", "mean"),
@@ -190,25 +244,23 @@ def proj_model(
         hist_std=("actual_fp", "std"),
     ).reset_index()
     player_hist["hist_std"] = player_hist["hist_std"].fillna(0)
-    
+
     # 4. Compute position-level FP/$1K from historical data
     if "pos" in hist.columns:
         pos_stats = hist.copy()
-        # Use primary position (first in multi-pos)
         pos_stats["primary_pos"] = pos_stats["pos"].str.split("/").str[0].str.strip()
         _tmp = pos_stats.copy()
         _tmp["_fpk"] = _tmp["actual_fp"] / (_tmp["salary"] / 1000)
         pos_fpk = _tmp.groupby("primary_pos")["_fpk"].mean().to_dict()
     else:
         pos_fpk = {}
-    
+
     overall_fpk = (hist["actual_fp"] / (hist["salary"] / 1000)).mean() if len(hist) > 0 else fp_per_k
-    
-    # 5. Build projections — vectorised (no row-by-row iteration)
+
+    # 5. Build projections — vectorised
     sal_series = df["salary"].astype(float)
     sal_base = sal_series * fp_per_k / 1000.0
 
-    # Position-adjusted baseline (vectorised)
     if "pos" in df.columns:
         primary_pos = df["pos"].astype(str).str.split("/").str[0].str.strip()
         pos_fpk_series = primary_pos.map(pos_fpk).fillna(overall_fpk)
@@ -217,7 +269,6 @@ def proj_model(
     pos_adj_base = sal_series * pos_fpk_series / 1000.0
     base = sal_base * (1 - pos_regress) + pos_adj_base * pos_regress
 
-    # Merge historical averages via a single join (not per-row lookup)
     hist_lookup = player_hist.set_index("player_name")[["hist_avg", "hist_games"]]
     df_names = df["player_name"].astype(str)
     merged = df_names.map(hist_lookup["hist_avg"].to_dict())
