@@ -418,6 +418,13 @@ def _build_player_level_sim_results(pool: pd.DataFrame, variance: float) -> pd.D
     floor = pd.to_numeric(df.get("floor", proj * 0.7), errors="coerce").fillna(proj * 0.7)
     own = pd.to_numeric(df.get("ownership", 5.0), errors="coerce").fillna(5.0)
 
+    # ── Sanity check: external floor/ceil may be on a different scale ────
+    # (e.g., RG ceil=17 when proj=51 → smash=1.0 for everyone).
+    # Fix: if ceil < proj or floor > proj, recompute from proj.
+    _bad_fc = (ceil < proj * 0.5) | (floor > proj * 1.2) | (ceil < floor)
+    ceil = ceil.where(~_bad_fc, proj * 1.45)
+    floor = floor.where(~_bad_fc, proj * 0.65)
+
     std = (ceil - floor) / 4 * variance
     std = std.clip(lower=0.5)
     smash_z = (ceil * 0.9 - proj) / std
