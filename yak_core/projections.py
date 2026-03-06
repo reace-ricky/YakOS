@@ -204,44 +204,38 @@ def proj_model(
     
     overall_fpk = (hist["actual_fp"] / (hist["salary"] / 1000)).mean() if len(hist) > 0 else fp_per_k
     
-    # 5. Build projections row by row
-    proj_values = []
-    hist_used = 0
-    for idx, row in df.iterrows():
-        pname = row.get("player_name", "")
-        salary = row.get("salary", 0)
-        pos = str(row.get("pos", "")).split("/")[0].strip()
-        
-        sal_base = salary * fp_per_k / 1000.0
-        
-        # Position-adjusted baseline
-        pos_fp_k = pos_fpk.get(pos, overall_fpk)
-        pos_adj_base = salary * pos_fp_k / 1000.0
-        
-        # Blend salary base with position adjustment
-        base = sal_base * (1 - pos_regress) + pos_adj_base * pos_regress
-        
-        # Check for historical data
-        pmatch = player_hist[player_hist["player_name"] == pname]
-        if len(pmatch) > 0:
-            h_avg = pmatch.iloc[0]["hist_avg"]
-            h_games = pmatch.iloc[0]["hist_games"]
-            # Scale weight by number of games (more games = more trust)
-            # 1 game = hist_weight * 0.5, 2 games = hist_weight * 0.75, 3+ = hist_weight
-            game_factor = min(1.0, 0.5 + 0.25 * (h_games - 1))
-            w = hist_weight * game_factor
-            proj = h_avg * w + base * (1 - w)
-            hist_used += 1
-        else:
-            proj = base
-        
-        proj_values.append(max(0.0, proj))
-    
+    # 5. Build projections — vectorised (no row-by-row iteration)
+    sal_series = df["salary"].astype(float)
+    sal_base = sal_series * fp_per_k / 1000.0
+
+    # Position-adjusted baseline (vectorised)
+    if "pos" in df.columns:
+        primary_pos = df["pos"].astype(str).str.split("/").str[0].str.strip()
+        pos_fpk_series = primary_pos.map(pos_fpk).fillna(overall_fpk)
+    else:
+        pos_fpk_series = pd.Series(overall_fpk, index=df.index)
+    pos_adj_base = sal_series * pos_fpk_series / 1000.0
+    base = sal_base * (1 - pos_regress) + pos_adj_base * pos_regress
+
+    # Merge historical averages via a single join (not per-row lookup)
+    hist_lookup = player_hist.set_index("player_name")[["hist_avg", "hist_games"]]
+    df_names = df["player_name"].astype(str)
+    merged = df_names.map(hist_lookup["hist_avg"].to_dict())
+    merged_games = df_names.map(hist_lookup["hist_games"].to_dict())
+
+    has_hist = merged.notna()
+    game_factor = (0.5 + 0.25 * (merged_games.fillna(1) - 1)).clip(upper=1.0)
+    w = hist_weight * game_factor
+
+    proj_series = base.copy()
+    proj_series[has_hist] = merged[has_hist] * w[has_hist] + base[has_hist] * (1 - w[has_hist])
+    proj_series = proj_series.clip(lower=0)
+
+    hist_used = int(has_hist.sum())
     print(f"[proj_model] {hist_used}/{len(df)} players had historical data, "
           f"{len(hist)} historical rows from {hist['slate_date'].nunique()} slates")
-    
-    result = pd.Series(proj_values, index=df.index)
-    return noisy_proj(result, noise_std=noise_std)
+
+    return noisy_proj(proj_series, noise_std=noise_std)
 
 
 def yakos_fp_projection(player_features: dict) -> dict:

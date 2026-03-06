@@ -169,34 +169,119 @@ def _normalize_dk_pool(pool: pd.DataFrame) -> pd.DataFrame:
 
 
 def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
-    """Add floor/ceil/proj_minutes/ownership from YakOS per-player models."""
+    """Add floor/ceil/proj_minutes/ownership from YakOS per-player models.
+
+    Performance-optimised: vectorised operations instead of row-by-row
+    iteration, and salary-rank ownership (instant) instead of field-sim
+    (1000 PuLP solves).  Field sim ownership can be triggered separately
+    from the Sims section if the user wants it.
+    """
     has_floor = "floor" in pool.columns and pool["floor"].notna().any()
     has_ceil = "ceil" in pool.columns and pool["ceil"].notna().any()
-    _OPTIONAL_FEAT_COLS = [
-        "rolling_fp_5", "rolling_fp_10", "rolling_fp_20",
-        "rolling_min_5", "rolling_min_10", "rolling_min_20",
-        "vegas_total", "spread",
-        "tank01_proj",
-    ]
-    floors, ceils, mins_proj = [], [], []
-    for _, row in pool.iterrows():
-        feats = {"salary": float(row.get("salary", 0) or 0)}
-        for col in _OPTIONAL_FEAT_COLS:
-            if col in pool.columns:
-                val = row.get(col)
-                if val is not None and not (isinstance(val, float) and pd.isna(val)):
-                    feats[col] = float(val)
-        fp_res = yakos_fp_projection(feats)
-        min_res = yakos_minutes_projection(feats)
-        floors.append(fp_res.get("floor", fp_res["proj"] * 0.7))
-        ceils.append(fp_res.get("ceil", fp_res["proj"] * 1.4))
-        mins_proj.append(min_res.get("proj_minutes", 0.0))
+
+    sal = pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0).astype(float)
+
+    # ── Vectorised FP projection (floor/ceil) ────────────────────────────
+    # Try to load trained model ONCE (not per-row)
+    _fp_model = None
+    _fp_features = None
+    try:
+        import os, joblib
+        from yak_core.config import YAKOS_ROOT
+        _fp_path = os.path.join(YAKOS_ROOT, "models", "yakos_fp_model.pkl")
+        if os.path.isfile(_fp_path):
+            _fp_model = joblib.load(_fp_path)
+            _fp_features = list(getattr(_fp_model, "feature_names_in_", []))
+    except Exception:
+        pass
+
+    if _fp_model is not None and _fp_features:
+        # Batch predict with trained model
+        feat_df = pd.DataFrame({col: pd.to_numeric(pool.get(col, np.nan), errors="coerce") for col in _fp_features})
+        pred = pd.Series(_fp_model.predict(feat_df), index=pool.index).clip(lower=0)
+
+        # Blend with rolling signals (vectorised)
+        _rolling_keys = [("rolling_fp_5", 0.30), ("rolling_fp_10", 0.20), ("rolling_fp_20", 0.10)]
+        rolling_weighted = pd.Series(0.0, index=pool.index)
+        rolling_w_sum = pd.Series(0.0, index=pool.index)
+        for key, w in _rolling_keys:
+            if key in pool.columns:
+                vals = pd.to_numeric(pool[key], errors="coerce")
+                mask = vals.notna()
+                rolling_weighted = rolling_weighted + vals.fillna(0) * w * mask.astype(float)
+                rolling_w_sum = rolling_w_sum + w * mask.astype(float)
+        has_rolling = rolling_w_sum > 0
+        rolling_signal = (rolling_weighted / rolling_w_sum.replace(0, 1))
+        proj_fp = pred.copy()
+        proj_fp[has_rolling] = pred[has_rolling] * 0.4 + rolling_signal[has_rolling] * 0.6
+        proj_fp = proj_fp.clip(lower=0)
+    else:
+        # Formula fallback (vectorised)
+        _FP_PER_K = 4.0
+        sal_base = sal * _FP_PER_K / 1000.0
+        _signal_cols = [("rolling_fp_5", 0.30), ("rolling_fp_10", 0.20),
+                        ("rolling_fp_20", 0.10), ("tank01_proj", 0.20), ("rg_proj", 0.15)]
+        sig_weighted = pd.Series(0.0, index=pool.index)
+        sig_w_sum = pd.Series(0.0, index=pool.index)
+        for key, w in _signal_cols:
+            if key in pool.columns:
+                vals = pd.to_numeric(pool[key], errors="coerce")
+                mask = vals.notna()
+                sig_weighted = sig_weighted + vals.fillna(0) * w * mask.astype(float)
+                sig_w_sum = sig_w_sum + w * mask.astype(float)
+        has_sig = sig_w_sum > 0
+        signal_proj = sig_weighted / sig_w_sum.replace(0, 1)
+        proj_fp = sal_base.copy()
+        proj_fp[has_sig] = signal_proj[has_sig] * 0.70 + sal_base[has_sig] * 0.30
+        proj_fp = proj_fp.clip(lower=0)
 
     if not has_floor:
-        pool["floor"] = floors
+        pool["floor"] = (proj_fp * 0.65).round(2)
     if not has_ceil:
-        pool["ceil"] = ceils
-    pool["proj_minutes"] = mins_proj
+        pool["ceil"] = (proj_fp * 1.45).round(2)
+
+    # ── Vectorised minutes projection ────────────────────────────────────
+    _min_model = None
+    _min_features = None
+    try:
+        import os, joblib
+        from yak_core.config import YAKOS_ROOT
+        _min_path = os.path.join(YAKOS_ROOT, "models", "yakos_minutes_model.pkl")
+        if os.path.isfile(_min_path):
+            _min_model = joblib.load(_min_path)
+            _min_features = list(getattr(_min_model, "feature_names_in_", []))
+    except Exception:
+        pass
+
+    if _min_model is not None and _min_features:
+        feat_df = pd.DataFrame({col: pd.to_numeric(pool.get(col, np.nan), errors="coerce") for col in _min_features})
+        proj_min = pd.Series(_min_model.predict(feat_df), index=pool.index)
+    else:
+        # Formula: weighted rolling minutes or salary fallback
+        _min_keys = [("rolling_min_5", 0.50), ("rolling_min_10", 0.30), ("rolling_min_20", 0.20)]
+        min_weighted = pd.Series(0.0, index=pool.index)
+        min_w_sum = pd.Series(0.0, index=pool.index)
+        for key, w in _min_keys:
+            if key in pool.columns:
+                vals = pd.to_numeric(pool[key], errors="coerce")
+                mask = vals.notna()
+                min_weighted = min_weighted + vals.fillna(0) * w * mask.astype(float)
+                min_w_sum = min_w_sum + w * mask.astype(float)
+        has_min_sig = min_w_sum > 0
+        sal_min_fallback = (sal / 300.0).clip(lower=10.0, upper=36.0)
+        proj_min = sal_min_fallback.copy()
+        proj_min[has_min_sig] = min_weighted[has_min_sig] / min_w_sum[has_min_sig].replace(0, 1)
+
+    # Contextual adjustments
+    if "b2b" in pool.columns:
+        b2b_mask = pool["b2b"].fillna(False).astype(bool)
+        proj_min[b2b_mask] *= 0.93
+    if "spread" in pool.columns:
+        abs_spread = pd.to_numeric(pool["spread"], errors="coerce").fillna(0).abs()
+        proj_min[abs_spread >= 15] *= 0.90
+        proj_min[(abs_spread >= 10) & (abs_spread < 15)] *= 0.95
+
+    pool["proj_minutes"] = proj_min.clip(lower=0).round(1)
 
     if "status" in pool.columns:
         inelig_mask = (
@@ -205,7 +290,11 @@ def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
         )
         pool.loc[inelig_mask, "proj_minutes"] = 0.0
 
-    pool = apply_ownership(pool)
+    # ── Ownership: use fast salary-rank (instant) instead of field sim ───
+    # Field sim (1000 PuLP solves) can take 10+ minutes and is the primary
+    # cause of the hang.  Salary-rank ownership is a good initial estimate;
+    # users can run field sim separately from the Sims section.
+    pool = apply_ownership(pool, use_field_sim=False)
     return compute_sim_eligible(pool)
 
 

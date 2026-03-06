@@ -525,6 +525,8 @@ def fetch_player_game_logs(
     player_names: List[str],
     player_id_map: Optional[Dict[str, str]],
     api_key: str,
+    max_workers: int = 10,
+    timeout_seconds: int = 120,
 ) -> pd.DataFrame:
     """Fetch rolling game-log stats for a list of players from Tank01.
 
@@ -532,36 +534,9 @@ def fetch_player_game_logs(
     computes rolling averages for DraftKings fantasy points and minutes played
     over the last 5, 10, and 20 games.
 
-    Design notes
-    ------------
-    * One API call per player (``numberOfGames=20``, ``fantasyPoints=true``).
-    * Per-player errors are caught and logged — a single failure will NOT abort
-      the entire batch.  The affected player will simply be absent from the
-      returned DataFrame.
-    * The function is safe to wrap with ``@st.cache_data(ttl=3600)`` because it
-      has no side-effects and accepts only primitive / hashable arguments.
-      (Pass ``tuple(sorted(player_names))`` and a ``frozenset`` or JSON-serialised
-      ``player_id_map`` when calling from a cached Streamlit function.)
-
-    Parameters
-    ----------
-    player_names : list of str
-        DraftKings display names for the players to look up.
-    player_id_map : dict of {player_name: tank01_playerID} or None
-        Pre-resolved Tank01 playerID mapping.  When a player's name is in this
-        map the corresponding ID is used directly; otherwise the name itself is
-        passed as the ``playerID`` parameter (Tank01 also accepts names for
-        some endpoints, but IDs are preferred).
-    api_key : str
-        Tank01 RapidAPI key.
-
-    Returns
-    -------
-    pd.DataFrame
-        One row per player.  Columns:
-        ``player_name``, ``rolling_fp_5``, ``rolling_fp_10``, ``rolling_fp_20``,
-        ``rolling_min_5``, ``rolling_min_10``, ``rolling_min_20``.
-        Players for whom no data could be retrieved are omitted.
+    Performance: uses concurrent threads (default 10) with an overall
+    timeout cap so the entire batch finishes in ~2 minutes max, even
+    with 200+ players.
     """
     if not player_names:
         return pd.DataFrame(columns=[
@@ -574,43 +549,42 @@ def fetch_player_game_logs(
     url = "https://" + _TANK01_HOST + "/getNBAGamesForPlayer"
     hdrs = _headers(api_key)
 
-    rows: List[dict] = []
+    # Filter to only players with Tank01 IDs
+    valid_players = [(name, _id_map[name]) for name in player_names if _id_map.get(name)]
+    skipped = len(player_names) - len(valid_players)
+    if skipped:
+        print(f"[fetch_player_game_logs] Skipped {skipped} players with no Tank01 playerID.")
+    if not valid_players:
+        return pd.DataFrame(columns=[
+            "player_name",
+            "rolling_fp_5", "rolling_fp_10", "rolling_fp_20",
+            "rolling_min_5", "rolling_min_10", "rolling_min_20",
+        ])
 
-    for name in player_names:
-        player_id = _id_map.get(name, "")
-        if not player_id:
-            # Tank01 sometimes accepts player names, but without an ID we skip
-            # rather than risk a bad match — log and continue.
-            print(f"[fetch_player_game_logs] No Tank01 playerID for '{name}' — skipping.")
-            continue
-
+    def _fetch_one(name_and_id):
+        name, player_id = name_and_id
         params = {
             "playerID": player_id,
             "numberOfGames": "20",
             "fantasyPoints": "true",
         }
-
         try:
-            resp = requests.get(url, headers=hdrs, params=params, timeout=30)
+            resp = requests.get(url, headers=hdrs, params=params, timeout=15)
             resp.raise_for_status()
             data = resp.json()
             body = data.get("body", data) if isinstance(data, dict) else data
 
-            # body may be a list of game dicts or a dict wrapping one
             if isinstance(body, dict):
-                # Try common list keys
                 for list_key in ("games", "gameLog", "stats", "playerStats"):
                     if list_key in body and isinstance(body[list_key], list):
                         body = body[list_key]
                         break
                 else:
-                    # Fallback: find the first list value
                     list_vals = [v for v in body.values() if isinstance(v, list)]
                     body = list_vals[0] if list_vals else []
 
             if not isinstance(body, list) or not body:
-                print(f"[fetch_player_game_logs] Empty game log for '{name}'.")
-                continue
+                return None
 
             fps: List[float] = []
             mins: List[float] = []
@@ -619,10 +593,8 @@ def fetch_player_game_logs(
                 if not isinstance(game, dict):
                     continue
 
-                # ── DK fantasy points ──────────────────────────────────────
                 fp_raw = game.get("fantasyPoints")
                 if isinstance(fp_raw, dict):
-                    # Nested dict: look for DraftKings sub-key
                     fp_val = (
                         fp_raw.get("DraftKings")
                         or fp_raw.get("dk")
@@ -643,7 +615,6 @@ def fetch_player_game_logs(
 
                 fps.append(fp)
 
-                # ── Minutes ───────────────────────────────────────────────
                 mins_raw = (
                     game.get("mins")
                     or game.get("min")
@@ -652,7 +623,6 @@ def fetch_player_game_logs(
                     or game.get("minSeconds")
                 )
                 try:
-                    # Tank01 sometimes returns "MM:SS" strings
                     if mins_raw is not None and ":" in str(mins_raw):
                         parts = str(mins_raw).split(":")
                         m_val = float(parts[0]) + float(parts[1]) / 60.0
@@ -663,15 +633,13 @@ def fetch_player_game_logs(
                 mins.append(m_val)
 
             if not fps:
-                print(f"[fetch_player_game_logs] No valid game entries for '{name}'.")
-                continue
+                return None
 
             def _rolling_avg(values: List[float], n: int) -> float:
-                """Average of the last *n* values, or all values if fewer than n."""
                 subset = values[-n:] if len(values) >= n else values
                 return round(sum(subset) / len(subset), 2) if subset else 0.0
 
-            rows.append({
+            return {
                 "player_name": name,
                 "rolling_fp_5":  _rolling_avg(fps, 5),
                 "rolling_fp_10": _rolling_avg(fps, 10),
@@ -679,12 +647,31 @@ def fetch_player_game_logs(
                 "rolling_min_5":  _rolling_avg(mins, 5),
                 "rolling_min_10": _rolling_avg(mins, 10),
                 "rolling_min_20": _rolling_avg(mins, 20),
-            })
-
+            }
         except Exception as exc:
-            # Per-player failure — log and continue to next player
-            print(f"[fetch_player_game_logs] Error fetching game logs for '{name}': {exc}")
-            continue
+            print(f"[fetch_player_game_logs] Error for '{name}': {exc}")
+            return None
+
+    # Run concurrently with timeout cap
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    rows: List[dict] = []
+    try:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(_fetch_one, vp): vp[0] for vp in valid_players}
+            import time
+            deadline = time.time() + timeout_seconds
+            for future in as_completed(futures, timeout=timeout_seconds):
+                if time.time() > deadline:
+                    print(f"[fetch_player_game_logs] Timeout ({timeout_seconds}s) reached, stopping.")
+                    break
+                try:
+                    result = future.result(timeout=5)
+                    if result:
+                        rows.append(result)
+                except Exception:
+                    pass
+    except Exception as exc:
+        print(f"[fetch_player_game_logs] Batch error: {exc}")
 
     if not rows:
         return pd.DataFrame(columns=[
