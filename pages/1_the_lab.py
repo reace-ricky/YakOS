@@ -181,22 +181,18 @@ def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
 
     # ── Vectorised FP projection (floor/ceil) ────────────────────────────
     # Try to load trained model ONCE (not per-row)
-    _fp_model = None
-    _fp_features = None
+    _fp_json = None
     try:
-        import os, joblib
+        import os
         from yak_core.config import YAKOS_ROOT
-        _fp_path = os.path.join(YAKOS_ROOT, "models", "yakos_fp_model.pkl")
-        if os.path.isfile(_fp_path):
-            _fp_model = joblib.load(_fp_path)
-            _fp_features = list(getattr(_fp_model, "feature_names_in_", []))
+        from yak_core.model_loader import load_json_model, predict_batch
+        _fp_json = load_json_model(os.path.join(YAKOS_ROOT, "models", "yakos_fp_model.json"))
     except Exception:
         pass
 
-    if _fp_model is not None and _fp_features:
-        # Batch predict with trained model
-        feat_df = pd.DataFrame({col: pd.to_numeric(pool.get(col, np.nan), errors="coerce") for col in _fp_features})
-        pred = pd.Series(_fp_model.predict(feat_df), index=pool.index).clip(lower=0)
+    if _fp_json is not None:
+        # Batch predict with portable JSON model
+        pred = predict_batch(_fp_json, pool).clip(lower=0)
 
         # Blend with rolling signals (vectorised)
         _rolling_keys = [("rolling_fp_5", 0.30), ("rolling_fp_10", 0.20), ("rolling_fp_20", 0.10)]
@@ -239,21 +235,17 @@ def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
         pool["ceil"] = (proj_fp * 1.45).round(2)
 
     # ── Vectorised minutes projection ────────────────────────────────────
-    _min_model = None
-    _min_features = None
+    _min_json = None
     try:
-        import os, joblib
+        import os
         from yak_core.config import YAKOS_ROOT
-        _min_path = os.path.join(YAKOS_ROOT, "models", "yakos_minutes_model.pkl")
-        if os.path.isfile(_min_path):
-            _min_model = joblib.load(_min_path)
-            _min_features = list(getattr(_min_model, "feature_names_in_", []))
+        from yak_core.model_loader import load_json_model, predict_batch
+        _min_json = load_json_model(os.path.join(YAKOS_ROOT, "models", "yakos_minutes_model.json"))
     except Exception:
         pass
 
-    if _min_model is not None and _min_features:
-        feat_df = pd.DataFrame({col: pd.to_numeric(pool.get(col, np.nan), errors="coerce") for col in _min_features})
-        proj_min = pd.Series(_min_model.predict(feat_df), index=pool.index)
+    if _min_json is not None:
+        proj_min = predict_batch(_min_json, pool)
     else:
         # Formula: weighted rolling minutes or salary fallback
         _min_keys = [("rolling_min_5", 0.50), ("rolling_min_10", 0.30), ("rolling_min_20", 0.20)]

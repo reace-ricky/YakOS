@@ -393,6 +393,20 @@ def predict_ownership(
 
     X, _ = build_ownership_features(pool)
 
+    # Try portable JSON model first
+    json_path = model_path.replace(".pkl", ".json")
+    if os.path.isfile(json_path):
+        try:
+            from yak_core.model_loader import load_json_model, predict_batch
+            json_model = load_json_model(json_path)
+            if json_model is not None:
+                preds = predict_batch(json_model, pool).values
+                pool["own_model"] = np.clip(preds, 0.0, OWN_CLIP_MAX).round(1)
+                return pool
+        except Exception as exc:
+            print(f"[ext_ownership] JSON model failed ({exc}); trying pkl")
+
+    # Pkl fallback
     if os.path.isfile(model_path):
         try:
             import joblib
