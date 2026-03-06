@@ -270,6 +270,13 @@ def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
         proj_min = sal_min_fallback.copy()
         proj_min[has_min_sig] = min_weighted[has_min_sig] / min_w_sum[has_min_sig].replace(0, 1)
 
+        # Players with NO game-log signal AND bottom-tier salary are likely
+        # deep bench / DNP-CD risks.  Cap their projected minutes at 4 so
+        # compute_sim_eligible (min_proj_minutes=4) can filter them out.
+        _MIN_SALARY_FOR_FALLBACK = 4000
+        deep_bench_mask = (~has_min_sig) & (sal < _MIN_SALARY_FOR_FALLBACK)
+        proj_min[deep_bench_mask] = proj_min[deep_bench_mask].clip(upper=3.5)
+
     # Contextual adjustments
     if "b2b" in pool.columns:
         b2b_mask = pool["b2b"].fillna(False).astype(bool)
@@ -391,6 +398,16 @@ def _build_player_level_sim_results(pool: pd.DataFrame, variance: float) -> pd.D
     if pool.empty:
         return pd.DataFrame()
     df = pool.copy()
+
+    # Only include sim-eligible players (filters OUT/IR/0-min players)
+    if "sim_eligible" in df.columns:
+        df = df[df["sim_eligible"].astype(bool)].reset_index(drop=True)
+    # For historical slates with actual minutes data, drop 0-minute players
+    if "mp_actual" in df.columns:
+        mp = pd.to_numeric(df["mp_actual"], errors="coerce").fillna(0)
+        df = df[mp > 0].reset_index(drop=True)
+    if df.empty:
+        return pd.DataFrame()
     proj = pd.to_numeric(df.get("proj", 0), errors="coerce").fillna(0)
     ceil = pd.to_numeric(df.get("ceil", proj * 1.4), errors="coerce").fillna(proj * 1.4)
     floor = pd.to_numeric(df.get("floor", proj * 0.7), errors="coerce").fillna(proj * 0.7)
