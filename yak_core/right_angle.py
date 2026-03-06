@@ -784,6 +784,248 @@ def compute_game_environment_cards(pool_df: pd.DataFrame) -> list:
     return cards
 
 
+# ============================================================
+# BREAKOUT CANDIDATE DETECTION
+# ============================================================
+
+# Opponent DVP ranks: teams that allow the most FP (higher = softer).
+# Derived from 30-day game log analysis (Feb 4 – Mar 5 2026).
+# Updated periodically; keys are uppercase team abbreviations.
+_DEFAULT_OPP_DVP = {
+    "MEM": 24.1, "DAL": 23.9, "WAS": 23.7, "UTA": 23.7, "IND": 23.6,
+    "POR": 23.3, "ATL": 23.1, "PHI": 22.9, "DET": 22.8, "ORL": 22.6,
+    "PHX": 22.5, "MIL": 22.4, "DEN": 22.3, "OKC": 22.2, "MIN": 22.1,
+    "LAL": 22.0, "GS": 21.9, "HOU": 21.8, "SAC": 21.7, "LAC": 21.6,
+    "NO": 21.4, "MIA": 21.2, "CHI": 21.0, "CLE": 20.8, "BKN": 20.6,
+    "CHA": 20.4, "SA": 20.1, "TOR": 19.9, "NY": 18.5, "BOS": 17.2,
+}
+
+# Salary tiers for DraftKings NBA classic (used for archetype labelling).
+_SALARY_CHEAP = 5000       # < $5K = cheap
+_SALARY_MID_UPPER = 7500   # $5K-$7.5K = mid-range
+# >= $7.5K = studs
+
+
+def compute_breakout_candidates(
+    pool_df: pd.DataFrame,
+    opp_dvp: dict | None = None,
+    top_n: int = 10,
+) -> pd.DataFrame:
+    """Identify breakout candidates using five evidence-based signals.
+
+    The breakout score (0–100) blends five signals:
+
+        1. minutes_surge  (wt 0.30) — projected minutes jump vs 10-game baseline.
+           Players who got 20%+ more minutes broke out at nearly 3x the base rate.
+
+        2. salary_value   (wt 0.20) — salary-relative projection efficiency.
+           Sub-$5K players proj'd 28+ min with ≥0.7 FP/min historically crush
+           expectations.  Captures "underpriced role change" signal.
+
+        3. usage_bump     (wt 0.20) — rolling FP trending up vs longer baseline.
+           Proxy for injury-driven usage consolidation: remaining creator(s) see
+           more on-ball time, FGA, and assist opps without a salary adjustment yet.
+
+        4. matchup_dvp    (wt 0.15) — opponent defensive weakness + pace.
+           Facing MEM/DAL/WAS/UTA/IND → ~9% breakout rate vs BOS/NYK at 2-3%.
+
+        5. volatility     (wt 0.15) — high recent FP std → wider outcome range.
+           Volatile mid-salary players break out at 12% (2x base rate).
+
+    Each signal is normalised 0–1 across the slate and combined into a
+    weighted composite score.  Players are classified into salary-tier
+    archetypes:
+        Cheap  (<$5K):  "Minute Spike" / "Underpriced Role"
+        Mid  ($5-7.5K): "Usage Consolidation" / "Peripherals Ceiling"
+        Stud (≥$7.5K):  "Environment Ceiling" / "Pace-Up Spike"
+
+    Parameters
+    ----------
+    pool_df : pd.DataFrame
+        Player pool. Required: ``player_name``, ``team``.
+        Strongly recommended: ``rolling_min_5``, ``rolling_min_10``,
+        ``rolling_fp_5``, ``rolling_fp_10``, ``rolling_fp_20``,
+        ``opponent``, ``proj``, ``salary``, ``vegas_total``, ``spread``.
+    opp_dvp : dict, optional
+        Opponent DVP dict (team → avg FP allowed). Falls back to built-in table.
+    top_n : int
+        Number of candidates to return (default 10).
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: ``player_name``, ``team``, ``pos``, ``salary``, ``proj``,
+        ``breakout_score``, ``breakout_signals``, ``salary_tier``, ``archetype``.
+        Sorted by ``breakout_score`` descending.
+    """
+    out_cols = [
+        "player_name", "team", "pos", "salary", "proj",
+        "breakout_score", "breakout_signals", "salary_tier", "archetype",
+    ]
+    if pool_df.empty or "player_name" not in pool_df.columns:
+        return pd.DataFrame(columns=out_cols)
+
+    dvp = opp_dvp if opp_dvp else _DEFAULT_OPP_DVP
+    df = pool_df.copy()
+
+    # ── Coerce numerics ───────────────────────────────────────────────
+    num_cols = [
+        "proj", "salary", "rolling_fp_5", "rolling_fp_10", "rolling_fp_20",
+        "rolling_min_5", "rolling_min_10", "rolling_min_20",
+        "vegas_total", "spread",
+    ]
+    for col in num_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+    # ── Salary tier ───────────────────────────────────────────────────
+    if "salary" in df.columns:
+        df["salary_tier"] = np.where(
+            df["salary"] < _SALARY_CHEAP, "Cheap",
+            np.where(df["salary"] < _SALARY_MID_UPPER, "Mid", "Stud"),
+        )
+    else:
+        df["salary_tier"] = "Mid"
+
+    # ── Signal 1: Minutes Surge (0.30) ────────────────────────────────
+    # Ratio of recent 5-game minutes vs 10-game baseline.
+    has_mins = "rolling_min_5" in df.columns and "rolling_min_10" in df.columns
+    if has_mins:
+        baseline = df["rolling_min_10"].clip(lower=10)
+        recent = df["rolling_min_5"].clip(lower=0)
+        df["_min_surge"] = (recent / baseline).clip(lower=0.5, upper=2.0)
+    else:
+        df["_min_surge"] = 1.0
+
+    # ── Signal 2: Salary Value / Underpriced Role (0.20) ──────────────
+    # FP-per-$1K is high when a cheap player is projected well → role change.
+    if "proj" in df.columns and "salary" in df.columns:
+        sal_k = (df["salary"] / 1000.0).clip(lower=1.0)
+        df["_sal_value"] = df["proj"] / sal_k
+    else:
+        df["_sal_value"] = 0.0
+
+    # ── Signal 3: Usage / Trending Bump (0.20) ────────────────────────
+    # Rolling_fp_5 above rolling_fp_10 or rolling_fp_20 → usage is consolidating.
+    has_fp_roll = "rolling_fp_5" in df.columns
+    if has_fp_roll:
+        long_avg = df["rolling_fp_20"] if "rolling_fp_20" in df.columns else (
+            df["rolling_fp_10"] if "rolling_fp_10" in df.columns else df["rolling_fp_5"]
+        )
+        # Positive = trending up (usage consolidation), clip below 0
+        df["_usage_bump"] = (df["rolling_fp_5"] - long_avg).clip(lower=0)
+    else:
+        df["_usage_bump"] = 0.0
+
+    # ── Signal 4: Matchup DVP + Pace (0.15) ───────────────────────────
+    if "opponent" in df.columns:
+        df["_opp_dvp"] = df["opponent"].str.strip().str.upper().map(dvp).fillna(21.5)
+    else:
+        df["_opp_dvp"] = 21.5
+
+    # Boost DVP signal with game total (vegas_total = game O/U).  High O/U
+    # amplifies pace effect.
+    if "vegas_total" in df.columns:
+        ou = df["vegas_total"].clip(lower=200, upper=260)
+        ou_norm = (ou - 200) / 60.0  # 0-1 range roughly
+        df["_matchup"] = df["_opp_dvp"] + ou_norm * 3.0  # ~3 FP bonus at max pace
+    else:
+        df["_matchup"] = df["_opp_dvp"]
+
+    # ── Signal 5: Volatility (0.15) ───────────────────────────────────
+    # Gap between short and long rolling avg = inconsistent = volatile.
+    if has_fp_roll and "rolling_fp_10" in df.columns:
+        df["_vol"] = (df["rolling_fp_5"] - df["rolling_fp_10"]).abs().clip(lower=0)
+    else:
+        df["_vol"] = 0.0
+
+    # ── Normalise all signals to 0–1 ──────────────────────────────────
+    def _norm(s: pd.Series) -> pd.Series:
+        lo, hi = s.min(), s.max()
+        if hi == lo:
+            return pd.Series(0.5, index=s.index)
+        return (s - lo) / (hi - lo)
+
+    n_min = _norm(df["_min_surge"])
+    n_val = _norm(df["_sal_value"])
+    n_use = _norm(df["_usage_bump"])
+    n_dvp = _norm(df["_matchup"])
+    n_vol = _norm(df["_vol"])
+
+    df["breakout_score"] = (
+        0.30 * n_min
+        + 0.20 * n_val
+        + 0.20 * n_use
+        + 0.15 * n_dvp
+        + 0.15 * n_vol
+    ).mul(100).round(1)
+
+    # ── Human-readable signals ────────────────────────────────────────
+    def _signals(row) -> str:
+        parts = []
+        ms = row.get("_min_surge", 1.0)
+        if ms >= 1.15:
+            parts.append(f"Mins ↑{(ms-1)*100:.0f}%")
+        sv = row.get("_sal_value", 0)
+        sal = row.get("salary", 0)
+        if sal > 0 and sal < _SALARY_CHEAP and sv >= 5.0:
+            parts.append("Underpriced")
+        ub = row.get("_usage_bump", 0)
+        if ub >= 3.0:
+            parts.append(f"Usage ↑{ub:.1f}")
+        opp = row.get("opponent", "")
+        opp_val = row.get("_opp_dvp", 21.5)
+        if opp_val >= 23.0:
+            parts.append(f"Soft D ({opp})")
+        v = row.get("_vol", 0)
+        if v >= 3.0:
+            parts.append("Volatile")
+        return " · ".join(parts) if parts else "Composite"
+
+    df["breakout_signals"] = df.apply(_signals, axis=1)
+
+    # ── Salary-tier archetype ─────────────────────────────────────────
+    def _archetype(row) -> str:
+        tier = row.get("salary_tier", "Mid")
+        ms = row.get("_min_surge", 1.0)
+        ub = row.get("_usage_bump", 0)
+        opp_val = row.get("_opp_dvp", 21.5)
+        sv = row.get("_sal_value", 0)
+
+        if tier == "Cheap":
+            if ms >= 1.15:
+                return "⬆ Minute Spike"
+            if sv >= 5.0:
+                return "💎 Underpriced Role"
+            return "⬆ Cheap Upside"
+        if tier == "Mid":
+            if ub >= 3.0:
+                return "🔄 Usage Consolidation"
+            if ms >= 1.10:
+                return "📈 Peripherals Ceiling"
+            return "📈 Mid-Range Ceiling"
+        # Stud
+        if opp_val >= 23.0:
+            return "🔥 Pace-Up Spike"
+        return "🔥 Environment Ceiling"
+
+    df["archetype"] = df.apply(_archetype, axis=1)
+
+    # ── Filter: meaningful players only ───────────────────────────────
+    if "proj" in df.columns:
+        df = df[df["proj"] >= 8.0].copy()
+    if "salary" in df.columns:
+        df = df[df["salary"] > 0].copy()
+
+    keep = [c for c in out_cols if c in df.columns]
+    return (
+        df[keep]
+        .sort_values("breakout_score", ascending=False)
+        .head(top_n)
+        .reset_index(drop=True)
+    )
+
+
 # ---------------------------------------------------------------------------
 # Minute-Cannibal Detection
 # ---------------------------------------------------------------------------

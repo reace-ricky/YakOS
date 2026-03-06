@@ -31,6 +31,7 @@ from yak_core.edge import compute_edge_metrics  # noqa: E402
 from yak_core.right_angle import (  # noqa: E402
     compute_game_environment_cards,
     compute_tiered_stack_alerts,
+    compute_breakout_candidates,
 )
 from yak_core.context import get_slate_context, get_lab_analysis  # noqa: E402
 
@@ -161,6 +162,45 @@ def main() -> None:
     _filled = sum(1 for t in ["core", "leverage", "value", "fade"] if not edge_df[edge_df["auto_tier"] == t].empty)
     if _filled == 0:
         st.info("No edge tiers populated. Run sims in The Lab first to generate edge data.")
+
+    st.divider()
+
+    # =====================================================================
+    # SECTION 1.5: BREAKOUT CANDIDATES
+    # =====================================================================
+    st.subheader("Breakout Candidates")
+    st.caption(
+        "Players with converging breakout signals: minutes surge, underpriced role, "
+        "usage consolidation, soft matchup, and volatility."
+    )
+
+    try:
+        breakout_df = compute_breakout_candidates(pool, top_n=10)
+        if not breakout_df.empty:
+            # Group by salary tier for clean display
+            for tier_label, tier_emoji in [("Cheap", "\u2b06"), ("Mid", "\ud83d\udcc8"), ("Stud", "\ud83d\udd25")]:
+                tier_rows = breakout_df[breakout_df["salary_tier"] == tier_label]
+                if tier_rows.empty:
+                    continue
+                tier_desc = {
+                    "Cheap": "Underpriced minute spikes — role changes not yet priced in",
+                    "Mid": "Usage consolidation targets — under-owned with peripherals upside",
+                    "Stud": "Environment ceiling plays — pace-up + soft defense",
+                }
+                st.markdown(f"**{tier_emoji} {tier_label}** — {tier_desc.get(tier_label, '')}")
+                _bo_cols = [c for c in ["player_name", "pos", "team", "salary", "proj", "breakout_score", "archetype", "breakout_signals"] if c in tier_rows.columns]
+                _bo_fmt = {c: "{:.1f}" for c in ["proj", "breakout_score"] if c in tier_rows.columns}
+                if "salary" in tier_rows.columns:
+                    _bo_fmt["salary"] = "${:,.0f}"
+                st.dataframe(
+                    tier_rows[_bo_cols].style.format(_bo_fmt),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+        else:
+            st.info("No breakout candidates detected. Load rolling stats in The Lab for better signal detection.")
+    except Exception as exc:
+        st.info(f"Breakout detection requires rolling game-log stats from The Lab. ({exc})")
 
     st.divider()
 
