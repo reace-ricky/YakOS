@@ -58,10 +58,10 @@ _BUILD_MODE_COLS = {
     "ceiling": "ceil",
 }
 _CONTEST_TO_BUILD_MODE = {
-    "GPP - 150 Max": "ceiling",
-    "GPP - 20 Max": "ceiling",
-    "Single Entry / 3-Max": "median",
-    "50/50 / Double-Up": "floor",
+    "GPP Main": "ceiling",
+    "GPP Early": "ceiling",
+    "GPP Late": "ceiling",
+    "Cash Main": "floor",
     "Showdown": "ceiling",
 }
 
