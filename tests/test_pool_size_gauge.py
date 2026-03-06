@@ -66,24 +66,24 @@ class TestPoolSizeGaugeStatus:
 
     def test_gpp_20_max_specific_ranges(self) -> None:
         """Regression: GPP - 20 Max in-range, below, and above values."""
-        pmin, pmax = get_pool_size_range("GPP - 20 Max")
+        pmin, pmax = get_pool_size_range("GPP Early")
         mid = (pmin + pmax) // 2
-        assert _pool_gauge_status(mid, "GPP - 20 Max") == "in_range", (
+        assert _pool_gauge_status(mid, "GPP Early") == "in_range", (
             f"Expected in_range for count={mid}, range=({pmin},{pmax})"
         )
-        assert _pool_gauge_status(pmin - 1, "GPP - 20 Max") == "below", (
+        assert _pool_gauge_status(pmin - 1, "GPP Early") == "below", (
             f"Expected below for count={pmin - 1}, range=({pmin},{pmax})"
         )
-        assert _pool_gauge_status(pmax + 1, "GPP - 20 Max") == "above", (
+        assert _pool_gauge_status(pmax + 1, "GPP Early") == "above", (
             f"Expected above for count={pmax + 1}, range=({pmin},{pmax})"
         )
 
     def test_cash_specific_ranges(self) -> None:
         """50/50 / Double-Up has small target range."""
-        pmin, pmax = get_pool_size_range("50/50 / Double-Up")
-        assert _pool_gauge_status(pmin, "50/50 / Double-Up") == "in_range"
-        assert _pool_gauge_status(pmax, "50/50 / Double-Up") == "in_range"
-        assert _pool_gauge_status(pmax + 5, "50/50 / Double-Up") == "above"
+        pmin, pmax = get_pool_size_range("Cash Main")
+        assert _pool_gauge_status(pmin, "Cash Main") == "in_range"
+        assert _pool_gauge_status(pmax, "Cash Main") == "in_range"
+        assert _pool_gauge_status(pmax + 5, "Cash Main") == "above"
 
 
 # ---------------------------------------------------------------------------
@@ -117,8 +117,8 @@ class TestContestTypePersistence:
 
     def test_non_showdown_contest_label_overrides_classic(self) -> None:
         """For classic contests, apply_roster_rules sets 'Classic'; the label overrides it."""
-        slate = self._publish_slate("GPP - 150 Max", is_showdown=False)
-        assert slate.contest_type == "GPP - 150 Max"
+        slate = self._publish_slate("GPP Main", is_showdown=False)
+        assert slate.contest_type == "GPP Main"
         # is_showdown flag should still be False (unaffected by contest_type override)
         assert slate.is_showdown is False
 
