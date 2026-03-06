@@ -496,16 +496,37 @@ def main() -> None:
                                     f"(DraftGroup {_historical_dg_id})"
                                 )
                 elif _is_historical and draft_group_id:
-                    # Draft group selected via slate picker — use DK draftables API
-                    # directly for that specific draft group (gives exact players for
-                    # that slate, not a generic cache).
-                    st.info(f"Loading players for DraftGroup {draft_group_id} ({slate_date_str})…")
+                    # Draft group selected via slate picker — use SalaryHistoryClient
+                    # to fetch the exact player pool for that draft group.  This calls
+                    # the same DK draftables API but returns a clean DataFrame with
+                    # standardised columns (player_name, position, team, salary,
+                    # player_dk_id).  The live dk_ingest.fetch_dk_draftables() is NOT
+                    # used because its error handling triggers st.stop() inside the
+                    # outer try/except, silently aborting the load.
+                    with st.spinner(f"Fetching historical players for DraftGroup {draft_group_id}…"):
+                        _hist_dg_df = _salary_client.get_draftables(draft_group_id)
+                    if not _hist_dg_df.empty:
+                        _historical_salary_df = _hist_dg_df
+                        _historical_dg_id = draft_group_id
+                        st.info(
+                            f"Historical salaries loaded from DK "
+                            f"(DraftGroup {draft_group_id}, {slate_date_str})"
+                        )
+                    else:
+                        st.warning(
+                            f"No players found for DraftGroup {draft_group_id} on {slate_date_str}. "
+                            "The draft group may not exist or the DK API may be unavailable."
+                        )
 
                 if not draft_group_id and _historical_salary_df is None:
                     st.warning(
                         "No slate selected. Use \"Fetch Available Slates\" to pick a slate, "
                         "or enter a Draft Group ID manually in the advanced section above."
                     )
+                elif _is_historical and draft_group_id and _historical_salary_df is None:
+                    # SalaryHistoryClient returned empty for this draft group —
+                    # warning was already shown above; nothing more to do.
+                    pass
                 else:
                     # Step 1: Fetch DK draftables (salaries, positions, teams)
                     # Use historical salary cache when available; fall back to live DK API.
