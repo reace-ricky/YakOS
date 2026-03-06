@@ -94,7 +94,7 @@ from yak_core.projections import (  # noqa: E402
 )
 from yak_core.ownership import apply_ownership  # noqa: E402
 from yak_core.rg_loader import load_rg_projections, merge_rg_with_pool  # noqa: E402
-from yak_core.live import fetch_injury_updates, fetch_player_game_logs, fetch_betting_odds  # noqa: E402
+from yak_core.live import fetch_injury_updates, fetch_player_game_logs, fetch_betting_odds, auto_flag_injuries  # noqa: E402
 from yak_core.salary_history import SalaryHistoryClient  # noqa: E402
 from yak_core.dff_ingest import fetch_dff_pool  # noqa: E402
 
@@ -802,6 +802,30 @@ def main() -> None:
                                 st.caption("ℹ️ No Vegas odds returned from Tank01.")
                         except Exception as t01_exc:
                             st.caption(f"ℹ️ Tank01 enrichment not available: {t01_exc}")
+
+                    # ── Auto injury detection (runs automatically) ────────
+                    if _api_key:
+                        with st.spinner("Auto-detecting injured / inactive players…"):
+                            try:
+                                pool = auto_flag_injuries(
+                                    pool,
+                                    api_key=_api_key,
+                                    slate_date=slate_date_str,
+                                )
+                                _inj_flagged = pool[
+                                    pool["injury_note"].fillna("").astype(str).str.len() > 0
+                                ] if "injury_note" in pool.columns else pd.DataFrame()
+                                if not _inj_flagged.empty:
+                                    _inj_show = _inj_flagged[
+                                        [c for c in ["player_name", "salary", "status", "injury_note"]
+                                         if c in _inj_flagged.columns]
+                                    ].copy()
+                                    st.warning(f"⚠️ {len(_inj_flagged)} player(s) auto-flagged as injured/inactive:")
+                                    st.dataframe(_inj_show, use_container_width=True, hide_index=True)
+                                else:
+                                    st.caption("✅ No injured/inactive players detected.")
+                            except Exception as _inj_exc:
+                                st.caption(f"ℹ️ Auto injury detection skipped: {_inj_exc}")
 
                     # Apply projection pipeline
                     parsed_rules = _rules_from_preset(preset)

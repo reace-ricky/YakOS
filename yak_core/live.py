@@ -523,7 +523,159 @@ def fetch_injury_updates(date_key: str, cfg: dict) -> list:
 
 
 # ---------------------------------------------------------------------------
-# NEW: fetch_player_game_logs
+# Auto injury detection
+# ---------------------------------------------------------------------------
+
+_STALE_GAME_DAYS = 14  # if last game > N days ago, flag as likely OUT
+_MIN_SALARY_FLOOR = 3500  # DK minimum-salary players are strong OUT signal
+
+
+def auto_flag_injuries(
+    pool_df: pd.DataFrame,
+    api_key: str,
+    slate_date: str = "",
+) -> pd.DataFrame:
+    """Automatically detect and flag injured / inactive players in the pool.
+
+    Uses two complementary signals:
+
+    1. **Tank01 injury list** — calls ``getNBAInjuryList`` and maps
+       ``playerID`` back to pool player names.  Players with designation
+       ``Out`` get status ``OUT``; ``Day-To-Day`` → ``GTD``.
+    2. **Stale game-log date** — if ``last_game_date`` is present in
+       *pool_df* and a player hasn't appeared in a box score in 14+ days
+       **and** their salary is at the DK minimum ($3–3.5K), mark ``OUT``.
+       This catches long-term IR players the injury list misses.
+
+    The function sets the ``status`` column for flagged players; downstream
+    ``_filter_ineligible_players`` and ``compute_sim_eligible`` will then
+    exclude them from the optimizer pool.
+
+    Parameters
+    ----------
+    pool_df : pd.DataFrame
+        Player pool with at least ``player_name``.  Should have ``player_id``
+        (Tank01 ID) for injury-list matching and ``last_game_date`` for
+        staleness detection.
+    api_key : str
+        Tank01 RapidAPI key.
+    slate_date : str
+        Current slate date in ``YYYY-MM-DD`` or ``YYYYMMDD`` format.
+        Used to compute days-since-last-game.  Falls back to today.
+
+    Returns
+    -------
+    pd.DataFrame
+        Copy of *pool_df* with ``status`` updated for flagged players.
+        Also adds ``injury_note`` column explaining why a player was flagged.
+    """
+    import math
+    from datetime import datetime, timedelta
+
+    pool = pool_df.copy()
+    if "status" not in pool.columns:
+        pool["status"] = "Active"
+    if "injury_note" not in pool.columns:
+        pool["injury_note"] = ""
+
+    flagged_count = 0
+
+    # ── Signal 1: Tank01 injury list (playerID → pool name) ───────────
+    try:
+        resp = requests.get(
+            "https://" + _TANK01_HOST + "/getNBAInjuryList",
+            headers=_headers(api_key),
+            timeout=20,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        body = data.get("body", data) if isinstance(data, dict) else data
+
+        if isinstance(body, list) and body:
+            # Build reverse map: playerID → pool index
+            if "player_id" in pool.columns:
+                _id_to_idx = {}
+                for idx, row in pool.iterrows():
+                    pid = str(row.get("player_id", "")).strip()
+                    if pid and pid.lower() not in ("", "nan"):
+                        _id_to_idx[pid] = idx
+
+                _desig_map = {
+                    "Out": "OUT",
+                    "OUT": "OUT",
+                    "Day-To-Day": "GTD",
+                    "DAY-TO-DAY": "GTD",
+                    "GTD": "GTD",
+                }
+
+                for entry in body:
+                    if not isinstance(entry, dict):
+                        continue
+                    eid = str(entry.get("playerID", "")).strip()
+                    desig = str(entry.get("designation", "")).strip()
+                    desc = str(entry.get("description", "")).strip()
+                    mapped = _desig_map.get(desig, _desig_map.get(desig.upper()))
+                    if eid in _id_to_idx and mapped:
+                        idx = _id_to_idx[eid]
+                        pool.at[idx, "status"] = mapped
+                        pool.at[idx, "injury_note"] = f"Tank01: {desig} — {desc[:80]}"
+                        flagged_count += 1
+
+            print(f"[auto_flag_injuries] Signal 1: {flagged_count} player(s) flagged from Tank01 injury list")
+    except Exception as exc:
+        print(f"[auto_flag_injuries] Tank01 injury list fetch failed (non-fatal): {exc}")
+
+    # ── Signal 2: Stale last_game_date + minimum salary ───────────────
+    stale_count = 0
+    if "last_game_date" in pool.columns:
+        # Resolve reference date
+        _ref_str = slate_date.replace("-", "") if slate_date else ""
+        try:
+            if _ref_str and len(_ref_str) == 8:
+                ref_date = datetime.strptime(_ref_str, "%Y%m%d")
+            else:
+                ref_date = datetime.utcnow()
+        except ValueError:
+            ref_date = datetime.utcnow()
+
+        for idx, row in pool.iterrows():
+            # Skip players already flagged as OUT
+            if str(row.get("status", "")).strip().upper() in ("OUT", "IR", "SUSPENDED"):
+                continue
+
+            lgd = str(row.get("last_game_date", "")).strip()
+            if not lgd or lgd.lower() == "nan" or len(lgd) < 8:
+                continue
+
+            try:
+                last_dt = datetime.strptime(lgd[:8], "%Y%m%d")
+            except ValueError:
+                continue
+
+            days_since = (ref_date - last_dt).days
+            salary = float(row.get("salary", 0))
+
+            # Only flag min-salary players.  High-salary players with
+            # old game logs are likely just missing current-season data
+            # from Tank01 (API only returns ~20 recent games).  If DK
+            # prices someone at $5K+, they expect that player to play.
+            if days_since >= _STALE_GAME_DAYS and salary <= _MIN_SALARY_FLOOR:
+                pool.at[idx, "status"] = "OUT"
+                pool.at[idx, "injury_note"] = (
+                    f"Inactive {days_since}d (last game {lgd[:8]}), "
+                    f"min salary ${int(salary):,} — likely OUT/IR"
+                )
+                stale_count += 1
+
+        print(f"[auto_flag_injuries] Signal 2: {stale_count} player(s) flagged via stale game logs")
+
+    total = flagged_count + stale_count
+    print(f"[auto_flag_injuries] Total flagged: {total} player(s)")
+    return pool
+
+
+# ---------------------------------------------------------------------------
+# fetch_player_game_logs
 # ---------------------------------------------------------------------------
 
 def fetch_player_game_logs(
@@ -599,10 +751,16 @@ def fetch_player_game_logs(
 
             fps: List[float] = []
             mins: List[float] = []
+            game_dates: List[str] = []  # YYYYMMDD strings from gameID
 
             for game in body:
                 if not isinstance(game, dict):
                     continue
+
+                # Extract game date from gameID (e.g. "20260305_LAL@DEN")
+                _gid = str(game.get("gameID", ""))
+                if len(_gid) >= 8 and _gid[:8].isdigit():
+                    game_dates.append(_gid[:8])
 
                 fp_raw = game.get("fantasyPoints")
                 if isinstance(fp_raw, dict):
@@ -650,6 +808,9 @@ def fetch_player_game_logs(
                 subset = values[-n:] if len(values) >= n else values
                 return round(sum(subset) / len(subset), 2) if subset else 0.0
 
+            # Most recent game date (latest YYYYMMDD from game IDs)
+            last_game_date = max(game_dates) if game_dates else ""
+
             return {
                 "player_name": name,
                 "rolling_fp_5":  _rolling_avg(fps, 5),
@@ -658,6 +819,7 @@ def fetch_player_game_logs(
                 "rolling_min_5":  _rolling_avg(mins, 5),
                 "rolling_min_10": _rolling_avg(mins, 10),
                 "rolling_min_20": _rolling_avg(mins, 20),
+                "last_game_date": last_game_date,
             }
         except Exception as exc:
             print(f"[fetch_player_game_logs] Error for '{name}': {exc}")
