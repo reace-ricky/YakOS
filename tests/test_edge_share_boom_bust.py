@@ -144,21 +144,21 @@ class TestBoomBustSummaryMetrics:
 
 class TestContestAwareCaption:
     def test_gpp_tagging_mode_ceiling(self):
-        """GPP - 20 Max preset has tagging_mode == 'ceiling'."""
+        """GPP Main preset has tagging_mode == 'ceiling'."""
         from yak_core.config import CONTEST_PRESETS
-        preset = CONTEST_PRESETS.get("GPP - 20 Max", {})
+        preset = CONTEST_PRESETS.get("GPP Main", {})
         assert preset.get("tagging_mode") == "ceiling"
 
     def test_cash_tagging_mode_floor(self):
-        """50/50 / Double-Up preset has tagging_mode == 'floor'."""
+        """Cash Main preset has tagging_mode == 'floor'."""
         from yak_core.config import CONTEST_PRESETS
-        preset = CONTEST_PRESETS.get("50/50 / Double-Up", {})
-        assert preset.get("tagging_mode") in ("floor", "cash", None)
+        preset = CONTEST_PRESETS.get("Cash Main", {})
+        assert preset.get("tagging_mode") == "floor"
 
     def test_gpp_caption_text(self):
         """GPP ceiling mode caption starts with 'GPP lineup set'."""
         from yak_core.config import CONTEST_PRESETS
-        preset = CONTEST_PRESETS.get("GPP - 20 Max", {})
+        preset = CONTEST_PRESETS.get("GPP Main", {})
         bb = _make_boom_bust_df()
         n_ab = len(bb[bb["lineup_grade"].isin(["A", "B"])])
         avg_bust = bb["bust_risk"].mean()

@@ -60,13 +60,13 @@ class TestComputeLineupBoomBust:
     def test_returns_five_rows_for_five_lineups(self):
         lineups = _make_lineups(5)
         sim = _make_sim_results(lineups)
-        result = compute_lineup_boom_bust(lineups, sim, "GPP - 20 Max")
+        result = compute_lineup_boom_bust(lineups, sim, "GPP Main")
         assert len(result) == 5
 
     def test_all_required_columns_present(self):
         lineups = _make_lineups(5)
         sim = _make_sim_results(lineups)
-        result = compute_lineup_boom_bust(lineups, sim, "GPP - 20 Max")
+        result = compute_lineup_boom_bust(lineups, sim, "GPP Main")
         expected_cols = {
             "lineup_index", "total_proj", "total_ceil", "total_floor",
             "avg_smash_prob", "avg_bust_prob", "boom_score", "bust_risk",
@@ -85,7 +85,7 @@ class TestComputeLineupBoomBust:
         sim_copy.loc[sim_copy["player_name"].isin(boost_players), "ceil"] = 999.0
         sim_copy.loc[sim_copy["player_name"].isin(boost_players), "smash_prob"] = 0.99
 
-        result = compute_lineup_boom_bust(lineups, sim_copy, "GPP - 20 Max")
+        result = compute_lineup_boom_bust(lineups, sim_copy, "GPP Main")
         rank1_row = result[result["boom_bust_rank"] == 1].iloc[0]
         assert rank1_row["lineup_index"] == 3
 
@@ -103,7 +103,7 @@ class TestComputeLineupBoomBust:
         other_players = lineups[lineups["lineup_index"] != 2]["player_name"].tolist()
         sim_copy.loc[sim_copy["player_name"].isin(other_players), "floor"] = 0.0
 
-        result = compute_lineup_boom_bust(lineups, sim_copy, "50/50 / Double-Up")
+        result = compute_lineup_boom_bust(lineups, sim_copy, "Cash Main")
         rank1_row = result[result["boom_bust_rank"] == 1].iloc[0]
         assert rank1_row["lineup_index"] == 2
 
@@ -111,7 +111,7 @@ class TestComputeLineupBoomBust:
         """Top 20% of lineups (by rank) must all receive grade A."""
         lineups = _make_lineups(10)
         sim = _make_sim_results(lineups)
-        result = compute_lineup_boom_bust(lineups, sim, "GPP - 20 Max")
+        result = compute_lineup_boom_bust(lineups, sim, "GPP Main")
         top_2 = result[result["boom_bust_rank"] <= 2]["lineup_grade"].tolist()
         assert all(g == "A" for g in top_2)
 
@@ -119,14 +119,14 @@ class TestComputeLineupBoomBust:
         """Bottom 20% of lineups (by rank) must all receive grade F."""
         lineups = _make_lineups(10)
         sim = _make_sim_results(lineups)
-        result = compute_lineup_boom_bust(lineups, sim, "GPP - 20 Max")
+        result = compute_lineup_boom_bust(lineups, sim, "GPP Main")
         bottom_2 = result[result["boom_bust_rank"] >= 9]["lineup_grade"].tolist()
         assert all(g == "F" for g in bottom_2)
 
     def test_empty_lineups_returns_empty_dataframe(self):
         empty_lu = pd.DataFrame()
         sim = _make_sim_results(_make_lineups(3))
-        result = compute_lineup_boom_bust(empty_lu, sim, "GPP - 20 Max")
+        result = compute_lineup_boom_bust(empty_lu, sim, "GPP Main")
         assert result.empty
 
     def test_missing_sim_data_no_crash(self):
@@ -134,31 +134,31 @@ class TestComputeLineupBoomBust:
         lineups = _make_lineups(5)
         empty_sim = pd.DataFrame(columns=["player_name", "smash_prob", "bust_prob",
                                            "ceil", "floor", "sim_mean"])
-        result = compute_lineup_boom_bust(lineups, empty_sim, "GPP - 20 Max")
+        result = compute_lineup_boom_bust(lineups, empty_sim, "GPP Main")
         assert len(result) == 5
 
     def test_missing_sim_data_none_no_crash(self):
         """None sim_player_results should not crash."""
         lineups = _make_lineups(5)
-        result = compute_lineup_boom_bust(lineups, None, "GPP - 20 Max")
+        result = compute_lineup_boom_bust(lineups, None, "GPP Main")
         assert len(result) == 5
 
     def test_boom_score_in_0_100(self):
         lineups = _make_lineups(5)
         sim = _make_sim_results(lineups)
-        result = compute_lineup_boom_bust(lineups, sim, "GPP - 20 Max")
+        result = compute_lineup_boom_bust(lineups, sim, "GPP Main")
         assert result["boom_score"].between(0, 100).all(), result["boom_score"].tolist()
 
     def test_bust_risk_in_0_100(self):
         lineups = _make_lineups(5)
         sim = _make_sim_results(lineups)
-        result = compute_lineup_boom_bust(lineups, sim, "GPP - 20 Max")
+        result = compute_lineup_boom_bust(lineups, sim, "GPP Main")
         assert result["bust_risk"].between(0, 100).all(), result["bust_risk"].tolist()
 
     def test_rank_starts_at_1_and_is_contiguous(self):
         lineups = _make_lineups(5)
         sim = _make_sim_results(lineups)
-        result = compute_lineup_boom_bust(lineups, sim, "GPP - 20 Max")
+        result = compute_lineup_boom_bust(lineups, sim, "GPP Main")
         ranks = sorted(result["boom_bust_rank"].tolist())
         assert ranks[0] == 1
         assert ranks[-1] <= len(result)
@@ -174,6 +174,6 @@ class TestComputeLineupBoomBust:
         """A single lineup should rank #1 and receive grade A."""
         lineups = _make_lineups(1)
         sim = _make_sim_results(lineups)
-        result = compute_lineup_boom_bust(lineups, sim, "GPP - 20 Max")
+        result = compute_lineup_boom_bust(lineups, sim, "GPP Main")
         assert result.iloc[0]["boom_bust_rank"] == 1
         assert result.iloc[0]["lineup_grade"] == "A"
