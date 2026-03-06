@@ -107,10 +107,10 @@ _MOCK_PAYLOAD_CASH = {
 
 class TestEdgeShareTwoContests:
     def test_two_contests_in_contest_order(self):
-        """GPP-20 and Cash labels are in CONTEST_ORDER."""
+        """GPP Main and Cash Main labels are in CONTEST_ORDER."""
         mod = importlib.import_module("pages.5_friends_edge_share")
-        assert "GPP - 20 Max" in mod.CONTEST_ORDER
-        assert "50/50 / Double-Up" in mod.CONTEST_ORDER
+        assert "GPP Main" in mod.CONTEST_ORDER
+        assert "Cash Main" in mod.CONTEST_ORDER
 
     def test_two_contests_detected_from_edge_state(self):
         """With 2 payloads in edge_analysis_by_contest, 2 contests have data."""
@@ -118,8 +118,8 @@ class TestEdgeShareTwoContests:
         mod = importlib.import_module("pages.5_friends_edge_share")
 
         edge = RickyEdgeState()
-        edge.set_edge_analysis("GPP - 20 Max", _MOCK_PAYLOAD_GPP20)
-        edge.set_edge_analysis("50/50 / Double-Up", _MOCK_PAYLOAD_CASH)
+        edge.set_edge_analysis("GPP Main", _MOCK_PAYLOAD_GPP20)
+        edge.set_edge_analysis("Cash Main", _MOCK_PAYLOAD_CASH)
         lu = LineupSetState()
 
         contests = [
@@ -127,14 +127,14 @@ class TestEdgeShareTwoContests:
             if c in edge.edge_analysis_by_contest or c in lu.published_sets
         ]
         assert len(contests) == 2
-        assert "50/50 / Double-Up" in contests
-        assert "GPP - 20 Max" in contests
+        assert "Cash Main" in contests
+        assert "GPP Main" in contests
 
     def test_contest_order_cash_before_gpp20(self):
-        """50/50 / Double-Up appears before GPP - 20 Max in CONTEST_ORDER."""
+        """Cash Main appears before GPP Main in CONTEST_ORDER."""
         mod = importlib.import_module("pages.5_friends_edge_share")
         order = mod.CONTEST_ORDER
-        assert order.index("50/50 / Double-Up") < order.index("GPP - 20 Max")
+        assert order.index("Cash Main") < order.index("GPP Main")
 
 
 # ---------------------------------------------------------------------------
@@ -213,25 +213,25 @@ class TestEdgeSharePublishedLineups:
         mod = importlib.import_module("pages.5_friends_edge_share")
 
         edge = RickyEdgeState()
-        lu = self._setup_published("GPP - 20 Max")
+        lu = self._setup_published("GPP Main")
 
         contests = [
             c for c in mod.CONTEST_ORDER
             if c in edge.edge_analysis_by_contest or c in lu.published_sets
         ]
-        assert "GPP - 20 Max" in contests
+        assert "GPP Main" in contests
 
     def test_published_set_structure(self):
         """Published set has required keys for rendering."""
-        lu = self._setup_published("GPP - 20 Max")
-        pub = lu.published_sets["GPP - 20 Max"]
+        lu = self._setup_published("GPP Main")
+        pub = lu.published_sets["GPP Main"]
         assert "lineups_df" in pub
         assert "published_at" in pub
         assert "config" in pub
 
     def test_lineup_df_not_empty(self):
         """Lineup DataFrame stored in published_sets is non-empty."""
-        lu = self._setup_published("GPP - 20 Max")
-        pub_df = lu.published_sets["GPP - 20 Max"]["lineups_df"]
+        lu = self._setup_published("GPP Main")
+        pub_df = lu.published_sets["GPP Main"]["lineups_df"]
         assert not pub_df.empty
         assert "lineup_index" in pub_df.columns

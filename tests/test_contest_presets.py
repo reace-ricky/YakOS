@@ -50,7 +50,7 @@ class TestGetPoolSizeRange:
         assert lo < hi, f"pool_size_min ({lo}) must be < pool_size_max ({hi}) for '{label}'"
 
     def test_gpp_20_max_values(self) -> None:
-        assert get_pool_size_range("GPP Early") == (25, 45)
+        assert get_pool_size_range("GPP Early") == (20, 40)
 
     def test_invalid_label_raises_key_error(self) -> None:
         with pytest.raises(KeyError, match="Unknown contest label"):
