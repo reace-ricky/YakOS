@@ -1142,11 +1142,9 @@ def main() -> None:
             # Get the long-form lineup data from build_ricky_lineups
             # Reconstruct from the optimizer output stored during pipeline run
             try:
-                from yak_core.edge import compute_edge_metrics
                 _edge_for_score = compute_edge_metrics(pool, calibration_state=slate.calibration_state, variance=sim.variance)
-                from yak_core.publishing import build_ricky_lineups
-                _PIPELINE_TO_OPTIMIZER = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "CASH": "CASH"}
-                _opt_contest = _PIPELINE_TO_OPTIMIZER.get(pipeline_contest, "GPP_20")
+                _PIPELINE_TO_OPTIMIZER_SC = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "CASH": "CASH"}
+                _opt_contest = _PIPELINE_TO_OPTIMIZER_SC.get(pipeline_contest, "GPP_20")
                 _lu_long = build_ricky_lineups(edge_df=_edge_for_score, contest_type=_opt_contest, calibration_state=slate.calibration_state, salary_cap=SALARY_CAP)
 
                 if not _lu_long.empty and _pn_col in _lu_long.columns and _lu_col in _lu_long.columns:
