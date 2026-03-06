@@ -289,11 +289,10 @@ def _fetch_actuals_from_box_scores(date_key: str, cfg: dict) -> pd.DataFrame:
     """
     api_key = _get_rapidapi_key(cfg)
     clean = date_key.replace("-", "")
-    formatted = f"{clean[:4]}-{clean[4:6]}-{clean[6:8]}"
 
     # Step 1: retrieve game IDs for the date
     games_url = "https://" + _TANK01_HOST + "/getNBAGamesForDate"
-    games_params = {"gameDate": formatted}
+    games_params = {"gameDate": clean}  # Tank01 expects YYYYMMDD, no dashes
     games_headers = _headers(api_key)
     print(
         f"[_fetch_actuals_from_box_scores] URL={games_url} params={games_params} "
