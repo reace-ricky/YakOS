@@ -334,7 +334,7 @@ def _fetch_actuals_from_box_scores(date_key: str, cfg: dict) -> pd.DataFrame:
             continue
 
         box_url = "https://" + _TANK01_HOST + "/getNBABoxScore"
-        box_params = {"gameID": str(game_id)}
+        box_params = {"gameID": str(game_id), "fantasyPoints": "true"}
         print(f"[_fetch_actuals_from_box_scores] Box score URL={box_url} params={box_params}")
         box_resp = requests.get(
             box_url,
@@ -347,13 +347,19 @@ def _fetch_actuals_from_box_scores(date_key: str, cfg: dict) -> pd.DataFrame:
         box_body = box_data.get("body", box_data) if isinstance(box_data, dict) else box_data
 
         if isinstance(box_body, dict):
-            player_stats = box_body.get("playerStats", box_body.get("players", []))
-            if not isinstance(player_stats, list):
+            raw_ps = box_body.get("playerStats", box_body.get("players", {}))
+            # Tank01 returns playerStats as a dict keyed by playerID
+            if isinstance(raw_ps, dict):
+                player_stats = list(raw_ps.values())
+            elif isinstance(raw_ps, list):
+                player_stats = raw_ps
+            else:
                 player_stats = []
         elif isinstance(box_body, list):
             player_stats = box_body
         else:
             player_stats = []
+        print(f"[_fetch_actuals_from_box_scores] Parsed {len(player_stats)} players from box score {game_id}")
 
         for p in player_stats:
             if not isinstance(p, dict):
