@@ -66,22 +66,6 @@ _CONTEST_TO_BUILD_MODE = {
 }
 
 
-def _render_status_bar(slate: "SlateState", edge: "RickyEdgeState") -> None:
-    cols = st.columns([2, 2, 2, 2, 4])
-    with cols[0]:
-        st.metric("Sport", slate.sport or "—")
-    with cols[1]:
-        st.metric("Date", slate.slate_date or "—")
-    with cols[2]:
-        st.metric("Contest", slate.contest_type or "—")
-    with cols[3]:
-        check = "✅" if edge.ricky_edge_check else "⛔"
-        st.metric("Edge Check", check)
-    with cols[4]:
-        if slate.active_layers:
-            chips = " ".join(f"`{l}`" for l in slate.active_layers)
-            st.markdown(f"**Layers:** {chips}")
-
 
 def _apply_sim_learnings(pool: pd.DataFrame, sim: "SimState") -> pd.DataFrame:
     """Apply non-destructive Sim Learnings boosts to effective_proj column."""
@@ -239,7 +223,6 @@ def main() -> None:
     sim = get_sim_state()
     lu_state = get_lineup_state()
 
-    _render_status_bar(slate, edge)
     st.divider()
 
     # ── Edge Check Gate ───────────────────────────────────────────────────
@@ -251,7 +234,7 @@ def main() -> None:
         st.stop()
 
     if not slate.is_ready():
-        st.warning("⚠️ No slate published. Go to **Slate Hub** and publish a slate first.")
+        st.warning("⚠️ No slate published. Go to **The Lab** and load a slate first.")
         st.stop()
 
     pool: pd.DataFrame = slate.player_pool.copy()
@@ -554,7 +537,7 @@ def main() -> None:
 
     injury_updates = st.session_state.get("_hub_injury_updates", [])
     if not injury_updates:
-        st.info("No injury updates loaded. Use **Slate Hub → Refresh Injuries** to fetch updates.")
+        st.info("No injury updates loaded. Use **The Lab → Injury / News Refresh** to fetch updates.")
     elif built_labels:
         swap_label = st.selectbox("Contest for swap suggestions", built_labels, key="_bp_swap_label")
         swap_df = lu_state.lineups.get(swap_label)

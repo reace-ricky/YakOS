@@ -54,23 +54,6 @@ _TAG_COLORS = {
 _CONV_LABELS = {1: "1 – Low", 2: "2", 3: "3 – Mid", 4: "4", 5: "5 – High"}
 
 
-def _render_status_bar(slate: "SlateState", edge: "RickyEdgeState") -> None:
-    cols = st.columns([2, 2, 2, 2, 4])
-    with cols[0]:
-        st.metric("Sport", slate.sport or "—")
-    with cols[1]:
-        st.metric("Date", slate.slate_date or "—")
-    with cols[2]:
-        st.metric("Contest", slate.contest_type or "—")
-    with cols[3]:
-        check_icon = "✅" if edge.ricky_edge_check else "⛔"
-        st.metric("Edge Check", check_icon)
-    with cols[4]:
-        if slate.active_layers:
-            chips = " ".join(f"`{l}`" for l in slate.active_layers)
-            st.markdown(f"**Layers:** {chips}")
-
-
 # ---------------------------------------------------------------------------
 # Main page
 # ---------------------------------------------------------------------------
@@ -79,13 +62,11 @@ def main() -> None:
     st.title("🎯 Ricky Edge")
     st.caption("Tag players, environments, and stacks for this slate.")
 
-    # Nav order: Slate Hub → Ricky Edge → The Lab → Build & Publish → Friends / Edge Share
     slate = get_slate_state()
     edge = get_edge_state()
-    _render_status_bar(slate, edge)
 
     if not slate.is_ready():
-        st.warning("⚠️ No slate published yet. Go to **Slate Hub** and publish a slate first.")
+        st.warning("⚠️ No slate published yet. Go to **The Lab** and load a slate first.")
 
     # Use get_lab_analysis() as the default data source for player pool and sim metrics.
     # Falls back to the base player pool from SlateState when sims have not been run.

@@ -1,18 +1,15 @@
 """YakOS DFS Optimizer – Sprint 1 multi-page shell.
 
 Entry point for the Streamlit app.  Uses ``st.navigation`` to route between
-the five Sprint 1 pages:
+the four pages:
 
-  1. Slate Hub         – load DK contests, configure slate, publish
+  1. The Lab           – load slate, sims, calibration, edge analysis
   2. Ricky Edge        – tag players / games / stacks, edge labels
-  3. The Lab           – sims, calibration, contest gauges
-  4. Build & Publish   – build lineups, export CSV, publish to Edge Share
-  5. Friends / Edge Share – read-only lineup view + friend builder
+  3. Build & Publish   – build lineups, export CSV, publish to Edge Share
+  4. Friends / Edge Share – read-only lineup view + friend builder
 
 All shared state lives in ``yak_core/state.py`` (SlateState,
 RickyEdgeState, LineupSetState, SimState).
-
-See YAKOS_BUILD_RULES.md for the full Sprint 1 build contract.
 """
 
 from __future__ import annotations
@@ -35,12 +32,11 @@ st.set_page_config(
 )
 
 # ── Navigation ─────────────────────────────────────────────────────────────
-# Nav order: 1) Slate Hub, 2) Ricky Edge, 3) The Lab, 4) Build & Publish, 5) Friends / Edge Share
+# Nav order: 1) The Lab, 2) Ricky Edge, 3) Build & Publish, 4) Friends / Edge Share
 pg = st.navigation(
     [
-        st.Page("pages/1_slate_hub.py", title="Slate Hub", icon="🏀"),
+        st.Page("pages/1_the_lab.py", title="The Lab", icon="🧪"),
         st.Page("pages/2_ricky_edge.py", title="Ricky Edge", icon="🎯"),
-        st.Page("pages/3_the_lab.py", title="The Lab", icon="🧪"),
         st.Page("pages/4_build_publish.py", title="Build & Publish", icon="🏗️"),
         st.Page("pages/5_friends_edge_share.py", title="Friends / Edge Share", icon="👥"),
     ]
