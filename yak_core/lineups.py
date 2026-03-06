@@ -318,11 +318,19 @@ def build_multiple_lineups_with_exposure(
                 x[(i, s)] = pulp.LpVariable(f"x_{i}_{s}_{lu_num}", cat="Binary")
 
         # Objective: blend projection + ownership leverage + edge scores
+        # + small salary-utilization bonus to discourage leaving $ on the table.
         # stack_weight / value_weight pull in Edge Analysis scores when present.
         stack_weight = float(cfg.get("STACK_WEIGHT", 0.0))
         value_weight = float(cfg.get("VALUE_WEIGHT", 0.0))
         has_stack_scores = any("stack_score" in p for p in players)
         has_value_scores = any("value_score" in p for p in players)
+
+        # Salary-utilization coefficient: encourage spending closer to the cap.
+        # The coefficient converts salary ($) into a projection-scale bonus.
+        # At 0.0003, a $4000 salary difference adds ~1.2 bonus points — enough
+        # to break ties between equal-projection lineups but never enough to
+        # override a genuinely better projection (typical proj difference is 3+).
+        _SAL_UTIL_COEFF = 0.0003
 
         def _effective_proj(p):
             base = float(p.get("proj", 0))
@@ -340,7 +348,8 @@ def build_multiple_lineups_with_exposure(
             return base
 
         prob += pulp.lpSum(
-            _effective_proj(players[i]) * x[(i, s)]
+            (_effective_proj(players[i]) + _SAL_UTIL_COEFF * float(players[i]["salary"]))
+            * x[(i, s)]
             for i in range(n)
             for s in DK_POS_SLOTS
         )
@@ -730,6 +739,7 @@ def build_showdown_lineups(
     """
     num_lineups = int(cfg.get("NUM_LINEUPS", 20))
     salary_cap = int(cfg.get("SALARY_CAP", 50000))
+    min_salary = int(cfg.get("MIN_SALARY_USED", 45000))
     max_exposure = float(cfg.get("MAX_EXPOSURE", 0.35))
     solver_time_limit = int(cfg.get("SOLVER_TIME_LIMIT", 30))
     lock_names = [n.strip() for n in cfg.get("LOCK", [])]
@@ -774,8 +784,12 @@ def build_showdown_lineups(
         # Binary vars: y[i] = 1 if player i (CPT or FLEX entry) is selected
         y = {i: pulp.LpVariable(f"y_{i}_{lu_num}", cat="Binary") for i in range(n)}
 
-        # Objective: maximise total projected points
-        prob += pulp.lpSum(players[i]["proj"] * y[i] for i in range(n))
+        # Objective: maximise total projected points + salary utilization bonus
+        _SAL_UTIL_COEFF = 0.0003
+        prob += pulp.lpSum(
+            (players[i]["proj"] + _SAL_UTIL_COEFF * float(players[i]["salary"])) * y[i]
+            for i in range(n)
+        )
 
         # Exactly 1 CPT (from CPT variants, indices 0..m-1)
         prob += pulp.lpSum(y[i] for i in range(m)) == 1
@@ -787,8 +801,9 @@ def build_showdown_lineups(
         for j in range(m):
             prob += y[j] + y[m + j] <= 1
 
-        # Salary cap
+        # Salary cap and floor
         prob += pulp.lpSum(players[i]["salary"] * y[i] for i in range(n)) <= salary_cap
+        prob += pulp.lpSum(players[i]["salary"] * y[i] for i in range(n)) >= min_salary
 
         # LOCK: locked players must appear (either as CPT or FLEX)
         if lock_names:
