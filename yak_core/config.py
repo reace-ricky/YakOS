@@ -319,6 +319,124 @@ DK_CONTEST_MATCH_RULES: Dict[str, Dict[str, Any]] = {
 }
 
 
+# ============================================================
+# DK SLATE CLASSIFICATION
+# ============================================================
+# Maps DK DraftGroup metadata to user-friendly slate labels.
+# Used by Slate Hub to build the slate picker from the lobby API.
+#
+# The classify_draft_group() function below uses these rules to
+# turn raw DraftGroup dicts into clean labels like:
+#   "Main Slate (6 games)"
+#   "Night Slate (4 games)"  
+#   "Late Slate (3 games)"
+#   "Showdown: LAL @ DEN"
+
+# Keywords in ContestStartTimeSuffix that indicate slate type
+_SLATE_SUFFIX_KEYWORDS = {
+    "main": "Main",
+    "night": "Night",
+    "late": "Late",
+    "early": "Early",
+    "afternoon": "Afternoon",
+    "turbo": "Turbo",
+}
+
+
+def classify_draft_group(dg: Dict[str, Any]) -> str:
+    """Turn a raw DK DraftGroup dict into a user-friendly slate label.
+
+    Parameters
+    ----------
+    dg : dict
+        Raw DraftGroup from DK lobby API with keys like DraftGroupId,
+        GameCount, ContestStartTimeSuffix, GameTypeId, GameStyle.
+
+    Returns
+    -------
+    str
+        Label like "Main Slate (6 games)", "Showdown: LAL @ DEN", etc.
+    """
+    game_count = int(dg.get("GameCount") or dg.get("gameCount") or dg.get("game_count") or 0)
+    suffix = str(dg.get("ContestStartTimeSuffix") or dg.get("suffix") or "").strip()
+    game_type_id = int(dg.get("GameTypeId") or dg.get("gameTypeId") or dg.get("game_type_id") or 0)
+    game_style = str(dg.get("GameStyle") or dg.get("gameStyle") or dg.get("game_style") or "")
+
+    # Showdown: single-game contests
+    if game_type_id == 81 or "showdown" in game_style.lower():
+        # Suffix usually has the matchup like "(LAL @ DEN)"
+        matchup = suffix.strip("()")
+        if matchup:
+            return f"Showdown: {matchup}"
+        return f"Showdown ({game_count} game{'s' if game_count != 1 else ''})"
+
+    # Classic slates: classify by suffix keywords, then by game count
+    suffix_lower = suffix.lower()
+    for keyword, label in _SLATE_SUFFIX_KEYWORDS.items():
+        if keyword in suffix_lower:
+            return f"{label} Slate ({game_count} game{'s' if game_count != 1 else ''})"
+
+    # No keyword match — classify by game count
+    if game_count >= 5:
+        return f"Main Slate ({game_count} games)"
+    elif game_count >= 3:
+        return f"Slate ({game_count} games)"
+    elif game_count == 2:
+        return f"Mini Slate ({game_count} games)"
+    elif game_count == 1:
+        matchup = suffix.strip("()")
+        return f"Single Game: {matchup}" if matchup else "Single Game"
+    else:
+        return f"Slate{' ' + suffix if suffix else ''}"
+
+
+def build_slate_options(draft_groups: list) -> List[Dict[str, Any]]:
+    """Build a sorted list of slate options from raw DK DraftGroup dicts.
+
+    Returns a list of dicts, each with:
+      - draft_group_id (int)
+      - label (str) — user-friendly name
+      - game_count (int)
+      - game_style (str) — "Classic" or "Showdown Captain Mode"
+      - game_type_id (int)
+      - start_time (str)
+      - sort_order (int)
+    
+    Sorted by: Classic before Showdown, then by game_count descending
+    (so Main Slate is always first).
+    """
+    options = []
+    for dg in draft_groups:
+        dg_id = int(dg.get("DraftGroupId") or dg.get("draftGroupId") or dg.get("draft_group_id") or 0)
+        game_count = int(dg.get("GameCount") or dg.get("gameCount") or dg.get("game_count") or 0)
+        game_type_id = int(dg.get("GameTypeId") or dg.get("gameTypeId") or dg.get("game_type_id") or 0)
+        game_style = str(dg.get("GameStyle") or dg.get("gameStyle") or dg.get("game_style") or "Classic")
+        start_time = str(dg.get("StartDate") or dg.get("startDate") or dg.get("start_time") or "")
+        sort_order = int(dg.get("SortOrder") or dg.get("sortOrder") or dg.get("sort_order") or 99)
+
+        label = classify_draft_group(dg)
+
+        # Sort key: Classic (0) before Showdown (1), then by game count desc
+        is_showdown = 1 if (game_type_id == 81 or "showdown" in game_style.lower()) else 0
+        
+        options.append({
+            "draft_group_id": dg_id,
+            "label": label,
+            "game_count": game_count,
+            "game_style": game_style,
+            "game_type_id": game_type_id,
+            "start_time": start_time,
+            "sort_order": sort_order,
+            "_sort_key": (is_showdown, -game_count, sort_order),
+        })
+
+    options.sort(key=lambda x: x["_sort_key"])
+    # Remove internal sort key
+    for opt in options:
+        opt.pop("_sort_key", None)
+    return options
+
+
 # --- Alias map: lowercase/legacy keys -> canonical UPPER keys ---
 _KEY_ALIASES = {
     "slatedate": "SLATE_DATE",
