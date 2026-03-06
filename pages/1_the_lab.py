@@ -877,6 +877,18 @@ def main() -> None:
                         except Exception as _box_exc:
                             st.caption(f"ℹ️ Box score filter skipped: {_box_exc}")
 
+                    # ── Generate ownership projections ──────────────
+                    try:
+                        from yak_core.ext_ownership import predict_ownership, blend_and_normalize
+                        pool = predict_ownership(pool)
+                        pool = blend_and_normalize(pool)
+                        if "own_proj" in pool.columns:
+                            pool["ownership"] = pool["own_proj"]
+                            _own_mean = pool["ownership"].mean()
+                            st.caption(f"📊 Ownership projected (avg {_own_mean:.1f}%)")
+                    except Exception as _own_exc:
+                        st.caption(f"ℹ️ Ownership projection skipped: {_own_exc}")
+
                     # Store in session state
                     st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"] = pool
                     st.session_state[f"_hub_rules_{slate_date_str}_{_contest_safe}"] = parsed_rules
