@@ -2,7 +2,7 @@
 import os
 import requests
 import pandas as pd
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 from .config import YAKOS_ROOT
 
 _TANK01_HOST = "tank01-fantasy-stats.p.rapidapi.com"
@@ -515,3 +515,316 @@ def fetch_injury_updates(date_key: str, cfg: dict) -> list:
 
     except Exception as exc:
         raise RuntimeError(f"Tank01 injury API error: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# NEW: fetch_player_game_logs
+# ---------------------------------------------------------------------------
+
+def fetch_player_game_logs(
+    player_names: List[str],
+    player_id_map: Optional[Dict[str, str]],
+    api_key: str,
+) -> pd.DataFrame:
+    """Fetch rolling game-log stats for a list of players from Tank01.
+
+    Calls Tank01's ``getNBAGamesForPlayer`` endpoint for each player and
+    computes rolling averages for DraftKings fantasy points and minutes played
+    over the last 5, 10, and 20 games.
+
+    Design notes
+    ------------
+    * One API call per player (``numberOfGames=20``, ``fantasyPoints=true``).
+    * Per-player errors are caught and logged — a single failure will NOT abort
+      the entire batch.  The affected player will simply be absent from the
+      returned DataFrame.
+    * The function is safe to wrap with ``@st.cache_data(ttl=3600)`` because it
+      has no side-effects and accepts only primitive / hashable arguments.
+      (Pass ``tuple(sorted(player_names))`` and a ``frozenset`` or JSON-serialised
+      ``player_id_map`` when calling from a cached Streamlit function.)
+
+    Parameters
+    ----------
+    player_names : list of str
+        DraftKings display names for the players to look up.
+    player_id_map : dict of {player_name: tank01_playerID} or None
+        Pre-resolved Tank01 playerID mapping.  When a player's name is in this
+        map the corresponding ID is used directly; otherwise the name itself is
+        passed as the ``playerID`` parameter (Tank01 also accepts names for
+        some endpoints, but IDs are preferred).
+    api_key : str
+        Tank01 RapidAPI key.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per player.  Columns:
+        ``player_name``, ``rolling_fp_5``, ``rolling_fp_10``, ``rolling_fp_20``,
+        ``rolling_min_5``, ``rolling_min_10``, ``rolling_min_20``.
+        Players for whom no data could be retrieved are omitted.
+    """
+    if not player_names:
+        return pd.DataFrame(columns=[
+            "player_name",
+            "rolling_fp_5", "rolling_fp_10", "rolling_fp_20",
+            "rolling_min_5", "rolling_min_10", "rolling_min_20",
+        ])
+
+    _id_map: Dict[str, str] = player_id_map or {}
+    url = "https://" + _TANK01_HOST + "/getNBAGamesForPlayer"
+    hdrs = _headers(api_key)
+
+    rows: List[dict] = []
+
+    for name in player_names:
+        player_id = _id_map.get(name, "")
+        if not player_id:
+            # Tank01 sometimes accepts player names, but without an ID we skip
+            # rather than risk a bad match — log and continue.
+            print(f"[fetch_player_game_logs] No Tank01 playerID for '{name}' — skipping.")
+            continue
+
+        params = {
+            "playerID": player_id,
+            "numberOfGames": "20",
+            "fantasyPoints": "true",
+        }
+
+        try:
+            resp = requests.get(url, headers=hdrs, params=params, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+            body = data.get("body", data) if isinstance(data, dict) else data
+
+            # body may be a list of game dicts or a dict wrapping one
+            if isinstance(body, dict):
+                # Try common list keys
+                for list_key in ("games", "gameLog", "stats", "playerStats"):
+                    if list_key in body and isinstance(body[list_key], list):
+                        body = body[list_key]
+                        break
+                else:
+                    # Fallback: find the first list value
+                    list_vals = [v for v in body.values() if isinstance(v, list)]
+                    body = list_vals[0] if list_vals else []
+
+            if not isinstance(body, list) or not body:
+                print(f"[fetch_player_game_logs] Empty game log for '{name}'.")
+                continue
+
+            fps: List[float] = []
+            mins: List[float] = []
+
+            for game in body:
+                if not isinstance(game, dict):
+                    continue
+
+                # ── DK fantasy points ──────────────────────────────────────
+                fp_raw = game.get("fantasyPoints")
+                if isinstance(fp_raw, dict):
+                    # Nested dict: look for DraftKings sub-key
+                    fp_val = (
+                        fp_raw.get("DraftKings")
+                        or fp_raw.get("dk")
+                        or fp_raw.get("DK")
+                        or fp_raw.get("dkPoints")
+                    )
+                    try:
+                        fp = float(fp_val) if fp_val is not None else _calc_dk_nba_fp(game)
+                    except (ValueError, TypeError):
+                        fp = _calc_dk_nba_fp(game)
+                elif fp_raw is not None:
+                    try:
+                        fp = float(fp_raw)
+                    except (ValueError, TypeError):
+                        fp = _calc_dk_nba_fp(game)
+                else:
+                    fp = _calc_dk_nba_fp(game)
+
+                fps.append(fp)
+
+                # ── Minutes ───────────────────────────────────────────────
+                mins_raw = (
+                    game.get("mins")
+                    or game.get("min")
+                    or game.get("minutes")
+                    or game.get("MP")
+                    or game.get("minSeconds")
+                )
+                try:
+                    # Tank01 sometimes returns "MM:SS" strings
+                    if mins_raw is not None and ":" in str(mins_raw):
+                        parts = str(mins_raw).split(":")
+                        m_val = float(parts[0]) + float(parts[1]) / 60.0
+                    else:
+                        m_val = float(mins_raw) if mins_raw is not None else 0.0
+                except (ValueError, TypeError):
+                    m_val = 0.0
+                mins.append(m_val)
+
+            if not fps:
+                print(f"[fetch_player_game_logs] No valid game entries for '{name}'.")
+                continue
+
+            def _rolling_avg(values: List[float], n: int) -> float:
+                """Average of the last *n* values, or all values if fewer than n."""
+                subset = values[-n:] if len(values) >= n else values
+                return round(sum(subset) / len(subset), 2) if subset else 0.0
+
+            rows.append({
+                "player_name": name,
+                "rolling_fp_5":  _rolling_avg(fps, 5),
+                "rolling_fp_10": _rolling_avg(fps, 10),
+                "rolling_fp_20": _rolling_avg(fps, 20),
+                "rolling_min_5":  _rolling_avg(mins, 5),
+                "rolling_min_10": _rolling_avg(mins, 10),
+                "rolling_min_20": _rolling_avg(mins, 20),
+            })
+
+        except Exception as exc:
+            # Per-player failure — log and continue to next player
+            print(f"[fetch_player_game_logs] Error fetching game logs for '{name}': {exc}")
+            continue
+
+    if not rows:
+        return pd.DataFrame(columns=[
+            "player_name",
+            "rolling_fp_5", "rolling_fp_10", "rolling_fp_20",
+            "rolling_min_5", "rolling_min_10", "rolling_min_20",
+        ])
+
+    df = pd.DataFrame(rows)
+    print(f"[fetch_player_game_logs] Rolling stats computed for {len(df)} players.")
+    return df.reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
+# NEW: fetch_betting_odds
+# ---------------------------------------------------------------------------
+
+def fetch_betting_odds(game_date: str, api_key: str) -> pd.DataFrame:
+    """Fetch NBA Vegas betting odds from Tank01 for a given date.
+
+    Calls Tank01's ``getNBABettingOdds`` endpoint and returns a tidy DataFrame
+    with the over/under total and home-team spread for each game.
+
+    Parameters
+    ----------
+    game_date : str
+        Date in ``YYYYMMDD`` **or** ``YYYY-MM-DD`` format.  Both are accepted
+        and normalised internally.
+    api_key : str
+        Tank01 RapidAPI key.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns: ``home_team``, ``away_team``, ``vegas_total``, ``spread``.
+        ``spread`` is the home-team spread (negative = home favourite).
+        Returns an empty DataFrame with those columns on any failure.
+    """
+    empty = pd.DataFrame(columns=["home_team", "away_team", "vegas_total", "spread"])
+
+    # Normalise date to YYYYMMDD
+    date_clean = game_date.replace("-", "")
+    if len(date_clean) != 8 or not date_clean.isdigit():
+        print(f"[fetch_betting_odds] Invalid date format: '{game_date}'.")
+        return empty
+
+    url = "https://" + _TANK01_HOST + "/getNBABettingOdds"
+    params = {"gameDate": date_clean}
+    hdrs = _headers(api_key)
+
+    try:
+        resp = requests.get(url, headers=hdrs, params=params, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        body = data.get("body", data) if isinstance(data, dict) else data
+
+        # body may be a list of game-odds dicts, or a dict wrapping one
+        if isinstance(body, dict):
+            for list_key in ("games", "odds", "bettingOdds", "data"):
+                if list_key in body and isinstance(body[list_key], list):
+                    body = body[list_key]
+                    break
+            else:
+                list_vals = [v for v in body.values() if isinstance(v, list)]
+                body = list_vals[0] if list_vals else []
+
+        if not isinstance(body, list) or not body:
+            print(f"[fetch_betting_odds] No odds data returned for {game_date}.")
+            return empty
+
+        rows: List[dict] = []
+        for game in body:
+            if not isinstance(game, dict):
+                continue
+
+            # ── Team identifiers ──────────────────────────────────────────
+            home = str(
+                game.get("homeTeam")
+                or game.get("home_team")
+                or game.get("home")
+                or ""
+            ).strip().upper()
+            away = str(
+                game.get("awayTeam")
+                or game.get("away_team")
+                or game.get("away")
+                or ""
+            ).strip().upper()
+
+            if not home and not away:
+                continue
+
+            # ── Over/under total ─────────────────────────────────────────
+            # Tank01 may nest odds under a bookmaker key or expose them flat.
+            total_raw = (
+                game.get("overUnder")
+                or game.get("total")
+                or game.get("ou")
+                or game.get("over_under")
+            )
+            # Dig one level deeper into a nested odds dict if needed
+            if total_raw is None and isinstance(game.get("odds"), dict):
+                total_raw = game["odds"].get("overUnder") or game["odds"].get("total")
+            try:
+                vegas_total = float(total_raw) if total_raw is not None else float("nan")
+            except (ValueError, TypeError):
+                vegas_total = float("nan")
+
+            # ── Home spread ───────────────────────────────────────────────
+            spread_raw = (
+                game.get("homeSpread")
+                or game.get("spread")
+                or game.get("home_spread")
+                or game.get("pointSpread")
+            )
+            if spread_raw is None and isinstance(game.get("odds"), dict):
+                spread_raw = (
+                    game["odds"].get("homeSpread")
+                    or game["odds"].get("spread")
+                )
+            try:
+                spread = float(spread_raw) if spread_raw is not None else float("nan")
+            except (ValueError, TypeError):
+                spread = float("nan")
+
+            rows.append({
+                "home_team": home,
+                "away_team": away,
+                "vegas_total": vegas_total,
+                "spread": spread,
+            })
+
+        if not rows:
+            print(f"[fetch_betting_odds] No parseable odds rows for {game_date}.")
+            return empty
+
+        df = pd.DataFrame(rows)
+        print(f"[fetch_betting_odds] {len(df)} game odds fetched for {game_date}.")
+        return df.reset_index(drop=True)
+
+    except Exception as exc:
+        print(f"[fetch_betting_odds] Error fetching odds for {game_date}: {exc}")
+        return empty

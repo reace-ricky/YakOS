@@ -6,7 +6,10 @@ Responsibilities
 - Contest Type picker from CONTEST_PRESETS.
 - Fetch DK Lobby Contests → auto-resolves draft_group_id by matching contest type.
 - Load Player Pool via DK draftables API (always API-first, no local files).
-  Optionally enriches with Tank01 stats when TANK01_RAPIDAPI_KEY secret is present.
+  Enriches with Tank01 game-log rolling stats and Vegas odds when
+  TANK01_RAPIDAPI_KEY secret is present.  Does NOT merge Tank01 DFS data —
+  DK is the sole source of truth for the player pool, salaries, and injury
+  status.
 - Game selector (multiselect) after pool loads to filter by matchup.
 - Optional RG CSV overlay via merge_rg_with_pool().
 - S1.7: Refresh action that re-pulls injuries via Tank01 API.
@@ -59,7 +62,7 @@ from yak_core.config import (  # noqa: E402
         DK_CONTEST_MATCH_RULES,
 )
 from yak_core.sims import compute_sim_eligible, _INELIGIBLE_STATUSES  # noqa: E402
-from yak_core.live import fetch_injury_updates  # noqa: E402
+from yak_core.live import fetch_injury_updates, fetch_player_game_logs, fetch_betting_odds  # noqa: E402
 from yak_core.salary_history import SalaryHistoryClient  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -116,13 +119,34 @@ def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
     Players with ineligible status (OUT, IR, DND, etc.) have their
     proj_minutes forced to 0 so the minutes-based sim_eligible filter
     correctly excludes them regardless of their salary.
+
+    When rolling stat columns (rolling_fp_5/10/20, rolling_min_5/10/20)
+    and Vegas context columns (vegas_total, spread) are present in the
+    pool they are forwarded to yakos_fp_projection and
+    yakos_minutes_projection so the YakOS model can use real observed data
+    rather than salary-only estimates.
     """
     has_floor = "floor" in pool.columns and pool["floor"].notna().any()
     has_ceil = "ceil" in pool.columns and pool["ceil"].notna().any()
 
+    # Columns to forward to the projection functions when present
+    _OPTIONAL_FEAT_COLS = [
+        "rolling_fp_5", "rolling_fp_10", "rolling_fp_20",
+        "rolling_min_5", "rolling_min_10", "rolling_min_20",
+        "vegas_total", "spread",
+        "tank01_proj",
+    ]
+
     floors, ceils, mins_proj = [], [], []
     for _, row in pool.iterrows():
         feats = {"salary": float(row.get("salary", 0) or 0)}
+        # Forward any available real-data features to the projection functions
+        for col in _OPTIONAL_FEAT_COLS:
+            if col in pool.columns:
+                val = row.get(col)
+                if val is not None and not (isinstance(val, float) and pd.isna(val)):
+                    feats[col] = float(val)
+
         fp_res = yakos_fp_projection(feats)
         min_res = yakos_minutes_projection(feats)
         floors.append(fp_res.get("floor", fp_res["proj"] * 0.7))
@@ -274,19 +298,75 @@ def _match_contests_to_preset(lobby_df: pd.DataFrame, preset: dict) -> pd.DataFr
     return lobby_df[mask].drop_duplicates(subset=["draft_group_id"]).reset_index(drop=True)
 
 
+# Substrings in contest names that indicate a non-main (mini/late/early) slate.
+_NON_MAIN_SLATE_KEYWORDS = [
+    "late", "early", "turbo", "afternoon", "morning",
+    "2 game", "2-game", "3 game", "3-game", "1 game", "1-game",
+    "showdown",
+]
+
+
 def _auto_pick_best_contest(lobby_df: pd.DataFrame, preset: dict) -> Optional[int]:
     """Pick the best-matching DraftKings draft_group_id for the given preset.
 
-    Filters lobby contests using DK_CONTEST_MATCH_RULES, then returns the
-    draft_group_id of the contest with the best sort key (highest prize pool
-    or highest entries, depending on the rule's 'prefer' setting).
-    Returns None if no matching contest is found.
+    Strategy (in order):
+    1. Filter matched contests to "main slate" candidates by excluding
+       draft groups whose names contain late/early/turbo/mini keywords.
+    2. Among main-slate candidates, pick the draft group with the most
+       draftable players (i.e., the largest player pool = most games).
+    3. If draftables counts are unavailable or tied, fall back to highest
+       prize pool or highest entries per the preset's match rules.
+    4. If no main-slate candidates remain after keyword filtering, fall
+       back to the full matched set (so we always return something).
+
+    Returns None if no matching contest is found at all.
     """
     matched = _match_contests_to_preset(lobby_df, preset)
     if matched.empty:
         return None
 
-    # Determine sort column from match rules
+    # --- Step 1: Prefer main-slate draft groups ---
+    # Exclude contests whose name contains late/early/turbo/mini keywords.
+    if "name" in matched.columns:
+        name_lower = matched["name"].str.lower().fillna("")
+        is_non_main = pd.Series(False, index=matched.index)
+        for kw in _NON_MAIN_SLATE_KEYWORDS:
+            is_non_main |= name_lower.str.contains(kw, na=False)
+        main_candidates = matched[~is_non_main]
+    else:
+        main_candidates = matched
+
+    # Fall back to full set if keyword filter removed everything
+    if main_candidates.empty:
+        main_candidates = matched
+
+    # Deduplicate to unique draft groups (keep the row with highest prize_pool
+    # per group so we have representative metadata).
+    if "prize_pool" in main_candidates.columns:
+        main_candidates = main_candidates.sort_values("prize_pool", ascending=False)
+    unique_dgs = main_candidates.drop_duplicates(subset=["draft_group_id"], keep="first")
+
+    # --- Step 2: Pick the draft group with the most players ---
+    # Fetch draftables count per unique draft_group_id.  This is a lightweight
+    # API call and ensures we always get the full main slate.
+    if len(unique_dgs) > 1:
+        dg_player_counts: dict = {}
+        for dg_id in unique_dgs["draft_group_id"].unique():
+            try:
+                draftables = fetch_dk_draftables(int(dg_id))
+                dg_player_counts[int(dg_id)] = len(draftables)
+            except Exception:
+                dg_player_counts[int(dg_id)] = 0
+
+        if dg_player_counts:
+            best_dg = max(dg_player_counts, key=dg_player_counts.get)
+            # Only use the draftables-based pick if it clearly has more players
+            # (at least 20% more than the runner-up to avoid noise).
+            counts_sorted = sorted(dg_player_counts.values(), reverse=True)
+            if len(counts_sorted) >= 2 and counts_sorted[0] > counts_sorted[1] * 1.2:
+                return best_dg
+
+    # --- Step 3: Fallback — highest prize pool or entries ---
     preset_label = None
     for label, p in CONTEST_PRESETS.items():
         if p is preset:
@@ -294,12 +374,12 @@ def _auto_pick_best_contest(lobby_df: pd.DataFrame, preset: dict) -> Optional[in
             break
     rules = DK_CONTEST_MATCH_RULES.get(preset_label or "", {})
     prefer = rules.get("prefer", "highest_prize")
-    if prefer == "highest_entries" and "current_entries" in matched.columns:
+    if prefer == "highest_entries" and "current_entries" in unique_dgs.columns:
         sort_col = "current_entries"
     else:
         sort_col = "prize_pool"
 
-    best_row = matched.sort_values(sort_col, ascending=False).iloc[0]
+    best_row = unique_dgs.sort_values(sort_col, ascending=False).iloc[0]
     return int(best_row["draft_group_id"])
 
 def _filter_lobby_by_date(lobby_df: pd.DataFrame, target_date: str) -> pd.DataFrame:
@@ -602,54 +682,109 @@ def main() -> None:
                                 pool[_save_cols].rename(columns=_cache_col_map),
                             )
 
-                    # Step 3: Optionally enrich with Tank01 stats (game logs, rolling avgs, Vegas)
+                    # ----------------------------------------------------------------
+                    # Step 3: Enrich pool with Tank01 game-log stats and Vegas odds.
+                    #
+                    # Architecture: DK is the sole source of truth for the player
+                    # pool, salaries, positions, and injury status.  Tank01 is used
+                    # ONLY for game-log rolling averages (fp/min) and Vegas totals.
+                    # We do NOT call fetch_live_opt_pool / getNBADFS here — that
+                    # endpoint overwrites injury status and reduces the pool.
+                    # ----------------------------------------------------------------
                     _api_key = st.session_state.get("rapidapi_key", "")
                     if _api_key:
                         try:
-                            from yak_core.live import fetch_live_opt_pool
-                            tank01_pool = fetch_live_opt_pool(
-                                slate_date_str,
-                                {"RAPIDAPI_KEY": _api_key},
-                            )
-                            if not tank01_pool.empty:
-                                # Rename 'proj' → 'tank01_proj' before merge to preserve the
-                                # DK salary-based proj that will be overwritten by apply_projections.
-                                if "proj" in tank01_pool.columns and "tank01_proj" not in tank01_pool.columns:
-                                    tank01_pool = tank01_pool.rename(columns={"proj": "tank01_proj"})
-                                # Select only useful columns for the merge.
-                                # Include 'status' so Tank01's date-specific injury status
-                                # (e.g. OUT on 2026-03-03) overrides the DK draftables
-                                # status, which may reflect a different point in time.
-                                merge_cols = ["player_name"]
-                                for col in ("opp", "opponent", "tank01_proj", "own_proj", "actual_fp", "status"):
-                                    if col in tank01_pool.columns:
-                                        merge_cols.append(col)
+                            # -- 3a: Build Tank01 playerID map from pool if available --
+                            # The DK draftables payload sometimes includes a Tank01-
+                            # compatible player_id; use it when present.
+                            _t01_id_map: dict = {}
+                            for _id_col in ("player_id", "tank01_player_id", "t01_id"):
+                                if _id_col in pool.columns:
+                                    _t01_id_map = dict(
+                                        zip(
+                                            pool["player_name"].astype(str),
+                                            pool[_id_col].astype(str),
+                                        )
+                                    )
+                                    break
+
+                            # -- 3b: Fetch per-player game log rolling stats --
+                            _player_names = pool["player_name"].dropna().tolist()
+                            with st.spinner("Fetching game log rolling stats from Tank01…"):
+                                _game_log_df = fetch_player_game_logs(
+                                    _player_names,
+                                    _t01_id_map if _t01_id_map else None,
+                                    _api_key,
+                                )
+
+                            if not _game_log_df.empty:
+                                # Left-join rolling stats into pool — does NOT touch status
                                 pool = pool.merge(
-                                    tank01_pool[merge_cols],
+                                    _game_log_df,
                                     on="player_name",
                                     how="left",
-                                    suffixes=("", "_tank01"),
                                 )
-                                # Prefer Tank01 status when it is more restrictive.
-                                # Tank01 fetches data for the specific slate date so its
-                                # injury/availability status is authoritative.
-                                if "status_tank01" in pool.columns:
-                                    tank01_norm = (
-                                        pool["status_tank01"]
-                                        .fillna("")
-                                        .astype(str)
-                                        .str.strip()
-                                        .str.upper()
+                                st.caption(
+                                    f"✅ Rolling stats merged for "
+                                    f"{_game_log_df['player_name'].nunique()} players."
+                                )
+                            else:
+                                st.caption("ℹ️ No game log rolling stats returned from Tank01.")
+
+                            # -- 3c: Fetch Vegas betting odds for this date --
+                            with st.spinner("Fetching Vegas odds from Tank01…"):
+                                _odds_df = fetch_betting_odds(slate_date_str, _api_key)
+
+                            if not _odds_df.empty:
+                                # Merge Vegas total + spread into pool by matching
+                                # each player's team against home/away team columns.
+                                # Strategy: build a team → (vegas_total, spread) lookup
+                                # where away teams get the same total but inverted spread.
+                                _team_odds_rows = []
+                                for _, _o in _odds_df.iterrows():
+                                    _total = _o["vegas_total"]
+                                    _spread = _o["spread"]
+                                    # Home team: spread as-is
+                                    if _o["home_team"]:
+                                        _team_odds_rows.append({
+                                            "team": _o["home_team"],
+                                            "vegas_total": _total,
+                                            "spread": _spread,
+                                        })
+                                    # Away team: same total, inverted spread
+                                    if _o["away_team"]:
+                                        import math
+                                        _away_spread = (
+                                            -_spread
+                                            if not (isinstance(_spread, float) and math.isnan(_spread))
+                                            else float("nan")
+                                        )
+                                        _team_odds_rows.append({
+                                            "team": _o["away_team"],
+                                            "vegas_total": _total,
+                                            "spread": _away_spread,
+                                        })
+
+                                if _team_odds_rows:
+                                    _team_odds_df = pd.DataFrame(_team_odds_rows).drop_duplicates("team")
+                                    # Temporarily strip existing vegas cols to avoid _x/_y suffixes
+                                    for _vc in ("vegas_total", "spread"):
+                                        if _vc in pool.columns:
+                                            pool = pool.drop(columns=[_vc])
+                                    pool = pool.merge(
+                                        _team_odds_df,
+                                        on="team",
+                                        how="left",
                                     )
-                                    # Use Tank01 status wherever it is non-empty
-                                    has_tank01_status = tank01_norm != ""
-                                    pool.loc[has_tank01_status, "status"] = pool.loc[
-                                        has_tank01_status, "status_tank01"
-                                    ]
-                                    pool = pool.drop(columns=["status_tank01"])
-                                st.caption(f"✅ Tank01 stats merged for {len(tank01_pool)} players.")
+                                    st.caption(
+                                        f"✅ Vegas odds merged for "
+                                        f"{_team_odds_df['team'].nunique()} teams."
+                                    )
+                            else:
+                                st.caption("ℹ️ No Vegas odds returned from Tank01.")
+
                         except Exception as t01_exc:
-                            st.caption(f"ℹ️ Tank01 stats not available: {t01_exc}")
+                            st.caption(f"ℹ️ Tank01 enrichment not available: {t01_exc}")
 
                     # Step 4: Apply projection pipeline
                     parsed_rules = _rules_from_preset(preset)
@@ -691,11 +826,105 @@ def main() -> None:
 
                     # Step 7: Remove players who are ineligible for this slate
                     # (OUT/DND/IR status or zero projected minutes).
+                    _before_filter = pool.copy()  # keep a snapshot for the diagnostic expander
                     _before = len(pool)
                     pool = _filter_ineligible_players(pool)
                     _removed = _before - len(pool)
                     if _removed:
                         st.caption(f"ℹ️ {_removed} player(s) removed (OUT/DND/IR or 0 proj minutes).")
+
+                    # ── Diagnostic expander (post Step 7) ────────────────────────
+                    with st.expander(
+                        f"🔍 Pool Diagnostics — {_removed} player(s) dropped",
+                        expanded=(_removed > 0),
+                    ):
+                        # ── Dropped players breakdown ─────────────────────────
+                        _dropped_rows = _before_filter[
+                            ~_before_filter.index.isin(
+                                _before_filter.merge(
+                                    pool[["player_name"]],
+                                    on="player_name",
+                                    how="inner",
+                                ).index
+                            )
+                        ].copy() if _removed > 0 else pd.DataFrame()
+
+                        if not _dropped_rows.empty:
+                            # Label the reason for each dropped player
+                            def _drop_reason(r):
+                                status_val = str(r.get("status", "")).strip().upper()
+                                if status_val in _INELIGIBLE_STATUSES:
+                                    return f"Status: {r.get('status', '')}"
+                                mins_val = r.get("proj_minutes", None)
+                                try:
+                                    if float(mins_val) <= 0:
+                                        return "Zero proj_minutes"
+                                except (TypeError, ValueError):
+                                    return "Zero proj_minutes"
+                                return "Unknown"
+
+                            _dropped_rows["drop_reason"] = _dropped_rows.apply(_drop_reason, axis=1)
+
+                            st.markdown("**Dropped players:**")
+                            _diag_show_cols = [
+                                c for c in [
+                                    "player_name", "status", "proj_minutes", "salary", "drop_reason"
+                                ]
+                                if c in _dropped_rows.columns
+                            ]
+                            st.dataframe(
+                                _dropped_rows[_diag_show_cols]
+                                .sort_values("drop_reason")
+                                .reset_index(drop=True),
+                                use_container_width=True,
+                                hide_index=True,
+                            )
+
+                            # Breakdown counts by reason
+                            _reason_counts = _dropped_rows["drop_reason"].value_counts()
+                            for _reason, _cnt in _reason_counts.items():
+                                st.caption(f"  • {_reason}: {_cnt} player(s)")
+                        else:
+                            st.success("No players were dropped at this step.")
+
+                        st.divider()
+
+                        # ── Projection coverage stats ─────────────────────────
+                        st.markdown("**Projection coverage (active pool):**")
+                        _total_active = len(pool)
+
+                        # Rolling FP coverage
+                        _fp_col = "rolling_fp_5"
+                        if _fp_col in pool.columns:
+                            _has_rolling = pool[_fp_col].notna() & (pool[_fp_col] != 0)
+                            _n_rolling = int(_has_rolling.sum())
+                            _n_salary_only = _total_active - _n_rolling
+                            st.caption(
+                                f"Players with real rolling FP data: **{_n_rolling}** / {_total_active}  "
+                                f"(salary-implied only: {_n_salary_only})"
+                            )
+                        else:
+                            st.caption(
+                                f"Rolling FP columns not present — all {_total_active} players "
+                                "use salary-implied projections only."
+                            )
+
+                        # Rolling minutes coverage
+                        _min_col = "rolling_min_5"
+                        if _min_col in pool.columns:
+                            _has_rolling_min = pool[_min_col].notna() & (pool[_min_col] != 0)
+                            st.caption(
+                                f"Players with real rolling minutes data: "
+                                f"**{int(_has_rolling_min.sum())}** / {_total_active}"
+                            )
+
+                        # Vegas coverage
+                        if "vegas_total" in pool.columns:
+                            _has_vegas = pool["vegas_total"].notna()
+                            st.caption(
+                                f"Players with Vegas total: "
+                                f"**{int(_has_vegas.sum())}** / {_total_active}"
+                            )
 
                     st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"] = pool
                     st.session_state[f"_hub_rules_{slate_date_str}_{_contest_safe}"] = parsed_rules
