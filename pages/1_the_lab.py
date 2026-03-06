@@ -6,8 +6,7 @@ Responsibilities
   Fetch Available Slates, Load Player Pool, Game Filter, Publish Slate.
 - **Simulations + Learnings**: Run sims, view player-level smash/bust/leverage,
   apply sim learnings — all in one section.
-- **Edge Analysis**: Ownership edge, value plays, stacking labels,
-  minute-cannibal not-together suggestions.
+- **Edge Analysis**: Ownership edge, value plays, stacking labels.
 - **Calibration**: Bucketed table, historical pipeline, rating weight tester,
   calibration profiles.
 - **RCI**: Ricky Confidence Index gauges per contest type.
@@ -76,7 +75,6 @@ from yak_core.config import (  # noqa: E402
 from yak_core.right_angle import (  # noqa: E402
     compute_stack_scores,
     compute_value_scores,
-    detect_minute_cannibals,
 )
 from yak_core.sim_rating import compare_rating_weights, get_weight_sets  # noqa: E402
 from yak_core.context import get_lab_analysis  # noqa: E402
@@ -419,8 +417,8 @@ def _build_player_level_sim_results(pool: pd.DataFrame, variance: float) -> pd.D
         "floor": floor,
         "ceil": ceil,
         "ownership": own,
-        "smash_prob": smash_prob.round(3),
-        "bust_prob": bust_prob.round(3),
+        "smash_prob": smash_prob.round(2),
+        "bust_prob": bust_prob.round(2),
         "leverage": leverage.round(2),
     })
     return result.sort_values("leverage", ascending=False).reset_index(drop=True)
@@ -905,26 +903,35 @@ def main() -> None:
             if st.button("Refresh Injuries & News"):
                 _key = st.session_state.get("rapidapi_key", "")
                 if not _key:
-                    st.warning("Tank01 RapidAPI key not configured.")
+                    st.warning("Tank01 RapidAPI key not configured — add TANK01_RAPIDAPI_KEY to .streamlit/secrets.toml.")
                 else:
                     with st.spinner("Fetching latest injury updates…"):
                         try:
-                            updates = fetch_injury_updates(slate_date_str, {"RAPIDAPI_KEY": _key})
+                            # date_key should be YYYYMMDD for Tank01
+                            _injury_date = slate_date_str.replace("-", "")
+                            updates = fetch_injury_updates(_injury_date, {"RAPIDAPI_KEY": _key})
                             if updates:
-                                st.success(f"Fetched {len(updates)} injury updates.")
-                                pool_copy = hub_pool.copy()
+                                pool_names = set(hub_pool["player_name"].dropna().astype(str).values) if "player_name" in hub_pool.columns else set()
                                 affected = [
                                     {"player": u.get("player_name", ""), "status": u.get("status", "")}
                                     for u in updates
-                                    if u.get("player_name", "") in pool_copy.get("player_name", pd.Series(dtype=str)).values
+                                    if u.get("player_name", "") in pool_names
                                 ]
                                 if affected:
-                                    st.warning(f"⚠️ {len(affected)} players in your pool have status updates:")
+                                    st.warning(f"⚠️ {len(affected)} player(s) in your pool have status changes:")
                                     st.dataframe(pd.DataFrame(affected), use_container_width=True, hide_index=True)
+                                else:
+                                    st.success(f"Fetched {len(updates)} league-wide updates — none affect your current pool.")
                             else:
-                                st.info("No injury updates found.")
+                                st.info("No injury updates returned from Tank01.")
                         except Exception as exc:
-                            st.error(f"Refresh failed: {exc}")
+                            _err_msg = str(exc)
+                            if "429" in _err_msg or "rate" in _err_msg.lower():
+                                st.warning("Tank01 API rate limit hit — try again in a minute.")
+                            elif "401" in _err_msg or "403" in _err_msg:
+                                st.error("Tank01 API key invalid or expired. Check TANK01_RAPIDAPI_KEY in secrets.")
+                            else:
+                                st.error(f"Injury refresh failed: {_err_msg}")
 
     st.divider()
 
@@ -1120,33 +1127,40 @@ def main() -> None:
     # =====================================================================
     st.subheader("📊 Edge Analysis")
 
-    if not pool.empty:
-        ea_col1, ea_col2 = st.columns(2)
+    if not pool.empty and sim.player_results is not None and not sim.player_results.empty:
+        pr = sim.player_results.copy()
 
+        # ── Top leverage plays (smash prob vs ownership mismatch) ────────
+        pos_edge = pr[pr["leverage"] > 1.2].nlargest(5, "leverage")
+        neg_edge = pr[pr["leverage"] < 0.7].nsmallest(5, "leverage")
+
+        ea_col1, ea_col2 = st.columns(2)
         with ea_col1:
-            st.markdown("**Ownership Edge**")
-            if sim.player_results is not None and not sim.player_results.empty:
-                pr = sim.player_results.copy()
-                pos_edge = pr[pr["leverage"] > 1.2].nlargest(5, "leverage")
-                neg_edge = pr[pr["leverage"] < 0.7].nsmallest(5, "leverage")
-                if not pos_edge.empty:
-                    st.markdown("✅ *Positive leverage (smash / low owned):*")
-                    _pe = pos_edge[["player_name", "ownership", "smash_prob", "leverage"]].copy()
-                    for _c in ["ownership", "smash_prob", "leverage"]:
-                        if _c in _pe.columns:
-                            _pe[_c] = _pe[_c].round(1)
-                    st.dataframe(_pe, use_container_width=True, hide_index=True)
-                if not neg_edge.empty:
-                    st.markdown("⚠️ *Negative leverage (bust risk / high owned):*")
-                    _ne = neg_edge[["player_name", "ownership", "bust_prob", "leverage"]].copy()
-                    for _c in ["ownership", "bust_prob", "leverage"]:
-                        if _c in _ne.columns:
-                            _ne[_c] = _ne[_c].round(1)
-                    st.dataframe(_ne, use_container_width=True, hide_index=True)
+            st.markdown("**Positive Leverage** — high smash, low owned")
+            if not pos_edge.empty:
+                _pe = pos_edge[["player_name", "salary", "ownership", "smash_prob", "leverage"]].copy()
+                _pe["salary"] = _pe["salary"].astype(int)
+                for _c in ["ownership", "smash_prob", "leverage"]:
+                    if _c in _pe.columns:
+                        _pe[_c] = _pe[_c].round(2)
+                st.dataframe(_pe, use_container_width=True, hide_index=True)
             else:
-                st.info("Run sims first to see ownership edge.")
+                st.caption("No high-leverage plays found.")
 
         with ea_col2:
+            st.markdown("**Negative Leverage** — bust risk, over-owned")
+            if not neg_edge.empty:
+                _ne = neg_edge[["player_name", "salary", "ownership", "bust_prob", "leverage"]].copy()
+                _ne["salary"] = _ne["salary"].astype(int)
+                for _c in ["ownership", "bust_prob", "leverage"]:
+                    if _c in _ne.columns:
+                        _ne[_c] = _ne[_c].round(2)
+                st.dataframe(_ne, use_container_width=True, hide_index=True)
+            else:
+                st.caption("No over-owned bust risks found.")
+
+        # ── Value plays ──────────────────────────────────────────────────
+        with st.expander("💰 Value Plays & Stacks", expanded=False):
             _MIN_VALUE_SALARY = 4000
             st.markdown(f"**Value Plays** (salary ≥ ${_MIN_VALUE_SALARY:,})")
             try:
@@ -1165,80 +1179,20 @@ def main() -> None:
                         _vd["proj"] = _vd["proj"].round(1)
                     st.dataframe(_vd, use_container_width=True, hide_index=True)
                 else:
-                    st.info("No value scores available.")
+                    st.caption("No value scores available.")
             except Exception as exc:
-                st.info(f"Value scores unavailable: {exc}")
+                st.caption(f"Value scores unavailable: {exc}")
 
-        # Stacking labels
-        st.markdown("**Stacking / Correlation Labels**")
-        try:
-            stack_scores = compute_stack_scores(pool)
-            if not stack_scores.empty:
-                show_cols = [c for c in ["team", "stack_score"] if c in stack_scores.columns]
-                st.dataframe(stack_scores[show_cols].head(10), use_container_width=True, hide_index=True)
-        except Exception as exc:
-            st.info(f"Stack scores unavailable: {exc}")
-
-    # Minute-cannibal not-together suggestions
-    _preset = CONTEST_PRESETS.get(pipeline_contest_display_name, {})
-    if not pool.empty and _preset.get("not_with_auto", False):
-        st.markdown("---")
-        st.markdown("### ⚠️ Suggested Not-Together Rules")
-        st.caption(
-            "Players on the same team who compete for the same rotation minutes. "
-            "Approve pairs to enforce 'not with' constraints in the optimizer."
-        )
-        try:
-            edge_state = get_edge_state()
-            cannibal_pairs = detect_minute_cannibals(pool)
-            if cannibal_pairs:
-                approved_keys = {
-                    (p["player_a"], p["player_b"])
-                    for p in edge_state.approved_not_with_pairs
-                }
-                any_change = False
-                for pair in cannibal_pairs:
-                    pa, pb = pair["player_a"], pair["player_b"]
-                    key = (pa, pb)
-                    is_approved = key in approved_keys
-                    col_cb, col_info = st.columns([1, 5])
-                    with col_cb:
-                        checked = st.checkbox(
-                            "Approve", value=is_approved,
-                            key=f"_not_with_{pa}_{pb}",
-                            label_visibility="collapsed",
-                        )
-                    with col_info:
-                        st.markdown(
-                            f"**{pa}** + **{pb}** | 🏀 {pair['team']} | "
-                            f"{pair['position_group'].title()} | "
-                            f"{pair['combined_minutes']} combined min  \n"
-                            f"_{pair['reason']}_"
-                        )
-                    if checked and key not in approved_keys:
-                        edge_state.approved_not_with_pairs.append({
-                            "player_a": pa, "player_b": pb,
-                            "team": pair["team"],
-                            "position_group": pair["position_group"],
-                        })
-                        approved_keys.add(key)
-                        any_change = True
-                    elif not checked and key in approved_keys:
-                        edge_state.approved_not_with_pairs = [
-                            p for p in edge_state.approved_not_with_pairs
-                            if not (p["player_a"] == pa and p["player_b"] == pb)
-                        ]
-                        approved_keys.discard(key)
-                        any_change = True
-                if any_change:
-                    set_edge_state(edge_state)
-                n_approved = len(edge_state.approved_not_with_pairs)
-                if n_approved:
-                    st.success(f"✅ {n_approved} pair(s) approved — will be enforced in optimizer.")
-            else:
-                st.info("No minute-cannibal pairs detected in current pool.")
-        except Exception as exc:
-            st.info(f"Minute-cannibal detection unavailable: {exc}")
+            st.markdown("**Top Stacks**")
+            try:
+                stack_scores = compute_stack_scores(pool)
+                if not stack_scores.empty:
+                    show_cols = [c for c in ["team", "stack_score"] if c in stack_scores.columns]
+                    st.dataframe(stack_scores[show_cols].head(6), use_container_width=True, hide_index=True)
+            except Exception as exc:
+                st.caption(f"Stack scores unavailable: {exc}")
+    elif not pool.empty:
+        st.info("Run sims first to populate edge analysis.")
 
     st.divider()
 
