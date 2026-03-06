@@ -234,6 +234,19 @@ def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
     if not has_ceil:
         pool["ceil"] = (proj_fp * 1.45).round(2)
 
+    # Sanity check: if external floor/ceil are nonsensical relative to proj,
+    # override them.  "Nonsensical" = ceil < proj or floor > proj or ceil < floor.
+    _proj_col = pd.to_numeric(pool.get("proj", proj_fp), errors="coerce").fillna(proj_fp)
+    _ceil = pd.to_numeric(pool["ceil"], errors="coerce")
+    _floor = pd.to_numeric(pool["floor"], errors="coerce")
+    _bad_ceil = _ceil.isna() | (_ceil < _proj_col * 0.5)  # ceil shouldn't be < 50% of proj
+    _bad_floor = _floor.isna() | (_floor > _proj_col * 1.2)  # floor shouldn't be > 120% of proj
+    _bad_range = _ceil < _floor  # ceil must exceed floor
+    _needs_fix = _bad_ceil | _bad_floor | _bad_range
+    if _needs_fix.any():
+        pool.loc[_needs_fix, "floor"] = (proj_fp[_needs_fix] * 0.65).round(2)
+        pool.loc[_needs_fix, "ceil"] = (proj_fp[_needs_fix] * 1.45).round(2)
+
     # ── Vectorised minutes projection ────────────────────────────────────
     _min_json = None
     try:

@@ -223,6 +223,11 @@ def compute_edge_metrics(
     floor = _parse_numeric(df.get("floor", proj * 0.7), proj * 0.7)
     own = _parse_numeric(df.get("ownership", pd.Series(5.0, index=df.index)), 5.0)
 
+    # Sanity: ceil must be above proj, floor must be below proj
+    _bad = (ceil < proj * 0.5) | (floor > proj * 1.2) | (ceil < floor)
+    ceil = ceil.where(~_bad, proj * 1.4)
+    floor = floor.where(~_bad, proj * 0.7)
+
     # Apply calibration ceiling/floor boosts
     ceil_boost = float(cal.get("ceiling_boost", 0.0))
     floor_red = float(cal.get("floor_reduction", 0.0))
