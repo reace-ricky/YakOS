@@ -235,12 +235,12 @@ def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
         pool["ceil"] = (proj_fp * 1.45).round(2)
 
     # Sanity check: if external floor/ceil are nonsensical relative to proj,
-    # override them.  "Nonsensical" = ceil < proj or floor > proj or ceil < floor.
+    # override them.  Ceiling MUST be above proj; floor MUST be below proj.
     _proj_col = pd.to_numeric(pool.get("proj", proj_fp), errors="coerce").fillna(proj_fp)
     _ceil = pd.to_numeric(pool["ceil"], errors="coerce")
     _floor = pd.to_numeric(pool["floor"], errors="coerce")
-    _bad_ceil = _ceil.isna() | (_ceil < _proj_col * 0.5)  # ceil shouldn't be < 50% of proj
-    _bad_floor = _floor.isna() | (_floor > _proj_col * 1.2)  # floor shouldn't be > 120% of proj
+    _bad_ceil = _ceil.isna() | (_ceil <= _proj_col)  # ceil must be ABOVE proj
+    _bad_floor = _floor.isna() | (_floor >= _proj_col)  # floor must be BELOW proj
     _bad_range = _ceil < _floor  # ceil must exceed floor
     _needs_fix = _bad_ceil | _bad_floor | _bad_range
     if _needs_fix.any():
@@ -419,9 +419,9 @@ def _build_player_level_sim_results(pool: pd.DataFrame, variance: float) -> pd.D
     own = pd.to_numeric(df.get("ownership", 5.0), errors="coerce").fillna(5.0)
 
     # ── Sanity check: external floor/ceil may be on a different scale ────
-    # (e.g., RG ceil=17 when proj=51 → smash=1.0 for everyone).
-    # Fix: if ceil < proj or floor > proj, recompute from proj.
-    _bad_fc = (ceil < proj * 0.5) | (floor > proj * 1.2) | (ceil < floor)
+    # (e.g., RG/DFF ceil=25 when proj=43 → smash=1.0 for everyone).
+    # Ceiling MUST be above proj; floor MUST be below proj.
+    _bad_fc = (ceil <= proj) | (floor >= proj) | (ceil < floor)
     ceil = ceil.where(~_bad_fc, proj * 1.45)
     floor = floor.where(~_bad_fc, proj * 0.65)
 

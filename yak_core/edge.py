@@ -224,7 +224,7 @@ def compute_edge_metrics(
     own = _parse_numeric(df.get("ownership", pd.Series(5.0, index=df.index)), 5.0)
 
     # Sanity: ceil must be above proj, floor must be below proj
-    _bad = (ceil < proj * 0.5) | (floor > proj * 1.2) | (ceil < floor)
+    _bad = (ceil <= proj) | (floor >= proj) | (ceil < floor)
     ceil = ceil.where(~_bad, proj * 1.4)
     floor = floor.where(~_bad, proj * 0.7)
 
