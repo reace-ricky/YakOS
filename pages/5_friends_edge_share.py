@@ -37,10 +37,10 @@ from yak_core.config import CONTEST_PRESETS  # noqa: E402
 
 # Fixed display order — must use the canonical labels from CONTEST_PRESETS
 CONTEST_ORDER = [
-    "50/50 / Double-Up",
-    "Single Entry / 3-Max",
-    "GPP - 20 Max",
-    "GPP - 150 Max",
+    "Cash Main",
+    "GPP Late",
+    "GPP Early",
+    "GPP Main",
     "Showdown",
 ]
 

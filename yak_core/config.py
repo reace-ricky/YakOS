@@ -81,29 +81,18 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 
 
 # ============================================================
-# CONTEST PRESETS
+# CONTEST PRESETS (Consolidated)
 # ============================================================
-# Each preset maps a user-facing "Contest Type" label to a config
-# dictionary that fully describes how to build and sim lineups for
-# that contest format.  The public Optimizer tab exposes only this
-# simplified picker; the Admin Lab (Calibration Lab) keeps the full
-# per-archetype knobs for manual override.
-#
-# Keys in each preset:
-#   slate_type        - "Classic" or "Showdown Captain"
-#   archetype         - DFS_ARCHETYPES key to apply by default
-#   internal_contest  - internal calibration key (GPP / 50/50 / etc.)
-#   projection_style  - column to drive the LP objective: proj / floor / ceil
-#   volatility        - sim volatility mode: low / standard / high
-#   correlation_mode  - stack / balanced / none
-#   default_lineups   - suggested lineup count
-#   default_max_exposure - suggested per-player max exposure (0–1)
-#   min_salary        - suggested minimum salary used constraint
-#   description       - one-line caption shown below the Contest Type dropdown
+# Simplified to 5 types:
+#   GPP Main  — highest game-count slate, standard GPP build
+#   GPP Early — early-lock slates (afternoon games)
+#   GPP Late  — 9:30pm EST and later games only
+#   Showdown  — single-game Captain mode (per-game option on Main and Late)
+#   Cash Main — 50/50 and double-ups, high-floor focus
 
 CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
-    "GPP - 150 Max": {
-        "description": "GPP - 150 Max — max upside, 150 lineups, high volatility",
+    "GPP Main": {
+        "description": "Main slate GPP — highest game count, max upside, 150 lineups",
         "slate_type": "Classic",
         "archetype": "Ceiling Hunter",
         "internal_contest": "MME",
@@ -129,9 +118,11 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "max_per_team": 2,
         # Exposure
         "exposure_rules": True,
+        # Ownership sim contest type (for field_sim_ownership)
+        "ownership_contest_type": "gpp_main",
     },
-    "GPP - 20 Max": {
-        "description": "GPP - 20 Max — ceiling-focused, 20 lineups, high volatility",
+    "GPP Early": {
+        "description": "Early slate GPP — afternoon games only, 20 lineups",
         "slate_type": "Classic",
         "archetype": "Ceiling Hunter",
         "internal_contest": "GPP",
@@ -142,8 +133,8 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "default_max_exposure": 0.5,
         "min_salary": 47000,
         # Pool sizing
-        "pool_size_min": 25,
-        "pool_size_max": 45,
+        "pool_size_min": 20,
+        "pool_size_max": 40,
         # Tagging mode
         "tagging_mode": "ceiling",
         "show_leverage": True,
@@ -157,65 +148,41 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "max_per_team": 2,
         # Exposure
         "exposure_rules": True,
+        # Ownership sim contest type
+        "ownership_contest_type": "gpp_early",
     },
-    "Single Entry / 3-Max": {
-        "description": "Single Entry / 3-Max — balanced upside, 1–3 lineups, moderate volatility",
+    "GPP Late": {
+        "description": "Late slate GPP — 9:30pm EST and later, 20 lineups",
         "slate_type": "Classic",
-        "archetype": "Balanced",
+        "archetype": "Ceiling Hunter",
         "internal_contest": "GPP",
-        "projection_style": "proj",
-        "volatility": "standard",
-        "correlation_mode": "balanced",
-        "default_lineups": 3,
-        "default_max_exposure": 1.0,
-        "min_salary": 48000,
+        "projection_style": "ceil",
+        "volatility": "high",
+        "correlation_mode": "stack",
+        "default_lineups": 20,
+        "default_max_exposure": 0.5,
+        "min_salary": 47000,
         # Pool sizing
-        "pool_size_min": 20,
+        "pool_size_min": 15,
         "pool_size_max": 35,
         # Tagging mode
         "tagging_mode": "ceiling",
         "show_leverage": True,
         # Ownership strategy
         "eat_chalk": False,
-        "target_avg_ownership_min": 20,
-        "target_avg_ownership_max": 30,
-        "ownership_caps_by_tier": {"premium_8k": 60, "mid_5k": 50, "value_sub5k": 40},
+        "target_avg_ownership_min": 15,
+        "target_avg_ownership_max": 25,
+        "ownership_caps_by_tier": {"premium_8k": 50, "mid_5k": 40, "value_sub5k": 35},
         # Correlation rules
         "not_with_auto": True,
         "max_per_team": 2,
         # Exposure
-        "exposure_rules": False,
-    },
-    "50/50 / Double-Up": {
-        "description": "50/50 / Double-Up — high-floor plays, 1 lineup, low volatility",
-        "slate_type": "Classic",
-        "archetype": "Floor Lock",
-        "internal_contest": "50/50",
-        "projection_style": "floor",
-        "volatility": "low",
-        "correlation_mode": "none",
-        "default_lineups": 1,
-        "default_max_exposure": 0.8,
-        "min_salary": 49000,
-        # Pool sizing
-        "pool_size_min": 15,
-        "pool_size_max": 25,
-        # Tagging mode
-        "tagging_mode": "floor",
-        "show_leverage": False,
-        # Ownership strategy
-        "eat_chalk": True,
-        "target_avg_ownership_min": None,
-        "target_avg_ownership_max": None,
-        "ownership_caps_by_tier": None,
-        # Correlation rules
-        "not_with_auto": False,
-        "max_per_team": None,
-        # Exposure
-        "exposure_rules": False,
+        "exposure_rules": True,
+        # Ownership sim contest type
+        "ownership_contest_type": "gpp_late",
     },
     "Showdown": {
-        "description": "Showdown — single-game Captain mode, 3 lineups, high volatility",
+        "description": "Showdown — single-game Captain mode, 3 lineups per game",
         "slate_type": "Showdown Captain",
         "archetype": "Ceiling Hunter",
         "internal_contest": "Captain",
@@ -243,6 +210,38 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "exposure_rules": False,
         # Showdown-specific
         "captain_aware": True,
+        # Ownership sim contest type
+        "ownership_contest_type": "showdown",
+    },
+    "Cash Main": {
+        "description": "Cash / 50-50 / Double-Up — high-floor plays, 1 lineup, low volatility",
+        "slate_type": "Classic",
+        "archetype": "Floor Lock",
+        "internal_contest": "50/50",
+        "projection_style": "floor",
+        "volatility": "low",
+        "correlation_mode": "none",
+        "default_lineups": 1,
+        "default_max_exposure": 0.8,
+        "min_salary": 49000,
+        # Pool sizing
+        "pool_size_min": 15,
+        "pool_size_max": 25,
+        # Tagging mode
+        "tagging_mode": "floor",
+        "show_leverage": False,
+        # Ownership strategy
+        "eat_chalk": True,
+        "target_avg_ownership_min": None,
+        "target_avg_ownership_max": None,
+        "ownership_caps_by_tier": None,
+        # Correlation rules
+        "not_with_auto": False,
+        "max_per_team": None,
+        # Exposure
+        "exposure_rules": False,
+        # Ownership sim contest type
+        "ownership_contest_type": "cash",
     },
 }
 
@@ -250,13 +249,12 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
 CONTEST_PRESET_LABELS: List[str] = list(CONTEST_PRESETS.keys())
 
 # Short archetype labels for each contest preset label.
-# Used when tagging approved lineups / promoted sim sets with a concise contest label.
 CONTEST_PRESET_ARCH_LABELS: Dict[str, str] = {
-    "GPP - 150 Max": "MME",
-    "GPP - 20 Max": "GPP",
-    "Single Entry / 3-Max": "SE/3-MAX",
-    "50/50 / Double-Up": "50/50",
-    "Showdown": "Showdown",
+    "GPP Main": "MME",
+    "GPP Early": "GPP-E",
+    "GPP Late": "GPP-L",
+    "Showdown": "SD",
+    "Cash Main": "CASH",
 }
 
 # ============================================================
@@ -265,17 +263,9 @@ CONTEST_PRESET_ARCH_LABELS: Dict[str, str] = {
 # Hidden mapping table: each preset label maps to rules used to
 # auto-match DK lobby contests.  The Slate Hub uses these rules
 # to filter lobby rows and pick the best draft_group_id.
-#
-# Keys per rule:
-#   game_type   - "classic" or "showdown" (maps to DK game_type_id)
-#   max_entries_per_user - exact match on DK max_entries_per_user (None = any)
-#   name_contains - list of substrings; contest name must contain one (case-insensitive)
-#   name_excludes - list of substrings; contest name must NOT contain any
-#   is_single_entry - True/False/None (None = don't filter)
-#   prefer       - "highest_prize" or "highest_entries" for tie-breaking
 
 DK_CONTEST_MATCH_RULES: Dict[str, Dict[str, Any]] = {
-    "GPP - 150 Max": {
+    "GPP Main": {
         "game_type": "classic",
         "max_entries_per_user": 150,
         "name_contains": [],
@@ -283,24 +273,23 @@ DK_CONTEST_MATCH_RULES: Dict[str, Dict[str, Any]] = {
         "is_single_entry": False,
         "prefer": "highest_prize",
     },
-    "GPP - 20 Max": {
+    "GPP Early": {
         "game_type": "classic",
         "max_entries_per_user": 20,
-        "name_contains": [],
-        "name_excludes": ["Double Up", "50/50", "Satellite", "Qualifier"],
+        "name_contains": ["Early"],
+        "name_excludes": ["Double Up", "50/50", "Satellite", "Qualifier", "Showdown"],
         "is_single_entry": False,
         "prefer": "highest_prize",
     },
-    "Single Entry / 3-Max": {
+    "GPP Late": {
         "game_type": "classic",
-        "max_entries_per_user": None,  # match 1 or 3
-        "max_entries_per_user_lte": 3,
-        "name_contains": [],
+        "max_entries_per_user": 20,
+        "name_contains": ["Late", "Night"],
         "name_excludes": ["Double Up", "50/50", "Satellite", "Qualifier", "Showdown"],
-        "is_single_entry": None,
+        "is_single_entry": False,
         "prefer": "highest_prize",
     },
-    "50/50 / Double-Up": {
+    "Cash Main": {
         "game_type": "classic",
         "max_entries_per_user": None,
         "name_contains": ["Double Up", "50/50"],
@@ -322,15 +311,6 @@ DK_CONTEST_MATCH_RULES: Dict[str, Dict[str, Any]] = {
 # ============================================================
 # DK SLATE CLASSIFICATION
 # ============================================================
-# Maps DK DraftGroup metadata to user-friendly slate labels.
-# Used by Slate Hub to build the slate picker from the lobby API.
-#
-# The classify_draft_group() function below uses these rules to
-# turn raw DraftGroup dicts into clean labels like:
-#   "Main Slate (6 games)"
-#   "Night Slate (4 games)"  
-#   "Late Slate (3 games)"
-#   "Showdown: LAL @ DEN"
 
 # Keywords in ContestStartTimeSuffix that indicate slate type
 _SLATE_SUFFIX_KEYWORDS = {
