@@ -59,11 +59,36 @@ from yak_core.config import (  # noqa: E402
     SALARY_CAP,
     DK_SHOWDOWN_SLOTS,
     DK_SHOWDOWN_LINEUP_SIZE,
-        DK_CONTEST_MATCH_RULES,
+    DK_CONTEST_MATCH_RULES,
+    classify_draft_group,
+    build_slate_options,
 )
 from yak_core.sims import compute_sim_eligible, _INELIGIBLE_STATUSES  # noqa: E402
 from yak_core.live import fetch_injury_updates, fetch_player_game_logs, fetch_betting_odds  # noqa: E402
 from yak_core.salary_history import SalaryHistoryClient  # noqa: E402
+
+
+def _fetch_dk_draft_groups(sport: str = "NBA") -> list:
+    """Fetch DraftGroup metadata from the DK lobby API.
+    
+    The lobby response contains both Contests and DraftGroups arrays.
+    This function extracts the DraftGroups array which has slate-level
+    metadata (GameCount, ContestStartTimeSuffix, GameStyle, etc.).
+    """
+    import requests
+    url = "https://www.draftkings.com/lobby/getcontests"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        "Accept": "application/json",
+    }
+    resp = requests.get(url, params={"sport": sport.upper()}, headers=headers, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+    
+    # Extract DraftGroups array
+    draft_groups_raw = data.get("DraftGroups") or data.get("draftGroups") or []
+    return draft_groups_raw
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -230,202 +255,6 @@ def _render_status_bar(slate: "SlateState") -> None:
             st.success(f"✅ Slate published at {slate.published_at}")
 
 
-def _match_contests_to_preset(lobby_df: pd.DataFrame, preset: dict) -> pd.DataFrame:
-    """Filter lobby contests using DK_CONTEST_MATCH_RULES for the given preset.
-
-    Uses the hidden mapping table in config.py to match on game_type,
-    max_entries_per_user, contest name patterns, and single-entry flags.
-    Falls back to simple Showdown/Classic filtering when no rule exists.
-    """
-    if lobby_df.empty:
-        return lobby_df
-
-    preset_label = None
-    for label, p in CONTEST_PRESETS.items():
-        if p is preset:
-            preset_label = label
-            break
-
-    rules = DK_CONTEST_MATCH_RULES.get(preset_label or "", {})
-    if not rules:
-        # Fallback: simple Showdown vs Classic
-        is_showdown = preset.get("slate_type") == "Showdown Captain"
-        if is_showdown:
-            mask = lobby_df["game_type_id"].isin(_SHOWDOWN_GAME_TYPE_IDS)
-        else:
-            mask = ~lobby_df["game_type_id"].isin(_SHOWDOWN_GAME_TYPE_IDS)
-        return lobby_df[mask].drop_duplicates(subset=["draft_group_id"]).reset_index(drop=True)
-
-    mask = pd.Series(True, index=lobby_df.index)
-
-    # 1. game_type filter (classic vs showdown)
-    if rules.get("game_type") == "showdown":
-        mask &= lobby_df["game_type_id"].isin(_SHOWDOWN_GAME_TYPE_IDS)
-    elif rules.get("game_type") == "classic":
-        mask &= ~lobby_df["game_type_id"].isin(_SHOWDOWN_GAME_TYPE_IDS)
-
-    # 2. max_entries_per_user exact match
-    mec = rules.get("max_entries_per_user")
-    if mec is not None and "max_entries_per_user" in lobby_df.columns:
-        mask &= lobby_df["max_entries_per_user"] == mec
-
-    # 3. max_entries_per_user <= threshold
-    mec_lte = rules.get("max_entries_per_user_lte")
-    if mec_lte is not None and "max_entries_per_user" in lobby_df.columns:
-        mask &= lobby_df["max_entries_per_user"] <= mec_lte
-
-    # 4. name_contains — contest name must contain at least one substring
-    includes = rules.get("name_contains", [])
-    if includes and "name" in lobby_df.columns:
-        name_lower = lobby_df["name"].str.lower()
-        inc_mask = pd.Series(False, index=lobby_df.index)
-        for sub in includes:
-            inc_mask |= name_lower.str.contains(sub.lower(), na=False)
-        mask &= inc_mask
-
-    # 5. name_excludes — contest name must NOT contain any substring
-    excludes = rules.get("name_excludes", [])
-    if excludes and "name" in lobby_df.columns:
-        name_lower = lobby_df["name"].str.lower()
-        for sub in excludes:
-            mask &= ~name_lower.str.contains(sub.lower(), na=False)
-
-    # 6. is_single_entry filter
-    ise = rules.get("is_single_entry")
-    if ise is not None and "is_single_entry" in lobby_df.columns:
-        mask &= lobby_df["is_single_entry"] == ise
-
-    return lobby_df[mask].drop_duplicates(subset=["draft_group_id"]).reset_index(drop=True)
-
-
-# Substrings in contest names that indicate a non-main (mini/late/early) slate.
-_NON_MAIN_SLATE_KEYWORDS = [
-    "late", "early", "turbo", "afternoon", "morning",
-    "2 game", "2-game", "3 game", "3-game", "1 game", "1-game",
-    "showdown",
-]
-
-
-def _auto_pick_best_contest(lobby_df: pd.DataFrame, preset: dict) -> Optional[int]:
-    """Pick the best-matching DraftKings draft_group_id for the given preset.
-
-    Strategy (in order):
-    1. Filter matched contests to "main slate" candidates by excluding
-       draft groups whose names contain late/early/turbo/mini keywords.
-    2. Among main-slate candidates, pick the draft group with the most
-       draftable players (i.e., the largest player pool = most games).
-    3. If draftables counts are unavailable or tied, fall back to highest
-       prize pool or highest entries per the preset's match rules.
-    4. If no main-slate candidates remain after keyword filtering, fall
-       back to the full matched set (so we always return something).
-
-    Returns None if no matching contest is found at all.
-    """
-    matched = _match_contests_to_preset(lobby_df, preset)
-    if matched.empty:
-        return None
-
-    # --- Step 1: Prefer main-slate draft groups ---
-    # Exclude contests whose name contains late/early/turbo/mini keywords.
-    if "name" in matched.columns:
-        name_lower = matched["name"].str.lower().fillna("")
-        is_non_main = pd.Series(False, index=matched.index)
-        for kw in _NON_MAIN_SLATE_KEYWORDS:
-            is_non_main |= name_lower.str.contains(kw, na=False)
-        main_candidates = matched[~is_non_main]
-    else:
-        main_candidates = matched
-
-    # Fall back to full set if keyword filter removed everything
-    if main_candidates.empty:
-        main_candidates = matched
-
-    # Deduplicate to unique draft groups (keep the row with highest prize_pool
-    # per group so we have representative metadata).
-    if "prize_pool" in main_candidates.columns:
-        main_candidates = main_candidates.sort_values("prize_pool", ascending=False)
-    unique_dgs = main_candidates.drop_duplicates(subset=["draft_group_id"], keep="first")
-
-    # --- Step 2: Pick the draft group with the most players ---
-    # Fetch draftables count per unique draft_group_id.  This is a lightweight
-    # API call and ensures we always get the full main slate.
-    if len(unique_dgs) > 1:
-        dg_player_counts: dict = {}
-        for dg_id in unique_dgs["draft_group_id"].unique():
-            try:
-                draftables = fetch_dk_draftables(int(dg_id))
-                dg_player_counts[int(dg_id)] = len(draftables)
-            except Exception:
-                dg_player_counts[int(dg_id)] = 0
-
-        if dg_player_counts:
-            best_dg = max(dg_player_counts, key=dg_player_counts.get)
-            # Only use the draftables-based pick if it clearly has more players
-            # (at least 20% more than the runner-up to avoid noise).
-            counts_sorted = sorted(dg_player_counts.values(), reverse=True)
-            if len(counts_sorted) >= 2 and counts_sorted[0] > counts_sorted[1] * 1.2:
-                return best_dg
-
-    # --- Step 3: Fallback — highest prize pool or entries ---
-    preset_label = None
-    for label, p in CONTEST_PRESETS.items():
-        if p is preset:
-            preset_label = label
-            break
-    rules = DK_CONTEST_MATCH_RULES.get(preset_label or "", {})
-    prefer = rules.get("prefer", "highest_prize")
-    if prefer == "highest_entries" and "current_entries" in unique_dgs.columns:
-        sort_col = "current_entries"
-    else:
-        sort_col = "prize_pool"
-
-    best_row = unique_dgs.sort_values(sort_col, ascending=False).iloc[0]
-    return int(best_row["draft_group_id"])
-
-def _filter_lobby_by_date(lobby_df: pd.DataFrame, target_date: str) -> pd.DataFrame:
-    """Filter lobby contests to those whose start_time falls on target_date (YYYY-MM-DD).
-
-    The DK lobby returns all upcoming contests (potentially days away).
-    This ensures we only auto-pick from contests actually scheduled for
-    the user's selected slate date.
-
-    Handles DK .NET JSON dates like '/Date(1741212000000)/' as well as
-    ISO 8601 strings.  Falls back to unfiltered lobby when parsing fails
-    so the user can still load a player pool.
-    """
-    if lobby_df.empty or "start_time" not in lobby_df.columns:
-        return lobby_df
-    try:
-        import re as _re
-        from zoneinfo import ZoneInfo
-
-        def _parse_dk_date(val: str) -> "pd.Timestamp | None":
-            """Parse a single DK start_time value."""
-            s = str(val).strip()
-            # .NET JSON date: /Date(1741212000000)/ or /Date(1741212000000-0500)/
-            m = _re.search(r"/Date\((\d+)", s)
-            if m:
-                epoch_ms = int(m.group(1))
-                return pd.Timestamp(epoch_ms, unit="ms", tz="UTC")
-            # ISO 8601 fallback
-            try:
-                return pd.Timestamp(s, tz="UTC") if s else None
-            except Exception:
-                return None
-
-        parsed = lobby_df["start_time"].apply(_parse_dk_date)
-        # Convert UTC to US/Eastern for date comparison (NBA games are evening ET)
-        eastern = parsed.apply(
-            lambda ts: ts.tz_convert(ZoneInfo("America/New_York")) if ts is not None else None
-        )
-        mask = eastern.apply(
-            lambda ts: ts.strftime("%Y-%m-%d") == target_date if ts is not None else False
-        )
-        filtered = lobby_df[mask].reset_index(drop=True)
-        return filtered
-    except Exception:
-        return lobby_df
-
 def _extract_games(pool: pd.DataFrame) -> list[str]:
     """Extract unique game matchup strings from the pool."""
     opp_col = "opp" if "opp" in pool.columns else (
@@ -515,9 +344,9 @@ def main() -> None:
             f"_hub_draft_group_id_{_stale_date}_{_stale_contest_safe}",
         ]:
             st.session_state.pop(key, None)
-        # Clear lobby cache keyed to the previous sport + previous date
-        old_lobby_key = f"_hub_lobby_{_stale_sport}_{_stale_date}"
-        st.session_state.pop(old_lobby_key, None)
+        # Clear slate cache keyed to the previous sport
+        old_slate_key = f"_hub_slates_{_stale_sport}_{_stale_date}"
+        st.session_state.pop(old_slate_key, None)
     st.session_state["_hub_prev_date"] = slate_date_str
     st.session_state["_hub_prev_sport"] = sport
     st.session_state["_hub_prev_contest"] = contest_type_label
@@ -525,68 +354,68 @@ def main() -> None:
     # Projection model is always YakOS Model
     proj_source = "model"
 
-    # ── DK lobby cache (used both by debug UI and auto-pick) ──────────────
-    lobby_key = f"_hub_lobby_{sport}_{slate_date_str}"
-    lobby_df: Optional[pd.DataFrame] = st.session_state.get(lobby_key)
-
-    # ── Debug Mode: DK Contest Selection (admin only) ─────────────────────
-    # Show the full DK contest selection UI only when debug_mode is enabled.
-    # In normal operation the contest is resolved automatically.
-    _debug_mode = st.session_state.get("debug_mode", False)
-    _debug_draft_group_id: Optional[int] = None
-
-    if _debug_mode:
-        st.subheader("DK Contest Selection (Debug)")
-        _is_live = slate_date_str == _today
-        if _is_live:
-            st.caption("📡 Live slate — fetching from DK lobby.")
-        else:
-            st.caption(f"📂 Historical slate — date: {slate_date_str}. Enter Draft Group ID directly.")
-
-        col_fetch, col_clear = st.columns([2, 1])
-        with col_fetch:
-            if st.button("🔍 Fetch Contests from DK", help="Pulls current DK lobby contests for this sport."):
-                with st.spinner("Fetching DK lobby…"):
-                    try:
-                        fetched = fetch_dk_lobby_contests(sport)
-                        st.session_state[lobby_key] = fetched
-                        lobby_df = fetched
-                        if fetched.empty:
-                            st.warning("No contests found in DK lobby for this sport/date.")
-                        else:
-                            st.success(f"Found {len(fetched)} contests.")
-                    except Exception as exc:
-                        st.error(f"Failed to fetch DK lobby: {exc}")
-        with col_clear:
-            if lobby_df is not None and st.button("Clear"):
-                st.session_state.pop(lobby_key, None)
-                lobby_df = None
-                st.rerun()
-
-        if lobby_df is not None and not lobby_df.empty:
-            matched = _match_contests_to_preset(lobby_df, preset)
-            if not matched.empty:
-                contest_options = {
-                    f"{row['name']} (DG {row['draft_group_id']})": int(row["draft_group_id"])
-                    for _, row in matched.iterrows()
-                }
-                selected_label = st.selectbox("Select Contest", list(contest_options.keys()))
-                _debug_draft_group_id = contest_options[selected_label]
-                st.caption(f"Draft Group ID: **{_debug_draft_group_id}**")
-            else:
-                st.info("No contests matched the selected Contest Type. Enter Draft Group ID manually.")
-
-        with st.expander("Manual Draft Group ID override", expanded=_debug_draft_group_id is None):
-            dg_val = st.number_input(
-                "Draft Group ID",
-                min_value=0,
-                step=1,
-                value=int(_debug_draft_group_id or 0),
-                help="DraftKings draft group ID (visible in DK contest URLs). Overrides lobby selection.",
-                key="_hub_dg_manual",
+    # ── Slate Picker ──────────────────────────────────────────────────────
+    st.subheader("Select Slate")
+    
+    _slate_cache_key = f"_hub_slates_{sport}_{slate_date_str}"
+    _cached_slates = st.session_state.get(_slate_cache_key)
+    
+    col_fetch_slate, col_clear_slate = st.columns([2, 1])
+    with col_fetch_slate:
+        if st.button("🔍 Fetch Available Slates", type="secondary"):
+            with st.spinner("Fetching slates from DraftKings..."):
+                try:
+                    raw_dgs = _fetch_dk_draft_groups(sport)
+                    if not raw_dgs:
+                        st.warning("No slates found on DraftKings for this sport. Try a different date.")
+                    else:
+                        slate_options = build_slate_options(raw_dgs)
+                        st.session_state[_slate_cache_key] = slate_options
+                        _cached_slates = slate_options
+                        st.success(f"Found {len(slate_options)} slate(s).")
+                except Exception as exc:
+                    st.error(f"Failed to fetch slates: {exc}")
+    with col_clear_slate:
+        if _cached_slates and st.button("Clear"):
+            st.session_state.pop(_slate_cache_key, None)
+            _cached_slates = None
+            st.rerun()
+    
+    selected_dg_id: Optional[int] = None
+    selected_slate_label: Optional[str] = None
+    
+    if _cached_slates:
+        # Build radio options: "Main Slate (6 games)" etc.
+        slate_labels = [s["label"] for s in _cached_slates]
+        selected_idx = st.radio(
+            "Choose a slate",
+            range(len(slate_labels)),
+            format_func=lambda i: slate_labels[i],
+            key="_hub_slate_radio",
+        )
+        if selected_idx is not None:
+            selected_slate = _cached_slates[selected_idx]
+            selected_dg_id = selected_slate["draft_group_id"]
+            selected_slate_label = selected_slate["label"]
+            st.caption(
+                f"Draft Group **{selected_dg_id}** · "
+                f"{selected_slate['game_count']} game(s) · "
+                f"{selected_slate['game_style']}"
             )
-            if dg_val > 0:
-                _debug_draft_group_id = int(dg_val)
+    
+    # Manual DG ID override (for historical dates or when lobby is unavailable)
+    with st.expander("Manual Draft Group ID (advanced)", expanded=_cached_slates is None):
+        manual_dg = st.number_input(
+            "Draft Group ID",
+            min_value=0,
+            step=1,
+            value=0,
+            help="Paste a DraftKings Draft Group ID if you know it. Overrides the slate picker.",
+            key="_hub_manual_dg",
+        )
+        if manual_dg > 0:
+            selected_dg_id = int(manual_dg)
+            selected_slate_label = f"Manual (DG {manual_dg})"
 
     # ── Row 5: Load Player Pool ────────────────────────────────────────────
     _today_date = pd.Timestamp.now(tz=ZoneInfo("America/New_York")).date()
@@ -594,11 +423,8 @@ def main() -> None:
     _salary_client = SalaryHistoryClient()
 
     if st.button("📥 Load Player Pool", type="primary"):
-        # Resolve draft_group_id:
-        # • Debug mode  → use the manually selected / entered value.
-        # • Normal mode → auto-fetch the DK lobby and pick the highest prize-pool
-        #                 contest that matches the selected Contest Type.
-        draft_group_id: Optional[int] = _debug_draft_group_id if _debug_mode else None
+        # Resolve draft_group_id from the slate picker or manual override.
+        draft_group_id: Optional[int] = selected_dg_id
 
         with st.spinner("Loading player pool…"):
             try:
@@ -626,22 +452,10 @@ def main() -> None:
                                     f"(DraftGroup {_historical_dg_id})"
                                 )
 
-                # Auto-pick contest when no override is set
-                if not draft_group_id:
-                    _lobby = lobby_df
-                    if _lobby is None:
-                        _lobby = fetch_dk_lobby_contests(sport)
-                        st.session_state[lobby_key] = _lobby
-                    _lobby = _filter_lobby_by_date(_lobby, slate_date_str)
-                    draft_group_id = _auto_pick_best_contest(_lobby, preset)
-                    if draft_group_id:
-                        st.caption(f"ℹ️ Auto-selected Draft Group ID: **{draft_group_id}**")
-
                 if not draft_group_id and _historical_salary_df is None:
                     st.warning(
-                        "Could not determine a Draft Group ID for the selected Contest Type. "
-                        "No matching contests were found in the DK lobby. "
-                        "Try a different sport, date, or contest type, or check your network connection."
+                        "No slate selected. Use \"Fetch Available Slates\" to pick a slate, "
+                        "or enter a Draft Group ID manually in the advanced section above."
                     )
                 else:
                     # Step 1: Fetch DK draftables (salaries, positions, teams)
