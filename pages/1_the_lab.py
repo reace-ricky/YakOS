@@ -1050,6 +1050,10 @@ def main() -> None:
         st.caption("Player-level smash / bust / leverage (sorted by leverage)")
         display_df = prepare_sims_table(sim.player_results)
 
+        # Format all float columns to 2 decimal places for display
+        _float_fmt = {c: "{:.2f}" for c in display_df.select_dtypes(include="number").columns
+                      if c != "salary"}
+
         def _style_row(row: pd.Series) -> list:
             styles = [""] * len(row)
             cols = list(row.index)
@@ -1062,7 +1066,7 @@ def main() -> None:
             return styles
 
         try:
-            styled = display_df.style.apply(_style_row, axis=1)
+            styled = display_df.style.apply(_style_row, axis=1).format(_float_fmt)
             st.dataframe(styled, use_container_width=True, hide_index=True)
         except Exception:
             st.dataframe(display_df, use_container_width=True, hide_index=True)
