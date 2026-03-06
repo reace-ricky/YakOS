@@ -50,7 +50,7 @@ class TestGetPoolSizeRange:
         assert lo < hi, f"pool_size_min ({lo}) must be < pool_size_max ({hi}) for '{label}'"
 
     def test_gpp_20_max_values(self) -> None:
-        assert get_pool_size_range("GPP - 20 Max") == (25, 45)
+        assert get_pool_size_range("GPP Early") == (25, 45)
 
     def test_invalid_label_raises_key_error(self) -> None:
         with pytest.raises(KeyError, match="Unknown contest label"):
@@ -60,7 +60,7 @@ class TestGetPoolSizeRange:
 class TestCashPresetRules:
     """50/50 / Double-Up cash preset has correct methodology values."""
 
-    CASH_LABEL = "50/50 / Double-Up"
+    CASH_LABEL = "Cash Main"
 
     def test_eat_chalk_true(self) -> None:
         assert CONTEST_PRESETS[self.CASH_LABEL]["eat_chalk"] is True
@@ -78,7 +78,7 @@ class TestCashPresetRules:
 class TestGpp150MaxPresetRules:
     """GPP - 150 Max preset has correct pool sizing and methodology values."""
 
-    LABEL = "GPP - 150 Max"
+    LABEL = "GPP Main"
 
     def test_pool_size_min(self) -> None:
         assert CONTEST_PRESETS[self.LABEL]["pool_size_min"] == 40
@@ -109,11 +109,11 @@ class TestGetMethodologyRules:
             assert key in rules, f"get_methodology_rules('{label}') missing key '{key}'"
 
     def test_cash_eat_chalk(self) -> None:
-        rules = get_methodology_rules("50/50 / Double-Up")
+        rules = get_methodology_rules("Cash Main")
         assert rules["eat_chalk"] is True
 
     def test_gpp_150_exposure_rules(self) -> None:
-        rules = get_methodology_rules("GPP - 150 Max")
+        rules = get_methodology_rules("GPP Main")
         assert rules["exposure_rules"] is True
 
     def test_invalid_label_raises_key_error(self) -> None:
