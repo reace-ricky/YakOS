@@ -4,15 +4,12 @@ Stores per-slate projection errors (by position + salary tier), accumulates
 them across slates, and produces correction factors that can be applied to
 future projections.
 
-Workflow
---------
-1. After a historical slate loads actuals, call ``record_slate_errors()``
-   to persist the proj-vs-actual errors for that date.
-2. Before running sims on a new slate, call ``get_correction_factors()``
-   to retrieve accumulated position + salary tier adjustments.
-3. Call ``apply_corrections()`` to adjust the pool's ``proj`` column.
+Supports two storage backends:
+  - File-based (JSON on disk) — for local dev
+  - Session-state dict — for Streamlit Cloud (ephemeral filesystem)
 
-All data is stored as JSON in ``{YAKOS_ROOT}/data/calibration_feedback/``.
+Pass ``store=dict`` to all public functions to use in-memory storage, or
+omit to use the default file-based backend.
 """
 
 from __future__ import annotations
@@ -49,9 +46,50 @@ def _ensure_dir() -> None:
     Path(_FEEDBACK_DIR).mkdir(parents=True, exist_ok=True)
 
 
+# ─── Storage helpers ──────────────────────────────────────────────────
+
+def _load_history(store: Optional[Dict] = None) -> Dict[str, Any]:
+    if store is not None:
+        return store.get("slate_errors", {})
+    if os.path.isfile(_HISTORY_FILE):
+        with open(_HISTORY_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+
+def _save_history(history: Dict[str, Any], store: Optional[Dict] = None) -> None:
+    if store is not None:
+        store["slate_errors"] = history
+        return
+    _ensure_dir()
+    with open(_HISTORY_FILE, "w") as f:
+        json.dump(history, f, indent=2)
+
+
+def _save_corrections(corrections: Dict[str, Any], store: Optional[Dict] = None) -> None:
+    if store is not None:
+        store["correction_factors"] = corrections
+        return
+    _ensure_dir()
+    with open(_CORRECTIONS_FILE, "w") as f:
+        json.dump(corrections, f, indent=2)
+
+
+def _load_corrections(store: Optional[Dict] = None) -> Dict[str, Any]:
+    if store is not None:
+        return store.get("correction_factors", {})
+    if os.path.isfile(_CORRECTIONS_FILE):
+        with open(_CORRECTIONS_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+
+# ─── Core logic ───────────────────────────────────────────────────────
+
 def record_slate_errors(
     slate_date: str,
     pool_df: pd.DataFrame,
+    store: Optional[Dict] = None,
 ) -> Dict[str, Any]:
     """Compute and persist projection errors for a completed slate.
 
@@ -62,14 +100,14 @@ def record_slate_errors(
     pool_df : pd.DataFrame
         Must have ``player_name``, ``pos``, ``salary``, ``proj``, ``actual_fp``.
         Players with actual_fp == 0 or NaN are excluded (DNP / missing).
+    store : dict, optional
+        In-memory store (e.g. st.session_state dict). If None, uses files.
 
     Returns
     -------
     dict
         Summary of errors recorded for this slate.
     """
-    _ensure_dir()
-
     required = {"player_name", "pos", "salary", "proj", "actual_fp"}
     if not required.issubset(set(pool_df.columns)):
         missing = required - set(pool_df.columns)
@@ -130,44 +168,25 @@ def record_slate_errors(
     }
 
     # Load existing history and append/replace
-    history = _load_history()
+    history = _load_history(store)
     history[slate_date] = slate_record
-    _save_history(history)
+    _save_history(history, store)
 
     # Recompute correction factors
-    _recompute_corrections(history)
+    _recompute_corrections(history, store)
 
     return slate_record
 
 
-def _load_history() -> Dict[str, Any]:
-    if os.path.isfile(_HISTORY_FILE):
-        with open(_HISTORY_FILE, "r") as f:
-            return json.load(f)
-    return {}
-
-
-def _save_history(history: Dict[str, Any]) -> None:
-    _ensure_dir()
-    with open(_HISTORY_FILE, "w") as f:
-        json.dump(history, f, indent=2)
-
-
-def _recompute_corrections(history: Dict[str, Any]) -> None:
-    """Aggregate errors across slates into correction factors.
-
-    Uses recency-weighted averaging: more recent slates get higher weight.
-    """
+def _recompute_corrections(history: Dict[str, Any], store: Optional[Dict] = None) -> None:
+    """Aggregate errors across slates into correction factors."""
     dates = sorted(history.keys(), reverse=True)[:_MAX_SLATES]
     if not dates:
         return
 
-    # Assign weights: most recent = 1.0, decaying by 0.85 per slate
     weights = {d: 0.85 ** i for i, d in enumerate(dates)}
-    total_weight = sum(weights.values())
 
-    # Accumulate position corrections
-    pos_accum: Dict[str, Dict[str, float]] = {}  # pos -> {weighted_error, weight, n}
+    pos_accum: Dict[str, Dict[str, float]] = {}
     tier_accum: Dict[str, Dict[str, float]] = {}
 
     for date in dates:
@@ -188,7 +207,6 @@ def _recompute_corrections(history: Dict[str, Any]) -> None:
             tier_accum[tier]["weight"] += w
             tier_accum[tier]["n"] += stats["n"]
 
-    # Compute final corrections
     pos_corrections = {}
     for pos, acc in pos_accum.items():
         if acc["n"] >= _MIN_SAMPLES and acc["weight"] > 0:
@@ -201,7 +219,6 @@ def _recompute_corrections(history: Dict[str, Any]) -> None:
             raw = acc["weighted_error"] / acc["weight"]
             tier_corrections[tier] = round(raw * _CORRECTION_STRENGTH, 2)
 
-    # Overall bias
     overall_errors = []
     overall_weights = []
     for date in dates:
@@ -226,24 +243,14 @@ def _recompute_corrections(history: Dict[str, Any]) -> None:
         "correction_strength": _CORRECTION_STRENGTH,
     }
 
-    _ensure_dir()
-    with open(_CORRECTIONS_FILE, "w") as f:
-        json.dump(corrections, f, indent=2)
+    _save_corrections(corrections, store)
 
 
-def get_correction_factors() -> Dict[str, Any]:
-    """Load the current correction factors.
-
-    Returns
-    -------
-    dict
-        Keys: ``n_slates``, ``overall_bias_correction``,
-        ``by_position`` (pos → float), ``by_salary_tier`` (tier → float).
-        Returns empty corrections if no history exists.
-    """
-    if os.path.isfile(_CORRECTIONS_FILE):
-        with open(_CORRECTIONS_FILE, "r") as f:
-            return json.load(f)
+def get_correction_factors(store: Optional[Dict] = None) -> Dict[str, Any]:
+    """Load the current correction factors."""
+    corr = _load_corrections(store)
+    if corr:
+        return corr
     return {
         "n_slates": 0,
         "overall_bias_correction": 0.0,
@@ -255,26 +262,11 @@ def get_correction_factors() -> Dict[str, Any]:
 def apply_corrections(
     pool_df: pd.DataFrame,
     corrections: Optional[Dict[str, Any]] = None,
+    store: Optional[Dict] = None,
 ) -> pd.DataFrame:
-    """Apply error-correction factors to a pool's projections.
-
-    Adjusts ``proj`` column based on accumulated position + salary tier
-    biases. Creates ``proj_pre_correction`` to preserve the original.
-
-    Parameters
-    ----------
-    pool_df : pd.DataFrame
-        Must have ``proj``, ``pos``, ``salary``.
-    corrections : dict, optional
-        Output of ``get_correction_factors()``. If None, loads from disk.
-
-    Returns
-    -------
-    pd.DataFrame
-        Copy with adjusted ``proj`` and ``proj_pre_correction`` columns.
-    """
+    """Apply error-correction factors to a pool's projections."""
     if corrections is None:
-        corrections = get_correction_factors()
+        corrections = get_correction_factors(store)
 
     if corrections.get("n_slates", 0) == 0:
         return pool_df.copy()
@@ -286,13 +278,11 @@ def apply_corrections(
     tier_corr = corrections.get("by_salary_tier", {})
     overall_bias = corrections.get("overall_bias_correction", 0.0)
 
-    # Compute primary position
     if "pos" in df.columns:
         primary_pos = df["pos"].astype(str).str.split("/").str[0].str.strip()
     else:
         primary_pos = pd.Series("", index=df.index)
 
-    # Compute salary tier
     if "salary" in df.columns:
         salary_tier = pd.cut(
             pd.to_numeric(df["salary"], errors="coerce"),
@@ -301,18 +291,9 @@ def apply_corrections(
     else:
         salary_tier = pd.Series("", index=df.index)
 
-    # Apply corrections additively
     adjustment = pd.Series(0.0, index=df.index)
-
-    # Position adjustment
-    pos_adj = primary_pos.map(pos_corr).fillna(0.0)
-    adjustment += pos_adj
-
-    # Salary tier adjustment
-    tier_adj = salary_tier.map(tier_corr).fillna(0.0)
-    adjustment += tier_adj
-
-    # Overall bias (halved since pos + tier already capture most of it)
+    adjustment += primary_pos.map(pos_corr).fillna(0.0)
+    adjustment += salary_tier.map(tier_corr).fillna(0.0)
     adjustment += overall_bias * 0.5
 
     df["proj"] = (df["proj"] + adjustment).clip(lower=0)
@@ -321,19 +302,10 @@ def apply_corrections(
     return df
 
 
-def get_calibration_summary() -> Dict[str, Any]:
-    """Return a human-readable summary of the calibration state.
-
-    Returns
-    -------
-    dict
-        Keys: ``n_slates``, ``dates``, ``overall_mae``,
-        ``position_corrections`` (list of dicts),
-        ``tier_corrections`` (list of dicts),
-        ``status`` (str: "no_data", "building", "ready").
-    """
-    history = _load_history()
-    corrections = get_correction_factors()
+def get_calibration_summary(store: Optional[Dict] = None) -> Dict[str, Any]:
+    """Return a human-readable summary of the calibration state."""
+    history = _load_history(store)
+    corrections = get_correction_factors(store)
 
     if not history:
         return {"status": "no_data", "n_slates": 0, "message": "No historical slates recorded yet."}
@@ -368,8 +340,12 @@ def get_calibration_summary() -> Dict[str, Any]:
     }
 
 
-def clear_calibration_history() -> None:
+def clear_calibration_history(store: Optional[Dict] = None) -> None:
     """Remove all stored calibration feedback data."""
+    if store is not None:
+        store.pop("slate_errors", None)
+        store.pop("correction_factors", None)
+        return
     for path in [_HISTORY_FILE, _CORRECTIONS_FILE]:
         if os.path.isfile(path):
             os.remove(path)

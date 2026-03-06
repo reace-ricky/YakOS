@@ -803,9 +803,11 @@ def main() -> None:
                     # Apply calibration corrections from historical feedback
                     try:
                         from yak_core.calibration_feedback import get_correction_factors, apply_corrections
-                        _cf = get_correction_factors()
+                        if "_cal_fb_store" not in st.session_state:
+                            st.session_state["_cal_fb_store"] = {}
+                        _cf = get_correction_factors(store=st.session_state["_cal_fb_store"])
                         if _cf.get("n_slates", 0) > 0:
-                            pool = apply_corrections(pool, _cf)
+                            pool = apply_corrections(pool, _cf, store=st.session_state["_cal_fb_store"])
                             st.caption(f"📐 Calibration corrections applied ({_cf['n_slates']} slate(s) of history)")
                     except Exception as _cf_exc:
                         pass  # silently skip if feedback module not ready
@@ -863,7 +865,9 @@ def main() -> None:
                                     if "proj" in pool.columns and "actual_fp" in pool.columns:
                                         try:
                                             from yak_core.calibration_feedback import record_slate_errors
-                                            _fb_result = record_slate_errors(slate_date_str, pool)
+                                            if "_cal_fb_store" not in st.session_state:
+                                                st.session_state["_cal_fb_store"] = {}
+                                            _fb_result = record_slate_errors(slate_date_str, pool, store=st.session_state["_cal_fb_store"])
                                             if "error" not in _fb_result:
                                                 _fb_mae = _fb_result.get("overall", {}).get("mae", "?")
                                                 _fb_corr = _fb_result.get("overall", {}).get("correlation", "?")
@@ -1411,17 +1415,80 @@ def main() -> None:
 
     with st.expander("📐 Calibration Feedback (Actuals Loop)", expanded=True):
         try:
-            from yak_core.calibration_feedback import get_calibration_summary, get_correction_factors, clear_calibration_history
-            _cal_fb = get_calibration_summary()
+            from yak_core.calibration_feedback import (
+                record_slate_errors, get_calibration_summary,
+                get_correction_factors, clear_calibration_history,
+            )
+
+            # Use session state as storage (survives on Streamlit Cloud)
+            if "_cal_fb_store" not in st.session_state:
+                st.session_state["_cal_fb_store"] = {}
+            _fb_store = st.session_state["_cal_fb_store"]
+
+            # ── Manual "Fetch Actuals & Record" button ──
+            _fb_is_hist = False
+            try:
+                _fb_is_hist = pd.to_datetime(slate.slate_date).date() < _today_date if slate.slate_date else False
+            except Exception:
+                pass
+
+            if _fb_is_hist and pool is not None and not pool.empty:
+                _fb_has_actuals = "actual_fp" in pool.columns and pool["actual_fp"].notna().any()
+                _fb_has_proj = "proj" in pool.columns and pool["proj"].notna().any()
+
+                if _fb_has_actuals and _fb_has_proj:
+                    # Actuals already in pool (from box score cross-ref or external projections)
+                    if st.button("📐 Record Calibration from Current Pool", key="_lab_record_cal_pool"):
+                        _fb_result = record_slate_errors(slate.slate_date, pool, store=_fb_store)
+                        if "error" not in _fb_result:
+                            _ov = _fb_result.get("overall", {})
+                            st.success(f"Recorded: MAE {_ov.get('mae', '?')}, Corr {_ov.get('correlation', '?')}, {_ov.get('n_players', 0)} players")
+                        else:
+                            st.warning(f"Could not record: {_fb_result['error']}")
+                else:
+                    # Need to fetch actuals from Tank01
+                    _fb_api_key = st.session_state.get("rapidapi_key", "")
+                    if _fb_api_key:
+                        if st.button("📐 Fetch Actuals & Record Calibration", key="_lab_fetch_record_cal"):
+                            with st.spinner("Fetching box scores..."):
+                                try:
+                                    from yak_core.live import fetch_actuals_from_api
+                                    _fb_date = slate.slate_date.replace("-", "")
+                                    _fb_actuals = fetch_actuals_from_api(_fb_date, {"RAPIDAPI_KEY": _fb_api_key})
+                                    if not _fb_actuals.empty and "actual_fp" in _fb_actuals.columns:
+                                        _fb_act_map = _fb_actuals.set_index("player_name")["actual_fp"].to_dict()
+                                        _fb_pool = pool.copy()
+                                        _fb_pool["actual_fp"] = _fb_pool["player_name"].map(_fb_act_map)
+                                        _fb_result = record_slate_errors(slate.slate_date, _fb_pool, store=_fb_store)
+                                        if "error" not in _fb_result:
+                                            _ov = _fb_result.get("overall", {})
+                                            st.success(f"Recorded: MAE {_ov.get('mae', '?')}, Corr {_ov.get('correlation', '?')}, {_ov.get('n_players', 0)} players")
+                                        else:
+                                            st.warning(f"Could not record: {_fb_result['error']}")
+                                    else:
+                                        st.warning("No actuals returned from Tank01 for this date.")
+                                except Exception as _fb_fetch_exc:
+                                    st.error(f"Failed to fetch actuals: {_fb_fetch_exc}")
+                    else:
+                        st.caption(
+                            "⚠️ Tank01 API key not set and pool has no actuals. "
+                            "Either add TANK01_RAPIDAPI_KEY to secrets or upload an external projections file with actual results."
+                        )
+            elif not _fb_is_hist:
+                st.caption("Switch to a historical date to record calibration data.")
+
+            st.markdown("---")
+
+            # ── Summary display ──
+            _cal_fb = get_calibration_summary(store=_fb_store)
             _fb_status = _cal_fb.get("status", "no_data")
 
             if _fb_status == "no_data":
                 st.info(
-                    "No calibration data yet. Load a **historical slate** to auto-record "
-                    "projection errors. Each slate you run builds the correction model."
+                    "No calibration data yet. Load a historical slate above, then click "
+                    "**Record Calibration** to start building the correction model."
                 )
             else:
-                # Status bar
                 _n = _cal_fb.get("n_slates", 0)
                 _status_emoji = "🟡" if _fb_status == "building" else "🟢"
                 _status_label = f"{_status_emoji} {_fb_status.upper()} — {_n} slate(s) recorded"
@@ -1430,7 +1497,6 @@ def main() -> None:
                 if _fb_status == "building":
                     st.caption(f"Need {3 - _n} more slate(s) for full correction model. Keep running historical dates.")
 
-                # Key metrics
                 m1, m2, m3 = st.columns(3)
                 with m1:
                     st.metric("Avg MAE", _cal_fb.get("avg_mae", "—"))
@@ -1439,7 +1505,6 @@ def main() -> None:
                 with m3:
                     st.metric("Overall Bias", f"{_cal_fb.get('overall_bias', 0):+.2f}")
 
-                # Position corrections
                 _pos_corr = _cal_fb.get("position_corrections", [])
                 if _pos_corr:
                     st.markdown("**Position corrections:**")
@@ -1447,7 +1512,6 @@ def main() -> None:
                     _pos_df["correction"] = _pos_df["correction"].apply(lambda x: f"{x:+.2f}")
                     st.dataframe(_pos_df, use_container_width=True, hide_index=True)
 
-                # Salary tier corrections
                 _tier_corr = _cal_fb.get("tier_corrections", [])
                 if _tier_corr:
                     st.markdown("**Salary tier corrections:**")
@@ -1455,14 +1519,12 @@ def main() -> None:
                     _tier_df["correction"] = _tier_df["correction"].apply(lambda x: f"{x:+.2f}")
                     st.dataframe(_tier_df, use_container_width=True, hide_index=True)
 
-                # Dates used
                 _dates = _cal_fb.get("dates", [])
                 if _dates:
                     st.caption(f"Slates: {', '.join(_dates)}")
 
-                # Reset button
                 if st.button("🗑️ Reset Calibration History", key="_lab_reset_cal_fb"):
-                    clear_calibration_history()
+                    st.session_state["_cal_fb_store"] = {}
                     st.info("Calibration feedback cleared.")
 
         except Exception as _cal_fb_exc:
