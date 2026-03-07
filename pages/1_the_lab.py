@@ -1038,6 +1038,8 @@ def main() -> None:
                     "🎮 Game Filter (leave empty for all)",
                     all_games, default=[], key="_hub_games_multi",
                 )
+            # Persist game selection to SlateState so Build page inherits it
+            slate.selected_games = selected_games if selected_games else []
             if selected_games:
                 opp_col = "opp" if "opp" in hub_pool.columns else (
                     "opponent" if "opponent" in hub_pool.columns else None
@@ -1045,7 +1047,7 @@ def main() -> None:
                 if opp_col:
                     hub_pool = _filter_pool_by_games(hub_pool, selected_games, opp_col)
                     slate.player_pool = hub_pool
-                    set_slate_state(slate)
+            set_slate_state(slate)
 
         # Pool preview — compact inline view
         st.caption(f"**{len(hub_pool)} players** loaded  |  Roster: {slate.roster_slots}  |  Cap: ${slate.salary_cap:,}")

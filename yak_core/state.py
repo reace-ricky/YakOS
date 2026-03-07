@@ -86,6 +86,9 @@ class SlateState:
     published: bool = False
     published_at: str = ""
     active_layers: List[str] = field(default_factory=lambda: ["Base"])
+    selected_games: List[str] = field(default_factory=list)
+    # Game matchup strings selected via game filter (e.g. ["BOS vs NYK", "GSW vs LAL"])
+    # Empty list means "all games". Persists across pages.
 
     def is_ready(self) -> bool:
         """Return True when the slate is fully configured and published."""

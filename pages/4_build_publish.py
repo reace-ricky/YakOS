@@ -49,6 +49,47 @@ from yak_core.edge import compute_edge_metrics  # noqa: E402
 from yak_core.lineup_scoring import compute_lineup_boom_bust, GRADE_COLORS as _GRADE_COLORS_HEX  # noqa: E402
 from yak_core.right_angle import apply_edge_adjustments, compute_breakout_candidates  # noqa: E402
 
+
+# ---------------------------------------------------------------------------
+# Game extraction / filter (shared with The Lab)
+# ---------------------------------------------------------------------------
+
+def _extract_games_build(pool: pd.DataFrame) -> list[str]:
+    """Return sorted list of 'TEAM vs OPP' matchup strings from the pool."""
+    opp_col = "opp" if "opp" in pool.columns else (
+        "opponent" if "opponent" in pool.columns else None
+    )
+    if opp_col and "team" in pool.columns:
+        teams = pool["team"].str.strip().str.upper().fillna("")
+        opps = pool[opp_col].str.strip().str.upper().fillna("")
+        pairs = {
+            " vs ".join(sorted([t, o]))
+            for t, o in zip(teams, opps)
+            if t and o
+        }
+        return sorted(pairs)
+    elif "team" in pool.columns:
+        return sorted(pool["team"].dropna().str.strip().str.upper().unique().tolist())
+    return []
+
+
+def _filter_pool_by_games_build(pool: pd.DataFrame, selected_games: list[str]) -> pd.DataFrame:
+    """Filter pool to only players in the selected games."""
+    if not selected_games:
+        return pool
+    opp_col = "opp" if "opp" in pool.columns else (
+        "opponent" if "opponent" in pool.columns else None
+    )
+    if not opp_col:
+        return pool
+    teams = pool["team"].str.strip().str.upper().fillna("")
+    opps = pool[opp_col].str.strip().str.upper().fillna("")
+    keys = pd.Series(
+        [" vs ".join(sorted([t, o])) if t and o else t for t, o in zip(teams, opps)],
+        index=pool.index,
+    )
+    return pool[keys.isin(selected_games)].reset_index(drop=True)
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -424,6 +465,22 @@ def main() -> None:
             key="_bp_min_salary",
         )
 
+    # ── Game Selector — scope lineups to specific matchups ─────────────
+    all_games = _extract_games_build(pool)
+    if all_games:
+        # Default to Lab selection if set, otherwise empty (all games)
+        _lab_games = slate.selected_games if hasattr(slate, "selected_games") else []
+        _default_games = [g for g in _lab_games if g in all_games]
+        build_games = st.multiselect(
+            "🎮 Game Filter (leave empty for all)",
+            all_games,
+            default=_default_games,
+            key="_bp_games",
+        )
+        if build_games:
+            pool = _filter_pool_by_games_build(pool, build_games)
+            st.caption(f"Filtered to {len(build_games)} game(s) — {len(pool)} players")
+
     # Lock/Exclude inline (no expander)
     player_names = sorted(pool["player_name"].dropna().tolist()) if "player_name" in pool.columns else []
     col_lock, col_excl = st.columns(2)
@@ -435,7 +492,8 @@ def main() -> None:
     st.caption(
         f"**Roster:** {slate.roster_slots}  |  "
         f"**Cap:** ${slate.salary_cap:,}  |  "
-        f"**Type:** {slate.contest_type}"
+        f"**Type:** {slate.contest_type}  |  "
+        f"**Pool:** {len(pool)} players"
     )
 
     st.divider()
