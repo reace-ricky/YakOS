@@ -47,6 +47,7 @@ from yak_core.components import render_lineup_cards_paged  # noqa: E402
 from yak_core.publishing import publish_edge_and_lineups  # noqa: E402
 from yak_core.edge import compute_edge_metrics  # noqa: E402
 from yak_core.lineup_scoring import compute_lineup_boom_bust, GRADE_COLORS as _GRADE_COLORS_HEX  # noqa: E402
+from yak_core.right_angle import apply_edge_adjustments, compute_breakout_candidates  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -102,13 +103,17 @@ def _build_lineups(
     exclude_names: list,
 ) -> tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
     """Build lineups using the appropriate engine (Classic / Showdown)."""
+    pool = pool.copy()
+    # If edge-adjusted projections exist, promote them to 'proj' so the
+    # archetype layer and optimizer both operate on the adjusted numbers.
+    if "effective_proj" in pool.columns:
+        pool["raw_proj"] = pool["proj"].copy()  # preserve original for reference
+        pool["proj"] = pool["effective_proj"]
     # Ensure player_id column exists (pool from The Lab may only have player_name)
     if "player_id" not in pool.columns:
         if "player_name" in pool.columns:
-            pool = pool.copy()
             pool["player_id"] = pool["player_name"]
         elif "dk_player_id" in pool.columns:
-            pool = pool.copy()
             pool["player_id"] = pool["dk_player_id"]
     try:
         cfg = {
@@ -120,6 +125,10 @@ def _build_lineups(
             "EXCLUDE": exclude_names or [],
             "PROJ_COL": proj_col,
         }
+        # Inject per-player exposure caps from edge overrides
+        _eo = st.session_state.get("_edge_overrides", {})
+        if _eo.get("max_exposure_players"):
+            cfg["PLAYER_MAX_EXPOSURE"] = _eo["max_exposure_players"]
         if slate.is_showdown:
             lineups_df, expo_df = build_showdown_lineups(pool, cfg)
         else:
@@ -248,6 +257,61 @@ def main() -> None:
     pool: pd.DataFrame = slate.player_pool.copy()
     pool = _apply_sim_learnings(pool, sim)
 
+    # ── Apply Ricky's Edge adjustments to the pool ────────────────────
+    _edge_df = getattr(slate, "edge_df", None)
+    if _edge_df is None or (hasattr(_edge_df, "empty") and _edge_df.empty):
+        try:
+            _edge_df = compute_edge_metrics(pool, calibration_state=slate.calibration_state)
+        except Exception:
+            _edge_df = None
+
+    # Auto-classify tiers on edge_df (same logic as ricky_edge.py)
+    if _edge_df is not None and not _edge_df.empty:
+        if "auto_tier" not in _edge_df.columns and "smash_prob" in _edge_df.columns:
+            def _classify(row):
+                smash = float(row.get("smash_prob", 0) or 0)
+                bust = float(row.get("bust_prob", 0) or 0)
+                own = float(row.get("own_pct", 5) or 5)
+                lev = float(row.get("leverage", 0) or 0)
+                if bust >= 0.25 and own >= 25.0:
+                    return "fade"
+                if smash >= 0.20:
+                    return "core"
+                if pd.notna(lev) and lev >= 1.3 and own < 20:
+                    return "leverage"
+                if smash >= 0.10:
+                    return "value"
+                if bust >= 0.30:
+                    return "fade"
+                return ""
+            _edge_df = _edge_df.copy()
+            _edge_df["auto_tier"] = _edge_df.apply(_classify, axis=1)
+
+    _breakout_df = None
+    try:
+        _breakout_df = compute_breakout_candidates(pool, top_n=15)
+    except Exception:
+        pass
+
+    pool, _edge_overrides = apply_edge_adjustments(pool, edge_df=_edge_df, breakout_df=_breakout_df)
+
+    # Store overrides in session for use during build
+    st.session_state["_edge_overrides"] = _edge_overrides
+
+    if _edge_overrides["adjustments_applied"] > 0:
+        _n_adj = _edge_overrides["adjustments_applied"]
+        _n_excl = len(_edge_overrides["auto_exclude"])
+        _n_fade = len(_edge_overrides["max_exposure_players"])
+        _n_core = len(_edge_overrides["min_exposure_players"])
+        _parts = [f"{_n_adj} projection adjustments"]
+        if _n_core:
+            _parts.append(f"{_n_core} core boosts")
+        if _n_fade:
+            _parts.append(f"{_n_fade} fade caps")
+        if _n_excl:
+            _parts.append(f"{_n_excl} auto-excluded (extreme bust)")
+        st.caption(f"✅ Edge → Optimizer: {', '.join(_parts)}")
+
     # ─────────────────────────────────────────────────────────────────────
     # Section 1: Contest Selection Advisor
     # ─────────────────────────────────────────────────────────────────────
@@ -351,6 +415,13 @@ def main() -> None:
 
     proj_col = _get_proj_col(pool, build_mode)
 
+    # Merge edge overrides into exclude list
+    _eo = st.session_state.get("_edge_overrides", {})
+    _auto_excl = _eo.get("auto_exclude", [])
+    _merged_exclude = list(set(list(exclude_names) + _auto_excl))
+    if _auto_excl:
+        st.caption(f"Auto-excluded (bust risk): {', '.join(_auto_excl)}")
+
     if st.button("▶️ Build Lineups", type="primary", key="_bp_build"):
         with st.spinner(f"Building {num_lineups} {contest_label} lineups…"):
             lineups_df, expo_df = _build_lineups(
@@ -363,7 +434,7 @@ def main() -> None:
                 archetype=str(archetype),
                 slate=slate,
                 lock_names=list(lock_names),
-                exclude_names=list(exclude_names),
+                exclude_names=_merged_exclude,
             )
             if lineups_df is not None:
                 lu_state.set_lineups(

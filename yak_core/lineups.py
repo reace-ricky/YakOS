@@ -280,6 +280,8 @@ def build_multiple_lineups_with_exposure(
     own_weight = float(cfg.get("OWN_WEIGHT", 0.0))
     solver_time_limit = int(cfg.get("SOLVER_TIME_LIMIT", 30))
     max_appearances = max(1, int(num_lineups * max_exposure))
+    # Per-player exposure overrides: {player_name: max_exposure_float}
+    player_max_exp = cfg.get("PLAYER_MAX_EXPOSURE", {})
     pos_caps = cfg.get("POS_CAPS", {})
     lock_names = [n.strip() for n in cfg.get("LOCK", [])]
     max_pair_appearances = int(cfg.get("MAX_PAIR_APPEARANCES", 0))
@@ -410,9 +412,12 @@ def build_multiple_lineups_with_exposure(
                         <= 1
                     )
 
-        # Exposure cap across lineups
+        # Exposure cap across lineups (supports per-player overrides)
         for i in range(n):
-            if appearance_count[i] >= max_appearances:
+            pname = players[i].get("player_name", "")
+            p_max_exp = player_max_exp.get(pname)
+            p_max_app = max(1, int(num_lineups * p_max_exp)) if p_max_exp is not None else max_appearances
+            if appearance_count[i] >= p_max_app:
                 for s in DK_POS_SLOTS:
                     prob += x[(i, s)] == 0
 

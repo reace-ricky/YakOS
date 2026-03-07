@@ -447,6 +447,141 @@ def compute_value_scores(pool_df: pd.DataFrame, top_n: int = 10, min_proj: float
 
 
 # ============================================================
+# EDGE → OPTIMIZER BRIDGE
+# ============================================================
+
+# Tuning knobs for how edge tiers translate to optimizer adjustments.
+_EDGE_PROJ_BUMPS = {
+    "core":      0.06,   # +6% proj for core plays
+    "leverage":  0.04,   # +4% for leverage (underowned upside)
+    "value":     0.02,   # +2% for value tier
+    "secondary": 0.00,   # neutral
+    "punt":      0.00,   # neutral
+    "fade":     -0.08,   # -8% proj penalty for fades
+}
+_BREAKOUT_PROJ_BUMP = 0.05   # +5% for breakout candidates (scaled by score)
+_FADE_MAX_EXPOSURE = 0.15    # fades capped at 15% exposure
+_CORE_MIN_EXPOSURE = 0.25    # cores get at least 25% exposure floor
+_BUST_EXCLUDE_THRESH = 0.45  # bust_prob >= 45% → auto-exclude
+
+
+def apply_edge_adjustments(
+    pool: pd.DataFrame,
+    edge_df: pd.DataFrame | None = None,
+    breakout_df: pd.DataFrame | None = None,
+) -> tuple[pd.DataFrame, dict]:
+    """Translate Ricky's Edge tiers + breakout candidates into optimizer-ready adjustments.
+
+    This is the bridge between the Edge Analysis (display layer) and the
+    Build & Publish optimizer.  It modifies the pool's ``effective_proj``
+    column and returns constraint overrides for the optimizer config.
+
+    Adjustments
+    -----------
+    1. **Projection bumps** — core/leverage/value get a % boost to
+       ``effective_proj``; fades get a penalty.  This biases the optimizer
+       toward edge-approved players without hard-locking.
+    2. **Breakout bonus** — players in ``breakout_df`` get an additional
+       projection bump scaled by their ``breakout_score`` (0-100 → 0-5%).
+    3. **Exposure constraints** — returned in ``overrides`` dict:
+       - ``min_exposure_players``: core plays guaranteed a minimum floor.
+       - ``max_exposure_players``: fades capped at low exposure.
+       - ``auto_exclude``: extreme bust risks auto-excluded.
+
+    Parameters
+    ----------
+    pool : pd.DataFrame
+        Player pool with at least ``player_name`` and ``proj`` columns.
+        Modified in-place (adds/updates ``effective_proj``).
+    edge_df : pd.DataFrame, optional
+        Edge metrics with ``player_name``, ``auto_tier``, ``bust_prob``,
+        ``smash_prob`` columns (from Ricky's Edge page).
+    breakout_df : pd.DataFrame, optional
+        Breakout candidates with ``player_name`` and ``breakout_score``.
+
+    Returns
+    -------
+    (pool, overrides)
+        pool : pd.DataFrame with updated ``effective_proj``.
+        overrides : dict with keys ``min_exposure_players`` (list of names),
+        ``max_exposure_players`` (dict name→max_exp float),
+        ``auto_exclude`` (list of names), ``adjustments_applied`` (int).
+    """
+    pool = pool.copy()
+    if "effective_proj" not in pool.columns:
+        pool["effective_proj"] = pool["proj"].copy()
+
+    overrides: dict = {
+        "min_exposure_players": [],
+        "max_exposure_players": {},
+        "auto_exclude": [],
+        "adjustments_applied": 0,
+    }
+
+    if pool.empty or "player_name" not in pool.columns:
+        return pool, overrides
+
+    n_adj = 0
+
+    # ── 1. Edge tier projection adjustments ────────────────────────────
+    if edge_df is not None and not edge_df.empty and "auto_tier" in edge_df.columns:
+        tier_map = dict(
+            zip(
+                edge_df["player_name"].astype(str).str.strip(),
+                edge_df["auto_tier"].astype(str).str.strip(),
+            )
+        )
+        bust_map = {}
+        if "bust_prob" in edge_df.columns:
+            bust_map = dict(
+                zip(
+                    edge_df["player_name"].astype(str).str.strip(),
+                    pd.to_numeric(edge_df["bust_prob"], errors="coerce").fillna(0),
+                )
+            )
+
+        for idx, row in pool.iterrows():
+            pname = str(row.get("player_name", "")).strip()
+            tier = tier_map.get(pname, "")
+            bump = _EDGE_PROJ_BUMPS.get(tier, 0.0)
+
+            if bump != 0.0:
+                pool.at[idx, "effective_proj"] = row["effective_proj"] * (1.0 + bump)
+                n_adj += 1
+
+            # Exposure constraints
+            if tier == "core":
+                overrides["min_exposure_players"].append(pname)
+            elif tier == "fade":
+                overrides["max_exposure_players"][pname] = _FADE_MAX_EXPOSURE
+
+            # Auto-exclude extreme bust risks
+            bust = bust_map.get(pname, 0.0)
+            if bust >= _BUST_EXCLUDE_THRESH:
+                overrides["auto_exclude"].append(pname)
+
+    # ── 2. Breakout candidate projection bonus ─────────────────────────
+    if breakout_df is not None and not breakout_df.empty and "breakout_score" in breakout_df.columns:
+        bo_map = dict(
+            zip(
+                breakout_df["player_name"].astype(str).str.strip(),
+                pd.to_numeric(breakout_df["breakout_score"], errors="coerce").fillna(0),
+            )
+        )
+        for idx, row in pool.iterrows():
+            pname = str(row.get("player_name", "")).strip()
+            bo_score = bo_map.get(pname, 0.0)
+            if bo_score > 0:
+                # Scale: breakout_score 0-100 → 0% to _BREAKOUT_PROJ_BUMP
+                scaled_bump = _BREAKOUT_PROJ_BUMP * (bo_score / 100.0)
+                pool.at[idx, "effective_proj"] = row["effective_proj"] * (1.0 + scaled_bump)
+                n_adj += 1
+
+    overrides["adjustments_applied"] = n_adj
+    return pool, overrides
+
+
+# ============================================================
 # TIERED STACK ALERTS (Sprint 4A — condition-convergence)
 # ============================================================
 
