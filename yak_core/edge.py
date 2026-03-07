@@ -30,6 +30,26 @@ import pandas as pd
 # is set to NaN to avoid division-by-near-zero values.
 _MIN_OWN_FOR_LEVERAGE: float = 0.1
 
+# ---------------------------------------------------------------------------
+# Empirical variance model (shared by edge.py and sims.py)
+# ---------------------------------------------------------------------------
+# Calibrated from 21-slate backtest (Feb 7 – Mar 5 2026, 3512 player-slates,
+# 387 unique players with 3+ appearances).  Within-player std/proj ratios:
+#   <$5K:    1.04   (cheap reserves: wildly volatile)
+#   $5-6.5K: 0.64   (mid-value: high variance)
+#   $6.5-8K: 0.44   (mid-tier: moderate variance)
+#   $8-10K:  0.35   (studs: tighter distributions)
+#   $10K+:   0.30   (elite: tightest distributions)
+# Old constant: 0.15 for everyone.  Was 7x too low for bargain plays,
+# 2x too low for stars.
+_EMPIRICAL_VOL_RATIO: Dict[str, float] = {
+    "lt5k":    1.04,
+    "5_65k":   0.64,
+    "65_8k":   0.44,
+    "8_10k":   0.35,
+    "10k_plus": 0.30,
+}
+
 # Columns always included in the returned edge_df.
 EDGE_DF_COLUMNS = [
     "player_name",
@@ -53,6 +73,66 @@ EDGE_DF_COLUMNS = [
 def _parse_numeric(series: pd.Series, default: float = 0.0) -> pd.Series:
     """Coerce a series to float, filling NaN with *default*."""
     return pd.to_numeric(series, errors="coerce").fillna(default)
+
+
+def compute_empirical_std(
+    proj: "np.ndarray | pd.Series",
+    salary: "np.ndarray | pd.Series",
+    variance_mult: float = 1.0,
+    min_std: float = 0.5,
+) -> np.ndarray:
+    """Return per-player standard deviation using the empirical salary-bracket model.
+
+    This is the **single source of truth** for sim variance.  Both the Monte
+    Carlo engine (``sims.py``) and the edge metric computation (``edge.py``)
+    should call this rather than deriving std from constant ceil/floor ratios.
+
+    Calibrated from 21-slate backtest (Feb 7 – Mar 5 2026, 3512 player-slates).
+    Within-player std/proj ratios by salary bracket:
+
+    * <$5K:    1.04  (cheap reserves — wildly volatile)
+    * $5-6.5K: 0.64  (mid-value — high variance)
+    * $6.5-8K: 0.44  (mid-tier — moderate variance)
+    * $8-10K:  0.35  (studs — tighter distributions)
+    * $10K+:   0.30  (elite — tightest distributions)
+
+    Parameters
+    ----------
+    proj : array-like
+        Player projection (fantasy points).
+    salary : array-like
+        Player DK salary.
+    variance_mult : float
+        Global variance multiplier (1.0 = calibrated baseline).  Used by the
+        UI volatility slider ("low" / "standard" / "high").
+    min_std : float
+        Floor on returned std values (default 0.5 FP).
+
+    Returns
+    -------
+    np.ndarray
+        Per-player standard deviation array, same length as inputs.
+    """
+    proj_arr = np.asarray(proj, dtype=float)
+    sal_arr = np.asarray(salary, dtype=float)
+
+    # Start with mid-tier default
+    vol_ratio = np.full(len(proj_arr), _EMPIRICAL_VOL_RATIO["65_8k"])
+
+    vol_ratio[sal_arr < 5000] = _EMPIRICAL_VOL_RATIO["lt5k"]
+
+    mask_5_65 = (sal_arr >= 5000) & (sal_arr < 6500)
+    vol_ratio[mask_5_65] = _EMPIRICAL_VOL_RATIO["5_65k"]
+
+    # 6.5-8K is already the default
+
+    mask_8_10 = (sal_arr >= 8000) & (sal_arr < 10000)
+    vol_ratio[mask_8_10] = _EMPIRICAL_VOL_RATIO["8_10k"]
+
+    vol_ratio[sal_arr >= 10000] = _EMPIRICAL_VOL_RATIO["10k_plus"]
+
+    std = proj_arr * vol_ratio * variance_mult
+    return np.clip(std, min_std, None)
 
 
 def _compute_smash_bust(

@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from yak_core.edge import compute_empirical_std  # noqa: E402
 from yak_core.sim_rating import compute_pipeline_ratings  # noqa: E402
 
 # Status values that make a player ineligible for sims.
@@ -321,8 +322,10 @@ def run_monte_carlo_for_lineups(
             return pd.DataFrame(), {}
         return pd.DataFrame()
 
-    vol_map = {"low": 0.10, "standard": 0.18, "high": 0.28}
-    default_vol = vol_map.get(volatility_mode, 0.18)
+    # Volatility mode → multiplier on top of empirical calibration.
+    # "standard" (1.0) = the backtest-calibrated baseline; low/high scale it.
+    vol_map = {"low": 0.65, "standard": 1.0, "high": 1.45}
+    variance_mult = vol_map.get(volatility_mode, 1.0)
 
     rng = np.random.RandomState(42)
 
@@ -331,17 +334,10 @@ def run_monte_carlo_for_lineups(
 
     for lu_id, grp in lineups_df.groupby("lineup_index"):
         projs = grp["proj"].fillna(0).values.astype(float)
+        salaries = pd.to_numeric(grp.get("salary", pd.Series(6000, index=grp.index)), errors="coerce").fillna(6000).values.astype(float)
 
-        # Derive per-player std from ceil/floor when available
-        if "ceil" in grp.columns and "floor" in grp.columns:
-            ceil_series = pd.to_numeric(grp["ceil"], errors="coerce")
-            floor_series = pd.to_numeric(grp["floor"], errors="coerce")
-            ceil_v = ceil_series.where(ceil_series.notna(), other=pd.Series(projs * 1.3, index=grp.index)).values.astype(float)
-            floor_v = floor_series.where(floor_series.notna(), other=pd.Series(projs * 0.7, index=grp.index)).values.astype(float)
-            stds = (ceil_v - floor_v) / 4.0
-            stds = np.clip(stds, projs * 0.05, projs * 0.6)
-        else:
-            stds = projs * default_vol
+        # Empirical salary-bracket variance (calibrated from 21-slate backtest)
+        stds = compute_empirical_std(projs, salaries, variance_mult=variance_mult)
 
         # (n_sims × n_players) outcome matrix
         sim_matrix = rng.normal(
@@ -676,14 +672,13 @@ def compute_player_anomaly_table(
             )
 
     rng = np.random.RandomState(42)
-    default_vol = 0.18
 
     # ── Phase 1: lineup-level simulations ────────────────────────────────────
     lineup_totals: Dict[Any, np.ndarray] = {}  # lineup_index → (n_sims,) array
 
     for lu_id, grp in lu.groupby("lineup_index"):
         projs_list: List[float] = []
-        stds_list: List[float] = []
+        sals_list: List[float] = []
 
         for _, player_row in grp.iterrows():
             pname = player_row["player_name"]
@@ -696,22 +691,17 @@ def compute_player_anomaly_table(
                 return val
 
             proj = float(pd.to_numeric(_get_field("proj", 0), errors="coerce") or 0)
-            ceil_raw = pd.to_numeric(_get_field("ceil", np.nan), errors="coerce")
-            floor_raw = pd.to_numeric(_get_field("floor", np.nan), errors="coerce")
-            ceil_val = float(ceil_raw) if pd.notna(ceil_raw) else proj * 1.3
-            floor_val = float(floor_raw) if pd.notna(floor_raw) else proj * 0.7
-            if proj > 0:
-                std = float(np.clip((ceil_val - floor_val) / 4.0, proj * 0.05, proj * 0.6))
-            else:
-                std = default_vol
+            sal = float(pd.to_numeric(_get_field("salary", 6000), errors="coerce") or 6000)
             projs_list.append(proj)
-            stds_list.append(std)
+            sals_list.append(sal)
 
         if not projs_list or all(p == 0 for p in projs_list):
             continue
 
         projs_arr = np.array(projs_list)
-        stds_arr = np.array(stds_list)
+        sals_arr = np.array(sals_list)
+        # Empirical salary-bracket variance (calibrated from 21-slate backtest)
+        stds_arr = compute_empirical_std(projs_arr, sals_arr)
 
         sim_matrix = rng.normal(
             loc=projs_arr[None, :],
@@ -1030,20 +1020,14 @@ def run_sims_pipeline(
     # Build a player-level projection/ownership lookup
     p_proj: Dict[str, float] = {}
     p_own: Dict[str, float] = {}
-    p_ceil: Dict[str, float] = {}
-    p_floor: Dict[str, float] = {}
 
     for _, row in pool.iterrows():
         pname = str(row.get("player_name", ""))
         if not pname:
             continue
         proj_val = float(row.get("proj", 0) or 0)
-        ceil_val = float(row.get("ceil", proj_val * 1.4) or proj_val * 1.4)
-        floor_val = float(row.get("floor", proj_val * 0.7) or proj_val * 0.7)
         own_val = float(row.get("own_proj", 5.0) or 5.0)  # ownership column used here: pool["own_proj"] (canonical projected ownership)
         p_proj[pname] = proj_val
-        p_ceil[pname] = ceil_val
-        p_floor[pname] = floor_val
         p_own[pname] = own_val
 
     # Monte Carlo: simulate lineup totals
@@ -1052,12 +1036,21 @@ def run_sims_pipeline(
     records: List[Dict[str, Any]] = []
 
     # Pre-simulate all player scores for all iterations
+    # Uses empirical salary-bracket variance model (calibrated from 21-slate backtest)
     all_player_sims: Dict[str, np.ndarray] = {}
-    for pname, proj in p_proj.items():
-        ceil = p_ceil[pname]
-        floor_val = p_floor[pname]
-        std = max((ceil - floor_val) / 4.0 * variance, 0.5)
-        all_player_sims[pname] = rng.normal(proj, std, n_sims)
+    _all_names = list(p_proj.keys())
+    _all_projs = np.array([p_proj[n] for n in _all_names])
+    _all_sals = np.array([p_own.get(n, 6000) for n in _all_names])  # salary lookup below
+    # Build salary lookup from pool
+    p_sal: Dict[str, float] = {}
+    for _, row in pool.iterrows():
+        pname = str(row.get("player_name", ""))
+        if pname:
+            p_sal[pname] = float(row.get("salary", 6000) or 6000)
+    _all_sals = np.array([p_sal.get(n, 6000) for n in _all_names])
+    _all_stds = compute_empirical_std(_all_projs, _all_sals, variance_mult=variance)
+    for i, pname in enumerate(_all_names):
+        all_player_sims[pname] = rng.normal(_all_projs[i], _all_stds[i], n_sims)
 
     # Build per-lineup totals across all simulations
     all_lineup_totals: Dict[Any, np.ndarray] = {}
@@ -1390,12 +1383,12 @@ def run_sims_for_contest_type(
                                      "contest_type"])
 
     proj = pd.to_numeric(df.get("proj", 0), errors="coerce").fillna(0)
-    ceil = pd.to_numeric(df.get("ceil", proj * 1.4), errors="coerce").fillna(proj * 1.4)
-    floor_ = pd.to_numeric(df.get("floor", proj * 0.7), errors="coerce").fillna(proj * 0.7)
+    salary = pd.to_numeric(df.get("salary", pd.Series(6000, index=df.index)), errors="coerce").fillna(6000)
     own = pd.to_numeric(df.get("own_pct", 5.0), errors="coerce").fillna(5.0)
 
     rng = np.random.default_rng(seed=42)
-    std = ((ceil - floor_) / 4.0 * variance).clip(lower=0.5).values
+    # Empirical salary-bracket variance (calibrated from 21-slate backtest)
+    std = compute_empirical_std(proj.values, salary.values, variance_mult=variance)
     proj_vals = proj.values
 
     # Simulate n_sims score draws per player

@@ -95,13 +95,23 @@ class TestComputeEdgeMetrics:
         assert not base_result["proj"].equals(cal_result["proj"])
 
     def test_calibration_ceiling_boost_applied(self):
-        pool = _make_pool(n=3)
+        # Use players across different salary brackets so ceiling_boost
+        # produces varying effects on normalised ceil_magnitude.
+        pool = pd.DataFrame({
+            "player_name": ["Star", "Mid", "Cheap"],
+            "salary": [10000, 7000, 4000],
+            "proj": [45.0, 22.0, 6.0],
+            "floor": [35.0, 16.0, 3.0],
+            "ceil": [60.0, 30.0, 12.0],
+            "ownership": [25.0, 12.0, 5.0],
+        })
         base_result = compute_edge_metrics(pool, calibration_state={})
         cal_result = compute_edge_metrics(pool, calibration_state={"ceiling_boost": 0.5})
-        # Ceiling boost changes the smash threshold → probabilities should differ
-        assert not base_result["smash_prob"].reset_index(drop=True).equals(
-            cal_result["smash_prob"].reset_index(drop=True)
-        )
+        # Ceiling boost changes edge_score via ceil_magnitude (not smash_prob,
+        # which is now driven by the empirical salary/ownership model).
+        base_es = base_result.set_index("player_name")["edge_score"]
+        cal_es = cal_result.set_index("player_name")["edge_score"]
+        assert not base_es.equals(cal_es)
 
     def test_preserves_extra_columns(self):
         pool = _make_pool()
