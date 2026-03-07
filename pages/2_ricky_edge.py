@@ -223,11 +223,19 @@ def main() -> None:
     # =====================================================================
     st.subheader("Top Stacks")
     try:
-        stack_alerts = compute_tiered_stack_alerts(pool)
+        stack_alerts = compute_tiered_stack_alerts(pool, edge_df=edge_df)
         if stack_alerts:
             _stack_df = pd.DataFrame(stack_alerts).head(5)
-            _stack_cols = [c for c in ["team", "tier", "conditions_met", "key_players", "implied_total", "game_ou"] if c in _stack_df.columns]
+            _stack_cols = [c for c in ["team", "tier", "conditions_met", "key_players", "implied_total", "game_ou", "leverage_warning"] if c in _stack_df.columns]
+            # Drop leverage_warning column if all empty (no edge data available)
+            if "leverage_warning" in _stack_df.columns and _stack_df["leverage_warning"].str.strip().eq("").all():
+                _stack_cols = [c for c in _stack_cols if c != "leverage_warning"]
             st.dataframe(_stack_df[_stack_cols], use_container_width=True, hide_index=True)
+
+            # Surface flagged-player warnings beneath the table
+            _warned = [a for a in stack_alerts[:5] if a.get("leverage_warning")]
+            for w in _warned:
+                st.caption(f"{w['team']}: {w['leverage_warning']}")
 
             # Auto-define stacks from top teams if no manual stacks exist
             if not edge.stacks:
@@ -236,7 +244,10 @@ def main() -> None:
                     if team and not pool.empty and "player_name" in pool.columns:
                         team_players = pool[pool["team"] == team].nlargest(3, "proj")["player_name"].tolist()
                         if len(team_players) >= 2:
-                            edge.add_stack(team, team_players[:3], f"Auto: {srow.get('tier', '')} ({srow.get('conditions_met', 0)} conditions)")
+                            _rationale = f"Auto: {srow.get('tier', '')} ({srow.get('conditions_met', 0)} conditions)"
+                            if srow.get("leverage_warning"):
+                                _rationale += f" | {srow['leverage_warning']}"
+                            edge.add_stack(team, team_players[:3], _rationale)
                 set_edge_state(edge)
         else:
             st.info("No stack data available.")

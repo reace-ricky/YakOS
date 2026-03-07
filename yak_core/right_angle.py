@@ -451,7 +451,10 @@ def compute_value_scores(pool_df: pd.DataFrame, top_n: int = 10, min_proj: float
 # ============================================================
 
 
-def compute_tiered_stack_alerts(pool_df: pd.DataFrame) -> list:
+def compute_tiered_stack_alerts(
+    pool_df: pd.DataFrame,
+    edge_df: pd.DataFrame | None = None,
+) -> list:
     """Return tiered stack alerts by checking convergence of multiple conditions.
 
     Conditions checked per team stack (up to 5):
@@ -462,6 +465,15 @@ def compute_tiered_stack_alerts(pool_df: pd.DataFrame) -> list:
         4. Stack correlation proxy >= 0.3 (approximated as competitive spread < 7
            combined with game total >= 85th-percentile of slate).
         5. Stack ceiling >= 1.4x stack floor (``ceil`` and ``floor`` cols or proxy).
+
+    Leverage Cross-Reference
+    ------------------------
+    When ``edge_df`` is provided (with columns ``player_name``, ``bust_prob``,
+    ``own_pct``, ``auto_tier``), key stack players are checked against individual
+    leverage data.  If any key player is a bust risk (bust_prob >= 0.30) or
+    tagged as "fade", the stack receives a ``leverage_warning`` and the flagged
+    players are listed.  If 2+ of the top-3 stack players are flagged, the
+    stack tier is downgraded (Strong → Moderate, Moderate gets a ⚠️ warning).
 
     Tiers
     -----
@@ -476,7 +488,8 @@ def compute_tiered_stack_alerts(pool_df: pd.DataFrame) -> list:
     list of dict
         Each dict has keys: ``team``, ``tier``, ``tier_emoji``,
         ``conditions_met``, ``conditions``, ``implied_total``, ``game_ou``,
-        ``spread``, ``combined_ownership``, ``key_players``.
+        ``spread``, ``combined_ownership``, ``key_players``,
+        ``leverage_warning``, ``flagged_players``.
     """
     if pool_df.empty or "team" not in pool_df.columns or "proj" not in pool_df.columns:
         return []
@@ -504,6 +517,21 @@ def compute_tiered_stack_alerts(pool_df: pd.DataFrame) -> list:
         df["floor"] = pd.to_numeric(df["floor"], errors="coerce")
     if own_col:
         df[own_col] = pd.to_numeric(df[own_col], errors="coerce").fillna(15.0)
+
+    # ── Build player-level leverage lookup from edge_df ──────────────
+    _edge_lookup: dict = {}  # player_name -> {bust_prob, own_pct, auto_tier, leverage}
+    _BUST_THRESH_STACK = 0.30
+    if edge_df is not None and not edge_df.empty and "player_name" in edge_df.columns:
+        for _, erow in edge_df.iterrows():
+            pname = str(erow.get("player_name", "")).strip()
+            if not pname:
+                continue
+            _edge_lookup[pname] = {
+                "bust_prob": float(erow.get("bust_prob", 0) or 0),
+                "own_pct": float(erow.get("own_pct", 0) or 0),
+                "auto_tier": str(erow.get("auto_tier", "")),
+                "leverage": float(erow.get("leverage", 0) or 0),
+            }
 
     team_rows = []
     for team, grp in df.groupby("team"):
@@ -556,10 +584,11 @@ def compute_tiered_stack_alerts(pool_df: pd.DataFrame) -> list:
         if own_col:
             combined_own = float(top3[own_col].sum())
 
+        _top3_names = (
+            top3["player_name"].tolist() if "player_name" in top3.columns else []
+        )
         key_players = (
-            ", ".join(top3["player_name"].tolist()[:2])
-            if "player_name" in top3.columns
-            else "—"
+            ", ".join(_top3_names[:2]) if _top3_names else "—"
         )
 
         team_rows.append({
@@ -571,6 +600,7 @@ def compute_tiered_stack_alerts(pool_df: pd.DataFrame) -> list:
             "stack_floor": stack_floor,
             "combined_own": combined_own,
             "key_players": key_players,
+            "_top3_names": _top3_names,
         })
 
     if not team_rows:
@@ -635,6 +665,42 @@ def compute_tiered_stack_alerts(pool_df: pd.DataFrame) -> list:
         tier_emoji = "🔴" if n >= 4 else "🟡"
         tier = "Strong" if n >= 4 else "Moderate"
 
+        # ── Leverage cross-reference for key stack players ───────────
+        flagged_players: list[str] = []
+        leverage_warning = ""
+        if _edge_lookup:
+            top3_names = r.get("_top3_names", [])
+            if isinstance(top3_names, str):
+                top3_names = [s.strip() for s in top3_names.split(",") if s.strip()]
+            for pname in top3_names:
+                info = _edge_lookup.get(pname)
+                if info is None:
+                    continue
+                is_bust = info["bust_prob"] >= _BUST_THRESH_STACK
+                is_fade = info["auto_tier"] == "fade"
+                is_over_owned = info["own_pct"] >= 25.0 and info["bust_prob"] >= 0.25
+                if is_bust or is_fade or is_over_owned:
+                    reason = []
+                    if is_bust:
+                        reason.append(f"bust {info['bust_prob']:.0%}")
+                    if is_over_owned:
+                        reason.append(f"own {info['own_pct']:.0f}%")
+                    if is_fade and not is_bust:
+                        reason.append("fade")
+                    flagged_players.append(f"{pname} ({', '.join(reason)})")
+
+            n_flagged = len(flagged_players)
+            if n_flagged >= 2:
+                # Majority of core stack players are bust risks → downgrade tier
+                if tier == "Strong":
+                    tier = "Moderate"
+                    tier_emoji = "🟡"
+                    leverage_warning = f"⚠️ Downgraded — {n_flagged} key players have bust/fade risk"
+                else:
+                    leverage_warning = f"⚠️ Caution — {n_flagged} key players have bust/fade risk"
+            elif n_flagged == 1:
+                leverage_warning = f"⚠️ {flagged_players[0]} — check individual leverage"
+
         alerts.append({
             "team": r["team"],
             "tier": tier,
@@ -646,6 +712,8 @@ def compute_tiered_stack_alerts(pool_df: pd.DataFrame) -> list:
             "spread": r["abs_spread"],
             "combined_ownership": round(r["combined_own"], 1),
             "key_players": r["key_players"],
+            "leverage_warning": leverage_warning,
+            "flagged_players": flagged_players,
         })
 
     alerts.sort(key=lambda x: x["conditions_met"], reverse=True)
