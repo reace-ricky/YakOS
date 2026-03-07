@@ -1164,15 +1164,24 @@ def main() -> None:
             set_sim_state(sim)
 
     # Contest type for pipeline
-    pipeline_contest_display = ["GPP Main", "GPP Early", "GPP Late", "Cash Main"]
+    pipeline_contest_display = ["GPP Main", "GPP Early", "GPP Late", "Showdown", "Cash Main"]
     _CONTEST_NAME_TO_PIPELINE = {
         "GPP Main": "GPP_MAIN",
         "GPP Early": "GPP_EARLY",
         "GPP Late": "GPP_LATE",
+        "Showdown": "SHOWDOWN",
         "Cash Main": "CASH",
-        "Showdown": "GPP_EARLY",
     }
-    _default_display_idx = pipeline_contest_display.index(slate.contest_name) if slate.contest_name in pipeline_contest_display else 1
+    # Auto-select contest type based on the Slate Loading preset
+    _default_display_idx = (
+        pipeline_contest_display.index(slate.contest_name)
+        if slate.contest_name in pipeline_contest_display
+        else (
+            pipeline_contest_display.index(contest_type_label)
+            if contest_type_label in pipeline_contest_display
+            else 0
+        )
+    )
     pipeline_contest_display_name = st.selectbox(
         "Contest Type",
         pipeline_contest_display,
@@ -1188,7 +1197,7 @@ def main() -> None:
                     player_results = _build_player_level_sim_results(pool, sim.variance)
                     sim.player_results = player_results
                     # Build real optimized lineups instead of dummy placeholders
-                    _PIPELINE_TO_OPTIMIZER = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "CASH": "CASH"}
+                    _PIPELINE_TO_OPTIMIZER = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "SHOWDOWN": "SHOWDOWN", "CASH": "CASH"}
                     optimizer_contest = _PIPELINE_TO_OPTIMIZER.get(pipeline_contest, "GPP_20")
                     real_lineups = build_ricky_lineups(edge_df=compute_edge_metrics(pool, calibration_state=slate.calibration_state, variance=sim.variance), contest_type=optimizer_contest, calibration_state=slate.calibration_state, salary_cap=SALARY_CAP)
                     if not real_lineups.empty:
@@ -1265,7 +1274,7 @@ def main() -> None:
             # Reconstruct from the optimizer output stored during pipeline run
             try:
                 _edge_for_score = compute_edge_metrics(pool, calibration_state=slate.calibration_state, variance=sim.variance)
-                _PIPELINE_TO_OPTIMIZER_SC = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "CASH": "CASH"}
+                _PIPELINE_TO_OPTIMIZER_SC = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "SHOWDOWN": "SHOWDOWN", "CASH": "CASH"}
                 _opt_contest = _PIPELINE_TO_OPTIMIZER_SC.get(pipeline_contest, "GPP_20")
                 _lu_long = build_ricky_lineups(edge_df=_edge_for_score, contest_type=_opt_contest, calibration_state=slate.calibration_state, salary_cap=SALARY_CAP)
 

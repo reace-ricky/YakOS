@@ -59,6 +59,13 @@ _CONTEST_BUILD_PRESETS: Dict[str, Dict[str, Any]] = {
         "STACK_WEIGHT": 0.0,
         "VALUE_WEIGHT": 0.15,
     },
+    "SHOWDOWN": {
+        "NUM_LINEUPS": 3,
+        "MAX_EXPOSURE": 0.60,
+        "MIN_SALARY_USED": 46000,
+        "STACK_WEIGHT": 0.0,
+        "VALUE_WEIGHT": 0.05,
+    },
 }
 _DEFAULT_BUILD_PRESET: Dict[str, Any] = {
     "NUM_LINEUPS": 5,
@@ -121,6 +128,7 @@ def build_ricky_lineups(
         ``salary``, ``proj``.  Returns an empty DataFrame on failure.
     """
     from yak_core.lineups import build_multiple_lineups_with_exposure  # noqa: PLC0415
+    from yak_core.lineups import build_showdown_lineups  # noqa: PLC0415
     from yak_core.config import SALARY_CAP  # noqa: PLC0415
 
     if edge_df is None or edge_df.empty:
@@ -152,7 +160,16 @@ def build_ricky_lineups(
         return pd.DataFrame()
 
     try:
-        lineups_df, _ = build_multiple_lineups_with_exposure(pool, preset)
+        # Route to Showdown Captain optimizer for Showdown contest type
+        if contest_type.upper() == "SHOWDOWN":
+            lineups_df = build_showdown_lineups(
+                pool,
+                num_lineups=preset.get("NUM_LINEUPS", 3),
+                lock=lock,
+                exclude=exclude,
+            )
+        else:
+            lineups_df, _ = build_multiple_lineups_with_exposure(pool, preset)
     except Exception:
         return pd.DataFrame()
 
