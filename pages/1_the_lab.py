@@ -59,6 +59,7 @@ from yak_core.calibration import (  # noqa: E402
     DFS_ARCHETYPES,
 )
 from yak_core.config import (  # noqa: E402
+    YAKOS_ROOT,
     CONTEST_PRESETS,
     CONTEST_PRESET_LABELS,
     get_pool_size_range,
@@ -919,6 +920,19 @@ def main() -> None:
                     except Exception as _own_exc:
                         st.caption(f"ℹ️ Ownership projection skipped: {_own_exc}")
 
+                    # ── Auto-merge saved RotoGrinders file (if exists) ──
+                    _rg_auto_path = os.path.join(
+                        YAKOS_ROOT, "data", "rg_uploads", f"rg_{slate_date_str}.csv"
+                    )
+                    if os.path.isfile(_rg_auto_path):
+                        try:
+                            _saved_rg = load_rg_projections(_rg_auto_path)
+                            pool = merge_rg_with_pool(pool, _saved_rg)
+                            _own_mean_rg = pool["ownership"].mean() if "ownership" in pool.columns else 0
+                            st.caption(f"📊 Saved RG ownership auto-merged (avg {_own_mean_rg:.1f}%)")
+                        except Exception as _rg_auto_exc:
+                            st.caption(f"ℹ️ Saved RG auto-merge skipped: {_rg_auto_exc}")
+
                     # Store in session state
                     st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"] = pool
                     st.session_state[f"_hub_rules_{slate_date_str}_{_contest_safe}"] = parsed_rules
@@ -992,6 +1006,28 @@ def main() -> None:
 
         # RG upload
         with st.expander("External Projections Upload", expanded=False):
+            # Check if a saved RG file exists for this slate
+            _rg_save_dir = os.path.join(YAKOS_ROOT, "data", "rg_uploads")
+            _rg_save_path = os.path.join(_rg_save_dir, f"rg_{slate_date_str}.csv")
+            _has_saved_rg = os.path.isfile(_rg_save_path)
+
+            if _has_saved_rg:
+                st.caption(f"✅ RotoGrinders file saved for {slate_date_str}. It will auto-merge on load.")
+                if st.button("🔄 Re-merge saved RG file now", key="_hub_rg_remerge"):
+                    try:
+                        _saved_rg = load_rg_projections(_rg_save_path)
+                        merged = merge_rg_with_pool(
+                            st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"],
+                            _saved_rg,
+                        )
+                        st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"] = merged
+                        slate.player_pool = merged
+                        set_slate_state(slate)
+                        st.success(f"Re-merged saved RG data ({len(merged)} rows).")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Failed to re-merge saved RG: {exc}")
+
             st.caption("Upload a RotoGrinders CSV to merge projections into the pool.")
             rg_file = st.file_uploader("RotoGrinders CSV", type="csv", key="_hub_rg_upload")
             if rg_file:
@@ -1004,7 +1040,10 @@ def main() -> None:
                         st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"] = merged
                         slate.player_pool = merged
                         set_slate_state(slate)
-                        st.success(f"Merged RG data into pool ({len(merged)} rows).")
+                        # Save RG file to disk for persistence across sessions
+                        os.makedirs(_rg_save_dir, exist_ok=True)
+                        rg_df.to_csv(_rg_save_path, index=False)
+                        st.success(f"Merged RG data into pool ({len(merged)} rows). File saved for this slate.")
                         st.rerun()
                 except Exception as exc:
                     st.error(f"Failed to read RG CSV: {exc}")
