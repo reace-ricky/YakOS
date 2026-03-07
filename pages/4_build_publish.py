@@ -379,10 +379,15 @@ def main() -> None:
     # ─────────────────────────────────────────────────────────────────────
     st.subheader("⚙️ Build Config")
 
-    col1, col2 = st.columns(2)
+    # Auto-inherit contest type from Lab selection
+    _lab_contest = slate.contest_name if slate.contest_name in CONTEST_PRESET_LABELS else None
+    _default_contest_idx = CONTEST_PRESET_LABELS.index(_lab_contest) if _lab_contest else 0
+
+    col1, col2, col3 = st.columns(3)
     with col1:
-        contest_label = st.selectbox("Contest Type", CONTEST_PRESET_LABELS, key="_bp_contest")
+        contest_label = st.selectbox("Contest Type", CONTEST_PRESET_LABELS, index=_default_contest_idx, key="_bp_contest")
         preset = CONTEST_PRESETS.get(contest_label, {})
+    with col2:
         default_mode = _CONTEST_TO_BUILD_MODE.get(contest_label, "median")
         build_mode = st.selectbox(
             "Build Mode",
@@ -390,6 +395,7 @@ def main() -> None:
             index=["floor", "median", "ceiling"].index(default_mode),
             key="_bp_build_mode",
         )
+    with col3:
         archetype = st.selectbox(
             "Archetype",
             list(DFS_ARCHETYPES.keys()),
@@ -398,26 +404,32 @@ def main() -> None:
             key="_bp_archetype",
         )
 
-    with col2:
+    col4, col5, col6 = st.columns(3)
+    with col4:
         num_lineups = st.number_input(
             "# Lineups", min_value=1, max_value=150,
             value=int(preset.get("default_lineups", 1)),
             key="_bp_num_lineups",
         )
+    with col5:
         max_exp = st.slider(
             "Max Exposure", min_value=0.1, max_value=1.0, step=0.05,
             value=float(preset.get("default_max_exposure", 0.5)),
             key="_bp_max_exp",
         )
+    with col6:
         min_salary = st.number_input(
             "Min Salary Used", min_value=40000, max_value=50000, step=100,
             value=int(preset.get("min_salary", 48000)),
             key="_bp_min_salary",
         )
 
-    with st.expander("Lock / Exclude Players", expanded=False):
-        player_names = sorted(pool["player_name"].dropna().tolist()) if "player_name" in pool.columns else []
+    # Lock/Exclude inline (no expander)
+    player_names = sorted(pool["player_name"].dropna().tolist()) if "player_name" in pool.columns else []
+    col_lock, col_excl = st.columns(2)
+    with col_lock:
         lock_names = st.multiselect("Lock (in every lineup)", player_names, key="_bp_lock")
+    with col_excl:
         exclude_names = st.multiselect("Exclude", player_names, key="_bp_exclude")
 
     st.caption(

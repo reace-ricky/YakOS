@@ -13,6 +13,13 @@ Responsibilities
 - **Contest-type Gauges**: Score-based gauges driven by sim smash probability.
 - **Ricky Edge Check Gate**: Read-only gate status.
 
+UI AUTOMATION (v2):
+- Slates auto-fetch when date/sport/contest changes — no manual button.
+- Player pool auto-loads when a slate is selected — no manual button.
+- Sims auto-run when pool loads — no manual button.
+- Expanders replaced with inline sections where possible.
+- Flow: Pick date+sport+contest → pick slate → everything else is automatic.
+
 State read:  SlateState, RickyEdgeState, SimState
 State written: SlateState, SimState
 """
@@ -191,23 +198,12 @@ def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
     sal = pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0).astype(float)
 
     # ── Derive floor/ceil from pool["proj"] with per-player variance ──────
-    # The "proj" column is the single source of truth from the YakOS
-    # projection pipeline.  Floor and ceil must differ PER PLAYER so that
-    # smash/bust z-scores are NOT constants.  We derive per-player spread
-    # from rolling-FP standard deviation when available; otherwise fall
-    # back to salary-tier multipliers (studs are more consistent than
-    # value plays in NBA DFS).
     proj_fp = pd.to_numeric(pool.get("proj", 0), errors="coerce").fillna(0).clip(lower=0)
 
-    # If proj is all zeros (shouldn't happen post-apply_projections), use
-    # salary-implied as a last-resort safety net.
     if (proj_fp == 0).all():
         _FP_PER_K = 4.0
         proj_fp = sal * _FP_PER_K / 1000.0
 
-    # Compute per-player spread ratio from rolling game-log variance.
-    # Players with high FP variance → wider floor/ceil range.
-    # Players with low variance (consistent studs) → tighter range.
     _rolling_std = pd.Series(np.nan, index=pool.index)
     _rolling_mean = pd.Series(np.nan, index=pool.index)
     for col in ["rolling_fp_5", "rolling_fp_10", "rolling_fp_20"]:
@@ -215,33 +211,25 @@ def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
             vals = pd.to_numeric(pool[col], errors="coerce")
             _rolling_mean = _rolling_mean.fillna(vals)
 
-    # Use coefficient of variation from rolling data when available,
-    # else derive spread from salary tier (cheaper = more volatile).
-    # sal_k ranges ~3-13; spread_mult ranges ~0.25 (studs) to ~0.55 (min)
     sal_k = (sal / 1000.0).clip(lower=3.0)
     spread_mult = (0.65 - sal_k * 0.03).clip(lower=0.25, upper=0.55)
 
-    # If rolling data is present, blend rolling CV with salary-tier spread
     if "rolling_fp_5" in pool.columns and "rolling_fp_10" in pool.columns:
         fp5 = pd.to_numeric(pool["rolling_fp_5"], errors="coerce")
         fp10 = pd.to_numeric(pool["rolling_fp_10"], errors="coerce")
-        # Approximate CV: |fp5 - fp10| / mean → measures recent volatility
         _mean = ((fp5.fillna(0) + fp10.fillna(0)) / 2.0).replace(0, 1)
         _diff = (fp5.fillna(0) - fp10.fillna(0)).abs()
         rolling_cv = (_diff / _mean).clip(lower=0.05, upper=0.60)
         has_rolling = fp5.notna() & fp10.notna()
-        # Blend: 60% rolling CV + 40% salary tier for players with data
         spread_mult[has_rolling] = (
             rolling_cv[has_rolling] * 0.60 + spread_mult[has_rolling] * 0.40
         ).clip(lower=0.25, upper=0.55)
 
-    # Floor = proj × (1 - spread_mult),  Ceil = proj × (1 + spread_mult)
     if not has_floor:
         pool["floor"] = (proj_fp * (1.0 - spread_mult)).round(2)
     if not has_ceil:
         pool["ceil"] = (proj_fp * (1.0 + spread_mult)).round(2)
 
-    # Sanity check: ceil MUST be above proj; floor MUST be below proj.
     _ceil = pd.to_numeric(pool["ceil"], errors="coerce")
     _floor = pd.to_numeric(pool["floor"], errors="coerce")
     _bad_ceil = _ceil.isna() | (_ceil <= proj_fp)
@@ -265,7 +253,6 @@ def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
     if _min_json is not None:
         proj_min = predict_batch(_min_json, pool)
     else:
-        # Formula: weighted rolling minutes or salary fallback
         _min_keys = [("rolling_min_5", 0.50), ("rolling_min_10", 0.30), ("rolling_min_20", 0.20)]
         min_weighted = pd.Series(0.0, index=pool.index)
         min_w_sum = pd.Series(0.0, index=pool.index)
@@ -280,9 +267,6 @@ def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
         proj_min = sal_min_fallback.copy()
         proj_min[has_min_sig] = min_weighted[has_min_sig] / min_w_sum[has_min_sig].replace(0, 1)
 
-        # Players with NO game-log signal AND bottom-tier salary are likely
-        # deep bench / DNP-CD risks.  Cap their projected minutes at 4 so
-        # compute_sim_eligible (min_proj_minutes=4) can filter them out.
         _MIN_SALARY_FOR_FALLBACK = 4000
         deep_bench_mask = (~has_min_sig) & (sal < _MIN_SALARY_FOR_FALLBACK)
         proj_min[deep_bench_mask] = proj_min[deep_bench_mask].clip(upper=3.5)
@@ -305,10 +289,6 @@ def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
         )
         pool.loc[inelig_mask, "proj_minutes"] = 0.0
 
-    # ── Ownership: use fast salary-rank (instant) instead of field sim ───
-    # Field sim (1000 PuLP solves) can take 10+ minutes and is the primary
-    # cause of the hang.  Salary-rank ownership is a good initial estimate;
-    # users can run field sim separately from the Sims section.
     pool = apply_ownership(pool, use_field_sim=False)
     return compute_sim_eligible(pool)
 
@@ -409,10 +389,8 @@ def _build_player_level_sim_results(pool: pd.DataFrame, variance: float) -> pd.D
         return pd.DataFrame()
     df = pool.copy()
 
-    # Only include sim-eligible players (filters OUT/IR/0-min players)
     if "sim_eligible" in df.columns:
         df = df[df["sim_eligible"].astype(bool)].reset_index(drop=True)
-    # For historical slates with actual minutes data, drop 0-minute players
     if "mp_actual" in df.columns:
         mp = pd.to_numeric(df["mp_actual"], errors="coerce").fillna(0)
         df = df[mp > 0].reset_index(drop=True)
@@ -423,9 +401,6 @@ def _build_player_level_sim_results(pool: pd.DataFrame, variance: float) -> pd.D
     floor = pd.to_numeric(df.get("floor", proj * 0.7), errors="coerce").fillna(proj * 0.7)
     own = pd.to_numeric(df.get("ownership", 5.0), errors="coerce").fillna(5.0)
 
-    # ── Sanity check: external floor/ceil may be on a different scale ────
-    # (e.g., RG/DFF ceil=25 when proj=43 → smash=1.0 for everyone).
-    # Ceiling MUST be above proj; floor MUST be below proj.
     _bad_fc = (ceil <= proj) | (floor >= proj) | (ceil < floor)
     ceil = ceil.where(~_bad_fc, proj * 1.45)
     floor = floor.where(~_bad_fc, proj * 0.65)
@@ -482,24 +457,397 @@ def _gauge_score(sim_results: Optional[pd.DataFrame], contest: str) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Auto-pipeline: loads pool + runs sims in one shot
+# ---------------------------------------------------------------------------
+
+def _auto_load_pool_and_sims(
+    sport: str,
+    slate_date_str: str,
+    contest_type_label: str,
+    preset: dict,
+    selected_dg_id: Optional[int],
+    _is_historical: bool,
+    _salary_client: "SalaryHistoryClient",
+    _today_date,
+    slate,
+    sim,
+    _contest_safe: str,
+    status_container,
+) -> Optional[pd.DataFrame]:
+    """Combined pool load + sims pipeline. Returns the loaded pool or None.
+
+    Streams status messages into status_container (a st.status context).
+    """
+    proj_source = "model"
+    draft_group_id: Optional[int] = selected_dg_id
+
+    try:
+        _historical_salary_df: Optional[pd.DataFrame] = None
+        _historical_dg_id: Optional[int] = None
+
+        # ── Resolve salary data ──────────────────────────────────────
+        if _is_historical and not draft_group_id:
+            _cached = _salary_client.load_cached_salaries(slate_date_str)
+            if _cached is not None and not _cached.empty:
+                _historical_salary_df = _cached
+                status_container.write(f"Historical salaries loaded from cache for {slate_date_str}.")
+            else:
+                _hist_df = _salary_client.get_historical_salaries(slate_date_str)
+                if not _hist_df.empty:
+                    _historical_salary_df = _hist_df
+                    _historical_dg_id = _hist_df.attrs.get("draft_group_id")
+                else:
+                    _dff_pool = fetch_dff_pool(sport)
+                    if not _dff_pool.empty:
+                        _historical_salary_df = _dff_pool
+        elif _is_historical and draft_group_id:
+            _hist_dg_df = _salary_client.get_draftables(draft_group_id)
+            if not _hist_dg_df.empty:
+                _historical_salary_df = _hist_dg_df
+                _historical_dg_id = draft_group_id
+            else:
+                _dff_pool = fetch_dff_pool(sport)
+                if not _dff_pool.empty:
+                    _historical_salary_df = _dff_pool
+
+        if not draft_group_id and _historical_salary_df is None and not _is_historical:
+            pass
+        elif _is_historical and not draft_group_id and _historical_salary_df is None:
+            status_container.warning("No slate selected — pick a slate above.")
+            return None
+        elif _is_historical and draft_group_id and _historical_salary_df is None:
+            pass
+
+        # ── Resolve the player pool ──────────────────────────────
+        pool = None
+        _pool_source = "DK"
+        if _historical_salary_df is not None and not _historical_salary_df.empty:
+            pool = _historical_salary_df.copy()
+            if "position" in pool.columns and "pos" not in pool.columns:
+                pool = pool.rename(columns={"position": "pos"})
+            if "player_dk_id" in pool.columns and "dk_player_id" not in pool.columns:
+                pool = pool.rename(columns={"player_dk_id": "dk_player_id"})
+            if _historical_dg_id and not draft_group_id:
+                draft_group_id = _historical_dg_id
+            if "dff_proj" in pool.columns:
+                _pool_source = "DailyFantasyFuel"
+        elif draft_group_id:
+            try:
+                pool = fetch_dk_draftables(draft_group_id)
+            except Exception:
+                pool = pd.DataFrame()
+            if pool.empty:
+                pool = fetch_dff_pool(sport)
+                _pool_source = "DailyFantasyFuel"
+            if pool.empty:
+                status_container.error(f"No players found for Draft Group ID {draft_group_id}.")
+                return None
+        else:
+            pool = fetch_dff_pool(sport)
+            _pool_source = "DailyFantasyFuel"
+            if pool.empty:
+                status_container.error("No players found.")
+                return None
+
+        if pool is not None and not pool.empty:
+            pool = _normalize_dk_pool(pool)
+            if "salary" not in pool.columns:
+                pool["salary"] = 0
+            pool["salary"] = pd.to_numeric(pool["salary"], errors="coerce").fillna(0)
+
+            # Auto-save live salary data
+            if not _is_historical and not pool.empty:
+                _cache_col_map = {"pos": "position", "dk_player_id": "player_dk_id"}
+                _save_cols = [
+                    c for c in ("player_name", "pos", "team", "salary", "dk_player_id")
+                    if c in pool.columns
+                ]
+                if _save_cols:
+                    _salary_client.save_salaries(
+                        slate_date_str,
+                        pool[_save_cols].rename(columns=_cache_col_map),
+                    )
+
+            # Tank01 enrichment
+            _api_key = st.session_state.get("rapidapi_key", "")
+            if _api_key:
+                try:
+                    _t01_id_map: dict = {}
+                    for _id_col in ("player_id", "tank01_player_id", "t01_id"):
+                        if _id_col in pool.columns:
+                            _t01_id_map = dict(
+                                zip(pool["player_name"].astype(str), pool[_id_col].astype(str))
+                            )
+                            break
+                    _player_names = pool["player_name"].dropna().tolist()
+                    status_container.write("Fetching game log rolling stats…")
+                    _game_log_df = fetch_player_game_logs(
+                        _player_names,
+                        _t01_id_map if _t01_id_map else None,
+                        _api_key,
+                    )
+                    if not _game_log_df.empty:
+                        pool = pool.merge(_game_log_df, on="player_name", how="left")
+                        status_container.write(f"✅ Rolling stats merged for {_game_log_df['player_name'].nunique()} players.")
+
+                    status_container.write("Fetching Vegas odds…")
+                    _odds_df = fetch_betting_odds(slate_date_str, _api_key)
+                    if not _odds_df.empty:
+                        _team_odds_rows = []
+                        for _, _o in _odds_df.iterrows():
+                            _total = _o["vegas_total"]
+                            _spread = _o["spread"]
+                            if _o["home_team"]:
+                                _team_odds_rows.append({
+                                    "team": _o["home_team"],
+                                    "vegas_total": _total,
+                                    "spread": _spread,
+                                })
+                            if _o["away_team"]:
+                                import math
+                                _away_spread = (
+                                    -_spread
+                                    if not (isinstance(_spread, float) and math.isnan(_spread))
+                                    else float("nan")
+                                )
+                                _team_odds_rows.append({
+                                    "team": _o["away_team"],
+                                    "vegas_total": _total,
+                                    "spread": _away_spread,
+                                })
+                        if _team_odds_rows:
+                            _team_odds_df = pd.DataFrame(_team_odds_rows).drop_duplicates("team")
+                            for _vc in ("vegas_total", "spread"):
+                                if _vc in pool.columns:
+                                    pool = pool.drop(columns=[_vc])
+                            pool = pool.merge(_team_odds_df, on="team", how="left")
+                            status_container.write(f"✅ Vegas odds merged for {_team_odds_df['team'].nunique()} teams.")
+                except Exception as t01_exc:
+                    status_container.write(f"ℹ️ Tank01 enrichment: {t01_exc}")
+
+                # ── Auto injury detection ────────
+                status_container.write("Auto-detecting injuries…")
+                try:
+                    pool = auto_flag_injuries(
+                        pool,
+                        api_key=_api_key,
+                        slate_date=slate_date_str,
+                    )
+                    _inj_flagged = pool[
+                        pool["injury_note"].fillna("").astype(str).str.len() > 0
+                    ] if "injury_note" in pool.columns else pd.DataFrame()
+                    if not _inj_flagged.empty:
+                        status_container.write(f"⚠️ {len(_inj_flagged)} player(s) flagged as injured/inactive.")
+                except Exception as _inj_exc:
+                    status_container.write(f"ℹ️ Injury detection skipped: {_inj_exc}")
+
+            # Apply projection pipeline
+            parsed_rules = _rules_from_preset(preset)
+            cfg = merge_config({
+                "PROJ_SOURCE": proj_source,
+                "SLATE_DATE": slate_date_str,
+                "CONTEST_TYPE": preset["internal_contest"],
+            })
+            pool = apply_projections(pool, cfg)
+
+            # Apply calibration corrections
+            try:
+                from yak_core.calibration_feedback import get_correction_factors, apply_corrections
+                if "_cal_fb_store" not in st.session_state:
+                    st.session_state["_cal_fb_store"] = {}
+                _cf = get_correction_factors(store=st.session_state["_cal_fb_store"])
+                if _cf.get("n_slates", 0) > 0:
+                    pool = apply_corrections(pool, _cf, store=st.session_state["_cal_fb_store"])
+                    status_container.write(f"📐 Calibration corrections applied ({_cf['n_slates']} slate(s))")
+            except Exception:
+                pass
+
+            pool = _enrich_pool(pool)
+
+            # Dedup
+            _group_cols = [c for c in _PLAYER_IDENTITY_COLS if c in pool.columns]
+            _agg_cols = {c: "mean" for c in _NUMERIC_AGG_COLS if c in pool.columns}
+            if _group_cols and _agg_cols:
+                _extra_cols = [c for c in pool.columns if c not in _group_cols and c not in _agg_cols]
+                _extra_agg = {c: "first" for c in _extra_cols}
+                pool = pool.groupby(_group_cols, as_index=False).agg({**_agg_cols, **_extra_agg})
+            else:
+                if "dk_player_id" in pool.columns:
+                    dedup_key = "dk_player_id"
+                else:
+                    dedup_key = "player_name"
+                if "proj" in pool.columns:
+                    pool = pool.sort_values("proj", ascending=False)
+                pool = pool.drop_duplicates(subset=[dedup_key], keep="first")
+            pool = pool.reset_index(drop=True)
+
+            # Filter ineligible
+            _before = len(pool)
+            pool = _filter_ineligible_players(pool)
+            _removed = _before - len(pool)
+            if _removed:
+                status_container.write(f"ℹ️ {_removed} player(s) removed (OUT/DND/IR or 0 proj minutes).")
+
+            # For HISTORICAL slates, cross-reference box scores
+            if _is_historical and st.session_state.get("rapidapi_key", ""):
+                _api_key = st.session_state["rapidapi_key"]
+                try:
+                    from yak_core.live import fetch_actuals_from_api
+                    _box_date = slate_date_str.replace("-", "")
+                    _actuals = fetch_actuals_from_api(_box_date, {"RAPIDAPI_KEY": _api_key})
+                    if not _actuals.empty and "actual_fp" in _actuals.columns:
+                        _played = set(_actuals[_actuals["actual_fp"] > 0]["player_name"].values)
+                        if _played:
+                            _act_map = _actuals.set_index("player_name")["actual_fp"].to_dict()
+                            pool["actual_fp"] = pool["player_name"].map(_act_map)
+
+                            _before_box = len(pool)
+                            pool = pool[
+                                pool["player_name"].isin(_played)
+                            ].reset_index(drop=True)
+                            _dnp_removed = _before_box - len(pool)
+                            if _dnp_removed:
+                                status_container.write(f"ℹ️ {_dnp_removed} DNP player(s) removed via box score.")
+
+                            # Auto-record projection errors
+                            if "proj" in pool.columns and "actual_fp" in pool.columns:
+                                try:
+                                    from yak_core.calibration_feedback import record_slate_errors
+                                    if "_cal_fb_store" not in st.session_state:
+                                        st.session_state["_cal_fb_store"] = {}
+                                    _fb_result = record_slate_errors(slate_date_str, pool, store=st.session_state["_cal_fb_store"])
+                                    if "error" not in _fb_result:
+                                        _fb_mae = _fb_result.get("overall", {}).get("mae", "?")
+                                        status_container.write(f"📐 Calibration feedback recorded (MAE: {_fb_mae})")
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+
+            # ── Ownership projections ──────────────
+            try:
+                from yak_core.ext_ownership import predict_ownership, blend_and_normalize
+                pool = predict_ownership(pool)
+                pool = blend_and_normalize(pool)
+                if "own_proj" in pool.columns:
+                    pool["ownership"] = pool["own_proj"]
+            except Exception:
+                pass
+
+            # ── Auto-merge saved RotoGrinders file ──
+            _rg_auto_path = os.path.join(
+                YAKOS_ROOT, "data", "rg_uploads", f"rg_{slate_date_str}.csv"
+            )
+            if os.path.isfile(_rg_auto_path):
+                try:
+                    _saved_rg = load_rg_projections(_rg_auto_path)
+                    pool = merge_rg_with_pool(pool, _saved_rg)
+                except Exception:
+                    pass
+
+            # Store in session state
+            st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"] = pool
+            st.session_state[f"_hub_rules_{slate_date_str}_{_contest_safe}"] = parsed_rules
+            st.session_state[f"_hub_draft_group_id_{slate_date_str}_{_contest_safe}"] = draft_group_id
+
+            # Auto-publish the slate
+            _ts = datetime.now(timezone.utc).isoformat()
+            slate.sport = sport
+            slate.site = "DK"
+            slate.slate_date = slate_date_str
+            slate.proj_source = proj_source
+            slate.contest_name = contest_type_label
+            slate.draft_group_id = draft_group_id
+            if parsed_rules:
+                slate.apply_roster_rules(parsed_rules)
+            slate.contest_type = contest_type_label
+            slate.player_pool = pool
+            slate.published = True
+            slate.published_at = _ts
+            if "Base" not in slate.active_layers:
+                slate.active_layers = ["Base"]
+            set_slate_state(slate)
+
+            status_container.write(f"✅ Loaded {len(pool)} players.")
+
+            # ══════════════════════════════════════════════════════════
+            # AUTO-RUN SIMS (no button needed)
+            # ══════════════════════════════════════════════════════════
+            status_container.write(f"Running sims ({sim.n_sims:,} iterations)…")
+            try:
+                player_results = _build_player_level_sim_results(pool, sim.variance)
+                sim.player_results = player_results
+
+                # Determine pipeline contest
+                _CONTEST_NAME_TO_PIPELINE = {
+                    "GPP Main": "GPP_MAIN",
+                    "GPP Early": "GPP_EARLY",
+                    "GPP Late": "GPP_LATE",
+                    "Cash Main": "CASH",
+                    "Showdown": "GPP_EARLY",
+                }
+                pipeline_contest = _CONTEST_NAME_TO_PIPELINE.get(contest_type_label, "GPP_20")
+
+                _PIPELINE_TO_OPTIMIZER = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "CASH": "CASH"}
+                optimizer_contest = _PIPELINE_TO_OPTIMIZER.get(pipeline_contest, "GPP_20")
+                real_lineups = build_ricky_lineups(
+                    edge_df=compute_edge_metrics(pool, calibration_state=slate.calibration_state, variance=sim.variance),
+                    contest_type=optimizer_contest,
+                    calibration_state=slate.calibration_state,
+                    salary_cap=SALARY_CAP,
+                )
+                if not real_lineups.empty:
+                    pipeline_df = run_sims_pipeline(
+                        pool=pool,
+                        lineups_df=real_lineups,
+                        contest_type=pipeline_contest,
+                        n_sims=sim.n_sims,
+                        variance=sim.variance,
+                        slate_date=slate.slate_date,
+                        draft_group_id=sim.draft_group_id,
+                    )
+                    sim.pipeline_output[pipeline_contest] = pipeline_df
+                set_sim_state(sim)
+
+                new_edge_df = compute_edge_metrics(
+                    pool,
+                    calibration_state=slate.calibration_state,
+                    variance=sim.variance,
+                )
+                slate.edge_df = new_edge_df
+                if "Edge" not in slate.active_layers:
+                    slate.active_layers.append("Edge")
+                set_slate_state(slate)
+                status_container.write(f"✅ Sims complete — {len(player_results)} players analyzed.")
+            except Exception as sim_exc:
+                status_container.write(f"⚠️ Sims failed: {sim_exc}")
+
+            return pool
+
+    except Exception as exc:
+        status_container.error(f"Failed to load player pool: {exc}")
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Main page
 # ---------------------------------------------------------------------------
 
 def main() -> None:
     st.title("🧪 The Lab")
-    st.caption("Load slate, run sims, analyze edge, calibrate projections.")
+    st.caption("Select date + contest → pick a slate → pool loads and sims run automatically.")
 
     slate = get_slate_state()
     edge = get_edge_state()
     sim = get_sim_state()
 
     # =====================================================================
-    # SECTION 1: SLATE LOADING (formerly Slate Hub)
+    # SECTION 1: SLATE LOADING — automated pipeline
     # =====================================================================
     st.subheader("📥 Load Slate")
 
-    # ── Row 1: Sport + Date ──────────────────────────────────────────────
-    col_sport, col_date = st.columns(2)
+    # ── Row 1: Sport + Date + Contest ─────────────────────────────────────
+    col_sport, col_date, col_contest = st.columns([1, 1, 2])
     with col_sport:
         sport = st.selectbox("Sport", ["NBA", "PGA"], index=0 if slate.sport == "NBA" else 1)
     with col_date:
@@ -507,16 +855,14 @@ def main() -> None:
         _today = pd.Timestamp.now(tz=ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
         slate_date = st.date_input("Date", value=pd.to_datetime(_today))
         slate_date_str = str(slate_date)
+    with col_contest:
+        contest_type_label = st.selectbox("Contest Type", CONTEST_PRESET_LABELS)
+        preset = CONTEST_PRESETS[contest_type_label]
 
     # Read Tank01 RapidAPI key from secrets
     rapidapi_key = st.secrets.get("TANK01_RAPIDAPI_KEY")
     if rapidapi_key:
         st.session_state["rapidapi_key"] = rapidapi_key
-
-    # ── Row 2: Contest Type ──────────────────────────────────────────────
-    contest_type_label = st.selectbox("Contest Type", CONTEST_PRESET_LABELS)
-    preset = CONTEST_PRESETS[contest_type_label]
-    st.caption(preset.get("description", ""))
 
     # Cache invalidation on date/sport/contest change
     _contest_safe = contest_type_label.lower().replace(" ", "_").replace("/", "-").replace("-", "_")
@@ -541,436 +887,137 @@ def main() -> None:
             st.session_state.pop(key, None)
         old_slate_key = f"_hub_slates_{_stale_sport}_{_stale_date}"
         st.session_state.pop(old_slate_key, None)
+        # Clear cached slates to force re-fetch
+        st.session_state.pop(f"_hub_slates_{sport}_{slate_date_str}", None)
     st.session_state["_hub_prev_date"] = slate_date_str
     st.session_state["_hub_prev_sport"] = sport
     st.session_state["_hub_prev_contest"] = contest_type_label
 
     proj_source = "model"
 
-    # ── Slate Picker ─────────────────────────────────────────────────────
+    # ── Auto-fetch slates ─────────────────────────────────────────────────
     from zoneinfo import ZoneInfo as _ZI2
     _today_date = pd.Timestamp.now(tz=_ZI2("America/New_York")).date()
     _is_historical = pd.to_datetime(slate_date_str).date() < _today_date
     _salary_client = SalaryHistoryClient()
 
-    with st.expander(
-        "📅 Historical slates" if _is_historical else "🟢 Live slates",
-        expanded=False,
-    ):
-        if _is_historical:
-            st.caption(f"Historical mode — slates fetched from FantasyLabs for {slate_date_str}")
-        else:
-            st.caption("Live mode — slates from DraftKings lobby (FantasyLabs fallback)")
+    _slate_cache_key = f"_hub_slates_{sport}_{slate_date_str}"
+    _cached_slates = st.session_state.get(_slate_cache_key)
 
-        _slate_cache_key = f"_hub_slates_{sport}_{slate_date_str}"
-        _cached_slates = st.session_state.get(_slate_cache_key)
+    # AUTO-FETCH: if no cached slates for this date/sport combo, fetch them
+    if _cached_slates is None:
+        _auto_fetch_status = st.empty()
+        try:
+            with _auto_fetch_status.container():
+                st.caption("🔍 Fetching available slates…")
+            if _is_historical:
+                raw_dgs = _fetch_historical_draft_groups(slate_date_str)
+                _source = "FantasyLabs"
+            else:
+                try:
+                    raw_dgs = _fetch_dk_draft_groups(sport)
+                    _source = "DraftKings"
+                except Exception:
+                    raw_dgs = []
+                if not raw_dgs:
+                    raw_dgs = _fetch_historical_draft_groups(slate_date_str)
+                    _source = "FantasyLabs"
+            if raw_dgs:
+                slate_options = build_slate_options(raw_dgs)
+                st.session_state[_slate_cache_key] = slate_options
+                _cached_slates = slate_options
+            _auto_fetch_status.empty()
+        except Exception:
+            _auto_fetch_status.empty()
 
-        col_fetch_slate, col_clear_slate = st.columns([2, 1])
-        with col_fetch_slate:
-            if st.button("🔍 Fetch Available Slates", type="secondary"):
-                with st.spinner("Fetching slates…"):
-                    try:
-                        if _is_historical:
-                            raw_dgs = _fetch_historical_draft_groups(slate_date_str)
-                            _source = "FantasyLabs"
-                        else:
-                            try:
-                                raw_dgs = _fetch_dk_draft_groups(sport)
-                                _source = "DraftKings"
-                            except Exception:
-                                raw_dgs = []
-                            if not raw_dgs:
-                                raw_dgs = _fetch_historical_draft_groups(slate_date_str)
-                                _source = "FantasyLabs"
-                        if not raw_dgs:
-                            st.warning(f"No slates found on {_source} for {slate_date_str}. Try a different date.")
-                        else:
-                            slate_options = build_slate_options(raw_dgs)
-                            st.session_state[_slate_cache_key] = slate_options
-                            _cached_slates = slate_options
-                            st.success(f"Found {len(slate_options)} slate(s) from {_source}.")
-                    except Exception as exc:
-                        st.error(f"Failed to fetch slates: {exc}")
-        with col_clear_slate:
-            if _cached_slates and st.button("Clear"):
-                st.session_state.pop(_slate_cache_key, None)
-                _cached_slates = None
-                st.rerun()
+    # ── Slate picker (inline, not in expander) ────────────────────────────
+    selected_dg_id: Optional[int] = None
+    selected_slate_label: Optional[str] = None
 
-        selected_dg_id: Optional[int] = None
-        selected_slate_label: Optional[str] = None
-
-        if _cached_slates:
-            slate_labels = [s["label"] for s in _cached_slates]
-            selected_idx = st.radio(
-                "Choose a slate",
-                range(len(slate_labels)),
-                format_func=lambda i: slate_labels[i],
-                key="_hub_slate_radio",
+    if _cached_slates:
+        _mode_label = "📅 Historical" if _is_historical else "🟢 Live"
+        st.caption(f"{_mode_label} — {len(_cached_slates)} slate(s) found")
+        slate_labels = [s["label"] for s in _cached_slates]
+        selected_idx = st.radio(
+            "Choose a slate",
+            range(len(slate_labels)),
+            format_func=lambda i: slate_labels[i],
+            key="_hub_slate_radio",
+            horizontal=True if len(slate_labels) <= 4 else False,
+        )
+        if selected_idx is not None:
+            selected_slate = _cached_slates[selected_idx]
+            selected_dg_id = selected_slate["draft_group_id"]
+            selected_slate_label = selected_slate["label"]
+            st.caption(
+                f"Draft Group **{selected_dg_id}** · "
+                f"{selected_slate['game_count']} game(s) · "
+                f"{selected_slate['game_style']}"
             )
-            if selected_idx is not None:
-                selected_slate = _cached_slates[selected_idx]
-                selected_dg_id = selected_slate["draft_group_id"]
-                selected_slate_label = selected_slate["label"]
-                st.caption(
-                    f"Draft Group **{selected_dg_id}** · "
-                    f"{selected_slate['game_count']} game(s) · "
-                    f"{selected_slate['game_style']}"
-                )
+    else:
+        st.info(f"No slates found for {slate_date_str}. Try a different date.")
 
-        # Manual DG override
+    # Manual DG override (collapsed)
+    with st.expander("Manual Draft Group Override", expanded=False):
         manual_dg = st.number_input(
-            "Manual Draft Group ID",
+            "Draft Group ID",
             min_value=0, step=1, value=0,
-            help="Paste a DraftKings Draft Group ID if you know it. Overrides the slate picker.",
+            help="Paste a DraftKings Draft Group ID if you know it.",
             key="_hub_manual_dg",
         )
         if manual_dg > 0:
             selected_dg_id = int(manual_dg)
             selected_slate_label = f"Manual (DG {manual_dg})"
 
-    # Store selected_dg_id in session state so it persists after expander closes
+    # Store selected_dg_id in session state so it persists
     if selected_dg_id:
         st.session_state["_lab_selected_dg_id"] = selected_dg_id
     else:
         selected_dg_id = st.session_state.get("_lab_selected_dg_id")
 
-    # ── Load Player Pool Button ──────────────────────────────────────────
-    if st.button("📥 Load Player Pool", type="primary"):
-        draft_group_id: Optional[int] = selected_dg_id
+    # ── AUTO-LOAD POOL + SIMS ─────────────────────────────────────────────
+    # Triggers when a new slate is selected (dg_id changes)
+    _pool_loaded_key = f"_hub_pool_{slate_date_str}_{_contest_safe}"
+    _prev_dg_key = "_lab_prev_loaded_dg"
+    _need_load = (
+        selected_dg_id is not None
+        and st.session_state.get(_pool_loaded_key) is None
+    )
+    # Also reload if the draft group changed
+    if (
+        selected_dg_id is not None
+        and st.session_state.get(_prev_dg_key) is not None
+        and st.session_state.get(_prev_dg_key) != selected_dg_id
+    ):
+        _need_load = True
 
-        with st.spinner("Loading player pool…"):
-            try:
-                _historical_salary_df: Optional[pd.DataFrame] = None
-                _historical_dg_id: Optional[int] = None
+    if _need_load:
+        with st.status("Loading pool & running sims…", expanded=True) as _load_status:
+            pool_result = _auto_load_pool_and_sims(
+                sport=sport,
+                slate_date_str=slate_date_str,
+                contest_type_label=contest_type_label,
+                preset=preset,
+                selected_dg_id=selected_dg_id,
+                _is_historical=_is_historical,
+                _salary_client=_salary_client,
+                _today_date=_today_date,
+                slate=slate,
+                sim=sim,
+                _contest_safe=_contest_safe,
+                status_container=_load_status,
+            )
+            if pool_result is not None:
+                st.session_state[_prev_dg_key] = selected_dg_id
+                _load_status.update(label="Pool loaded & sims complete", state="complete")
+            else:
+                _load_status.update(label="Load failed", state="error")
 
-                if _is_historical and not draft_group_id:
-                    _cached = _salary_client.load_cached_salaries(slate_date_str)
-                    if _cached is not None and not _cached.empty:
-                        _historical_salary_df = _cached
-                        st.info(f"Historical salaries loaded from cache for {slate_date_str}.")
-                    else:
-                        with st.spinner("Fetching historical salaries from DK…"):
-                            _hist_df = _salary_client.get_historical_salaries(slate_date_str)
-                        if not _hist_df.empty:
-                            _historical_salary_df = _hist_df
-                            _historical_dg_id = _hist_df.attrs.get("draft_group_id")
-                            if _historical_dg_id:
-                                st.info(f"Historical salaries loaded from DK (DraftGroup {_historical_dg_id})")
-                        else:
-                            st.caption("ℹ️ DK API unavailable — trying DailyFantasyFuel…")
-                            _dff_pool = fetch_dff_pool(sport)
-                            if not _dff_pool.empty:
-                                _historical_salary_df = _dff_pool
-                                st.info(f"✅ Player pool loaded from DailyFantasyFuel ({len(_dff_pool)} players)")
-                elif _is_historical and draft_group_id:
-                    with st.spinner(f"Fetching historical players for DraftGroup {draft_group_id}…"):
-                        _hist_dg_df = _salary_client.get_draftables(draft_group_id)
-                    if not _hist_dg_df.empty:
-                        _historical_salary_df = _hist_dg_df
-                        _historical_dg_id = draft_group_id
-                        st.info(f"Historical salaries loaded from DK (DraftGroup {draft_group_id}, {slate_date_str})")
-                    else:
-                        st.caption("ℹ️ DK API unavailable — trying DailyFantasyFuel…")
-                        _dff_pool = fetch_dff_pool(sport)
-                        if not _dff_pool.empty:
-                            _historical_salary_df = _dff_pool
-                            st.info(f"✅ Player pool loaded from DailyFantasyFuel ({len(_dff_pool)} players)")
-                        else:
-                            st.warning(
-                                f"No players found for DraftGroup {draft_group_id} on {slate_date_str}. "
-                                "Both DK API and DailyFantasyFuel returned empty."
-                            )
-
-                if not draft_group_id and _historical_salary_df is None and not _is_historical:
-                    pass
-                elif _is_historical and not draft_group_id and _historical_salary_df is None:
-                    st.warning(
-                        'No slate selected. Use "Fetch Available Slates" to pick a slate, '
-                        "or enter a Draft Group ID manually."
-                    )
-                elif _is_historical and draft_group_id and _historical_salary_df is None:
-                    pass
-
-                # ── Resolve the player pool ──────────────────────────────
-                pool = None
-                _pool_source = "DK"
-                if _historical_salary_df is not None and not _historical_salary_df.empty:
-                    pool = _historical_salary_df.copy()
-                    if "position" in pool.columns and "pos" not in pool.columns:
-                        pool = pool.rename(columns={"position": "pos"})
-                    if "player_dk_id" in pool.columns and "dk_player_id" not in pool.columns:
-                        pool = pool.rename(columns={"player_dk_id": "dk_player_id"})
-                    if _historical_dg_id and not draft_group_id:
-                        draft_group_id = _historical_dg_id
-                    if "dff_proj" in pool.columns:
-                        _pool_source = "DailyFantasyFuel"
-                elif draft_group_id:
-                    try:
-                        pool = fetch_dk_draftables(draft_group_id)
-                    except Exception:
-                        pool = pd.DataFrame()
-                    if pool.empty:
-                        st.caption("ℹ️ DK API unavailable — loading from DailyFantasyFuel…")
-                        pool = fetch_dff_pool(sport)
-                        _pool_source = "DailyFantasyFuel"
-                    if pool.empty:
-                        st.error(
-                            f"No players found for Draft Group ID {draft_group_id}. "
-                            "Both DK API and DailyFantasyFuel returned empty."
-                        )
-                        st.stop()
-                else:
-                    st.caption("ℹ️ No draft group selected — loading from DailyFantasyFuel…")
-                    pool = fetch_dff_pool(sport)
-                    _pool_source = "DailyFantasyFuel"
-                    if pool.empty:
-                        st.error("No players found. DailyFantasyFuel returned empty.")
-                        st.stop()
-
-                if pool is not None and not pool.empty:
-                    pool = _normalize_dk_pool(pool)
-                    if "salary" not in pool.columns:
-                        pool["salary"] = 0
-                    pool["salary"] = pd.to_numeric(pool["salary"], errors="coerce").fillna(0)
-
-                    # Auto-save live salary data
-                    if not _is_historical and not pool.empty:
-                        _cache_col_map = {"pos": "position", "dk_player_id": "player_dk_id"}
-                        _save_cols = [
-                            c for c in ("player_name", "pos", "team", "salary", "dk_player_id")
-                            if c in pool.columns
-                        ]
-                        if _save_cols:
-                            _salary_client.save_salaries(
-                                slate_date_str,
-                                pool[_save_cols].rename(columns=_cache_col_map),
-                            )
-
-                    # Tank01 enrichment
-                    _api_key = st.session_state.get("rapidapi_key", "")
-                    if _api_key:
-                        try:
-                            _t01_id_map: dict = {}
-                            for _id_col in ("player_id", "tank01_player_id", "t01_id"):
-                                if _id_col in pool.columns:
-                                    _t01_id_map = dict(
-                                        zip(pool["player_name"].astype(str), pool[_id_col].astype(str))
-                                    )
-                                    break
-                            _player_names = pool["player_name"].dropna().tolist()
-                            with st.spinner("Fetching game log rolling stats from Tank01…"):
-                                _game_log_df = fetch_player_game_logs(
-                                    _player_names,
-                                    _t01_id_map if _t01_id_map else None,
-                                    _api_key,
-                                )
-                            if not _game_log_df.empty:
-                                pool = pool.merge(_game_log_df, on="player_name", how="left")
-                                st.caption(f"✅ Rolling stats merged for {_game_log_df['player_name'].nunique()} players.")
-                            else:
-                                st.caption("ℹ️ No game log rolling stats returned from Tank01.")
-
-                            with st.spinner("Fetching Vegas odds from Tank01…"):
-                                _odds_df = fetch_betting_odds(slate_date_str, _api_key)
-                            if not _odds_df.empty:
-                                _team_odds_rows = []
-                                for _, _o in _odds_df.iterrows():
-                                    _total = _o["vegas_total"]
-                                    _spread = _o["spread"]
-                                    if _o["home_team"]:
-                                        _team_odds_rows.append({
-                                            "team": _o["home_team"],
-                                            "vegas_total": _total,
-                                            "spread": _spread,
-                                        })
-                                    if _o["away_team"]:
-                                        import math
-                                        _away_spread = (
-                                            -_spread
-                                            if not (isinstance(_spread, float) and math.isnan(_spread))
-                                            else float("nan")
-                                        )
-                                        _team_odds_rows.append({
-                                            "team": _o["away_team"],
-                                            "vegas_total": _total,
-                                            "spread": _away_spread,
-                                        })
-                                if _team_odds_rows:
-                                    _team_odds_df = pd.DataFrame(_team_odds_rows).drop_duplicates("team")
-                                    for _vc in ("vegas_total", "spread"):
-                                        if _vc in pool.columns:
-                                            pool = pool.drop(columns=[_vc])
-                                    pool = pool.merge(_team_odds_df, on="team", how="left")
-                                    st.caption(f"✅ Vegas odds merged for {_team_odds_df['team'].nunique()} teams.")
-                            else:
-                                st.caption("ℹ️ No Vegas odds returned from Tank01.")
-                        except Exception as t01_exc:
-                            st.caption(f"ℹ️ Tank01 enrichment not available: {t01_exc}")
-
-                    # ── Auto injury detection (runs automatically) ────────
-                    if _api_key:
-                        with st.spinner("Auto-detecting injured / inactive players…"):
-                            try:
-                                pool = auto_flag_injuries(
-                                    pool,
-                                    api_key=_api_key,
-                                    slate_date=slate_date_str,
-                                )
-                                _inj_flagged = pool[
-                                    pool["injury_note"].fillna("").astype(str).str.len() > 0
-                                ] if "injury_note" in pool.columns else pd.DataFrame()
-                                if not _inj_flagged.empty:
-                                    _inj_show = _inj_flagged[
-                                        [c for c in ["player_name", "salary", "status", "injury_note"]
-                                         if c in _inj_flagged.columns]
-                                    ].copy()
-                                    st.warning(f"⚠️ {len(_inj_flagged)} player(s) auto-flagged as injured/inactive:")
-                                    st.dataframe(_inj_show, use_container_width=True, hide_index=True)
-                                else:
-                                    st.caption("✅ No injured/inactive players detected.")
-                            except Exception as _inj_exc:
-                                st.caption(f"ℹ️ Auto injury detection skipped: {_inj_exc}")
-
-                    # Apply projection pipeline
-                    parsed_rules = _rules_from_preset(preset)
-                    cfg = merge_config({
-                        "PROJ_SOURCE": proj_source,
-                        "SLATE_DATE": slate_date_str,
-                        "CONTEST_TYPE": preset["internal_contest"],
-                    })
-                    pool = apply_projections(pool, cfg)
-
-                    # Apply calibration corrections from historical feedback
-                    try:
-                        from yak_core.calibration_feedback import get_correction_factors, apply_corrections
-                        if "_cal_fb_store" not in st.session_state:
-                            st.session_state["_cal_fb_store"] = {}
-                        _cf = get_correction_factors(store=st.session_state["_cal_fb_store"])
-                        if _cf.get("n_slates", 0) > 0:
-                            pool = apply_corrections(pool, _cf, store=st.session_state["_cal_fb_store"])
-                            st.caption(f"📐 Calibration corrections applied ({_cf['n_slates']} slate(s) of history)")
-                    except Exception as _cf_exc:
-                        pass  # silently skip if feedback module not ready
-
-                    pool = _enrich_pool(pool)
-
-                    # Dedup
-                    _group_cols = [c for c in _PLAYER_IDENTITY_COLS if c in pool.columns]
-                    _agg_cols = {c: "mean" for c in _NUMERIC_AGG_COLS if c in pool.columns}
-                    if _group_cols and _agg_cols:
-                        _extra_cols = [c for c in pool.columns if c not in _group_cols and c not in _agg_cols]
-                        _extra_agg = {c: "first" for c in _extra_cols}
-                        pool = pool.groupby(_group_cols, as_index=False).agg({**_agg_cols, **_extra_agg})
-                    else:
-                        if "dk_player_id" in pool.columns:
-                            dedup_key = "dk_player_id"
-                        else:
-                            dedup_key = "player_name"
-                        if "proj" in pool.columns:
-                            pool = pool.sort_values("proj", ascending=False)
-                        pool = pool.drop_duplicates(subset=[dedup_key], keep="first")
-                    pool = pool.reset_index(drop=True)
-
-                    # Filter ineligible
-                    _before = len(pool)
-                    pool = _filter_ineligible_players(pool)
-                    _removed = _before - len(pool)
-                    if _removed:
-                        st.caption(f"ℹ️ {_removed} player(s) removed (OUT/DND/IR or 0 proj minutes).")
-
-                    # For HISTORICAL slates, cross-reference box scores to drop
-                    # players who got 0 actual minutes (DNP-CD, inactive, etc.)
-                    if _is_historical and _api_key:
-                        try:
-                            from yak_core.live import fetch_actuals_from_api
-                            _box_date = slate_date_str.replace("-", "")
-                            _actuals = fetch_actuals_from_api(_box_date, {"RAPIDAPI_KEY": _api_key})
-                            if not _actuals.empty and "actual_fp" in _actuals.columns:
-                                # Players who appeared in box scores with > 0 FP
-                                _played = set(_actuals[_actuals["actual_fp"] > 0]["player_name"].values)
-                                if _played:
-                                    # Merge actual_fp into pool before filtering
-                                    _act_map = _actuals.set_index("player_name")["actual_fp"].to_dict()
-                                    pool["actual_fp"] = pool["player_name"].map(_act_map)
-
-                                    _before_box = len(pool)
-                                    pool = pool[
-                                        pool["player_name"].isin(_played)
-                                    ].reset_index(drop=True)
-                                    _dnp_removed = _before_box - len(pool)
-                                    if _dnp_removed:
-                                        st.caption(f"ℹ️ {_dnp_removed} DNP player(s) removed via box score cross-ref.")
-
-                                    # Auto-record projection errors for calibration feedback
-                                    if "proj" in pool.columns and "actual_fp" in pool.columns:
-                                        try:
-                                            from yak_core.calibration_feedback import record_slate_errors
-                                            if "_cal_fb_store" not in st.session_state:
-                                                st.session_state["_cal_fb_store"] = {}
-                                            _fb_result = record_slate_errors(slate_date_str, pool, store=st.session_state["_cal_fb_store"])
-                                            if "error" not in _fb_result:
-                                                _fb_mae = _fb_result.get("overall", {}).get("mae", "?")
-                                                _fb_corr = _fb_result.get("overall", {}).get("correlation", "?")
-                                                st.caption(f"📐 Calibration feedback recorded (MAE: {_fb_mae}, Corr: {_fb_corr})")
-                                        except Exception:
-                                            pass
-                        except Exception as _box_exc:
-                            st.caption(f"ℹ️ Box score filter skipped: {_box_exc}")
-
-                    # ── Generate ownership projections ──────────────
-                    try:
-                        from yak_core.ext_ownership import predict_ownership, blend_and_normalize
-                        pool = predict_ownership(pool)
-                        pool = blend_and_normalize(pool)
-                        if "own_proj" in pool.columns:
-                            pool["ownership"] = pool["own_proj"]
-                            _own_mean = pool["ownership"].mean()
-                            st.caption(f"📊 Ownership projected (avg {_own_mean:.1f}%)")
-                    except Exception as _own_exc:
-                        st.caption(f"ℹ️ Ownership projection skipped: {_own_exc}")
-
-                    # ── Auto-merge saved RotoGrinders file (if exists) ──
-                    _rg_auto_path = os.path.join(
-                        YAKOS_ROOT, "data", "rg_uploads", f"rg_{slate_date_str}.csv"
-                    )
-                    if os.path.isfile(_rg_auto_path):
-                        try:
-                            _saved_rg = load_rg_projections(_rg_auto_path)
-                            pool = merge_rg_with_pool(pool, _saved_rg)
-                            _own_mean_rg = pool["ownership"].mean() if "ownership" in pool.columns else 0
-                            st.caption(f"📊 Saved RG ownership auto-merged (avg {_own_mean_rg:.1f}%)")
-                        except Exception as _rg_auto_exc:
-                            st.caption(f"ℹ️ Saved RG auto-merge skipped: {_rg_auto_exc}")
-
-                    # Store in session state
-                    st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"] = pool
-                    st.session_state[f"_hub_rules_{slate_date_str}_{_contest_safe}"] = parsed_rules
-                    st.session_state[f"_hub_draft_group_id_{slate_date_str}_{_contest_safe}"] = draft_group_id
-                    _salary_mode = "Historical" if _is_historical else "Live"
-                    _source_label = f" (via {_pool_source})" if _pool_source != "DK" else ""
-                    st.success(f"✅ Loaded {len(pool)} players — {_salary_mode}{_source_label}")
-
-                    # Auto-publish the slate
-                    _ts = datetime.now(timezone.utc).isoformat()
-                    slate.sport = sport
-                    slate.site = "DK"
-                    slate.slate_date = slate_date_str
-                    slate.proj_source = proj_source
-                    slate.contest_name = contest_type_label
-                    slate.draft_group_id = draft_group_id
-                    if parsed_rules:
-                        slate.apply_roster_rules(parsed_rules)
-                    slate.contest_type = contest_type_label
-                    slate.player_pool = pool
-                    slate.published = True
-                    slate.published_at = _ts
-                    if "Base" not in slate.active_layers:
-                        slate.active_layers = ["Base"]
-                    set_slate_state(slate)
-
-            except Exception as exc:
-                st.error(f"Failed to load player pool: {exc}")
+    # Force-reload button (kept as escape hatch)
+    if st.session_state.get(_pool_loaded_key) is not None:
+        if st.button("🔄 Reload Pool & Re-run Sims", key="_lab_force_reload"):
+            st.session_state.pop(_pool_loaded_key, None)
+            st.rerun()
 
     # ── Pool Preview / Game Filter ───────────────────────────────────────
     hub_pool: Optional[pd.DataFrame] = st.session_state.get(f"_hub_pool_{slate_date_str}_{_contest_safe}")
@@ -980,28 +1027,29 @@ def main() -> None:
         all_games = _extract_games(hub_pool)
         is_showdown = (hub_rules or {}).get("is_showdown", False)
 
+        # Game filter — inline for showdown, collapsed for classic
         if all_games:
-            with st.expander("🎮 Game Filter", expanded=False):
-                if is_showdown:
-                    st.caption("Showdown: select exactly 1 game.")
-                    sel_game = st.selectbox("Game", all_games, key="_hub_game_sd")
-                    selected_games = [sel_game]
-                else:
-                    selected_games = st.multiselect(
-                        "Filter to games (leave empty to keep all)",
-                        all_games, default=[], key="_hub_games_multi",
-                    )
-                if selected_games:
-                    opp_col = "opp" if "opp" in hub_pool.columns else (
-                        "opponent" if "opponent" in hub_pool.columns else None
-                    )
-                    if opp_col:
-                        hub_pool = _filter_pool_by_games(hub_pool, selected_games, opp_col)
-                        # Update slate state with filtered pool
-                        slate.player_pool = hub_pool
-                        set_slate_state(slate)
+            if is_showdown:
+                st.caption("Showdown: select exactly 1 game.")
+                sel_game = st.selectbox("Game", all_games, key="_hub_game_sd")
+                selected_games = [sel_game]
+            else:
+                selected_games = st.multiselect(
+                    "🎮 Game Filter (leave empty for all)",
+                    all_games, default=[], key="_hub_games_multi",
+                )
+            if selected_games:
+                opp_col = "opp" if "opp" in hub_pool.columns else (
+                    "opponent" if "opponent" in hub_pool.columns else None
+                )
+                if opp_col:
+                    hub_pool = _filter_pool_by_games(hub_pool, selected_games, opp_col)
+                    slate.player_pool = hub_pool
+                    set_slate_state(slate)
 
-        with st.expander(f"👥 Player Pool ({len(hub_pool)} players)", expanded=False):
+        # Pool preview — compact inline view
+        st.caption(f"**{len(hub_pool)} players** loaded  |  Roster: {slate.roster_slots}  |  Cap: ${slate.salary_cap:,}")
+        with st.expander(f"👥 Player Pool", expanded=False):
             preview_cols = [c for c in [
                 "player_name", "pos", "team", "opp", "opponent", "salary",
                 "proj", "floor", "ceil", "proj_minutes", "ownership", "status", "sim_eligible",
@@ -1012,17 +1060,14 @@ def main() -> None:
             preview_df[float_cols] = preview_df[float_cols].round(1)
             st.dataframe(preview_df, use_container_width=True, hide_index=True)
 
-            st.caption(f"{len(hub_pool)} players loaded.")
-
         # RG upload
         with st.expander("External Projections Upload", expanded=False):
-            # Check if a saved RG file exists for this slate
             _rg_save_dir = os.path.join(YAKOS_ROOT, "data", "rg_uploads")
             _rg_save_path = os.path.join(_rg_save_dir, f"rg_{slate_date_str}.csv")
             _has_saved_rg = os.path.isfile(_rg_save_path)
 
             if _has_saved_rg:
-                st.caption(f"✅ RotoGrinders file saved for {slate_date_str}. It will auto-merge on load.")
+                st.caption(f"✅ RotoGrinders file saved for {slate_date_str}. Auto-merged on load.")
                 if st.button("🔄 Re-merge saved RG file now", key="_hub_rg_remerge"):
                     try:
                         _saved_rg = load_rg_projections(_rg_save_path)
@@ -1049,7 +1094,6 @@ def main() -> None:
                     st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"] = merged
                     slate.player_pool = merged
                     set_slate_state(slate)
-                    # Save RG file to disk for persistence across sessions
                     os.makedirs(_rg_save_dir, exist_ok=True)
                     rg_df.to_csv(_rg_save_path, index=False)
                     _own_avg = merged["ownership"].mean() if "ownership" in merged.columns else 0
@@ -1060,32 +1104,28 @@ def main() -> None:
         # ── Injury Monitor (auto-polls, replaces manual refresh) ──────
         _monitor_key = st.session_state.get("rapidapi_key", "")
         if _monitor_key:
-            # Load or create monitor state for this slate
             _im_state_key = f"_injury_monitor_{slate_date_str}"
             if _im_state_key not in st.session_state:
                 st.session_state[_im_state_key] = InjuryMonitorState.load(slate_date_str)
             _im_state: InjuryMonitorState = st.session_state[_im_state_key]
             _im_state.slate_date = slate_date_str
 
-            # Auto-poll on every page load if interval has elapsed
             _im_cfg = {"RAPIDAPI_KEY": _monitor_key}
             try:
                 _im_alerts = poll_injuries(_im_state, hub_pool, _im_cfg)
                 if _im_alerts:
-                    # Apply updated statuses to pool
                     hub_pool = apply_monitor_to_pool(hub_pool, _im_state)
                     st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"] = hub_pool
                     slate.player_pool = hub_pool
                     set_slate_state(slate)
-                    # Store alerts in session for downstream pages
                     st.session_state["_hub_injury_updates"] = [
                         {"player_name": a.player_name, "status": a.new_status}
                         for a in _im_alerts
                     ]
-            except Exception as _im_exc:
-                pass  # non-fatal — monitor logs internally
+            except Exception:
+                pass
 
-            # Display injury status panel (always visible, no button needed)
+            # Injury status panel
             _im_summary = monitor_summary(_im_state)
             _has_issues = _im_summary["confirmed_out"] > 0 or _im_summary["likely_out"] > 0 or _im_summary["return_watch"] > 0
             _inj_expanded = _has_issues or _im_summary["is_late_window"]
@@ -1093,7 +1133,6 @@ def main() -> None:
                 f"🏥 Injury Monitor ({_im_summary['confirmed_out']} OUT · {_im_summary['likely_out']} likely OUT)",
                 expanded=_inj_expanded,
             ):
-                # Status bar
                 _ic1, _ic2, _ic3, _ic4 = st.columns(4)
                 _ic1.metric("Confirmed OUT", _im_summary["confirmed_out"])
                 _ic2.metric("Likely OUT", _im_summary["likely_out"])
@@ -1103,7 +1142,6 @@ def main() -> None:
                 if _im_summary["is_late_window"]:
                     st.warning("Late-scratch window active — monitoring every 5 min.")
 
-                # Show recent alerts
                 _recent_alerts = _im_state.alert_history[-20:] if _im_state.alert_history else []
                 if _recent_alerts:
                     _alert_rows = []
@@ -1119,7 +1157,6 @@ def main() -> None:
                 else:
                     st.caption("No status changes detected yet.")
 
-                # GTD watch list
                 _gtd_players = get_high_prob_outs(_im_state)
                 if _gtd_players:
                     st.markdown("**GTD Watch** — likely sitting:")
@@ -1131,7 +1168,6 @@ def main() -> None:
                     } for g in _gtd_players]
                     st.dataframe(pd.DataFrame(_gtd_rows), use_container_width=True, hide_index=True)
 
-                # Manual force-refresh
                 if st.button("Force Refresh Now", key="_im_force_refresh"):
                     try:
                         _force_alerts = poll_injuries(_im_state, hub_pool, _im_cfg, force=True)
@@ -1149,7 +1185,7 @@ def main() -> None:
     st.divider()
 
     # =====================================================================
-    # SECTION 2: SIMULATIONS + APPLY LEARNINGS (combined)
+    # SECTION 2: SIMULATIONS RESULTS + APPLY LEARNINGS
     # =====================================================================
     st.subheader("🎲 Simulations")
 
@@ -1161,8 +1197,8 @@ def main() -> None:
         sim.draft_group_id = int(slate.draft_group_id)
         set_sim_state(sim)
 
-    # Sim controls
-    col_mode, col_var = st.columns(2)
+    # Sim controls — compact row
+    col_mode, col_var, col_nsims = st.columns(3)
     with col_mode:
         sim_mode = st.radio("Mode", ["Live", "Historical"], horizontal=True, key="_lab_mode",
                             index=0 if sim.sim_mode == "Live" else 1)
@@ -1177,15 +1213,14 @@ def main() -> None:
         if variance != sim.variance:
             sim.variance = variance
             set_sim_state(sim)
-
-    with st.expander("Advanced sim settings", expanded=False):
-        n_sims = st.number_input("Monte Carlo iterations", min_value=1000, max_value=50000,
+    with col_nsims:
+        n_sims = st.number_input("MC Iterations", min_value=1000, max_value=50000,
                                  step=1000, value=int(sim.n_sims), key="_lab_nsims")
         if n_sims != sim.n_sims:
             sim.n_sims = int(n_sims)
             set_sim_state(sim)
 
-    # Contest type for pipeline
+    # Contest type for pipeline display
     pipeline_contest_display = ["GPP Main", "GPP Early", "GPP Late", "Cash Main"]
     _CONTEST_NAME_TO_PIPELINE = {
         "GPP Main": "GPP_MAIN",
@@ -1196,20 +1231,20 @@ def main() -> None:
     }
     _default_display_idx = pipeline_contest_display.index(slate.contest_name) if slate.contest_name in pipeline_contest_display else 1
     pipeline_contest_display_name = st.selectbox(
-        "Contest Type",
+        "View Results For",
         pipeline_contest_display,
         index=_default_display_idx,
         key="_lab_pipeline_contest",
     )
     pipeline_contest = _CONTEST_NAME_TO_PIPELINE.get(pipeline_contest_display_name, "GPP_20")
 
+    # Manual re-run button (if you changed variance/mode and want fresh sims)
     if not pool.empty:
-        if st.button("▶️ Run Sims Pipeline", type="primary", key="_lab_run_sims"):
+        if st.button("🔄 Re-run Sims", key="_lab_run_sims"):
             with st.spinner(f"Running {sim.n_sims:,} Monte Carlo iterations…"):
                 try:
                     player_results = _build_player_level_sim_results(pool, sim.variance)
                     sim.player_results = player_results
-                    # Build real optimized lineups instead of dummy placeholders
                     _PIPELINE_TO_OPTIMIZER = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "CASH": "CASH"}
                     optimizer_contest = _PIPELINE_TO_OPTIMIZER.get(pipeline_contest, "GPP_20")
                     real_lineups = build_ricky_lineups(edge_df=compute_edge_metrics(pool, calibration_state=slate.calibration_state, variance=sim.variance), contest_type=optimizer_contest, calibration_state=slate.calibration_state, salary_cap=SALARY_CAP)
@@ -1246,7 +1281,6 @@ def main() -> None:
         st.caption("Player-level smash / bust / leverage (sorted by leverage)")
         display_df = prepare_sims_table(sim.player_results)
 
-        # Format all float columns to 2 decimal places for display
         _float_fmt = {c: "{:.2f}" for c in display_df.select_dtypes(include="number").columns
                       if c != "salary"}
 
@@ -1283,8 +1317,6 @@ def main() -> None:
             st.caption("Lineup projections scored against real box-score results.")
             _lu_col = "lineup_index"
             _pn_col = "player_name"
-            # Get the long-form lineup data from build_ricky_lineups
-            # Reconstruct from the optimizer output stored during pipeline run
             try:
                 _edge_for_score = compute_edge_metrics(pool, calibration_state=slate.calibration_state, variance=sim.variance)
                 _PIPELINE_TO_OPTIMIZER_SC = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "CASH": "CASH"}
@@ -1292,11 +1324,9 @@ def main() -> None:
                 _lu_long = build_ricky_lineups(edge_df=_edge_for_score, contest_type=_opt_contest, calibration_state=slate.calibration_state, salary_cap=SALARY_CAP)
 
                 if not _lu_long.empty and _pn_col in _lu_long.columns and _lu_col in _lu_long.columns:
-                    # Map actuals onto lineup players
                     _act_map = pool.dropna(subset=["actual_fp"]).set_index("player_name")["actual_fp"].to_dict()
                     _lu_long["actual_fp"] = _lu_long[_pn_col].map(_act_map)
 
-                    # Summarise per lineup
                     _lu_summary = _lu_long.groupby(_lu_col).agg(
                         proj_total=("proj", "sum"),
                         actual_total=("actual_fp", "sum"),
@@ -1308,7 +1338,6 @@ def main() -> None:
                     _lu_summary["actual_total"] = _lu_summary["actual_total"].round(1)
                     _lu_summary = _lu_summary.sort_values("actual_total", ascending=False).reset_index(drop=True)
 
-                    # Headline metrics
                     _best = _lu_summary.iloc[0]
                     _avg_proj = _lu_summary["proj_total"].mean()
                     _avg_actual = _lu_summary["actual_total"].mean()
@@ -1317,7 +1346,6 @@ def main() -> None:
                     c2.metric("Avg Projected", f"{_avg_proj:.1f}", delta=f"{_avg_actual - _avg_proj:+.1f} vs actual")
                     c3.metric("Lineups Built", len(_lu_summary))
 
-                    # Summary table
                     _show = _lu_summary[[_lu_col, "proj_total", "actual_total", "diff", "salary_total"]].copy()
                     _show.columns = ["Lineup", "Projected", "Actual", "Diff", "Salary"]
                     _show["Salary"] = _show["Salary"].astype(int)
@@ -1340,7 +1368,6 @@ def main() -> None:
                         use_container_width=True, hide_index=True,
                     )
 
-                    # Best lineup detail
                     with st.expander(f"🏆 Best Lineup Detail (#{int(_best[_lu_col])})", expanded=False):
                         _best_players = _lu_long[_lu_long[_lu_col] == _best[_lu_col]][
                             [c for c in ["slot", _pn_col, "pos", "team", "salary", "proj", "actual_fp"] if c in _lu_long.columns]
@@ -1382,7 +1409,6 @@ def main() -> None:
                         }
                         st.session_state[_cr_key].append(_cr_record)
 
-                        # Also persist to calibration store
                         if "_cal_fb_store" not in st.session_state:
                             st.session_state["_cal_fb_store"] = {}
                         _store = st.session_state["_cal_fb_store"]
@@ -1399,7 +1425,6 @@ def main() -> None:
                         else:
                             st.warning(f"Top {_cr_pct}% — needs work. Recorded.")
 
-                    # Show history for this slate
                     if st.session_state[_cr_key]:
                         _cr_df = pd.DataFrame(st.session_state[_cr_key])
                         _cr_show = _cr_df[["contest", "rank", "field_size", "finish_pct", "best_lineup_actual"]].copy()
@@ -1409,7 +1434,7 @@ def main() -> None:
             except Exception as _score_exc:
                 st.warning(f"Score vs Actuals failed: {_score_exc}")
 
-    # ── Apply Learnings (inline, not separate section) ───────────────────
+    # ── Apply Learnings (inline) ───────────────────────────────────
     if sim.player_results is not None and not sim.player_results.empty:
         with st.expander("⚡ Apply Sim Learnings", expanded=False):
             st.caption(
@@ -1419,16 +1444,19 @@ def main() -> None:
             _BOOST_CAP = 0.15
             _BUST_REDUCTION = 0.08
 
-            boost_threshold = st.slider(
-                "Smash threshold for positive boost",
-                min_value=0.10, max_value=0.50, step=0.01, value=0.20,
-                key="_lab_boost_threshold",
-            )
-            bust_threshold = st.slider(
-                "Bust threshold for reduction",
-                min_value=0.20, max_value=0.60, step=0.01, value=0.30,
-                key="_lab_bust_threshold",
-            )
+            col_bt, col_bust = st.columns(2)
+            with col_bt:
+                boost_threshold = st.slider(
+                    "Smash threshold for positive boost",
+                    min_value=0.10, max_value=0.50, step=0.01, value=0.20,
+                    key="_lab_boost_threshold",
+                )
+            with col_bust:
+                bust_threshold = st.slider(
+                    "Bust threshold for reduction",
+                    min_value=0.20, max_value=0.60, step=0.01, value=0.30,
+                    key="_lab_bust_threshold",
+                )
 
             col_apply, col_clear = st.columns(2)
             with col_apply:
@@ -1479,7 +1507,6 @@ def main() -> None:
     if not pool.empty and sim.player_results is not None and not sim.player_results.empty:
         pr = sim.player_results.copy()
 
-        # ── Top leverage plays (smash prob vs ownership mismatch) ────────
         pos_edge = pr[pr["leverage"] > 1.2].nlargest(5, "leverage")
         neg_edge = pr[pr["leverage"] < 0.7].nsmallest(5, "leverage")
 
@@ -1508,7 +1535,6 @@ def main() -> None:
             else:
                 st.caption("No over-owned bust risks found.")
 
-        # ── Value plays ──────────────────────────────────────────────────
         with st.expander("💰 Value Plays & Stacks", expanded=False):
             _MIN_VALUE_SALARY = 4000
             st.markdown(f"**Value Plays** (salary ≥ ${_MIN_VALUE_SALARY:,})")
@@ -1696,12 +1722,10 @@ def main() -> None:
                 get_correction_factors, clear_calibration_history,
             )
 
-            # Use session state as storage (survives on Streamlit Cloud)
             if "_cal_fb_store" not in st.session_state:
                 st.session_state["_cal_fb_store"] = {}
             _fb_store = st.session_state["_cal_fb_store"]
 
-            # ── Manual "Fetch Actuals & Record" button ──
             _fb_is_hist = False
             try:
                 _fb_is_hist = pd.to_datetime(slate.slate_date).date() < _today_date if slate.slate_date else False
@@ -1713,7 +1737,6 @@ def main() -> None:
                 _fb_has_proj = "proj" in pool.columns and pool["proj"].notna().any()
 
                 if _fb_has_actuals and _fb_has_proj:
-                    # Actuals already in pool (from box score cross-ref or external projections)
                     if st.button("📐 Record Calibration from Current Pool", key="_lab_record_cal_pool"):
                         _fb_result = record_slate_errors(slate.slate_date, pool, store=_fb_store)
                         if "error" not in _fb_result:
@@ -1722,7 +1745,6 @@ def main() -> None:
                         else:
                             st.warning(f"Could not record: {_fb_result['error']}")
                 else:
-                    # Need to fetch actuals from Tank01
                     _fb_api_key = st.session_state.get("rapidapi_key", "")
                     if _fb_api_key:
                         if st.button("📐 Fetch Actuals & Record Calibration", key="_lab_fetch_record_cal"):
@@ -1755,7 +1777,6 @@ def main() -> None:
 
             st.markdown("---")
 
-            # ── Summary display ──
             _cal_fb = get_calibration_summary(store=_fb_store)
             _fb_status = _cal_fb.get("status", "no_data")
 
@@ -1926,7 +1947,6 @@ def main() -> None:
     # =====================================================================
     st.subheader("🔐 Ricky Edge Check Gate")
 
-    # Historical slates auto-bypass the gate (no edge research needed for backtests)
     _lab_is_historical = False
     try:
         _lab_is_historical = pd.to_datetime(slate.slate_date).date() < _today_date if slate.slate_date else False
