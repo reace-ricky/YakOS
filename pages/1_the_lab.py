@@ -19,6 +19,7 @@ State written: SlateState, SimState
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
