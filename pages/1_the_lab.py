@@ -1541,10 +1541,10 @@ def main() -> None:
             st.markdown("**Positive Leverage** — high smash, low owned")
             if not pos_edge.empty:
                 _pe = pos_edge[["player_name", "salary", "ownership", "smash_prob", "leverage"]].copy()
-                _pe["salary"] = _pe["salary"].astype(int)
-                for _c in ["ownership", "smash_prob", "leverage"]:
-                    if _c in _pe.columns:
-                        _pe[_c] = _pe[_c].round(2)
+                _pe["salary"] = _pe["salary"].apply(lambda x: f"${int(x):,}")
+                _pe["ownership"] = _pe["ownership"].apply(lambda x: f"{x:.1f}%")
+                _pe["smash_prob"] = _pe["smash_prob"].apply(lambda x: f"{x:.0%}")
+                _pe["leverage"] = _pe["leverage"].round(2)
                 st.dataframe(_pe, use_container_width=True, hide_index=True)
             else:
                 st.caption("No high-leverage plays found.")
@@ -1553,10 +1553,10 @@ def main() -> None:
             st.markdown("**Negative Leverage** — bust risk, over-owned")
             if not neg_edge.empty:
                 _ne = neg_edge[["player_name", "salary", "ownership", "bust_prob", "leverage"]].copy()
-                _ne["salary"] = _ne["salary"].astype(int)
-                for _c in ["ownership", "bust_prob", "leverage"]:
-                    if _c in _ne.columns:
-                        _ne[_c] = _ne[_c].round(2)
+                _ne["salary"] = _ne["salary"].apply(lambda x: f"${int(x):,}")
+                _ne["ownership"] = _ne["ownership"].apply(lambda x: f"{x:.1f}%")
+                _ne["bust_prob"] = _ne["bust_prob"].apply(lambda x: f"{x:.0%}")
+                _ne["leverage"] = _ne["leverage"].round(2)
                 st.dataframe(_ne, use_container_width=True, hide_index=True)
             else:
                 st.caption("No over-owned bust risks found.")
