@@ -451,15 +451,19 @@ def compute_value_scores(pool_df: pd.DataFrame, top_n: int = 10, min_proj: float
 # ============================================================
 
 # Tuning knobs for how edge tiers translate to optimizer adjustments.
+# Calibrated from 21-slate backtest (Feb 7 – Mar 5 2026, 3512 player-slates).
+# Old bumps (+6% core, +4% lev, +2% val) HURT accuracy on 20/21 slates.
+# Key finding: $8K+ players over-project by +2.54 FP on average.
 _EDGE_PROJ_BUMPS = {
-    "core":      0.06,   # +6% proj for core plays
-    "leverage":  0.04,   # +4% for leverage (underowned upside)
-    "value":     0.02,   # +2% for value tier
+    "core":      0.00,   # no bump — low-sal cores already slightly under-projected
+    "leverage":  0.00,   # no bump — tiny sample, leave clean
+    "value":     0.00,   # no bump — near-zero error (+0.85)
     "secondary": 0.00,   # neutral
     "punt":      0.00,   # neutral
-    "fade":     -0.08,   # -8% proj penalty for fades
+    "neutral":   0.00,   # no bump — bump hurts MAE even though bias exists
+    "fade":     -0.07,   # -7% deflation for $8K+ chalk (backtest optimal)
 }
-_BREAKOUT_PROJ_BUMP = 0.05   # +5% for breakout candidates (scaled by score)
+_BREAKOUT_PROJ_BUMP = 0.00   # KILLED — breakout candidates over-project (+3.18 FP, 14.5% smash vs 24.5% non-BO)
 _FADE_MAX_EXPOSURE = 0.15    # fades capped at 15% exposure
 _CORE_MIN_EXPOSURE = 0.25    # cores get at least 25% exposure floor
 _BUST_EXCLUDE_THRESH = 0.45  # bust_prob >= 45% → auto-exclude

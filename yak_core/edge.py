@@ -57,23 +57,69 @@ def _parse_numeric(series: pd.Series, default: float = 0.0) -> pd.Series:
 
 def _compute_smash_bust(
     proj: pd.Series,
-    ceil: pd.Series,
-    floor: pd.Series,
+    salary: pd.Series,
+    own: pd.Series,
     variance: float,
 ) -> tuple[pd.Series, pd.Series]:
-    """Return (smash_prob, bust_prob) arrays using a normal approximation.
+    """Return (smash_prob, bust_prob) using empirically calibrated model.
 
-    smash = P(score >= 0.9 * ceil)
-    bust  = P(score <= 1.1 * floor)
+    Calibrated from 21-slate backtest (Feb 7 – Mar 5 2026, 3512 player-slates).
+    Old normal approximation produced CONSTANT probabilities (~0.069 smash,
+    ~0.094 bust) because ceil/floor were always proportional to proj.
+
+    New model uses salary bracket base rates adjusted by ownership and
+    value efficiency, matching observed actuals:
+      - <$5K: 43% smash, 36% bust
+      - $5-6.5K: 30% smash, 26% bust
+      - $6.5-8K: 21% smash, 16% bust
+      - $8-10K: 13% smash, 12% bust
+      - $10K+: 7% smash, 9% bust
     """
-    from scipy.stats import norm  # type: ignore
+    # Base rates by salary bracket (from backtest actuals)
+    smash_base = pd.Series(0.21, index=proj.index)  # default mid-tier
+    bust_base = pd.Series(0.16, index=proj.index)
 
-    std = ((ceil - floor) / 4.0 * variance).clip(lower=0.5)
-    smash_z = (ceil * 0.9 - proj) / std
-    bust_z = (floor * 1.1 - proj) / std
+    smash_base[salary < 5000] = 0.43
+    bust_base[salary < 5000] = 0.36
 
-    smash_prob = pd.Series(1 - norm.cdf(smash_z.values), index=proj.index)
-    bust_prob = pd.Series(norm.cdf(bust_z.values), index=proj.index)
+    mask_5_65 = (salary >= 5000) & (salary < 6500)
+    smash_base[mask_5_65] = 0.30
+    bust_base[mask_5_65] = 0.26
+
+    mask_65_8 = (salary >= 6500) & (salary < 8000)
+    smash_base[mask_65_8] = 0.21
+    bust_base[mask_65_8] = 0.16
+
+    mask_8_10 = (salary >= 8000) & (salary < 10000)
+    smash_base[mask_8_10] = 0.13
+    bust_base[mask_8_10] = 0.12
+
+    smash_base[salary >= 10000] = 0.07
+    bust_base[salary >= 10000] = 0.09
+
+    # Ownership adjustment: low ownership = higher smash (inverse correlation)
+    own_mult_smash = pd.Series(1.0, index=proj.index)
+    own_mult_smash[own < 10] = 1.15
+    own_mult_smash[(own >= 10) & (own < 20)] = 1.05
+    own_mult_smash[(own >= 20) & (own < 30)] = 0.95
+    own_mult_smash[own >= 30] = 0.85
+
+    # Chalk bust trap: high salary + high ownership
+    own_mult_bust = pd.Series(1.0, index=proj.index)
+    chalk_trap = (salary >= 8000) & (own >= 25)
+    own_mult_bust[chalk_trap] = 1.20
+
+    # Value efficiency adjustment
+    val_eff = proj / (salary / 1000.0).clip(lower=1.0)
+    val_mult = pd.Series(1.0, index=proj.index)
+    val_mult[val_eff >= 5.0] = 1.20
+    val_mult[(val_eff >= 4.0) & (val_eff < 5.0)] = 1.10
+    val_mult[val_eff < 3.0] = 0.90
+
+    # Apply variance multiplier (allows UI tuning)
+    smash_prob = (smash_base * own_mult_smash * val_mult * variance).clip(0.01, 0.95)
+    bust_prob = (bust_base * own_mult_bust * variance).clip(0.01, 0.95)
+
     return smash_prob, bust_prob
 
 
@@ -249,8 +295,8 @@ def compute_edge_metrics(
     # Apply calibration projection bumps
     eff_proj = _apply_calibration_bumps(proj, salary, cal)
 
-    # Compute smash/bust probabilities
-    smash_prob, bust_prob = _compute_smash_bust(eff_proj, ceil, floor, variance)
+    # Compute smash/bust probabilities (empirical model, calibrated from backtest)
+    smash_prob, bust_prob = _compute_smash_bust(eff_proj, salary, own, variance)
 
     # Compute leverage: proj / (own * scale_factor)
     # Represents: reward-per-ownership-unit
@@ -290,65 +336,17 @@ def compute_edge_metrics(
         _dampen = (1.0 - (rcv - 0.15).clip(lower=0.0) * 1.0).clip(lower=0.70)
     smash_dampened = smash_prob * _dampen
 
-    # ── Minutes pop signal ──
-    # Detect players whose projected minutes significantly exceed their
-    # rolling average.  A minutes pop is the clearest breakout indicator:
-    # injury to a teammate, role change, or matchup-driven usage spike.
-    # minutes_pop is 0-1 normalised: 0 = no change, 1 = massive increase.
-    proj_min = _parse_numeric(df.get("proj_minutes", pd.Series(0, index=df.index)), 0.0)
-    minutes_pop = pd.Series(0.0, index=df.index)
-
-    # Use rolling averages to compute delta
-    _rolling_min_cols = ["rolling_min_5", "rolling_min_10", "rolling_min_20"]
-    _rolling_min_weights = [0.50, 0.30, 0.20]
-    _baseline_min = pd.Series(0.0, index=df.index)
-    _baseline_w = pd.Series(0.0, index=df.index)
-    for _rm_col, _rm_w in zip(_rolling_min_cols, _rolling_min_weights):
-        if _rm_col in df.columns:
-            _rm_vals = _parse_numeric(df[_rm_col], np.nan)
-            _has = _rm_vals.notna()
-            _baseline_min = _baseline_min + _rm_vals.fillna(0) * _rm_w * _has.astype(float)
-            _baseline_w = _baseline_w + _rm_w * _has.astype(float)
-    _has_baseline = _baseline_w > 0
-    _baseline_min[_has_baseline] = _baseline_min[_has_baseline] / _baseline_w[_has_baseline]
-
-    if _has_baseline.any() and (proj_min > 0).any():
-        # Delta: how much proj_minutes exceeds the baseline (in minutes)
-        _min_delta = (proj_min - _baseline_min).clip(lower=0)
-        # Normalise: +10 minutes over baseline = pop of 1.0 (massive)
-        # +5 minutes = 0.5, +2 = 0.2, etc.
-        minutes_pop[_has_baseline] = (_min_delta[_has_baseline] / 10.0).clip(upper=1.0)
-
-    # Store the raw delta for display / breakout detection
-    df["minutes_delta"] = (proj_min - _baseline_min).round(1) if _has_baseline.any() else 0.0
-    df["minutes_pop"] = minutes_pop.round(3)
-
-    # ── Edge score: 5-component composite ──
-    # Ceiling Magnitude (0.25): rewards high absolute upside (studs)
-    # Smash Probability (0.25): rewards likelihood of hitting ceiling
-    # Safety (0.15): (1 - bust_prob), penalises bust risk
-    # Leverage (0.15): ownership edge, capped for studs
-    # Minutes Pop (0.20): breakout signal from projected minutes spike
-    #
-    # When no minutes data is available (minutes_pop all zeros),
-    # the weight redistributes proportionally to the other 4 components.
-    _has_min_signal = (minutes_pop > 0).any()
-    if _has_min_signal:
-        edge_score = (
-            ceil_magnitude * 0.25
-            + smash_dampened * 0.25
-            + (1.0 - bust_prob) * 0.15
-            + lev_norm_capped * 0.15
-            + minutes_pop * 0.20
-        )
-    else:
-        # No minutes data — fall back to original 4-component weights
-        edge_score = (
-            ceil_magnitude * 0.30
-            + smash_dampened * 0.30
-            + (1.0 - bust_prob) * 0.20
-            + lev_norm_capped * 0.20
-        )
+    # ── Edge score: 4-component composite ──
+    # Ceiling Magnitude (0.30): rewards high absolute upside (studs)
+    # Smash Probability (0.30): rewards likelihood of hitting ceiling
+    # Safety (0.20): (1 - bust_prob), penalises bust risk
+    # Leverage (0.20): ownership edge, capped for studs
+    edge_score = (
+        ceil_magnitude * 0.30
+        + smash_dampened * 0.30
+        + (1.0 - bust_prob) * 0.20
+        + lev_norm_capped * 0.20
+    )
 
     # ── Tournament anchor flag ──
     # Top 8 projected players are GPP anchors — cornerstones for lineups.
@@ -363,8 +361,6 @@ def compute_edge_metrics(
     out["smash_prob"] = smash_prob.values
     out["bust_prob"] = bust_prob.values
     out["ceil_magnitude"] = ceil_magnitude.values
-    out["minutes_pop"] = minutes_pop.values
-    out["minutes_delta"] = df["minutes_delta"].values
     out["edge_score"] = edge_score.values
     out["is_anchor"] = is_anchor.values
 

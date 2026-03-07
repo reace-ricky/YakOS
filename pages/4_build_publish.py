@@ -266,24 +266,23 @@ def main() -> None:
             _edge_df = None
 
     # Auto-classify tiers on edge_df (same logic as ricky_edge.py)
+    # Calibrated from 21-slate backtest (Feb 7 – Mar 5 2026, 3512 player-slates).
     if _edge_df is not None and not _edge_df.empty:
-        if "auto_tier" not in _edge_df.columns and "smash_prob" in _edge_df.columns:
+        if "auto_tier" not in _edge_df.columns:
             def _classify(row):
-                smash = float(row.get("smash_prob", 0) or 0)
-                bust = float(row.get("bust_prob", 0) or 0)
-                own = float(row.get("own_pct", 5) or 5)
-                lev = float(row.get("leverage", 0) or 0)
-                if bust >= 0.25 and own >= 25.0:
+                sal = float(row.get("salary", 6000) or 6000)
+                own = float(row.get("own_pct", 15) or 15)
+                proj = float(row.get("proj", 15) or 15)
+                val = proj / max(sal / 1000.0, 1.0)
+                if sal >= 8000:
                     return "fade"
-                if smash >= 0.20:
+                if sal < 6000 and val >= 2.0 and own < 15:
                     return "core"
-                if pd.notna(lev) and lev >= 1.3 and own < 20:
+                if own < 12 and val >= 2.5 and sal < 7500:
                     return "leverage"
-                if smash >= 0.10:
+                if val >= 3.0:
                     return "value"
-                if bust >= 0.30:
-                    return "fade"
-                return ""
+                return "neutral"
             _edge_df = _edge_df.copy()
             _edge_df["auto_tier"] = _edge_df.apply(_classify, axis=1)
 
