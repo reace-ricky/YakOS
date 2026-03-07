@@ -96,7 +96,7 @@ from yak_core.projections import (  # noqa: E402
 )
 from yak_core.ownership import apply_ownership  # noqa: E402
 from yak_core.rg_loader import load_rg_projections, merge_rg_with_pool  # noqa: E402
-from yak_core.live import fetch_injury_updates, fetch_player_game_logs, fetch_betting_odds, auto_flag_injuries  # noqa: E402
+from yak_core.live import fetch_injury_updates, fetch_player_game_logs, fetch_betting_odds, auto_flag_injuries, fetch_live_dfs  # noqa: E402
 from yak_core.salary_history import SalaryHistoryClient  # noqa: E402
 from yak_core.dff_ingest import fetch_dff_pool  # noqa: E402
 
@@ -788,13 +788,62 @@ def main() -> None:
                     _api_key = st.session_state.get("rapidapi_key", "")
                     if _api_key:
                         try:
+                            # Build Tank01 playerID map.  DK pools don't have
+                            # Tank01 IDs, so we call getNBADFS once to resolve
+                            # player names → Tank01 playerIDs.
                             _t01_id_map: dict = {}
                             for _id_col in ("player_id", "tank01_player_id", "t01_id"):
                                 if _id_col in pool.columns:
-                                    _t01_id_map = dict(
-                                        zip(pool["player_name"].astype(str), pool[_id_col].astype(str))
-                                    )
-                                    break
+                                    _tmp = pool.dropna(subset=[_id_col])
+                                    _tmp = _tmp[_tmp[_id_col].astype(str).str.strip().ne("")]
+                                    if not _tmp.empty:
+                                        _t01_id_map = dict(
+                                            zip(_tmp["player_name"].astype(str), _tmp[_id_col].astype(str))
+                                        )
+                                    if _t01_id_map:
+                                        break
+
+                            # If no Tank01 IDs in pool (DK-sourced slate),
+                            # resolve them via Tank01 DFS endpoint.
+                            if not _t01_id_map:
+                                with st.spinner("Resolving Tank01 player IDs…"):
+                                    try:
+                                        _dfs_date = slate_date_str.replace("-", "")
+                                        _t01_dfs = fetch_live_dfs(_dfs_date, {"RAPIDAPI_KEY": _api_key})
+                                        if not _t01_dfs.empty and "player_id" in _t01_dfs.columns:
+                                            _t01_valid = _t01_dfs.dropna(subset=["player_id"])
+                                            _t01_valid = _t01_valid[
+                                                _t01_valid["player_id"].astype(str).str.strip().ne("")
+                                            ]
+                                            # Build exact-name map from Tank01
+                                            _t01_name_to_id = dict(
+                                                zip(
+                                                    _t01_valid["player_name"].astype(str),
+                                                    _t01_valid["player_id"].astype(str),
+                                                )
+                                            )
+                                            # Also build a normalised-name map for
+                                            # fuzzy matching ("C.J." vs "CJ", Jr vs Jr.)
+                                            import re as _re
+                                            def _norm_name(n: str) -> str:
+                                                return _re.sub(r"[^a-z ]", "", n.lower()).strip()
+                                            _t01_norm = {
+                                                _norm_name(k): v
+                                                for k, v in _t01_name_to_id.items()
+                                            }
+                                            # Match pool names to Tank01 IDs
+                                            _pool_names = pool["player_name"].dropna().astype(str).tolist()
+                                            for _pn in _pool_names:
+                                                if _pn in _t01_name_to_id:
+                                                    _t01_id_map[_pn] = _t01_name_to_id[_pn]
+                                                else:
+                                                    _normed = _norm_name(_pn)
+                                                    if _normed in _t01_norm:
+                                                        _t01_id_map[_pn] = _t01_norm[_normed]
+                                            st.caption(f"✅ Resolved {len(_t01_id_map)} / {len(_pool_names)} Tank01 player IDs.")
+                                    except Exception as _id_exc:
+                                        st.caption(f"ℹ️ Tank01 ID resolution skipped: {_id_exc}")
+
                             _player_names = pool["player_name"].dropna().tolist()
                             with st.spinner("Fetching game log rolling stats from Tank01…"):
                                 _game_log_df = fetch_player_game_logs(

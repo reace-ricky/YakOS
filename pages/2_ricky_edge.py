@@ -175,6 +175,20 @@ def main() -> None:
     )
 
     try:
+        # Check data quality: warn if rolling stats are missing
+        _has_rolling = (
+            "rolling_fp_5" in pool.columns
+            and pool["rolling_fp_5"].notna().any()
+            and "rolling_min_5" in pool.columns
+            and pool["rolling_min_5"].notna().any()
+        )
+        if not _has_rolling:
+            st.warning(
+                "Rolling game-log stats not loaded — breakout model is running on "
+                "salary value + matchup only (35% of full signal). "
+                "Re-load the player pool with a Tank01 API key for full breakout detection."
+            )
+
         breakout_df = compute_breakout_candidates(pool, top_n=10)
         if not breakout_df.empty:
             # Group by salary tier for clean display
