@@ -384,3 +384,106 @@ def apply_injury_cascade(
     df["proj"] = df["adjusted_proj"]
 
     return df, cascade_report
+
+
+# ---------------------------------------------------------------------------
+# Return-watch deflation (Sprint 3.5 — injury speed & coverage)
+# ---------------------------------------------------------------------------
+
+# When a previously-OUT player returns, their teammates' cascade bumps should
+# be reversed (partially or fully depending on return confidence).
+# This prevents stale cascade projections from inflating beneficiaries who
+# no longer have extra minutes.
+
+RETURN_DEFLATION_FULL: float = 1.0    # Active / Probable → full reversal
+RETURN_DEFLATION_PARTIAL: float = 0.5  # GTD → half reversal (may still sit)
+
+
+def apply_return_watch_deflation(
+    pool_df: pd.DataFrame,
+    return_players: list,
+) -> tuple:
+    """Reverse cascade bumps for teammates of returning players.
+
+    When a player was OUT and has returned (or upgraded to Active/Probable),
+    their teammates' ``injury_bump_fp`` should be deflated because the minutes
+    that were redistributed are now reclaimed.
+
+    Parameters
+    ----------
+    pool_df : pd.DataFrame
+        Player pool that has already had ``apply_injury_cascade()`` applied.
+        Must contain ``player_name``, ``team``, ``injury_bump_fp``,
+        ``original_proj``, ``adjusted_proj``.
+    return_players : list of dict
+        Each dict: ``player_name``, ``team``, ``new_status``.
+        From ``injury_monitor.get_return_watch_players()``.
+
+    Returns
+    -------
+    (pool_df, deflation_report)
+        pool_df : pd.DataFrame with deflated projections.
+        deflation_report : list of dict with deflation details.
+    """
+    if pool_df is None or pool_df.empty or not return_players:
+        return pool_df, []
+
+    df = pool_df.copy()
+    if "injury_bump_fp" not in df.columns:
+        return df, []
+
+    report = []
+
+    for rp in return_players:
+        ret_name = rp.get("player_name", "")
+        ret_team = str(rp.get("team", "")).upper()
+        ret_status = rp.get("new_status", "Active")
+
+        if not ret_name or not ret_team:
+            continue
+
+        # Determine deflation factor based on return confidence
+        if ret_status in ("Active", "Probable"):
+            deflation = RETURN_DEFLATION_FULL
+        elif ret_status in ("GTD", "Questionable"):
+            deflation = RETURN_DEFLATION_PARTIAL
+        else:
+            deflation = RETURN_DEFLATION_FULL
+
+        # Find teammates with cascade bumps
+        team_mask = df["team"].fillna("").str.upper() == ret_team
+        bump_mask = df["injury_bump_fp"].fillna(0) > 0
+        not_self = df["player_name"] != ret_name
+        affected = df[team_mask & bump_mask & not_self]
+
+        if affected.empty:
+            continue
+
+        entry = {
+            "returning_player": ret_name,
+            "team": ret_team,
+            "new_status": ret_status,
+            "deflation_factor": deflation,
+            "affected_players": [],
+        }
+
+        for idx in affected.index:
+            old_bump = float(df.at[idx, "injury_bump_fp"])
+            reduction = round(old_bump * deflation, 2)
+            new_bump = round(old_bump - reduction, 2)
+
+            df.at[idx, "injury_bump_fp"] = new_bump
+            orig = float(df.at[idx, "original_proj"])
+            df.at[idx, "adjusted_proj"] = round(orig + new_bump, 2)
+            df.at[idx, "proj"] = df.at[idx, "adjusted_proj"]
+
+            entry["affected_players"].append({
+                "name": str(df.at[idx, "player_name"]),
+                "old_bump": old_bump,
+                "new_bump": new_bump,
+                "reduction": reduction,
+            })
+
+        report.append(entry)
+
+    return df, report

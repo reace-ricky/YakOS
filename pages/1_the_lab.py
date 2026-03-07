@@ -96,7 +96,16 @@ from yak_core.projections import (  # noqa: E402
 )
 from yak_core.ownership import apply_ownership  # noqa: E402
 from yak_core.rg_loader import load_rg_projections, merge_rg_with_pool  # noqa: E402
-from yak_core.live import fetch_injury_updates, fetch_player_game_logs, fetch_betting_odds, auto_flag_injuries, fetch_live_dfs  # noqa: E402
+from yak_core.live import fetch_injury_updates, fetch_player_game_logs, fetch_betting_odds, auto_flag_injuries  # noqa: E402
+from yak_core.injury_monitor import (  # noqa: E402
+    InjuryMonitorState,
+    poll_injuries,
+    apply_monitor_to_pool,
+    monitor_summary,
+    format_alerts_for_ui,
+    get_confirmed_outs,
+    get_high_prob_outs,
+)
 from yak_core.salary_history import SalaryHistoryClient  # noqa: E402
 from yak_core.dff_ingest import fetch_dff_pool  # noqa: E402
 
@@ -528,11 +537,6 @@ def main() -> None:
             f"_hub_pool_{_stale_date}_{_stale_contest_safe}",
             f"_hub_rules_{_stale_date}_{_stale_contest_safe}",
             f"_hub_draft_group_id_{_stale_date}_{_stale_contest_safe}",
-            # Clear Sims contest dropdown + game filter widgets so they
-            # don't carry stale state across contest-type switches.
-            "_lab_pipeline_contest",
-            "_hub_game_sd",
-            "_hub_games_multi",
         ]:
             st.session_state.pop(key, None)
         old_slate_key = f"_hub_slates_{_stale_sport}_{_stale_date}"
@@ -581,31 +585,10 @@ def main() -> None:
                         if not raw_dgs:
                             st.warning(f"No slates found on {_source} for {slate_date_str}. Try a different date.")
                         else:
-                            # Filter draft groups to selected date only.
-                            # DK lobby returns today + tomorrow; keep only
-                            # slates whose StartDate matches slate_date_str.
-                            _target_date = slate_date_str  # "YYYY-MM-DD"
-                            _filtered_dgs = []
-                            for _dg in raw_dgs:
-                                # Prefer StartDateEst (ET) to avoid UTC
-                                # date-boundary issues (8pm ET = next day UTC).
-                                _sd = str(
-                                    _dg.get("StartDateEst")
-                                    or _dg.get("StartDate")
-                                    or _dg.get("startDate")
-                                    or _dg.get("start_time")
-                                    or ""
-                                )
-                                _sd_date = _sd[:10]  # "YYYY-MM-DD"
-                                if _sd_date == _target_date:
-                                    _filtered_dgs.append(_dg)
-                            if not _filtered_dgs:
-                                # Fallback: don't filter if nothing matched
-                                _filtered_dgs = raw_dgs
-                            slate_options = build_slate_options(_filtered_dgs)
+                            slate_options = build_slate_options(raw_dgs)
                             st.session_state[_slate_cache_key] = slate_options
                             _cached_slates = slate_options
-                            st.success(f"Found {len(slate_options)} slate(s) from {_source} for {slate_date_str}.")
+                            st.success(f"Found {len(slate_options)} slate(s) from {_source}.")
                     except Exception as exc:
                         st.error(f"Failed to fetch slates: {exc}")
         with col_clear_slate:
@@ -618,27 +601,7 @@ def main() -> None:
         selected_slate_label: Optional[str] = None
 
         if _cached_slates:
-            # Filter slate list by selected contest type so the user
-            # only sees relevant slates (e.g. Showdown games when
-            # contest type is Showdown, Classic slates for GPP/Cash).
-            _is_showdown_contest = preset.get("slate_type") == "Showdown Captain"
-            # Game-type 70 = Classic, 81 = Showdown Captain.
-            # Exclude Tiers(73), Pickem(188), Points(343), 2H(112),
-            # Showdown Tiers(193) — they use different roster rules.
-            _CLASSIC_GAME_TYPE = 70
-            _SHOWDOWN_GAME_TYPE = 81
-            _visible_slates = [
-                s for s in _cached_slates
-                if (
-                    (_is_showdown_contest and s.get("game_type_id") == _SHOWDOWN_GAME_TYPE)
-                    or (not _is_showdown_contest and s.get("game_type_id") == _CLASSIC_GAME_TYPE)
-                )
-            ]
-            # Fallback: if filter produces nothing, show all
-            if not _visible_slates:
-                _visible_slates = _cached_slates
-
-            slate_labels = [s["label"] for s in _visible_slates]
+            slate_labels = [s["label"] for s in _cached_slates]
             selected_idx = st.radio(
                 "Choose a slate",
                 range(len(slate_labels)),
@@ -646,7 +609,7 @@ def main() -> None:
                 key="_hub_slate_radio",
             )
             if selected_idx is not None:
-                selected_slate = _visible_slates[selected_idx]
+                selected_slate = _cached_slates[selected_idx]
                 selected_dg_id = selected_slate["draft_group_id"]
                 selected_slate_label = selected_slate["label"]
                 st.caption(
@@ -788,62 +751,13 @@ def main() -> None:
                     _api_key = st.session_state.get("rapidapi_key", "")
                     if _api_key:
                         try:
-                            # Build Tank01 playerID map.  DK pools don't have
-                            # Tank01 IDs, so we call getNBADFS once to resolve
-                            # player names → Tank01 playerIDs.
                             _t01_id_map: dict = {}
                             for _id_col in ("player_id", "tank01_player_id", "t01_id"):
                                 if _id_col in pool.columns:
-                                    _tmp = pool.dropna(subset=[_id_col])
-                                    _tmp = _tmp[_tmp[_id_col].astype(str).str.strip().ne("")]
-                                    if not _tmp.empty:
-                                        _t01_id_map = dict(
-                                            zip(_tmp["player_name"].astype(str), _tmp[_id_col].astype(str))
-                                        )
-                                    if _t01_id_map:
-                                        break
-
-                            # If no Tank01 IDs in pool (DK-sourced slate),
-                            # resolve them via Tank01 DFS endpoint.
-                            if not _t01_id_map:
-                                with st.spinner("Resolving Tank01 player IDs…"):
-                                    try:
-                                        _dfs_date = slate_date_str.replace("-", "")
-                                        _t01_dfs = fetch_live_dfs(_dfs_date, {"RAPIDAPI_KEY": _api_key})
-                                        if not _t01_dfs.empty and "player_id" in _t01_dfs.columns:
-                                            _t01_valid = _t01_dfs.dropna(subset=["player_id"])
-                                            _t01_valid = _t01_valid[
-                                                _t01_valid["player_id"].astype(str).str.strip().ne("")
-                                            ]
-                                            # Build exact-name map from Tank01
-                                            _t01_name_to_id = dict(
-                                                zip(
-                                                    _t01_valid["player_name"].astype(str),
-                                                    _t01_valid["player_id"].astype(str),
-                                                )
-                                            )
-                                            # Also build a normalised-name map for
-                                            # fuzzy matching ("C.J." vs "CJ", Jr vs Jr.)
-                                            import re as _re
-                                            def _norm_name(n: str) -> str:
-                                                return _re.sub(r"[^a-z ]", "", n.lower()).strip()
-                                            _t01_norm = {
-                                                _norm_name(k): v
-                                                for k, v in _t01_name_to_id.items()
-                                            }
-                                            # Match pool names to Tank01 IDs
-                                            _pool_names = pool["player_name"].dropna().astype(str).tolist()
-                                            for _pn in _pool_names:
-                                                if _pn in _t01_name_to_id:
-                                                    _t01_id_map[_pn] = _t01_name_to_id[_pn]
-                                                else:
-                                                    _normed = _norm_name(_pn)
-                                                    if _normed in _t01_norm:
-                                                        _t01_id_map[_pn] = _t01_norm[_normed]
-                                            st.caption(f"✅ Resolved {len(_t01_id_map)} / {len(_pool_names)} Tank01 player IDs.")
-                                    except Exception as _id_exc:
-                                        st.caption(f"ℹ️ Tank01 ID resolution skipped: {_id_exc}")
-
+                                    _t01_id_map = dict(
+                                        zip(pool["player_name"].astype(str), pool[_id_col].astype(str))
+                                    )
+                                    break
                             _player_names = pool["player_name"].dropna().tolist()
                             with st.spinner("Fetching game log rolling stats from Tank01…"):
                                 _game_log_df = fetch_player_game_logs(
@@ -1143,40 +1057,94 @@ def main() -> None:
                 except Exception as exc:
                     st.error(f"Failed to read RG CSV: {exc}")
 
-        # Injury refresh
-        with st.expander("🔃 Injury / News Refresh", expanded=False):
-            if st.button("Refresh Injuries & News"):
-                _key = st.session_state.get("rapidapi_key", "")
-                if not _key:
-                    st.warning("Tank01 RapidAPI key not configured — add TANK01_RAPIDAPI_KEY to .streamlit/secrets.toml.")
+        # ── Injury Monitor (auto-polls, replaces manual refresh) ──────
+        _monitor_key = st.session_state.get("rapidapi_key", "")
+        if _monitor_key:
+            # Load or create monitor state for this slate
+            _im_state_key = f"_injury_monitor_{slate_date_str}"
+            if _im_state_key not in st.session_state:
+                st.session_state[_im_state_key] = InjuryMonitorState.load(slate_date_str)
+            _im_state: InjuryMonitorState = st.session_state[_im_state_key]
+            _im_state.slate_date = slate_date_str
+
+            # Auto-poll on every page load if interval has elapsed
+            _im_cfg = {"RAPIDAPI_KEY": _monitor_key}
+            try:
+                _im_alerts = poll_injuries(_im_state, hub_pool, _im_cfg)
+                if _im_alerts:
+                    # Apply updated statuses to pool
+                    hub_pool = apply_monitor_to_pool(hub_pool, _im_state)
+                    st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"] = hub_pool
+                    slate.player_pool = hub_pool
+                    set_slate_state(slate)
+                    # Store alerts in session for downstream pages
+                    st.session_state["_hub_injury_updates"] = [
+                        {"player_name": a.player_name, "status": a.new_status}
+                        for a in _im_alerts
+                    ]
+            except Exception as _im_exc:
+                pass  # non-fatal — monitor logs internally
+
+            # Display injury status panel (always visible, no button needed)
+            _im_summary = monitor_summary(_im_state)
+            _has_issues = _im_summary["confirmed_out"] > 0 or _im_summary["likely_out"] > 0 or _im_summary["return_watch"] > 0
+            _inj_expanded = _has_issues or _im_summary["is_late_window"]
+            with st.expander(
+                f"🏥 Injury Monitor ({_im_summary['confirmed_out']} OUT · {_im_summary['likely_out']} likely OUT)",
+                expanded=_inj_expanded,
+            ):
+                # Status bar
+                _ic1, _ic2, _ic3, _ic4 = st.columns(4)
+                _ic1.metric("Confirmed OUT", _im_summary["confirmed_out"])
+                _ic2.metric("Likely OUT", _im_summary["likely_out"])
+                _ic3.metric("Return Watch", _im_summary["return_watch"])
+                _ic4.metric("Last Poll", _im_summary["last_poll"])
+
+                if _im_summary["is_late_window"]:
+                    st.warning("Late-scratch window active — monitoring every 5 min.")
+
+                # Show recent alerts
+                _recent_alerts = _im_state.alert_history[-20:] if _im_state.alert_history else []
+                if _recent_alerts:
+                    _alert_rows = []
+                    for _al in reversed(_recent_alerts):
+                        _alert_rows.append({
+                            "Type": _al.get("alert_type", "").replace("_", " ").title(),
+                            "Player": _al.get("player_name", ""),
+                            "Team": _al.get("team", ""),
+                            "Status": f"{_al.get('old_status', '')} → {_al.get('new_status', '')}",
+                            "Detail": _al.get("detail", "")[:80],
+                        })
+                    st.dataframe(pd.DataFrame(_alert_rows), use_container_width=True, hide_index=True)
                 else:
-                    with st.spinner("Fetching latest injury updates…"):
-                        try:
-                            # date_key should be YYYYMMDD for Tank01
-                            _injury_date = slate_date_str.replace("-", "")
-                            updates = fetch_injury_updates(_injury_date, {"RAPIDAPI_KEY": _key})
-                            if updates:
-                                pool_names = set(hub_pool["player_name"].dropna().astype(str).values) if "player_name" in hub_pool.columns else set()
-                                affected = [
-                                    {"player": u.get("player_name", ""), "status": u.get("status", "")}
-                                    for u in updates
-                                    if u.get("player_name", "") in pool_names
-                                ]
-                                if affected:
-                                    st.warning(f"⚠️ {len(affected)} player(s) in your pool have status changes:")
-                                    st.dataframe(pd.DataFrame(affected), use_container_width=True, hide_index=True)
-                                else:
-                                    st.success(f"Fetched {len(updates)} league-wide updates — none affect your current pool.")
-                            else:
-                                st.info("No injury updates returned from Tank01.")
-                        except Exception as exc:
-                            _err_msg = str(exc)
-                            if "429" in _err_msg or "rate" in _err_msg.lower():
-                                st.warning("Tank01 API rate limit hit — try again in a minute.")
-                            elif "401" in _err_msg or "403" in _err_msg:
-                                st.error("Tank01 API key invalid or expired. Check TANK01_RAPIDAPI_KEY in secrets.")
-                            else:
-                                st.error(f"Injury refresh failed: {_err_msg}")
+                    st.caption("No status changes detected yet.")
+
+                # GTD watch list
+                _gtd_players = get_high_prob_outs(_im_state)
+                if _gtd_players:
+                    st.markdown("**GTD Watch** — likely sitting:")
+                    _gtd_rows = [{
+                        "Player": g["player_name"],
+                        "Team": g["team"],
+                        "Status": g["status"],
+                        "P(Out)": f"{g['gtd_out_prob']:.0%}",
+                    } for g in _gtd_players]
+                    st.dataframe(pd.DataFrame(_gtd_rows), use_container_width=True, hide_index=True)
+
+                # Manual force-refresh
+                if st.button("Force Refresh Now", key="_im_force_refresh"):
+                    try:
+                        _force_alerts = poll_injuries(_im_state, hub_pool, _im_cfg, force=True)
+                        if _force_alerts:
+                            hub_pool = apply_monitor_to_pool(hub_pool, _im_state)
+                            st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"] = hub_pool
+                            slate.player_pool = hub_pool
+                            set_slate_state(slate)
+                            st.success(f"{len(_force_alerts)} new alert(s) detected.")
+                        else:
+                            st.caption("No new changes.")
+                    except Exception as _fr_exc:
+                        st.error(f"Refresh failed: {_fr_exc}")
 
     st.divider()
 
@@ -1218,33 +1186,15 @@ def main() -> None:
             set_sim_state(sim)
 
     # Contest type for pipeline
-    pipeline_contest_display = ["GPP Main", "GPP Early", "GPP Late", "Showdown", "Cash Main"]
+    pipeline_contest_display = ["GPP Main", "GPP Early", "GPP Late", "Cash Main"]
     _CONTEST_NAME_TO_PIPELINE = {
         "GPP Main": "GPP_MAIN",
         "GPP Early": "GPP_EARLY",
         "GPP Late": "GPP_LATE",
-        "Showdown": "SHOWDOWN",
         "Cash Main": "CASH",
+        "Showdown": "GPP_EARLY",
     }
-    # Auto-select contest type based on the Slate Loading dropdown.
-    # Priority: current contest_type_label (what user selected at the top)
-    # takes precedence over slate.contest_name (which only updates on pool
-    # load and can be stale after a contest-type switch).
-    _expected_contest = (
-        contest_type_label
-        if contest_type_label in pipeline_contest_display
-        else (
-            slate.contest_name
-            if slate.contest_name in pipeline_contest_display
-            else "GPP Main"
-        )
-    )
-    # Force-sync session state BEFORE rendering the widget so Streamlit
-    # doesn't override our index with stale cached state.
-    _cached_val = st.session_state.get("_lab_pipeline_contest")
-    if _cached_val is not None and _cached_val != _expected_contest:
-        st.session_state["_lab_pipeline_contest"] = _expected_contest
-    _default_display_idx = pipeline_contest_display.index(_expected_contest)
+    _default_display_idx = pipeline_contest_display.index(slate.contest_name) if slate.contest_name in pipeline_contest_display else 1
     pipeline_contest_display_name = st.selectbox(
         "Contest Type",
         pipeline_contest_display,
@@ -1260,7 +1210,7 @@ def main() -> None:
                     player_results = _build_player_level_sim_results(pool, sim.variance)
                     sim.player_results = player_results
                     # Build real optimized lineups instead of dummy placeholders
-                    _PIPELINE_TO_OPTIMIZER = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "SHOWDOWN": "SHOWDOWN", "CASH": "CASH"}
+                    _PIPELINE_TO_OPTIMIZER = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "CASH": "CASH"}
                     optimizer_contest = _PIPELINE_TO_OPTIMIZER.get(pipeline_contest, "GPP_20")
                     real_lineups = build_ricky_lineups(edge_df=compute_edge_metrics(pool, calibration_state=slate.calibration_state, variance=sim.variance), contest_type=optimizer_contest, calibration_state=slate.calibration_state, salary_cap=SALARY_CAP)
                     if not real_lineups.empty:
@@ -1327,11 +1277,8 @@ def main() -> None:
                          if c in pipeline_output.columns]
             st.dataframe(pipeline_output[show_cols], use_container_width=True, hide_index=True)
 
-    # ── Score vs Actuals (historical mode only) ─────────────────────────
-    # RG contest files contain FPTS (mapped to actual_fp) even for live
-    # slates.  Only show this section when the slate is truly historical
-    # so it doesn't confuse the live workflow.
-    if _is_historical and pipeline_output is not None and not pipeline_output.empty and "actual_fp" in pool.columns and pool["actual_fp"].notna().any():
+    # ── Score vs Actuals ────────────────────────────────────────────────
+    if pipeline_output is not None and not pipeline_output.empty and "actual_fp" in pool.columns and pool["actual_fp"].notna().any():
         with st.expander("🎯 Score vs Actuals", expanded=True):
             st.caption("Lineup projections scored against real box-score results.")
             _lu_col = "lineup_index"
@@ -1340,7 +1287,7 @@ def main() -> None:
             # Reconstruct from the optimizer output stored during pipeline run
             try:
                 _edge_for_score = compute_edge_metrics(pool, calibration_state=slate.calibration_state, variance=sim.variance)
-                _PIPELINE_TO_OPTIMIZER_SC = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "SHOWDOWN": "SHOWDOWN", "CASH": "CASH"}
+                _PIPELINE_TO_OPTIMIZER_SC = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "CASH": "CASH"}
                 _opt_contest = _PIPELINE_TO_OPTIMIZER_SC.get(pipeline_contest, "GPP_20")
                 _lu_long = build_ricky_lineups(edge_df=_edge_for_score, contest_type=_opt_contest, calibration_state=slate.calibration_state, salary_cap=SALARY_CAP)
 
@@ -1541,10 +1488,10 @@ def main() -> None:
             st.markdown("**Positive Leverage** — high smash, low owned")
             if not pos_edge.empty:
                 _pe = pos_edge[["player_name", "salary", "ownership", "smash_prob", "leverage"]].copy()
-                _pe["salary"] = _pe["salary"].apply(lambda x: f"${int(x):,}")
-                _pe["ownership"] = _pe["ownership"].apply(lambda x: f"{x:.1f}%")
-                _pe["smash_prob"] = _pe["smash_prob"].apply(lambda x: f"{x:.0%}")
-                _pe["leverage"] = _pe["leverage"].round(2)
+                _pe["salary"] = _pe["salary"].astype(int)
+                for _c in ["ownership", "smash_prob", "leverage"]:
+                    if _c in _pe.columns:
+                        _pe[_c] = _pe[_c].round(2)
                 st.dataframe(_pe, use_container_width=True, hide_index=True)
             else:
                 st.caption("No high-leverage plays found.")
@@ -1553,10 +1500,10 @@ def main() -> None:
             st.markdown("**Negative Leverage** — bust risk, over-owned")
             if not neg_edge.empty:
                 _ne = neg_edge[["player_name", "salary", "ownership", "bust_prob", "leverage"]].copy()
-                _ne["salary"] = _ne["salary"].apply(lambda x: f"${int(x):,}")
-                _ne["ownership"] = _ne["ownership"].apply(lambda x: f"{x:.1f}%")
-                _ne["bust_prob"] = _ne["bust_prob"].apply(lambda x: f"{x:.0%}")
-                _ne["leverage"] = _ne["leverage"].round(2)
+                _ne["salary"] = _ne["salary"].astype(int)
+                for _c in ["ownership", "bust_prob", "leverage"]:
+                    if _c in _ne.columns:
+                        _ne[_c] = _ne[_c].round(2)
                 st.dataframe(_ne, use_container_width=True, hide_index=True)
             else:
                 st.caption("No over-owned bust risks found.")

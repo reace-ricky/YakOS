@@ -76,6 +76,19 @@ from .components import render_lineup_card, render_lineup_cards_paged
 
 from .salary_history import SalaryHistoryClient
 
+from .injury_monitor import (
+    InjuryMonitorState,
+    poll_injuries,
+    apply_monitor_to_pool,
+    monitor_summary,
+    format_alerts_for_ui,
+    get_confirmed_outs,
+    get_high_prob_outs,
+    get_return_watch_players,
+)
+
+from .injury_cascade import apply_return_watch_deflation
+
 __all__ = [
     # config
     "YAKOS_ROOT",
