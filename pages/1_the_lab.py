@@ -1278,8 +1278,11 @@ def main() -> None:
                          if c in pipeline_output.columns]
             st.dataframe(pipeline_output[show_cols], use_container_width=True, hide_index=True)
 
-    # ── Score vs Actuals ────────────────────────────────────────────────
-    if pipeline_output is not None and not pipeline_output.empty and "actual_fp" in pool.columns and pool["actual_fp"].notna().any():
+    # ── Score vs Actuals (historical mode only) ─────────────────────────
+    # RG contest files contain FPTS (mapped to actual_fp) even for live
+    # slates.  Only show this section when the slate is truly historical
+    # so it doesn't confuse the live workflow.
+    if _is_historical and pipeline_output is not None and not pipeline_output.empty and "actual_fp" in pool.columns and pool["actual_fp"].notna().any():
         with st.expander("🎯 Score vs Actuals", expanded=True):
             st.caption("Lineup projections scored against real box-score results.")
             _lu_col = "lineup_index"
