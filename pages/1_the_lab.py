@@ -957,18 +957,6 @@ def main() -> None:
     else:
         st.info(f"No slates found for {slate_date_str}. Try a different date.")
 
-    # Manual DG override (collapsed)
-    with st.expander("Manual Draft Group Override", expanded=False):
-        manual_dg = st.number_input(
-            "Draft Group ID",
-            min_value=0, step=1, value=0,
-            help="Paste a DraftKings Draft Group ID if you know it.",
-            key="_hub_manual_dg",
-        )
-        if manual_dg > 0:
-            selected_dg_id = int(manual_dg)
-            selected_slate_label = f"Manual (DG {manual_dg})"
-
     # Store selected_dg_id in session state so it persists
     if selected_dg_id:
         st.session_state["_lab_selected_dg_id"] = selected_dg_id
@@ -1019,7 +1007,7 @@ def main() -> None:
             st.session_state.pop(_pool_loaded_key, None)
             st.rerun()
 
-    # ── Pool Preview / Game Filter ───────────────────────────────────────
+    # ── Game Filter / External Projections ─────────────────────────────────
     hub_pool: Optional[pd.DataFrame] = st.session_state.get(f"_hub_pool_{slate_date_str}_{_contest_safe}")
     hub_rules: Optional[dict] = st.session_state.get(f"_hub_rules_{slate_date_str}_{_contest_safe}")
 
@@ -1049,18 +1037,8 @@ def main() -> None:
                     slate.player_pool = hub_pool
             set_slate_state(slate)
 
-        # Pool preview — compact inline view
+        # Pool summary line
         st.caption(f"**{len(hub_pool)} players** loaded  |  Roster: {slate.roster_slots}  |  Cap: ${slate.salary_cap:,}")
-        with st.expander(f"👥 Player Pool", expanded=False):
-            preview_cols = [c for c in [
-                "player_name", "pos", "team", "opp", "opponent", "salary",
-                "proj", "floor", "ceil", "proj_minutes", "ownership", "status", "sim_eligible",
-            ] if c in hub_pool.columns]
-            preview_df = hub_pool[preview_cols].sort_values("proj", ascending=False).copy()
-            float_cols = [c for c in ["proj", "floor", "ceil", "proj_minutes", "ownership"]
-                          if c in preview_df.columns]
-            preview_df[float_cols] = preview_df[float_cols].round(1)
-            st.dataframe(preview_df, use_container_width=True, hide_index=True)
 
         # RG upload
         with st.expander("External Projections Upload", expanded=False):
@@ -1127,62 +1105,60 @@ def main() -> None:
             except Exception:
                 pass
 
-            # Injury status panel
+            # Injury status panel — only shown when there are actual issues
             _im_summary = monitor_summary(_im_state)
             _has_issues = _im_summary["confirmed_out"] > 0 or _im_summary["likely_out"] > 0 or _im_summary["return_watch"] > 0
-            _inj_expanded = _has_issues or _im_summary["is_late_window"]
-            with st.expander(
-                f"🏥 Injury Monitor ({_im_summary['confirmed_out']} OUT · {_im_summary['likely_out']} likely OUT)",
-                expanded=_inj_expanded,
-            ):
-                _ic1, _ic2, _ic3, _ic4 = st.columns(4)
-                _ic1.metric("Confirmed OUT", _im_summary["confirmed_out"])
-                _ic2.metric("Likely OUT", _im_summary["likely_out"])
-                _ic3.metric("Return Watch", _im_summary["return_watch"])
-                _ic4.metric("Last Poll", _im_summary["last_poll"])
+            if _has_issues or _im_summary["is_late_window"]:
+                with st.expander(
+                    f"🏥 Injury Alert ({_im_summary['confirmed_out']} OUT · {_im_summary['likely_out']} likely OUT)",
+                    expanded=True,
+                ):
+                    _ic1, _ic2, _ic3, _ic4 = st.columns(4)
+                    _ic1.metric("Confirmed OUT", _im_summary["confirmed_out"])
+                    _ic2.metric("Likely OUT", _im_summary["likely_out"])
+                    _ic3.metric("Return Watch", _im_summary["return_watch"])
+                    _ic4.metric("Last Poll", _im_summary["last_poll"])
 
-                if _im_summary["is_late_window"]:
-                    st.warning("Late-scratch window active — monitoring every 5 min.")
+                    if _im_summary["is_late_window"]:
+                        st.warning("Late-scratch window active — monitoring every 5 min.")
 
-                _recent_alerts = _im_state.alert_history[-20:] if _im_state.alert_history else []
-                if _recent_alerts:
-                    _alert_rows = []
-                    for _al in reversed(_recent_alerts):
-                        _alert_rows.append({
-                            "Type": _al.get("alert_type", "").replace("_", " ").title(),
-                            "Player": _al.get("player_name", ""),
-                            "Team": _al.get("team", ""),
-                            "Status": f"{_al.get('old_status', '')} → {_al.get('new_status', '')}",
-                            "Detail": _al.get("detail", "")[:80],
-                        })
-                    st.dataframe(pd.DataFrame(_alert_rows), use_container_width=True, hide_index=True)
-                else:
-                    st.caption("No status changes detected yet.")
+                    _recent_alerts = _im_state.alert_history[-20:] if _im_state.alert_history else []
+                    if _recent_alerts:
+                        _alert_rows = []
+                        for _al in reversed(_recent_alerts):
+                            _alert_rows.append({
+                                "Type": _al.get("alert_type", "").replace("_", " ").title(),
+                                "Player": _al.get("player_name", ""),
+                                "Team": _al.get("team", ""),
+                                "Status": f"{_al.get('old_status', '')} → {_al.get('new_status', '')}",
+                                "Detail": _al.get("detail", "")[:80],
+                            })
+                        st.dataframe(pd.DataFrame(_alert_rows), use_container_width=True, hide_index=True)
 
-                _gtd_players = get_high_prob_outs(_im_state)
-                if _gtd_players:
-                    st.markdown("**GTD Watch** — likely sitting:")
-                    _gtd_rows = [{
-                        "Player": g["player_name"],
-                        "Team": g["team"],
-                        "Status": g["status"],
-                        "P(Out)": f"{g['gtd_out_prob']:.0%}",
-                    } for g in _gtd_players]
-                    st.dataframe(pd.DataFrame(_gtd_rows), use_container_width=True, hide_index=True)
+                    _gtd_players = get_high_prob_outs(_im_state)
+                    if _gtd_players:
+                        st.markdown("**GTD Watch** — likely sitting:")
+                        _gtd_rows = [{
+                            "Player": g["player_name"],
+                            "Team": g["team"],
+                            "Status": g["status"],
+                            "P(Out)": f"{g['gtd_out_prob']:.0%}",
+                        } for g in _gtd_players]
+                        st.dataframe(pd.DataFrame(_gtd_rows), use_container_width=True, hide_index=True)
 
-                if st.button("Force Refresh Now", key="_im_force_refresh"):
-                    try:
-                        _force_alerts = poll_injuries(_im_state, hub_pool, _im_cfg, force=True)
-                        if _force_alerts:
-                            hub_pool = apply_monitor_to_pool(hub_pool, _im_state)
-                            st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"] = hub_pool
-                            slate.player_pool = hub_pool
-                            set_slate_state(slate)
-                            st.success(f"{len(_force_alerts)} new alert(s) detected.")
-                        else:
-                            st.caption("No new changes.")
-                    except Exception as _fr_exc:
-                        st.error(f"Refresh failed: {_fr_exc}")
+                    if st.button("Force Refresh Now", key="_im_force_refresh"):
+                        try:
+                            _force_alerts = poll_injuries(_im_state, hub_pool, _im_cfg, force=True)
+                            if _force_alerts:
+                                hub_pool = apply_monitor_to_pool(hub_pool, _im_state)
+                                st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"] = hub_pool
+                                slate.player_pool = hub_pool
+                                set_slate_state(slate)
+                                st.success(f"{len(_force_alerts)} new alert(s) detected.")
+                            else:
+                                st.caption("No new changes.")
+                        except Exception as _fr_exc:
+                            st.error(f"Refresh failed: {_fr_exc}")
 
     st.divider()
 
