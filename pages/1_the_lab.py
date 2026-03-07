@@ -1029,23 +1029,22 @@ def main() -> None:
                     except Exception as exc:
                         st.error(f"Failed to re-merge saved RG: {exc}")
 
-            st.caption("Upload a RotoGrinders CSV to merge projections into the pool.")
+            st.caption("Upload a RotoGrinders CSV — ownership merges automatically.")
             rg_file = st.file_uploader("RotoGrinders CSV", type="csv", key="_hub_rg_upload")
             if rg_file:
                 try:
                     rg_df = load_rg_projections(rg_file)
-                    st.session_state["_hub_rg_df"] = rg_df
-                    st.success(f"RotoGrinders: {len(rg_df)} rows loaded.")
-                    if st.button("Merge RG Projections into Pool"):
-                        merged = merge_rg_with_pool(st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"], rg_df)
-                        st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"] = merged
-                        slate.player_pool = merged
-                        set_slate_state(slate)
-                        # Save RG file to disk for persistence across sessions
-                        os.makedirs(_rg_save_dir, exist_ok=True)
-                        rg_df.to_csv(_rg_save_path, index=False)
-                        st.success(f"Merged RG data into pool ({len(merged)} rows). File saved for this slate.")
-                        st.rerun()
+                    merged = merge_rg_with_pool(
+                        st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"], rg_df
+                    )
+                    st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"] = merged
+                    slate.player_pool = merged
+                    set_slate_state(slate)
+                    # Save RG file to disk for persistence across sessions
+                    os.makedirs(_rg_save_dir, exist_ok=True)
+                    rg_df.to_csv(_rg_save_path, index=False)
+                    _own_avg = merged["ownership"].mean() if "ownership" in merged.columns else 0
+                    st.success(f"RG merged — {len(merged)} players, avg ownership {_own_avg:.1f}%. Saved for this slate.")
                 except Exception as exc:
                     st.error(f"Failed to read RG CSV: {exc}")
 
