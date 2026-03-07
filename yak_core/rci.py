@@ -400,6 +400,29 @@ def compute_historical_roi_signal(
     )
 
 
+def _count_active_signals(
+    edge_payload: dict,
+    sim_results: Optional[pd.DataFrame],
+    actual_ownership: Optional[pd.DataFrame],
+    backtest_results: Optional[pd.DataFrame],
+) -> int:
+    """Count how many RCI signals have real data (not fallback/defaults)."""
+    active = 0
+    # Signal 1: edge payload has tagged players
+    if edge_payload and (edge_payload.get("core_value_players") or edge_payload.get("leverage_players")):
+        active += 1
+    # Signal 2: sims have been run
+    if sim_results is not None and not sim_results.empty:
+        active += 1
+    # Signal 3: actual ownership exists
+    if actual_ownership is not None and not actual_ownership.empty:
+        active += 1
+    # Signal 4: backtest data exists
+    if backtest_results is not None and not backtest_results.empty:
+        active += 1
+    return active
+
+
 def compute_rci(
     contest_label: str,
     edge_payload: dict,
@@ -416,6 +439,12 @@ def compute_rci(
 
     Combines 4 independent signals with tunable weights into a 0–100 composite.
     Determines whether calibration is stable or needs more work.
+
+    The score is **contest-specific** only when contest-specific data is
+    passed in (edge_payload per contest, sim_results filtered to that slate
+    subset, etc.).  When the same pool is shared across contest types the
+    function tracks *which signals have real data* and adjusts the score
+    accordingly so different contest types do NOT show identical numbers.
 
     Parameters
     ----------
@@ -464,9 +493,26 @@ def compute_rci(
         for s in signals:
             s.weight = s.weight / total_w
 
+    # ── Data-availability penalty ──
+    # When most signals are using fallback/default data (no edge analysis,
+    # no sims, no actual ownership, no backtests), the pool-only fallback
+    # scores look deceptively healthy.  Apply a ceiling so the RCI honestly
+    # reflects how much real work has been done for this contest type.
+    active_signals = _count_active_signals(
+        edge_payload, sim_results, actual_ownership, backtest_results,
+    )
+
     # Weighted composite
-    rci_score = sum(s.value * s.weight for s in signals)
-    rci_score = round(max(0.0, min(100.0, rci_score)), 1)
+    rci_raw = sum(s.value * s.weight for s in signals)
+
+    # Cap the score based on how many signals have real data:
+    # 0 active → max 30  ("not started")
+    # 1 active → max 55  ("early")
+    # 2 active → max 75  ("in progress")
+    # 3-4 active → no cap ("calibrated")
+    _CAPS = {0: 30, 1: 55, 2: 75, 3: 100, 4: 100}
+    cap = _CAPS.get(active_signals, 100)
+    rci_score = round(max(0.0, min(cap, rci_raw)), 1)
 
     rci_status = _get_color(rci_score)
 
@@ -475,7 +521,12 @@ def compute_rci(
     any_red = any(s.status == "red" for s in signals)
     calibration_stable = rci_score >= 70 and not any_red
 
-    if calibration_stable:
+    if active_signals == 0:
+        recommendation = (
+            "Not calibrated yet. Run edge analysis and sims "
+            "for this contest type to build confidence."
+        )
+    elif calibration_stable:
         recommendation = (
             "Calibration OK — further gains come from methodology and contest strategy."
         )
