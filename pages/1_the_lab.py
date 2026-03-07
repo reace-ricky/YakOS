@@ -70,6 +70,8 @@ from yak_core.config import (  # noqa: E402
     YAKOS_ROOT,
     CONTEST_PRESETS,
     CONTEST_PRESET_LABELS,
+    UI_CONTEST_LABELS,
+    UI_CONTEST_MAP,
     get_pool_size_range,
     merge_config,
     DK_POS_SLOTS,
@@ -781,14 +783,12 @@ def _auto_load_pool_and_sims(
                 # Determine pipeline contest
                 _CONTEST_NAME_TO_PIPELINE = {
                     "GPP Main": "GPP_MAIN",
-                    "GPP Early": "GPP_EARLY",
-                    "GPP Late": "GPP_LATE",
                     "Cash Main": "CASH",
-                    "Showdown": "GPP_EARLY",
+                    "Showdown": "GPP_MAIN",
                 }
-                pipeline_contest = _CONTEST_NAME_TO_PIPELINE.get(contest_type_label, "GPP_20")
+                pipeline_contest = _CONTEST_NAME_TO_PIPELINE.get(contest_type_label, "GPP_MAIN")
 
-                _PIPELINE_TO_OPTIMIZER = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "CASH": "CASH"}
+                _PIPELINE_TO_OPTIMIZER = {"GPP_MAIN": "GPP_150", "CASH": "CASH"}
                 optimizer_contest = _PIPELINE_TO_OPTIMIZER.get(pipeline_contest, "GPP_20")
                 real_lineups = build_ricky_lineups(
                     edge_df=compute_edge_metrics(pool, calibration_state=slate.calibration_state, variance=sim.variance),
@@ -856,7 +856,8 @@ def main() -> None:
         slate_date = st.date_input("Date", value=pd.to_datetime(_today))
         slate_date_str = str(slate_date)
     with col_contest:
-        contest_type_label = st.selectbox("Contest Type", CONTEST_PRESET_LABELS)
+        _ui_contest = st.selectbox("Contest Type", UI_CONTEST_LABELS)
+        contest_type_label = UI_CONTEST_MAP[_ui_contest]
         preset = CONTEST_PRESETS[contest_type_label]
 
     # Read Tank01 RapidAPI key from secrets
@@ -930,30 +931,27 @@ def main() -> None:
         except Exception:
             _auto_fetch_status.empty()
 
-    # ── Slate picker (inline, not in expander) ────────────────────────────
+    # ── Auto-select slate (no picker UI) ───────────────────────────────
+    # GPP / Cash → Main Slate (highest game-count Classic).
+    # Showdown → highest game-count Showdown pool; game filter picks the game.
     selected_dg_id: Optional[int] = None
     selected_slate_label: Optional[str] = None
 
     if _cached_slates:
-        _mode_label = "📅 Historical" if _is_historical else "🟢 Live"
-        st.caption(f"{_mode_label} — {len(_cached_slates)} slate(s) found")
-        slate_labels = [s["label"] for s in _cached_slates]
-        selected_idx = st.radio(
-            "Choose a slate",
-            range(len(slate_labels)),
-            format_func=lambda i: slate_labels[i],
-            key="_hub_slate_radio",
-            horizontal=True if len(slate_labels) <= 4 else False,
+        _is_sd = (contest_type_label == "Showdown")
+        if _is_sd:
+            _candidates = [s for s in _cached_slates if s["game_style"] != "Classic"]
+        else:
+            _candidates = [s for s in _cached_slates if s["game_style"] == "Classic"]
+        if not _candidates:
+            _candidates = _cached_slates  # fallback
+        _pick = max(_candidates, key=lambda s: s["game_count"])
+        selected_dg_id = _pick["draft_group_id"]
+        selected_slate_label = _pick["label"]
+        st.caption(
+            f"{_pick['label']} · DG {selected_dg_id} · "
+            f"{_pick['game_count']} game(s)"
         )
-        if selected_idx is not None:
-            selected_slate = _cached_slates[selected_idx]
-            selected_dg_id = selected_slate["draft_group_id"]
-            selected_slate_label = selected_slate["label"]
-            st.caption(
-                f"Draft Group **{selected_dg_id}** · "
-                f"{selected_slate['game_count']} game(s) · "
-                f"{selected_slate['game_style']}"
-            )
     else:
         st.info(f"No slates found for {slate_date_str}. Try a different date.")
 
@@ -1013,19 +1011,15 @@ def main() -> None:
 
     if hub_pool is not None and not hub_pool.empty:
         all_games = _extract_games(hub_pool)
-        is_showdown = (hub_rules or {}).get("is_showdown", False)
 
-        # Game filter — inline for showdown, collapsed for classic
+        # Game filter — checkboxes inside a collapsed expander
+        selected_games: list[str] = []
         if all_games:
-            if is_showdown:
-                st.caption("Showdown: select exactly 1 game.")
-                sel_game = st.selectbox("Game", all_games, key="_hub_game_sd")
-                selected_games = [sel_game]
-            else:
-                selected_games = st.multiselect(
-                    "🎮 Game Filter (leave empty for all)",
-                    all_games, default=[], key="_hub_games_multi",
-                )
+            with st.expander(f"🎮 Games ({len(all_games)})", expanded=False):
+                for _g in all_games:
+                    if st.checkbox(_g, value=False, key=f"_gf_{_g}"):
+                        selected_games.append(_g)
+
             # Persist game selection to SlateState so Build page inherits it
             slate.selected_games = selected_games if selected_games else []
             if selected_games:
@@ -1038,7 +1032,8 @@ def main() -> None:
             set_slate_state(slate)
 
         # Pool summary line
-        st.caption(f"**{len(hub_pool)} players** loaded  |  Roster: {slate.roster_slots}  |  Cap: ${slate.salary_cap:,}")
+        _game_note = f"  |  {len(selected_games)} of {len(all_games)} games" if selected_games else ""
+        st.caption(f"**{len(hub_pool)} players** loaded  |  Cap: ${slate.salary_cap:,}{_game_note}")
 
         # RG upload
         with st.expander("External Projections Upload", expanded=False):
@@ -1198,23 +1193,13 @@ def main() -> None:
             sim.n_sims = int(n_sims)
             set_sim_state(sim)
 
-    # Contest type for pipeline display
-    pipeline_contest_display = ["GPP Main", "GPP Early", "GPP Late", "Cash Main"]
+    # Map contest type to pipeline key (no extra selector needed)
     _CONTEST_NAME_TO_PIPELINE = {
         "GPP Main": "GPP_MAIN",
-        "GPP Early": "GPP_EARLY",
-        "GPP Late": "GPP_LATE",
         "Cash Main": "CASH",
-        "Showdown": "GPP_EARLY",
+        "Showdown": "GPP_MAIN",
     }
-    _default_display_idx = pipeline_contest_display.index(slate.contest_name) if slate.contest_name in pipeline_contest_display else 1
-    pipeline_contest_display_name = st.selectbox(
-        "View Results For",
-        pipeline_contest_display,
-        index=_default_display_idx,
-        key="_lab_pipeline_contest",
-    )
-    pipeline_contest = _CONTEST_NAME_TO_PIPELINE.get(pipeline_contest_display_name, "GPP_20")
+    pipeline_contest = _CONTEST_NAME_TO_PIPELINE.get(contest_type_label, "GPP_MAIN")
 
     # Manual re-run button (if you changed variance/mode and want fresh sims)
     if not pool.empty:

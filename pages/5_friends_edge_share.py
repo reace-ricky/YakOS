@@ -35,12 +35,10 @@ from yak_core.edge_metrics import (  # noqa: E402
 )
 from yak_core.config import CONTEST_PRESETS  # noqa: E402
 
-# Fixed display order — must use the canonical labels from CONTEST_PRESETS
+# Fixed display order — canonical labels from CONTEST_PRESETS
 CONTEST_ORDER = [
-    "Cash Main",
-    "GPP Late",
-    "GPP Early",
     "GPP Main",
+    "Cash Main",
     "Showdown",
 ]
 

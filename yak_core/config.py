@@ -245,8 +245,17 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
     },
 }
 
-# Ordered list of contest preset labels (preserves display order)
+# Ordered list of ALL contest preset labels (internal, preserves display order)
 CONTEST_PRESET_LABELS: List[str] = list(CONTEST_PRESETS.keys())
+
+# User-facing contest type labels — simplified to 3 choices.
+# Internally mapped to the full preset keys via UI_CONTEST_MAP.
+UI_CONTEST_LABELS: List[str] = ["GPP", "Cash", "Showdown"]
+UI_CONTEST_MAP: Dict[str, str] = {
+    "GPP": "GPP Main",       # Game filter handles early/late scoping
+    "Cash": "Cash Main",
+    "Showdown": "Showdown",
+}
 
 # Short archetype labels for each contest preset label.
 CONTEST_PRESET_ARCH_LABELS: Dict[str, str] = {

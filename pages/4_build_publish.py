@@ -42,7 +42,7 @@ from yak_core.lineups import (  # noqa: E402
     to_dk_showdown_upload_format,
 )
 from yak_core.calibration import apply_archetype, DFS_ARCHETYPES  # noqa: E402
-from yak_core.config import CONTEST_PRESETS, CONTEST_PRESET_LABELS  # noqa: E402
+from yak_core.config import CONTEST_PRESETS, CONTEST_PRESET_LABELS, UI_CONTEST_LABELS, UI_CONTEST_MAP  # noqa: E402
 from yak_core.components import render_lineup_cards_paged  # noqa: E402
 from yak_core.publishing import publish_edge_and_lineups  # noqa: E402
 from yak_core.edge import compute_edge_metrics  # noqa: E402
@@ -381,21 +381,13 @@ def main() -> None:
     gauge_summary = sim.contest_gauges
     if gauge_summary:
         advisor_rows = []
-        for label in CONTEST_PRESET_LABELS:
+        _UI_ADVISOR_LABELS = [("GPP", "GPP Main"), ("Cash", "Cash Main"), ("Showdown", "Showdown")]
+        for ui_label, label in _UI_ADVISOR_LABELS:
             preset = CONTEST_PRESETS.get(label, {})
-            # Map preset label → gauge label
             _label_map = {
                 "GPP Main": "150-Max",
-                "GPP Early": "20-Max",
-                "GPP Late": "20-Max",
                 "Showdown": "3-Max",
                 "Cash Main": "Cash",
-                # Legacy labels
-                "Cash Game": "Cash",
-                "Single Entry": "SE",
-                "3-Max Tournament": "3-Max",
-                "20-Max GPP": "20-Max",
-                "MME (150-Max)": "150-Max",
             }
             gauge_label = _label_map.get(label, "SE")
             gauge = gauge_summary.get(gauge_label, {})
@@ -403,7 +395,7 @@ def main() -> None:
             # Smash-based scores typically range 0.05–0.30; adjust thresholds
             rec = "✅ Strong" if score >= 0.25 else "✅ Playable" if score >= 0.12 else "⚠️ Thin" if score >= 0.06 else "❌ Weak"
             advisor_rows.append({
-                "Contest": label,
+                "Contest": ui_label,
                 "Build Mode": _CONTEST_TO_BUILD_MODE.get(label, "median"),
                 "Default Lineups": preset.get("default_lineups", 1),
                 "Sim Score": f"{int(score * 100)}%",
@@ -420,13 +412,15 @@ def main() -> None:
     # ─────────────────────────────────────────────────────────────────────
     st.subheader("⚙️ Build Config")
 
-    # Auto-inherit contest type from Lab selection
-    _lab_contest = slate.contest_name if slate.contest_name in CONTEST_PRESET_LABELS else None
-    _default_contest_idx = CONTEST_PRESET_LABELS.index(_lab_contest) if _lab_contest else 0
+    # Auto-inherit contest type from Lab selection (mapped to UI labels)
+    _REVERSE_UI_MAP = {v: k for k, v in UI_CONTEST_MAP.items()}
+    _lab_ui = _REVERSE_UI_MAP.get(slate.contest_name, "GPP") if slate.contest_name else "GPP"
+    _default_ui_idx = UI_CONTEST_LABELS.index(_lab_ui) if _lab_ui in UI_CONTEST_LABELS else 0
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        contest_label = st.selectbox("Contest Type", CONTEST_PRESET_LABELS, index=_default_contest_idx, key="_bp_contest")
+        _ui_contest = st.selectbox("Contest Type", UI_CONTEST_LABELS, index=_default_ui_idx, key="_bp_contest")
+        contest_label = UI_CONTEST_MAP[_ui_contest]
         preset = CONTEST_PRESETS.get(contest_label, {})
     with col2:
         default_mode = _CONTEST_TO_BUILD_MODE.get(contest_label, "median")
@@ -465,21 +459,18 @@ def main() -> None:
             key="_bp_min_salary",
         )
 
-    # ── Game Selector — scope lineups to specific matchups ─────────────
+    # ── Game Selector — checkboxes in expander ─────────────────────
     all_games = _extract_games_build(pool)
+    build_games: list[str] = []
     if all_games:
-        # Default to Lab selection if set, otherwise empty (all games)
         _lab_games = slate.selected_games if hasattr(slate, "selected_games") else []
-        _default_games = [g for g in _lab_games if g in all_games]
-        build_games = st.multiselect(
-            "🎮 Game Filter (leave empty for all)",
-            all_games,
-            default=_default_games,
-            key="_bp_games",
-        )
+        with st.expander(f"🎮 Games ({len(all_games)})", expanded=False):
+            for _g in all_games:
+                _default_on = _g in _lab_games if _lab_games else False
+                if st.checkbox(_g, value=_default_on, key=f"_bp_gf_{_g}"):
+                    build_games.append(_g)
         if build_games:
             pool = _filter_pool_by_games_build(pool, build_games)
-            st.caption(f"Filtered to {len(build_games)} game(s) — {len(pool)} players")
 
     # Lock/Exclude inline (no expander)
     player_names = sorted(pool["player_name"].dropna().tolist()) if "player_name" in pool.columns else []
@@ -489,11 +480,10 @@ def main() -> None:
     with col_excl:
         exclude_names = st.multiselect("Exclude", player_names, key="_bp_exclude")
 
+    _bp_game_note = f"  |  {len(build_games)} of {len(all_games)} games" if build_games else ""
     st.caption(
-        f"**Roster:** {slate.roster_slots}  |  "
-        f"**Cap:** ${slate.salary_cap:,}  |  "
-        f"**Type:** {slate.contest_type}  |  "
-        f"**Pool:** {len(pool)} players"
+        f"**{len(pool)} players**  |  "
+        f"Cap: ${slate.salary_cap:,}{_bp_game_note}"
     )
 
     st.divider()
