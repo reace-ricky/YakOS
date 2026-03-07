@@ -39,8 +39,10 @@ EDGE_DF_COLUMNS = [
     "leverage",
     "smash_prob",
     "bust_prob",
+    "ceil_magnitude",
     "edge_score",
     "edge_label",
+    "is_anchor",
 ]
 
 
@@ -143,11 +145,21 @@ def _edge_label(row: pd.Series) -> str:
     smash = row.get("smash_prob", 0.0)
     bust = row.get("bust_prob", 0.0)
     lev = row.get("leverage", 0.0)
+    is_anchor = row.get("is_anchor", False)
+
+    # Anchor tag first — these are GPP cornerstones
+    if is_anchor:
+        labels.append("🏆 GPP Anchor")
 
     if pd.notna(smash) and smash >= 0.25:
         labels.append("🔥 Smash")
     elif pd.notna(smash) and smash >= 0.12:
         labels.append("⬆ Upside")
+
+    # Core tag for high-ceiling studs that aren't anchors
+    ceil_mag = row.get("ceil_magnitude", 0.0)
+    if not is_anchor and pd.notna(ceil_mag) and ceil_mag >= 0.70:
+        labels.append("💎 Core")
 
     if pd.notna(bust) and bust >= 0.30:
         labels.append("💀 Bust Risk")
@@ -246,16 +258,54 @@ def compute_edge_metrics(
     leverage = eff_proj / own_safe
     leverage[own < _MIN_OWN_FOR_LEVERAGE] = np.nan
 
-    # Edge score: composite of smash upside, bust risk, and ownership leverage
-    # Higher is better.  Range is roughly 0–1 but not strictly bounded.
+    # ── Ceiling magnitude: normalised raw ceiling value ──
+    # This ensures studs with 60+ FP ceilings surface alongside value plays.
+    # Normalised 0-1 within the slate so it's comparable across days.
+    _ceil_max = float(ceil.max())
+    _ceil_denom = max(_ceil_max, 1.0)
+    ceil_magnitude = ceil / _ceil_denom  # 0-1 range, studs near 1.0
+
+    # ── Leverage (capped for studs) ──
+    # Raw leverage = proj / own%.  This crushes studs with high ownership.
+    # Fix: cap leverage's *downward* penalty on premium players ($8K+).
+    # Studs should never be penalised for being popular.
     _lev_filled = leverage.fillna(0.0)
     _lev_max = float(_lev_filled.max())
     _lev_denom = max(_lev_max, 1.0)
+    lev_norm = _lev_filled / _lev_denom  # 0-1 range
+
+    # For players above $8K, set a floor on their leverage score
+    # so they aren't crushed by high ownership.
+    _is_stud = salary >= 8000
+    lev_norm_capped = lev_norm.copy()
+    lev_norm_capped[_is_stud] = lev_norm[_is_stud].clip(lower=0.35)
+
+    # ── Minutes-stability dampening ──
+    # If a player has high rolling variance (rolling_cv), dampen their
+    # smash prob slightly to avoid boosting inconsistent players.
+    _dampen = pd.Series(1.0, index=df.index)
+    if "rolling_cv" in df.columns:
+        rcv = pd.to_numeric(df["rolling_cv"], errors="coerce").fillna(0.0)
+        # High CV (>0.30) gets dampened: mult goes from 1.0 down to 0.70
+        _dampen = (1.0 - (rcv - 0.15).clip(lower=0.0) * 1.0).clip(lower=0.70)
+    smash_dampened = smash_prob * _dampen
+
+    # ── Edge score: 4-component composite ──
+    # Ceiling Magnitude (0.30): rewards high absolute upside (studs)
+    # Smash Probability (0.30): rewards likelihood of hitting ceiling
+    # Safety (0.20): (1 - bust_prob), penalises bust risk
+    # Leverage (0.20): ownership edge, capped for studs
     edge_score = (
-        smash_prob * 0.5
-        + (1.0 - bust_prob) * 0.3
-        + (_lev_filled / _lev_denom) * 0.2
+        ceil_magnitude * 0.30
+        + smash_dampened * 0.30
+        + (1.0 - bust_prob) * 0.20
+        + lev_norm_capped * 0.20
     )
+
+    # ── Tournament anchor flag ──
+    # Top 8 projected players are GPP anchors — cornerstones for lineups.
+    _proj_rank = eff_proj.rank(ascending=False, method="first")
+    is_anchor = _proj_rank <= 8
 
     out = df.copy()
     out["salary"] = salary.values
@@ -264,7 +314,9 @@ def compute_edge_metrics(
     out["leverage"] = leverage.values
     out["smash_prob"] = smash_prob.values
     out["bust_prob"] = bust_prob.values
+    out["ceil_magnitude"] = ceil_magnitude.values
     out["edge_score"] = edge_score.values
+    out["is_anchor"] = is_anchor.values
 
     # Generate human-readable edge labels
     out["edge_label"] = out.apply(_edge_label, axis=1)
