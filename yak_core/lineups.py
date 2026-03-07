@@ -292,6 +292,16 @@ def build_multiple_lineups_with_exposure(
         for pair in not_with_raw
         if isinstance(pair, (list, tuple)) and len(pair) >= 2
     ]
+    # TIER_CONSTRAINTS: enforce min/max players from edge tiers per lineup.
+    # Calibrated from 21-slate backtest: neutrals outperform 51.5%,
+    # fades ($8K+ chalk) over-project by +2.54 FP.
+    # Format: {"tier_player_names": {tier: [names]},
+    #          "tier_min_players": {group: count},
+    #          "tier_max_players": {tier: count}}
+    tier_constraints = cfg.get("TIER_CONSTRAINTS", {})
+    tier_player_names: Dict[str, list] = tier_constraints.get("tier_player_names", {})
+    tier_min_players: Dict[str, int] = tier_constraints.get("tier_min_players", {})
+    tier_max_players: Dict[str, int] = tier_constraints.get("tier_max_players", {})
 
     players = player_pool.to_dict("records")
     n = len(players)
@@ -431,6 +441,38 @@ def build_multiple_lineups_with_exposure(
                         <= 1
                     )
 
+        # Tier composition constraints: enforce min/max players from edge tiers.
+        # This biases lineup construction toward undervalued tiers (core, neutral)
+        # and limits expensive chalk (fade) without touching projections.
+        if tier_player_names:
+            name_to_idx_tier = {players[i].get("player_name", ""): i for i in range(n)}
+            # Min constraints: e.g., "core_or_neutral" >= 2
+            for group_key, min_count in tier_min_players.items():
+                # Parse group: "core_or_neutral" → ["core", "neutral"]
+                tier_list = [t.strip() for t in group_key.replace("_or_", ",").split(",")]
+                eligible_idx = []
+                for t in tier_list:
+                    for pname in tier_player_names.get(t, []):
+                        idx_val = name_to_idx_tier.get(pname)
+                        if idx_val is not None:
+                            eligible_idx.append(idx_val)
+                if eligible_idx:
+                    prob += pulp.lpSum(
+                        x[(j, s)] for j in set(eligible_idx) for s in DK_POS_SLOTS
+                    ) >= min_count
+
+            # Max constraints: e.g., "fade" <= 3
+            for tier_key, max_count in tier_max_players.items():
+                tier_idx = [
+                    name_to_idx_tier.get(pname)
+                    for pname in tier_player_names.get(tier_key, [])
+                    if name_to_idx_tier.get(pname) is not None
+                ]
+                if tier_idx:
+                    prob += pulp.lpSum(
+                        x[(j, s)] for j in set(tier_idx) for s in DK_POS_SLOTS
+                    ) <= max_count
+
         # Uniqueness: each new lineup must differ by at least 3 players
         # from every previously built lineup.
         _MIN_DIFF = 3
@@ -497,6 +539,18 @@ def build_multiple_lineups_with_exposure(
                     for j in range(n):
                         if players[j].get("player_name", "") in lock_names:
                             prob2 += pulp.lpSum(x2[(j, s)] for s in DK_POS_SLOTS) == 1
+                # Tier constraints in fallback too
+                if tier_player_names:
+                    _nit = {players[i].get("player_name", ""): i for i in range(n)}
+                    for group_key, min_count in tier_min_players.items():
+                        tl = [t.strip() for t in group_key.replace("_or_", ",").split(",")]
+                        eidx = [_nit[p] for t in tl for p in tier_player_names.get(t, []) if p in _nit]
+                        if eidx:
+                            prob2 += pulp.lpSum(x2[(j, s)] for j in set(eidx) for s in DK_POS_SLOTS) >= min_count
+                    for tier_key, max_count in tier_max_players.items():
+                        tidx = [_nit[p] for p in tier_player_names.get(tier_key, []) if p in _nit]
+                        if tidx:
+                            prob2 += pulp.lpSum(x2[(j, s)] for j in set(tidx) for s in DK_POS_SLOTS) <= max_count
                 prob2.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=solver_time_limit))
                 if prob2.status == 1:
                     print(

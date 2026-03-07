@@ -129,6 +129,13 @@ def _build_lineups(
         _eo = st.session_state.get("_edge_overrides", {})
         if _eo.get("max_exposure_players"):
             cfg["PLAYER_MAX_EXPOSURE"] = _eo["max_exposure_players"]
+        # Inject tier-based lineup composition constraints
+        if _eo.get("tier_player_names"):
+            cfg["TIER_CONSTRAINTS"] = {
+                "tier_player_names": _eo["tier_player_names"],
+                "tier_min_players": _eo.get("tier_min_players", {}),
+                "tier_max_players": _eo.get("tier_max_players", {}),
+            }
         if slate.is_showdown:
             lineups_df, expo_df = build_showdown_lineups(pool, cfg)
         else:
@@ -297,18 +304,32 @@ def main() -> None:
     # Store overrides in session for use during build
     st.session_state["_edge_overrides"] = _edge_overrides
 
-    if _edge_overrides["adjustments_applied"] > 0:
-        _n_adj = _edge_overrides["adjustments_applied"]
-        _n_excl = len(_edge_overrides["auto_exclude"])
-        _n_fade = len(_edge_overrides["max_exposure_players"])
-        _n_core = len(_edge_overrides["min_exposure_players"])
-        _parts = [f"{_n_adj} projection adjustments"]
-        if _n_core:
-            _parts.append(f"{_n_core} core boosts")
+    _n_adj = _edge_overrides.get("adjustments_applied", 0)
+    _tier_names = _edge_overrides.get("tier_player_names", {})
+    _has_tiers = bool(_tier_names)
+
+    if _n_adj > 0 or _has_tiers:
+        _n_excl = len(_edge_overrides.get("auto_exclude", []))
+        _n_fade = len(_edge_overrides.get("max_exposure_players", {}))
+        _n_core = len(_edge_overrides.get("min_exposure_players", []))
+        _parts = []
+        if _n_adj:
+            _parts.append(f"{_n_adj} proj adjustments")
+        if _has_tiers:
+            tier_counts = {t: len(names) for t, names in _tier_names.items()}
+            _parts.append(f"tiers: {', '.join(f'{t}={c}' for t, c in tier_counts.items())}")
+            _tier_min = _edge_overrides.get("tier_min_players", {})
+            _tier_max = _edge_overrides.get("tier_max_players", {})
+            if _tier_min:
+                for k, v in _tier_min.items():
+                    _parts.append(f"min {v} {k.replace('_or_', '/')}")
+            if _tier_max:
+                for k, v in _tier_max.items():
+                    _parts.append(f"max {v} {k}/lineup")
         if _n_fade:
             _parts.append(f"{_n_fade} fade caps")
         if _n_excl:
-            _parts.append(f"{_n_excl} auto-excluded (extreme bust)")
+            _parts.append(f"{_n_excl} auto-excluded")
         st.caption(f"✅ Edge → Optimizer: {', '.join(_parts)}")
 
     # ─────────────────────────────────────────────────────────────────────

@@ -468,6 +468,17 @@ _FADE_MAX_EXPOSURE = 0.15    # fades capped at 15% exposure
 _CORE_MIN_EXPOSURE = 0.25    # cores get at least 25% exposure floor
 _BUST_EXCLUDE_THRESH = 0.45  # bust_prob >= 45% → auto-exclude
 
+# Tier-based lineup composition constraints (per 8-player lineup).
+# Backtest finding: neutrals outperform 51.5% of time, cores 46.8%.
+# Fades ($8K+ chalk) over-project — limit their presence.
+_TIER_MIN_PLAYERS = {
+    # Require at least 1 player from undervalued tiers per lineup
+    "core_or_neutral": 2,   # at least 2 from core + neutral combined
+}
+_TIER_MAX_PLAYERS = {
+    "fade": 3,  # max 3 fades ($8K+ chalk) per lineup — forces salary diversity
+}
+
 
 def apply_edge_adjustments(
     pool: pd.DataFrame,
@@ -520,6 +531,10 @@ def apply_edge_adjustments(
         "max_exposure_players": {},
         "auto_exclude": [],
         "adjustments_applied": 0,
+        # Tier-based lineup composition constraints
+        "tier_player_names": {},   # {tier: [player_names]} for optimizer
+        "tier_min_players": dict(_TIER_MIN_PLAYERS),
+        "tier_max_players": dict(_TIER_MAX_PLAYERS),
     }
 
     if pool.empty or "player_name" not in pool.columns:
@@ -563,6 +578,12 @@ def apply_edge_adjustments(
             bust = bust_map.get(pname, 0.0)
             if bust >= _BUST_EXCLUDE_THRESH:
                 overrides["auto_exclude"].append(pname)
+
+        # Build tier → player_name mapping for optimizer constraints
+        tier_names: dict[str, list[str]] = {}
+        for pname, tier in tier_map.items():
+            tier_names.setdefault(tier, []).append(pname)
+        overrides["tier_player_names"] = tier_names
 
     # ── 2. Breakout candidate projection bonus ─────────────────────────
     if breakout_df is not None and not breakout_df.empty and "breakout_score" in breakout_df.columns:
