@@ -85,48 +85,39 @@ def _apply_map(df: pd.DataFrame, col_map: dict) -> pd.DataFrame:
 def load_rg_projections(path) -> pd.DataFrame:
     """Load a RotoGrinders CSV and normalize columns.
 
-    Auto-detects whether the file is the lowercase projections format
-    (columns: name, team, fpts, proj_own, ...) or the uppercase contest/sim
-    format (columns: PLAYER, TEAM, FPTS, POWN, ...) and applies the correct
-    column mapping.
+    Auto-detects format:
+      - Contest results (uppercase cols: PLAYER, SALARY, FPTS, OWNERSHIP)
+      - Projections (lowercase cols: name, fpts, proj_own)
 
-    Returns DataFrame with columns: player_name, team, opp, pos, proj, salary,
-    proj_own, ceil, floor, smash, opto_pct, minutes, rg_value (when available).
+    Returns DataFrame with normalised column names.
     """
     df = pd.read_csv(path)
 
-    # Auto-detect format: uppercase columns = contest format, lowercase = projections format
-    has_uppercase = "PLAYER" in df.columns or "POWN" in df.columns
-    has_lowercase = "name" in df.columns or "fpts" in df.columns
-
-    if has_uppercase and not has_lowercase:
-        # Contest/sim format — use contest map, then rename to match projections schema
+    # Auto-detect: contest-results files have uppercase PLAYER/FPTS columns
+    _is_contest = "PLAYER" in df.columns or "FPTS" in df.columns
+    if _is_contest:
+        # Use contest map, then rename 'name' → 'player_name' if needed
         if "WIN_PROB" in df.columns:
             out = _apply_map(df, _RG_PROB_MAP)
         else:
             out = _apply_map(df, _RG_CONTEST_MAP)
-        # Rename "name" -> "player_name" to match projections schema
+        # Contest map produces 'name'; normalise to 'player_name'
         if "name" in out.columns and "player_name" not in out.columns:
             out = out.rename(columns={"name": "player_name"})
-        # Strip % from proj_own if present (contest format uses "32.97%")
-        if "proj_own" in out.columns:
-            out["proj_own"] = (
-                out["proj_own"]
-                .astype(str)
-                .str.replace("%", "", regex=False)
-                .apply(pd.to_numeric, errors="coerce")
-            )
-        print(f"[rg_loader] Detected contest/sim format ({len(out)} rows, {len(out.columns)} cols)")
+        # Strip '%' from percentage columns before numeric coercion
+        for c in ["ownership", "proj_own", "opto", "perfect", "smash"]:
+            if c in out.columns:
+                out[c] = out[c].astype(str).str.replace("%", "", regex=False)
+        for c in ["salary", "actual_fp", "ownership", "proj_own", "ceil",
+                  "floor", "smash", "minutes", "opto", "fpts_per_dollar"]:
+            if c in out.columns:
+                out[c] = pd.to_numeric(out[c], errors="coerce")
     else:
-        # Standard projections format
         out = _apply_map(df, _RG_PROJ_MAP)
-        print(f"[rg_loader] Detected projections format ({len(out)} rows, {len(out.columns)} cols)")
-
-    # Ensure numeric
-    for c in ["proj", "salary", "proj_own", "ceil", "floor", "smash",
-              "opto_pct", "minutes", "rg_value", "actual_fp", "ownership"]:
-        if c in out.columns:
-            out[c] = pd.to_numeric(out[c], errors="coerce")
+        for c in ["proj", "salary", "proj_own", "ceil", "floor", "smash",
+                  "opto_pct", "minutes", "rg_value"]:
+            if c in out.columns:
+                out[c] = pd.to_numeric(out[c], errors="coerce")
     return out
 
 
@@ -175,8 +166,14 @@ def merge_rg_with_pool(
     elif "ownership" in rg_df.columns:
         _rg_own_col = "ownership"
 
-    # Find new columns in rg_df that pool_df lacks
-    new_cols = [c for c in rg_df.columns if c not in pool_df.columns and c not in merge_cols]
+    # Find new columns in rg_df that pool_df lacks.
+    # Exclude actual_fp — contest-results files contain real FPTS which
+    # would trigger Score vs Actuals in live mode if merged.
+    _EXCLUDE_FROM_MERGE = {"actual_fp"}
+    new_cols = [
+        c for c in rg_df.columns
+        if c not in pool_df.columns and c not in merge_cols and c not in _EXCLUDE_FROM_MERGE
+    ]
 
     # Always include ownership column even if pool already has it — we want to overwrite
     if _rg_own_col and _rg_own_col not in new_cols:
@@ -197,26 +194,6 @@ def merge_rg_with_pool(
         rg_own = pd.to_numeric(merged[_rg_own_col], errors="coerce")
         # Only overwrite where RG provided a value; keep existing for unmatched
         has_rg = rg_own.notna()
-
-        # Filter out bad 0% ownership from RG for players with meaningful projections.
-        # RG sometimes publishes 0% for entire teams (data bug). A $5K+ player
-        # with 0% projected ownership is almost certainly wrong — keep our
-        # internal estimate for those players instead of overwriting with garbage.
-        _MIN_SALARY_FOR_OWN_GUARD = 4500
-        _proj_col = "proj" if "proj" in merged.columns else "fpts" if "fpts" in merged.columns else None
-        if _proj_col:
-            _has_proj = pd.to_numeric(merged.get(_proj_col, 0), errors="coerce").fillna(0) > 20
-        else:
-            _has_proj = pd.Series(False, index=merged.index)
-        _sal = pd.to_numeric(merged.get("salary", 0), errors="coerce").fillna(0)
-        _is_real_player = _has_proj | (_sal >= _MIN_SALARY_FOR_OWN_GUARD)
-        _is_zero_own = rg_own.fillna(0) == 0
-        _bad_zero = _is_zero_own & _is_real_player
-        _n_bad = _bad_zero.sum()
-        if _n_bad > 0:
-            print(f"[rg_loader] WARNING: {_n_bad} player(s) have 0% RG ownership despite high proj/salary — keeping internal estimate")
-            has_rg = has_rg & ~_bad_zero
-
         if "ownership" in merged.columns:
             merged.loc[has_rg, "ownership"] = rg_own[has_rg]
         else:
