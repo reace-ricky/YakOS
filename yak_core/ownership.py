@@ -125,6 +125,34 @@ def salary_rank_ownership(pool_df: pd.DataFrame, col: str = "ownership") -> pd.D
         value_score[has_salary] = proj[has_salary] / sal_k[has_salary]
     value_rank = value_score.rank(pct=True, method="average") if has_salary.any() else proj_rank
 
+    # ── Minutes pop signal ─────────────────────────────────────────────
+    # Players with projected minutes well above their rolling average are
+    # breakout candidates.  The field underestimates minutes pops, so these
+    # players tend to be under-owned relative to their expected output.
+    # We REDUCE their projected ownership slightly to reflect that the
+    # field hasn't caught up — which increases their leverage in the edge score.
+    min_pop_adj = pd.Series(1.0, index=df.index)
+    proj_min = pd.to_numeric(df.get("proj_minutes", 0), errors="coerce").fillna(0)
+    for _rm_col, _rm_w in [("rolling_min_5", 0.50), ("rolling_min_10", 0.30), ("rolling_min_20", 0.20)]:
+        if _rm_col in df.columns:
+            pass  # rolling data available
+    # If we have rolling minutes data, compute minutes delta
+    _baseline_min_own = pd.Series(0.0, index=df.index)
+    _bw = pd.Series(0.0, index=df.index)
+    for _rc, _rw in [("rolling_min_5", 0.50), ("rolling_min_10", 0.30), ("rolling_min_20", 0.20)]:
+        if _rc in df.columns:
+            _rv = pd.to_numeric(df[_rc], errors="coerce")
+            _m = _rv.notna()
+            _baseline_min_own = _baseline_min_own + _rv.fillna(0) * _rw * _m.astype(float)
+            _bw = _bw + _rw * _m.astype(float)
+    if (_bw > 0).any():
+        _baseline_min_own[_bw > 0] = _baseline_min_own[_bw > 0] / _bw[_bw > 0]
+        _min_delta = (proj_min - _baseline_min_own).clip(lower=0)
+        # Players with 5+ minute pop get 5-15% ownership reduction
+        # (field hasn't adjusted, so they're actually under-owned)
+        _pop_mask = _min_delta >= 3
+        min_pop_adj[_pop_mask] = (1.0 - (_min_delta[_pop_mask] / 50.0).clip(upper=0.15))
+
     # ── Combine signals with power curve ──────────────────────────────
     # Weights calibrated against real RotoGrinders ownership distributions.
     # Power curve (1.8) concentrates ownership toward top players —
@@ -135,7 +163,7 @@ def salary_rank_ownership(pool_df: pd.DataFrame, col: str = "ownership") -> pd.D
         # No salary data — lean heavier on projection + ceiling
         raw = (0.55 * proj_rank + 0.45 * ceil_rank)
 
-    raw_curved = raw ** 1.8
+    raw_curved = (raw ** 1.8) * min_pop_adj
 
     # ── Positional scarcity adjustment ────────────────────────────────
     if "pos" in df.columns:

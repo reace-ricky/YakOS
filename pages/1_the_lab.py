@@ -576,10 +576,31 @@ def main() -> None:
                         if not raw_dgs:
                             st.warning(f"No slates found on {_source} for {slate_date_str}. Try a different date.")
                         else:
-                            slate_options = build_slate_options(raw_dgs)
+                            # Filter draft groups to selected date only.
+                            # DK lobby returns today + tomorrow; keep only
+                            # slates whose StartDate matches slate_date_str.
+                            _target_date = slate_date_str  # "YYYY-MM-DD"
+                            _filtered_dgs = []
+                            for _dg in raw_dgs:
+                                # Prefer StartDateEst (ET) to avoid UTC
+                                # date-boundary issues (8pm ET = next day UTC).
+                                _sd = str(
+                                    _dg.get("StartDateEst")
+                                    or _dg.get("StartDate")
+                                    or _dg.get("startDate")
+                                    or _dg.get("start_time")
+                                    or ""
+                                )
+                                _sd_date = _sd[:10]  # "YYYY-MM-DD"
+                                if _sd_date == _target_date:
+                                    _filtered_dgs.append(_dg)
+                            if not _filtered_dgs:
+                                # Fallback: don't filter if nothing matched
+                                _filtered_dgs = raw_dgs
+                            slate_options = build_slate_options(_filtered_dgs)
                             st.session_state[_slate_cache_key] = slate_options
                             _cached_slates = slate_options
-                            st.success(f"Found {len(slate_options)} slate(s) from {_source}.")
+                            st.success(f"Found {len(slate_options)} slate(s) from {_source} for {slate_date_str}.")
                     except Exception as exc:
                         st.error(f"Failed to fetch slates: {exc}")
         with col_clear_slate:
@@ -592,7 +613,27 @@ def main() -> None:
         selected_slate_label: Optional[str] = None
 
         if _cached_slates:
-            slate_labels = [s["label"] for s in _cached_slates]
+            # Filter slate list by selected contest type so the user
+            # only sees relevant slates (e.g. Showdown games when
+            # contest type is Showdown, Classic slates for GPP/Cash).
+            _is_showdown_contest = preset.get("slate_type") == "Showdown Captain"
+            # Game-type 70 = Classic, 81 = Showdown Captain.
+            # Exclude Tiers(73), Pickem(188), Points(343), 2H(112),
+            # Showdown Tiers(193) — they use different roster rules.
+            _CLASSIC_GAME_TYPE = 70
+            _SHOWDOWN_GAME_TYPE = 81
+            _visible_slates = [
+                s for s in _cached_slates
+                if (
+                    (_is_showdown_contest and s.get("game_type_id") == _SHOWDOWN_GAME_TYPE)
+                    or (not _is_showdown_contest and s.get("game_type_id") == _CLASSIC_GAME_TYPE)
+                )
+            ]
+            # Fallback: if filter produces nothing, show all
+            if not _visible_slates:
+                _visible_slates = _cached_slates
+
+            slate_labels = [s["label"] for s in _visible_slates]
             selected_idx = st.radio(
                 "Choose a slate",
                 range(len(slate_labels)),
@@ -600,7 +641,7 @@ def main() -> None:
                 key="_hub_slate_radio",
             )
             if selected_idx is not None:
-                selected_slate = _cached_slates[selected_idx]
+                selected_slate = _visible_slates[selected_idx]
                 selected_dg_id = selected_slate["draft_group_id"]
                 selected_slate_label = selected_slate["label"]
                 st.caption(

@@ -290,17 +290,65 @@ def compute_edge_metrics(
         _dampen = (1.0 - (rcv - 0.15).clip(lower=0.0) * 1.0).clip(lower=0.70)
     smash_dampened = smash_prob * _dampen
 
-    # ── Edge score: 4-component composite ──
-    # Ceiling Magnitude (0.30): rewards high absolute upside (studs)
-    # Smash Probability (0.30): rewards likelihood of hitting ceiling
-    # Safety (0.20): (1 - bust_prob), penalises bust risk
-    # Leverage (0.20): ownership edge, capped for studs
-    edge_score = (
-        ceil_magnitude * 0.30
-        + smash_dampened * 0.30
-        + (1.0 - bust_prob) * 0.20
-        + lev_norm_capped * 0.20
-    )
+    # ── Minutes pop signal ──
+    # Detect players whose projected minutes significantly exceed their
+    # rolling average.  A minutes pop is the clearest breakout indicator:
+    # injury to a teammate, role change, or matchup-driven usage spike.
+    # minutes_pop is 0-1 normalised: 0 = no change, 1 = massive increase.
+    proj_min = _parse_numeric(df.get("proj_minutes", pd.Series(0, index=df.index)), 0.0)
+    minutes_pop = pd.Series(0.0, index=df.index)
+
+    # Use rolling averages to compute delta
+    _rolling_min_cols = ["rolling_min_5", "rolling_min_10", "rolling_min_20"]
+    _rolling_min_weights = [0.50, 0.30, 0.20]
+    _baseline_min = pd.Series(0.0, index=df.index)
+    _baseline_w = pd.Series(0.0, index=df.index)
+    for _rm_col, _rm_w in zip(_rolling_min_cols, _rolling_min_weights):
+        if _rm_col in df.columns:
+            _rm_vals = _parse_numeric(df[_rm_col], np.nan)
+            _has = _rm_vals.notna()
+            _baseline_min = _baseline_min + _rm_vals.fillna(0) * _rm_w * _has.astype(float)
+            _baseline_w = _baseline_w + _rm_w * _has.astype(float)
+    _has_baseline = _baseline_w > 0
+    _baseline_min[_has_baseline] = _baseline_min[_has_baseline] / _baseline_w[_has_baseline]
+
+    if _has_baseline.any() and (proj_min > 0).any():
+        # Delta: how much proj_minutes exceeds the baseline (in minutes)
+        _min_delta = (proj_min - _baseline_min).clip(lower=0)
+        # Normalise: +10 minutes over baseline = pop of 1.0 (massive)
+        # +5 minutes = 0.5, +2 = 0.2, etc.
+        minutes_pop[_has_baseline] = (_min_delta[_has_baseline] / 10.0).clip(upper=1.0)
+
+    # Store the raw delta for display / breakout detection
+    df["minutes_delta"] = (proj_min - _baseline_min).round(1) if _has_baseline.any() else 0.0
+    df["minutes_pop"] = minutes_pop.round(3)
+
+    # ── Edge score: 5-component composite ──
+    # Ceiling Magnitude (0.25): rewards high absolute upside (studs)
+    # Smash Probability (0.25): rewards likelihood of hitting ceiling
+    # Safety (0.15): (1 - bust_prob), penalises bust risk
+    # Leverage (0.15): ownership edge, capped for studs
+    # Minutes Pop (0.20): breakout signal from projected minutes spike
+    #
+    # When no minutes data is available (minutes_pop all zeros),
+    # the weight redistributes proportionally to the other 4 components.
+    _has_min_signal = (minutes_pop > 0).any()
+    if _has_min_signal:
+        edge_score = (
+            ceil_magnitude * 0.25
+            + smash_dampened * 0.25
+            + (1.0 - bust_prob) * 0.15
+            + lev_norm_capped * 0.15
+            + minutes_pop * 0.20
+        )
+    else:
+        # No minutes data — fall back to original 4-component weights
+        edge_score = (
+            ceil_magnitude * 0.30
+            + smash_dampened * 0.30
+            + (1.0 - bust_prob) * 0.20
+            + lev_norm_capped * 0.20
+        )
 
     # ── Tournament anchor flag ──
     # Top 8 projected players are GPP anchors — cornerstones for lineups.
@@ -315,6 +363,8 @@ def compute_edge_metrics(
     out["smash_prob"] = smash_prob.values
     out["bust_prob"] = bust_prob.values
     out["ceil_magnitude"] = ceil_magnitude.values
+    out["minutes_pop"] = minutes_pop.values
+    out["minutes_delta"] = df["minutes_delta"].values
     out["edge_score"] = edge_score.values
     out["is_anchor"] = is_anchor.values
 
