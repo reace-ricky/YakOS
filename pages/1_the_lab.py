@@ -179,10 +179,13 @@ def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
 
     sal = pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0).astype(float)
 
-    # ── Derive floor/ceil from pool["proj"] (already set by apply_projections) ─
-    # The "proj" column is the single source of truth from the YakOS projection
-    # pipeline (game-log model or salary-implied fallback).  Floor and ceil are
-    # simple multipliers so the optimizer has a range, NOT a separate model.
+    # ── Derive floor/ceil from pool["proj"] with per-player variance ──────
+    # The "proj" column is the single source of truth from the YakOS
+    # projection pipeline.  Floor and ceil must differ PER PLAYER so that
+    # smash/bust z-scores are NOT constants.  We derive per-player spread
+    # from rolling-FP standard deviation when available; otherwise fall
+    # back to salary-tier multipliers (studs are more consistent than
+    # value plays in NBA DFS).
     proj_fp = pd.to_numeric(pool.get("proj", 0), errors="coerce").fillna(0).clip(lower=0)
 
     # If proj is all zeros (shouldn't happen post-apply_projections), use
@@ -191,10 +194,41 @@ def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
         _FP_PER_K = 4.0
         proj_fp = sal * _FP_PER_K / 1000.0
 
+    # Compute per-player spread ratio from rolling game-log variance.
+    # Players with high FP variance → wider floor/ceil range.
+    # Players with low variance (consistent studs) → tighter range.
+    _rolling_std = pd.Series(np.nan, index=pool.index)
+    _rolling_mean = pd.Series(np.nan, index=pool.index)
+    for col in ["rolling_fp_5", "rolling_fp_10", "rolling_fp_20"]:
+        if col in pool.columns:
+            vals = pd.to_numeric(pool[col], errors="coerce")
+            _rolling_mean = _rolling_mean.fillna(vals)
+
+    # Use coefficient of variation from rolling data when available,
+    # else derive spread from salary tier (cheaper = more volatile).
+    # sal_k ranges ~3-13; spread_mult ranges ~0.25 (studs) to ~0.55 (min)
+    sal_k = (sal / 1000.0).clip(lower=3.0)
+    spread_mult = (0.65 - sal_k * 0.03).clip(lower=0.25, upper=0.55)
+
+    # If rolling data is present, blend rolling CV with salary-tier spread
+    if "rolling_fp_5" in pool.columns and "rolling_fp_10" in pool.columns:
+        fp5 = pd.to_numeric(pool["rolling_fp_5"], errors="coerce")
+        fp10 = pd.to_numeric(pool["rolling_fp_10"], errors="coerce")
+        # Approximate CV: |fp5 - fp10| / mean → measures recent volatility
+        _mean = ((fp5.fillna(0) + fp10.fillna(0)) / 2.0).replace(0, 1)
+        _diff = (fp5.fillna(0) - fp10.fillna(0)).abs()
+        rolling_cv = (_diff / _mean).clip(lower=0.05, upper=0.60)
+        has_rolling = fp5.notna() & fp10.notna()
+        # Blend: 60% rolling CV + 40% salary tier for players with data
+        spread_mult[has_rolling] = (
+            rolling_cv[has_rolling] * 0.60 + spread_mult[has_rolling] * 0.40
+        ).clip(lower=0.25, upper=0.55)
+
+    # Floor = proj × (1 - spread_mult),  Ceil = proj × (1 + spread_mult)
     if not has_floor:
-        pool["floor"] = (proj_fp * 0.65).round(2)
+        pool["floor"] = (proj_fp * (1.0 - spread_mult)).round(2)
     if not has_ceil:
-        pool["ceil"] = (proj_fp * 1.45).round(2)
+        pool["ceil"] = (proj_fp * (1.0 + spread_mult)).round(2)
 
     # Sanity check: ceil MUST be above proj; floor MUST be below proj.
     _ceil = pd.to_numeric(pool["ceil"], errors="coerce")
@@ -204,8 +238,8 @@ def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
     _bad_range = _ceil < _floor
     _needs_fix = _bad_ceil | _bad_floor | _bad_range
     if _needs_fix.any():
-        pool.loc[_needs_fix, "floor"] = (proj_fp[_needs_fix] * 0.65).round(2)
-        pool.loc[_needs_fix, "ceil"] = (proj_fp[_needs_fix] * 1.45).round(2)
+        pool.loc[_needs_fix, "floor"] = (proj_fp[_needs_fix] * (1.0 - spread_mult[_needs_fix])).round(2)
+        pool.loc[_needs_fix, "ceil"] = (proj_fp[_needs_fix] * (1.0 + spread_mult[_needs_fix])).round(2)
 
     # ── Vectorised minutes projection ────────────────────────────────────
     _min_json = None
