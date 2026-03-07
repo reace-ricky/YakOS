@@ -179,69 +179,29 @@ def _enrich_pool(pool: pd.DataFrame) -> pd.DataFrame:
 
     sal = pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0).astype(float)
 
-    # ── Vectorised FP projection (floor/ceil) ────────────────────────────
-    # Try to load trained model ONCE (not per-row)
-    _fp_json = None
-    try:
-        import os
-        from yak_core.config import YAKOS_ROOT
-        from yak_core.model_loader import load_json_model, predict_batch
-        _fp_json = load_json_model(os.path.join(YAKOS_ROOT, "models", "yakos_fp_model.json"))
-    except Exception:
-        pass
+    # ── Derive floor/ceil from pool["proj"] (already set by apply_projections) ─
+    # The "proj" column is the single source of truth from the YakOS projection
+    # pipeline (game-log model or salary-implied fallback).  Floor and ceil are
+    # simple multipliers so the optimizer has a range, NOT a separate model.
+    proj_fp = pd.to_numeric(pool.get("proj", 0), errors="coerce").fillna(0).clip(lower=0)
 
-    if _fp_json is not None:
-        # Batch predict with portable JSON model
-        pred = predict_batch(_fp_json, pool).clip(lower=0)
-
-        # Blend with rolling signals (vectorised)
-        _rolling_keys = [("rolling_fp_5", 0.30), ("rolling_fp_10", 0.20), ("rolling_fp_20", 0.10)]
-        rolling_weighted = pd.Series(0.0, index=pool.index)
-        rolling_w_sum = pd.Series(0.0, index=pool.index)
-        for key, w in _rolling_keys:
-            if key in pool.columns:
-                vals = pd.to_numeric(pool[key], errors="coerce")
-                mask = vals.notna()
-                rolling_weighted = rolling_weighted + vals.fillna(0) * w * mask.astype(float)
-                rolling_w_sum = rolling_w_sum + w * mask.astype(float)
-        has_rolling = rolling_w_sum > 0
-        rolling_signal = (rolling_weighted / rolling_w_sum.replace(0, 1))
-        proj_fp = pred.copy()
-        proj_fp[has_rolling] = pred[has_rolling] * 0.4 + rolling_signal[has_rolling] * 0.6
-        proj_fp = proj_fp.clip(lower=0)
-    else:
-        # Formula fallback (vectorised)
+    # If proj is all zeros (shouldn't happen post-apply_projections), use
+    # salary-implied as a last-resort safety net.
+    if (proj_fp == 0).all():
         _FP_PER_K = 4.0
-        sal_base = sal * _FP_PER_K / 1000.0
-        _signal_cols = [("rolling_fp_5", 0.30), ("rolling_fp_10", 0.20),
-                        ("rolling_fp_20", 0.10), ("tank01_proj", 0.20), ("rg_proj", 0.15)]
-        sig_weighted = pd.Series(0.0, index=pool.index)
-        sig_w_sum = pd.Series(0.0, index=pool.index)
-        for key, w in _signal_cols:
-            if key in pool.columns:
-                vals = pd.to_numeric(pool[key], errors="coerce")
-                mask = vals.notna()
-                sig_weighted = sig_weighted + vals.fillna(0) * w * mask.astype(float)
-                sig_w_sum = sig_w_sum + w * mask.astype(float)
-        has_sig = sig_w_sum > 0
-        signal_proj = sig_weighted / sig_w_sum.replace(0, 1)
-        proj_fp = sal_base.copy()
-        proj_fp[has_sig] = signal_proj[has_sig] * 0.70 + sal_base[has_sig] * 0.30
-        proj_fp = proj_fp.clip(lower=0)
+        proj_fp = sal * _FP_PER_K / 1000.0
 
     if not has_floor:
         pool["floor"] = (proj_fp * 0.65).round(2)
     if not has_ceil:
         pool["ceil"] = (proj_fp * 1.45).round(2)
 
-    # Sanity check: if external floor/ceil are nonsensical relative to proj,
-    # override them.  Ceiling MUST be above proj; floor MUST be below proj.
-    _proj_col = pd.to_numeric(pool.get("proj", proj_fp), errors="coerce").fillna(proj_fp)
+    # Sanity check: ceil MUST be above proj; floor MUST be below proj.
     _ceil = pd.to_numeric(pool["ceil"], errors="coerce")
     _floor = pd.to_numeric(pool["floor"], errors="coerce")
-    _bad_ceil = _ceil.isna() | (_ceil <= _proj_col)  # ceil must be ABOVE proj
-    _bad_floor = _floor.isna() | (_floor >= _proj_col)  # floor must be BELOW proj
-    _bad_range = _ceil < _floor  # ceil must exceed floor
+    _bad_ceil = _ceil.isna() | (_ceil <= proj_fp)
+    _bad_floor = _floor.isna() | (_floor >= proj_fp)
+    _bad_range = _ceil < _floor
     _needs_fix = _bad_ceil | _bad_floor | _bad_range
     if _needs_fix.any():
         pool.loc[_needs_fix, "floor"] = (proj_fp[_needs_fix] * 0.65).round(2)

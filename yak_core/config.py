@@ -101,7 +101,7 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "correlation_mode": "stack",
         "default_lineups": 150,
         "default_max_exposure": 0.35,
-        "min_salary": 48000,
+        "min_salary": 46000,
         # Pool sizing
         "pool_size_min": 40,
         "pool_size_max": 70,
@@ -131,7 +131,7 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "correlation_mode": "stack",
         "default_lineups": 20,
         "default_max_exposure": 0.5,
-        "min_salary": 48000,
+        "min_salary": 46000,
         # Pool sizing
         "pool_size_min": 20,
         "pool_size_max": 40,
@@ -161,7 +161,7 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "correlation_mode": "stack",
         "default_lineups": 20,
         "default_max_exposure": 0.5,
-        "min_salary": 48000,
+        "min_salary": 46000,
         # Pool sizing
         "pool_size_min": 15,
         "pool_size_max": 35,

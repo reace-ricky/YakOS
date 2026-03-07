@@ -55,7 +55,7 @@ from yak_core.lineup_scoring import compute_lineup_boom_bust, GRADE_COLORS as _G
 _BUILD_MODE_COLS = {
     "floor": "floor",
     "median": "proj",
-    "ceiling": "ceil",
+    "ceiling": "proj",  # GPP optimises on proj; ceil-upside handled by archetype
 }
 _CONTEST_TO_BUILD_MODE = {
     "GPP Main": "ceiling",
