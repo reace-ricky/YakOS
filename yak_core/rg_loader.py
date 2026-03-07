@@ -1,5 +1,6 @@
 """yak_core.rg_loader -- load and normalize RotoGrinders CSV exports."""
 import os
+from datetime import datetime
 import pandas as pd
 from typing import Optional
 
@@ -124,17 +125,88 @@ def merge_rg_with_pool(
     merge_cols: Optional[list] = None,
 ) -> pd.DataFrame:
     """Merge RG data into an existing player pool by name+team.
+
     Adds any new columns from rg_df that pool_df doesn't have yet.
+    **Critically**: if RG provides ownership data (``proj_own`` or
+    ``ownership``), it OVERWRITES the pool's ``ownership`` column
+    and sets ``own_proj`` so that both edge.py and sims.py consume
+    real ownership instead of the salary-rank fallback.
     """
     if merge_cols is None:
         merge_cols = ["player_name", "team"]
+
+    # Determine which RG column carries ownership
+    _rg_own_col = None
+    if "proj_own" in rg_df.columns:
+        _rg_own_col = "proj_own"
+    elif "ownership" in rg_df.columns:
+        _rg_own_col = "ownership"
+
     # Find new columns in rg_df that pool_df lacks
     new_cols = [c for c in rg_df.columns if c not in pool_df.columns and c not in merge_cols]
+
+    # Always include ownership column even if pool already has it — we want to overwrite
+    if _rg_own_col and _rg_own_col not in new_cols:
+        new_cols.append(_rg_own_col)
+
     if not new_cols:
         return pool_df
+
     rg_sub = rg_df[merge_cols + new_cols].drop_duplicates(subset=merge_cols)
-    merged = pool_df.merge(rg_sub, on=merge_cols, how="left")
+    # If RG ownership would collide with existing column, drop pool's version first
+    if _rg_own_col and _rg_own_col in pool_df.columns:
+        merged = pool_df.drop(columns=[_rg_own_col]).merge(rg_sub, on=merge_cols, how="left")
+    else:
+        merged = pool_df.merge(rg_sub, on=merge_cols, how="left")
+
+    # Overwrite the canonical ownership column with RG data
+    if _rg_own_col and _rg_own_col in merged.columns:
+        rg_own = pd.to_numeric(merged[_rg_own_col], errors="coerce")
+        # Only overwrite where RG provided a value; keep existing for unmatched
+        has_rg = rg_own.notna()
+        if "ownership" in merged.columns:
+            merged.loc[has_rg, "ownership"] = rg_own[has_rg]
+        else:
+            merged["ownership"] = rg_own
+        # Also set own_proj (canonical for sims.py)
+        if "own_proj" in merged.columns:
+            merged.loc[has_rg, "own_proj"] = rg_own[has_rg]
+        else:
+            merged["own_proj"] = merged["ownership"]
+
+        _matched = has_rg.sum()
+        _total = len(merged)
+        print(f"[rg_loader] Ownership updated: {_matched}/{_total} players now use RG ownership")
+
+    # Archive the merged data for ownership model training
+    _archive_for_training(merged)
+
     return merged
+
+
+def _archive_for_training(merged_df: pd.DataFrame) -> None:
+    """Save merged pool+RG data to the training archive for the ownership model.
+
+    Each upload is timestamped and appended to ``data/ownership_training/``.
+    The ownership model trainer reads all CSVs in that directory.
+    """
+    try:
+        from yak_core.config import YAKOS_ROOT
+        archive_dir = os.path.join(YAKOS_ROOT, "data", "ownership_training")
+        os.makedirs(archive_dir, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Keep only the columns useful for training
+        _train_cols = [
+            "player_name", "team", "pos", "salary", "proj", "floor", "ceil",
+            "ownership", "own_proj", "proj_own",
+        ]
+        keep = [c for c in _train_cols if c in merged_df.columns]
+        out = merged_df[keep].copy()
+        path = os.path.join(archive_dir, f"own_train_{ts}.csv")
+        out.to_csv(path, index=False)
+        print(f"[rg_loader] Archived ownership training data: {path} ({len(out)} rows)")
+    except Exception as exc:
+        print(f"[rg_loader] Warning: could not archive training data: {exc}")
 
 
 def hit_rate(
