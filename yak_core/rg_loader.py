@@ -82,16 +82,49 @@ def _apply_map(df: pd.DataFrame, col_map: dict) -> pd.DataFrame:
     return out[keep].copy()
 
 
-def load_rg_projections(path: str) -> pd.DataFrame:
-    """Load a RotoGrinders projections CSV and normalize columns.
+def load_rg_projections(path) -> pd.DataFrame:
+    """Load a RotoGrinders CSV and normalize columns.
+
+    Auto-detects whether the file is the lowercase projections format
+    (columns: name, team, fpts, proj_own, ...) or the uppercase contest/sim
+    format (columns: PLAYER, TEAM, FPTS, POWN, ...) and applies the correct
+    column mapping.
+
     Returns DataFrame with columns: player_name, team, opp, pos, proj, salary,
-    proj_own, ceil, floor, smash, opto_pct, minutes, rg_value.
+    proj_own, ceil, floor, smash, opto_pct, minutes, rg_value (when available).
     """
     df = pd.read_csv(path)
-    out = _apply_map(df, _RG_PROJ_MAP)
+
+    # Auto-detect format: uppercase columns = contest format, lowercase = projections format
+    has_uppercase = "PLAYER" in df.columns or "POWN" in df.columns
+    has_lowercase = "name" in df.columns or "fpts" in df.columns
+
+    if has_uppercase and not has_lowercase:
+        # Contest/sim format — use contest map, then rename to match projections schema
+        if "WIN_PROB" in df.columns:
+            out = _apply_map(df, _RG_PROB_MAP)
+        else:
+            out = _apply_map(df, _RG_CONTEST_MAP)
+        # Rename "name" -> "player_name" to match projections schema
+        if "name" in out.columns and "player_name" not in out.columns:
+            out = out.rename(columns={"name": "player_name"})
+        # Strip % from proj_own if present (contest format uses "32.97%")
+        if "proj_own" in out.columns:
+            out["proj_own"] = (
+                out["proj_own"]
+                .astype(str)
+                .str.replace("%", "", regex=False)
+                .apply(pd.to_numeric, errors="coerce")
+            )
+        print(f"[rg_loader] Detected contest/sim format ({len(out)} rows, {len(out.columns)} cols)")
+    else:
+        # Standard projections format
+        out = _apply_map(df, _RG_PROJ_MAP)
+        print(f"[rg_loader] Detected projections format ({len(out)} rows, {len(out.columns)} cols)")
+
     # Ensure numeric
     for c in ["proj", "salary", "proj_own", "ceil", "floor", "smash",
-              "opto_pct", "minutes", "rg_value"]:
+              "opto_pct", "minutes", "rg_value", "actual_fp", "ownership"]:
         if c in out.columns:
             out[c] = pd.to_numeric(out[c], errors="coerce")
     return out
@@ -164,6 +197,26 @@ def merge_rg_with_pool(
         rg_own = pd.to_numeric(merged[_rg_own_col], errors="coerce")
         # Only overwrite where RG provided a value; keep existing for unmatched
         has_rg = rg_own.notna()
+
+        # Filter out bad 0% ownership from RG for players with meaningful projections.
+        # RG sometimes publishes 0% for entire teams (data bug). A $5K+ player
+        # with 0% projected ownership is almost certainly wrong — keep our
+        # internal estimate for those players instead of overwriting with garbage.
+        _MIN_SALARY_FOR_OWN_GUARD = 4500
+        _proj_col = "proj" if "proj" in merged.columns else "fpts" if "fpts" in merged.columns else None
+        if _proj_col:
+            _has_proj = pd.to_numeric(merged.get(_proj_col, 0), errors="coerce").fillna(0) > 20
+        else:
+            _has_proj = pd.Series(False, index=merged.index)
+        _sal = pd.to_numeric(merged.get("salary", 0), errors="coerce").fillna(0)
+        _is_real_player = _has_proj | (_sal >= _MIN_SALARY_FOR_OWN_GUARD)
+        _is_zero_own = rg_own.fillna(0) == 0
+        _bad_zero = _is_zero_own & _is_real_player
+        _n_bad = _bad_zero.sum()
+        if _n_bad > 0:
+            print(f"[rg_loader] WARNING: {_n_bad} player(s) have 0% RG ownership despite high proj/salary — keeping internal estimate")
+            has_rg = has_rg & ~_bad_zero
+
         if "ownership" in merged.columns:
             merged.loc[has_rg, "ownership"] = rg_own[has_rg]
         else:
