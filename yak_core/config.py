@@ -370,6 +370,37 @@ def classify_draft_group(dg: Dict[str, Any]) -> str:
         return f"Slate{' ' + suffix if suffix else ''}"
 
 
+# DK game type IDs we support for lineup building.
+# 70 = Classic, 81 = Showdown Captain Mode.
+# Filters out: 188 (Tiers), 193 (Showdown Tiers), 73 (NBA Tiers),
+#              343 (Points), 112 (2nd Half), and other non-standard formats.
+_SUPPORTED_GAME_TYPE_IDS = {70, 81}
+
+
+def _format_start_time(start_time_str: str) -> str:
+    """Convert a DK StartDate string into a short 'Sat 8PM ET' label."""
+    if not start_time_str or start_time_str == "None":
+        return ""
+    try:
+        from datetime import datetime as _dt
+        from zoneinfo import ZoneInfo as _ZI
+        # DK returns ISO-ish timestamps like '2026-03-08T01:00:00.0000000'
+        cleaned = start_time_str.rstrip("0").rstrip(".")
+        dt = _dt.fromisoformat(cleaned)
+        dt_utc = dt.replace(tzinfo=_ZI("UTC"))
+        dt_et = dt_utc.astimezone(_ZI("America/New_York"))
+        # Format: "Sat 8PM" (drop leading zero, drop minutes if :00)
+        day = dt_et.strftime("%a")
+        hour = dt_et.strftime("%I").lstrip("0")
+        minute = dt_et.strftime("%M")
+        ampm = dt_et.strftime("%p")
+        if minute == "00":
+            return f"{day} {hour}{ampm}"
+        return f"{day} {hour}:{minute}{ampm}"
+    except Exception:
+        return ""
+
+
 def build_slate_options(draft_groups: list) -> List[Dict[str, Any]]:
     """Build a sorted list of slate options from raw DK DraftGroup dicts.
 
@@ -382,17 +413,31 @@ def build_slate_options(draft_groups: list) -> List[Dict[str, Any]]:
       - start_time (str)
       - sort_order (int)
     
+    Filters to Classic (70) and Showdown (81) game types only — removes
+    Tiers, Points, 2nd Half, and other formats that duplicate the same
+    player pool but use incompatible roster rules.
+
     Sorted by: Classic before Showdown, then by game_count descending
     (so Main Slate is always first).
     """
     options = []
+    seen_dg_ids: set = set()
     for dg in draft_groups:
         dg_id = int(dg.get("DraftGroupId") or dg.get("draftGroupId") or dg.get("draft_group_id") or 0)
+        if dg_id in seen_dg_ids:
+            continue
+        seen_dg_ids.add(dg_id)
+
         game_count = int(dg.get("GameCount") or dg.get("gameCount") or dg.get("game_count") or 0)
         game_type_id = int(dg.get("GameTypeId") or dg.get("gameTypeId") or dg.get("game_type_id") or 0)
         game_style = str(dg.get("GameStyle") or dg.get("gameStyle") or dg.get("game_style") or "Classic")
         start_time = str(dg.get("StartDate") or dg.get("startDate") or dg.get("start_time") or "")
         sort_order = int(dg.get("SortOrder") or dg.get("sortOrder") or dg.get("sort_order") or 99)
+
+        # Filter: only Classic (70) and Showdown (81) game types.
+        # Skip Tiers (73/188/193), Points (343), 2nd Half (112), etc.
+        if _SUPPORTED_GAME_TYPE_IDS and game_type_id not in _SUPPORTED_GAME_TYPE_IDS:
+            continue
 
         label = classify_draft_group(dg)
 
@@ -403,7 +448,7 @@ def build_slate_options(draft_groups: list) -> List[Dict[str, Any]]:
             "draft_group_id": dg_id,
             "label": label,
             "game_count": game_count,
-            "game_style": game_style,
+            "game_style": "Showdown Captain Mode" if is_showdown else "Classic",
             "game_type_id": game_type_id,
             "start_time": start_time,
             "sort_order": sort_order,
@@ -411,6 +456,21 @@ def build_slate_options(draft_groups: list) -> List[Dict[str, Any]]:
         })
 
     options.sort(key=lambda x: x["_sort_key"])
+
+    # Disambiguate any remaining duplicate labels using start time
+    label_counts: Dict[str, int] = {}
+    for opt in options:
+        label_counts[opt["label"]] = label_counts.get(opt["label"], 0) + 1
+    duped_labels = {lbl for lbl, cnt in label_counts.items() if cnt > 1}
+    if duped_labels:
+        for opt in options:
+            if opt["label"] in duped_labels:
+                _time_tag = _format_start_time(opt.get("start_time", ""))
+                if _time_tag:
+                    opt["label"] = f"{opt['label']} — {_time_tag}"
+                else:
+                    opt["label"] = f"{opt['label']} (DG {opt['draft_group_id']})"
+
     # Remove internal sort key
     for opt in options:
         opt.pop("_sort_key", None)
