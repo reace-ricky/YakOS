@@ -367,13 +367,25 @@ def generate_slate_overview(
     own = _safe_numeric(pool.get("ownership", pool.get("own_pct", pd.Series())))
     n_players = len(pool)
 
-    # Bullet 1: Slate size and salary distribution
-    avg_sal = sal.mean()
-    high_sal_count = (sal >= 8000).sum()
-    bullets.append(
-        f"{n_players} players on the slate, {high_sal_count} priced $8K+"
-        f" (avg salary ${avg_sal:,.0f})"
-    )
+    # Bullet 1: Core plays — top players to build lineups around
+    # Use edge_score if available, fall back to projection rank
+    _edge_col = "edge_score" if "edge_score" in signals_df.columns else "edge_composite"
+    _has_edge = _edge_col in signals_df.columns and signals_df[_edge_col].max() > 0
+    if _has_edge:
+        _core = signals_df.nlargest(4, _edge_col)
+    else:
+        _core = signals_df.nlargest(4, "proj") if "proj" in signals_df.columns else pd.DataFrame()
+
+    if not _core.empty:
+        core_parts = []
+        for _, r in _core.iterrows():
+            name = r.get("player_name", "?")
+            s = r.get("salary", 0)
+            p = r.get("proj", 0)
+            core_parts.append(f"{name} (${s:,.0f}/{p:.1f})")
+        bullets.append(f"Core builds: {', '.join(core_parts)}")
+    else:
+        bullets.append(f"{n_players} players on the slate")
 
     # Bullet 2: Injury / Pop Catalyst opportunities
     # Check both legacy injury_bump_fp AND pop_catalyst signals so the
