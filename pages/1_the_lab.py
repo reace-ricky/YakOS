@@ -652,14 +652,12 @@ def _auto_load_pool_and_sims(
             })
             pool = apply_projections(pool, cfg)
 
-            # Apply calibration corrections
+            # Apply calibration corrections (file-backed — persists across sessions)
             try:
                 from yak_core.calibration_feedback import get_correction_factors, apply_corrections
-                if "_cal_fb_store" not in st.session_state:
-                    st.session_state["_cal_fb_store"] = {}
-                _cf = get_correction_factors(store=st.session_state["_cal_fb_store"])
+                _cf = get_correction_factors()
                 if _cf.get("n_slates", 0) > 0:
-                    pool = apply_corrections(pool, _cf, store=st.session_state["_cal_fb_store"])
+                    pool = apply_corrections(pool, _cf)
                     status_container.write(f"📐 Calibration corrections applied ({_cf['n_slates']} slate(s))")
             except Exception:
                 pass
@@ -711,16 +709,34 @@ def _auto_load_pool_and_sims(
                             if _dnp_removed:
                                 status_container.write(f"ℹ️ {_dnp_removed} DNP player(s) removed via box score.")
 
-                            # Auto-record projection errors
+                            # Auto-record projection errors (file-backed)
                             if "proj" in pool.columns and "actual_fp" in pool.columns:
                                 try:
                                     from yak_core.calibration_feedback import record_slate_errors
-                                    if "_cal_fb_store" not in st.session_state:
-                                        st.session_state["_cal_fb_store"] = {}
-                                    _fb_result = record_slate_errors(slate_date_str, pool, store=st.session_state["_cal_fb_store"])
+                                    _fb_result = record_slate_errors(slate_date_str, pool)
                                     if "error" not in _fb_result:
                                         _fb_mae = _fb_result.get("overall", {}).get("mae", "?")
                                         status_container.write(f"📐 Calibration feedback recorded (MAE: {_fb_mae})")
+                                except Exception:
+                                    pass
+
+                                # Auto-archive slate snapshot for learning loop
+                                try:
+                                    from yak_core.slate_archive import archive_slate
+                                    archive_slate(pool, slate_date_str, contest_type=contest_type_label,
+                                                  sim_results=sim.player_results if sim.player_results is not None else None)
+                                    status_container.write("💾 Slate archived for model training.")
+                                except Exception:
+                                    pass
+
+                                # Record edge signal outcomes for feedback loop
+                                try:
+                                    from yak_core.edge_feedback import record_edge_outcomes
+                                    _ef_result = record_edge_outcomes(slate_date_str, pool, contest_type=contest_type_label)
+                                    if "error" not in _ef_result:
+                                        _ef_sigs = _ef_result.get("signals", {})
+                                        _ef_active = sum(1 for s in _ef_sigs.values() if s.get("n_flagged", 0) > 0)
+                                        status_container.write(f"🎯 Edge feedback: {_ef_active} signals tracked.")
                                 except Exception:
                                     pass
                 except Exception:
@@ -1373,12 +1389,21 @@ def main() -> None:
                         }
                         st.session_state[_cr_key].append(_cr_record)
 
-                        if "_cal_fb_store" not in st.session_state:
-                            st.session_state["_cal_fb_store"] = {}
-                        _store = st.session_state["_cal_fb_store"]
-                        if "contest_results" not in _store:
-                            _store["contest_results"] = []
-                        _store["contest_results"].append(_cr_record)
+                        # Persist contest results to disk alongside calibration
+                        try:
+                            from yak_core.calibration_feedback import _FEEDBACK_DIR, _ensure_dir
+                            import json as _cr_json
+                            _ensure_dir()
+                            _cr_file = os.path.join(_FEEDBACK_DIR, "contest_results.json")
+                            _cr_hist = []
+                            if os.path.isfile(_cr_file):
+                                with open(_cr_file) as _crf:
+                                    _cr_hist = _cr_json.load(_crf)
+                            _cr_hist.append(_cr_record)
+                            with open(_cr_file, "w") as _crf:
+                                _cr_json.dump(_cr_hist, _crf, indent=2)
+                        except Exception:
+                            pass
 
                         if _cr_pct <= 1:
                             st.success(f"Top {_cr_pct}% — elite finish. Recorded.")
