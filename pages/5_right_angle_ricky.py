@@ -1,10 +1,12 @@
-"""Edge Share – YakOS page.
+"""Right Angle Ricky -- the public-facing edge analysis and lineup showcase.
 
-Responsibilities
-----------------
-- Two-tab layout: Ricky's Edge Analysis (writeup + top lineups) and Optimizer
-  (full paginated lineup browser per contest type).
-- Clean, minimal UI — no clutter.
+This is what friends see. Clean, confident, no clutter.
+
+Layout:
+  - Slate header (sport, date, site)
+  - Confidence pills per contest type
+  - Tab 1: Ricky's Analysis (edge writeup + top lineup per contest)
+  - Tab 2: All Lineups (paginated browser per contest type)
 
 State read: LineupSetState (published_sets), RickyEdgeState, SlateState, SimState
 State written: None (fully read-only)
@@ -34,10 +36,12 @@ from yak_core.edge_metrics import (  # noqa: E402
     get_confidence_color,
 )
 from yak_core.config import CONTEST_PRESETS, UI_CONTEST_LABELS, UI_CONTEST_MAP  # noqa: E402
+from yak_core.ricky_signals import compute_ricky_signals, generate_slate_overview, SIGNAL_BADGES  # noqa: E402
+from yak_core.context import get_lab_analysis  # noqa: E402
 
 # Internal preset labels in display order
 _CONTEST_ORDER = [UI_CONTEST_MAP[k] for k in UI_CONTEST_LABELS]
-# Reverse map: preset label → short UI label  ("GPP Main" → "GPP")
+# Reverse map: preset label -> short UI label  ("GPP Main" -> "GPP")
 _LABEL_SHORT = {v: k for k, v in UI_CONTEST_MAP.items()}
 
 # ---------------------------------------------------------------------------
@@ -45,8 +49,8 @@ _LABEL_SHORT = {v: k for k, v in UI_CONTEST_MAP.items()}
 # ---------------------------------------------------------------------------
 
 
-def _status_strip(slate: "SlateState") -> None:
-    """Compact one-line status bar."""
+def _status_strip(slate) -> None:
+    """Compact one-line slate header."""
     parts = []
     if slate.sport:
         parts.append(f"**{slate.sport}**")
@@ -55,10 +59,10 @@ def _status_strip(slate: "SlateState") -> None:
     if slate.site:
         parts.append(slate.site)
     if parts:
-        st.caption(" · ".join(parts))
+        st.caption(" \u00b7 ".join(parts))
 
 
-def _confidence_pills(edge: "RickyEdgeState") -> None:
+def _confidence_pills(edge) -> None:
     """Render compact confidence pills across contests that have data."""
     available = [c for c in _CONTEST_ORDER if c in edge.edge_analysis_by_contest]
     if not available:
@@ -72,14 +76,14 @@ def _confidence_pills(edge: "RickyEdgeState") -> None:
         short = _LABEL_SHORT.get(contest_label, contest_label)
         with col:
             if color == "green":
-                st.success(f"**{short}** — {score:.0f}/100")
+                st.success(f"**{short}** \u2014 {score:.0f}/100")
             elif color == "yellow":
-                st.warning(f"**{short}** — {score:.0f}/100")
+                st.warning(f"**{short}** \u2014 {score:.0f}/100")
             else:
-                st.error(f"**{short}** — {score:.0f}/100")
+                st.error(f"**{short}** \u2014 {score:.0f}/100")
 
 
-def _render_edge_writeup(edge: "RickyEdgeState", contest_label: str) -> None:
+def _render_edge_writeup(edge, contest_label: str) -> None:
     """Render edge analysis writeup for one contest type."""
     payload = edge.edge_analysis_by_contest.get(contest_label)
     if payload is None:
@@ -114,11 +118,10 @@ def _render_edge_writeup(edge: "RickyEdgeState", contest_label: str) -> None:
             })
         return pd.DataFrame(rows, columns=_COLS)
 
-    # Show all three player groups inline — compact
-    for group_label, group_data, empty_msg in [
-        ("Core & Value", core_value, "No core/value plays tagged."),
-        ("Leverage", leverage, "No leverage plays tagged."),
-        ("Fades", fades, "No fades tagged."),
+    for group_label, group_data in [
+        ("Core & Value", core_value),
+        ("Leverage", leverage),
+        ("Fades", fades),
     ]:
         df = _to_df(group_data)
         if df.empty:
@@ -128,18 +131,11 @@ def _render_edge_writeup(edge: "RickyEdgeState", contest_label: str) -> None:
 
     warnings = payload.get("contest_fit_warnings", [])
     for w in warnings:
-        st.caption(f"⚠️ {w}")
+        st.caption(w)
 
 
-def _get_best_lineup(
-    lu_state: "LineupSetState",
-    sim_state: "SimState",
-    contest_label: str,
-) -> tuple:
-    """Return (lineup_rows_df, sim_metrics_dict, boom_bust_dict) for the #1 lineup.
-
-    Returns (None, None, None) if no data.
-    """
+def _get_best_lineup(lu_state, sim_state, contest_label: str) -> tuple:
+    """Return (lineup_rows_df, sim_metrics_dict, boom_bust_dict) for the #1 lineup."""
     pub = lu_state.published_sets.get(contest_label)
     if pub is None:
         return None, None, None
@@ -154,7 +150,7 @@ def _get_best_lineup(
         or sim_state.pipeline_output.get("GPP_20")
     )
 
-    # Determine best lineup — prefer highest boom_score, else first
+    # Determine best lineup -- prefer highest boom_score, else first
     best_idx = 0
     if boom_bust_df is not None and not boom_bust_df.empty and "lineup_index" in boom_bust_df.columns:
         if "boom_score" in boom_bust_df.columns:
@@ -166,14 +162,12 @@ def _get_best_lineup(
 
     lu_rows = pub_df[pub_df["lineup_index"] == best_idx] if "lineup_index" in pub_df.columns else pub_df
 
-    # Sim metrics
     sim_metrics = {}
     if pipeline_df is not None and not pipeline_df.empty and "lineup_index" in pipeline_df.columns:
         match = pipeline_df[pipeline_df["lineup_index"] == best_idx]
         if not match.empty:
             sim_metrics = match.iloc[0].to_dict()
 
-    # Boom/bust row
     bb_row = None
     if boom_bust_df is not None and not boom_bust_df.empty and "lineup_index" in boom_bust_df.columns:
         bb_match = boom_bust_df[boom_bust_df["lineup_index"] == best_idx]
@@ -189,8 +183,7 @@ def _get_best_lineup(
 
 
 def main() -> None:
-    st.title("📊 Edge Share")
-    st.caption("Ricky's Edge Analysis and Optimizer — read-only view.")
+    st.title("Right Angle Ricky")
 
     slate = get_slate_state()
     edge = get_edge_state()
@@ -199,42 +192,90 @@ def main() -> None:
 
     _status_strip(slate)
 
-    # ── Empty state check ──────────────────────────────────────────────
+    # -- Empty state check --
     has_edge = bool(edge.edge_analysis_by_contest)
     has_lineups = bool(lu_state.published_sets)
+    has_pool = slate.player_pool is not None and not slate.player_pool.empty
 
-    if not has_edge and not has_lineups:
+    if not has_edge and not has_lineups and not has_pool:
         st.info(
-            "No Edge Share data yet. Run Edge Analysis on Ricky's Edge and "
-            "publish lineups from Build & Publish."
+            "Nothing published yet. Load a slate in **The Lab**, approve in "
+            "**Ricky's Edge Analysis**, and publish from **Build & Publish**."
         )
         return
 
-    # ── Confidence strip ───────────────────────────────────────────────
+    # -- Confidence strip --
     _confidence_pills(edge)
-    st.divider()
+    if has_edge:
+        st.divider()
 
-    # ── Two main tabs ──────────────────────────────────────────────────
-    tab_edge, tab_optimizer = st.tabs(["Ricky's Edge Analysis", "Optimizer"])
+    # -- Two main tabs --
+    tab_analysis, tab_lineups = st.tabs(["Ricky's Analysis", "All Lineups"])
 
     # ==================================================================
-    # TAB 1 — Ricky's Edge Analysis
+    # TAB 1 -- Ricky's Analysis
     # ==================================================================
-    with tab_edge:
-        # Show each contest type that has edge analysis OR published lineups
+    with tab_analysis:
+        # If we have a pool but no published edge analysis, generate the
+        # signal-driven overview so the page isn't empty
+        if not has_edge and has_pool:
+            pool = slate.player_pool.copy()
+            # Merge sim data if available
+            _analysis = get_lab_analysis()
+            if not _analysis["pool"].empty:
+                pool = _analysis["pool"]
+
+            signals_df = compute_ricky_signals(pool)
+            contest_type = slate.contest_name or "GPP"
+            overview = generate_slate_overview(pool, signals_df, contest_type=contest_type)
+
+            # Slate overview bullets
+            for bullet in overview["bullets"]:
+                st.markdown(f"- {bullet}")
+
+            if overview["recommendation"]:
+                st.info(overview["recommendation"])
+
+            st.divider()
+
+            # Top edges table
+            top_edges = signals_df[signals_df["edge_composite"] > 0].head(10)
+            if not top_edges.empty:
+                st.markdown("**Top Edges**")
+                display_df = pd.DataFrame()
+                display_df["Player"] = top_edges["player_name"].values
+                if "pos" in top_edges.columns:
+                    display_df["Pos"] = top_edges["pos"].values
+                if "team" in top_edges.columns:
+                    display_df["Team"] = top_edges["team"].values
+                display_df["Salary"] = top_edges["salary"].values if "salary" in top_edges.columns else 0
+                display_df["Proj"] = top_edges["proj"].values if "proj" in top_edges.columns else 0
+                own_col = "ownership" if "ownership" in top_edges.columns else "own_pct"
+                if own_col in top_edges.columns:
+                    display_df["Own%"] = top_edges[own_col].values
+                display_df["Edge"] = (top_edges["edge_composite"].values * 100).round(0).astype(int)
+                display_df["Signals"] = top_edges["signal_badges"].values
+
+                _fmt = {"Salary": "${:,.0f}", "Proj": "{:.1f}"}
+                if "Own%" in display_df.columns:
+                    _fmt["Own%"] = "{:.1f}%"
+                st.dataframe(
+                    display_df.style.format(_fmt, na_rep=""),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+        # Published edge analysis by contest
         contests_shown = [
             c for c in _CONTEST_ORDER
             if c in edge.edge_analysis_by_contest or c in lu_state.published_sets
         ]
 
-        if not contests_shown:
-            st.info("No edge analysis available. Run analysis on Ricky's Edge page first.")
-        else:
+        if contests_shown:
             for contest_label in contests_shown:
                 short = _LABEL_SHORT.get(contest_label, contest_label)
                 st.markdown(f"### {short}")
 
-                # Edge writeup
                 if contest_label in edge.edge_analysis_by_contest:
                     _render_edge_writeup(edge, contest_label)
 
@@ -245,7 +286,7 @@ def main() -> None:
                     render_premium_lineup_card(
                         lineup_rows=lu_rows,
                         sim_metrics=sim_metrics,
-                        lineup_label=f"#{1} {short}",
+                        lineup_label=f"#1 {short}",
                         salary_cap=slate.salary_cap,
                         boom_bust_row=bb_row,
                         compact=True,
@@ -253,17 +294,20 @@ def main() -> None:
 
                 st.divider()
 
+        elif not has_pool:
+            st.info("No analysis available yet.")
+
     # ==================================================================
-    # TAB 2 — Optimizer (paginated lineup browser)
+    # TAB 2 -- All Lineups (paginated browser)
     # ==================================================================
-    with tab_optimizer:
+    with tab_lineups:
         pub_contests = [
             c for c in _CONTEST_ORDER
             if c in lu_state.published_sets
         ]
 
         if not pub_contests:
-            st.info("No lineups published yet. Build and publish from the Build & Publish page.")
+            st.info("No lineups published yet. Build and publish from **Build & Publish**.")
         else:
             for contest_label in pub_contests:
                 short = _LABEL_SHORT.get(contest_label, contest_label)
@@ -271,7 +315,6 @@ def main() -> None:
 
                 st.markdown(f"### {short}")
 
-                # Metadata strip
                 pub_ts = pub.get("published_at", "")
                 config = pub.get("config", {})
                 meta_parts = []
@@ -281,7 +324,7 @@ def main() -> None:
                     meta_parts.append(f"Mode: {config.get('build_mode', '?')}")
                     meta_parts.append(f"Lineups: {config.get('num_lineups', '?')}")
                 if meta_parts:
-                    st.caption(" · ".join(meta_parts))
+                    st.caption(" \u00b7 ".join(meta_parts))
 
                 pub_df: pd.DataFrame = pub.get("lineups_df", pd.DataFrame())
                 if pub_df.empty:
@@ -294,16 +337,14 @@ def main() -> None:
                     or sim_state.pipeline_output.get("GPP_20")
                 )
 
-                # Paginated premium cards
                 render_premium_cards_paged(
                     lineups_df=pub_df,
                     sim_results_df=pipeline_df,
                     salary_cap=slate.salary_cap,
-                    nav_key=f"es_{contest_label}",
+                    nav_key=f"rar_{contest_label}",
                     boom_bust_df=boom_bust_df,
                 )
 
-                # Exposure summary
                 exposure_df = pub.get("exposure_df")
                 if exposure_df is not None and not exposure_df.empty:
                     with st.expander("Exposure Summary", expanded=False):
