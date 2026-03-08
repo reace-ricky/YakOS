@@ -67,6 +67,17 @@ def main() -> None:
         st.warning("No player pool available. Load a slate in The Lab first.")
         return
 
+    # Deduplicate pool by player_name — Showdown draft groups can contain
+    # duplicate entries (e.g. players from multiple game slots, or CPT/FLEX
+    # variants leaking in).  Keep the first occurrence (highest-salary variant).
+    if "player_name" in pool.columns:
+        _pre_dedup = len(pool)
+        pool = pool.sort_values("salary", ascending=False).drop_duplicates(
+            subset=["player_name"], keep="first"
+        ).reset_index(drop=True)
+        if len(pool) < _pre_dedup:
+            st.caption(f"Deduplicated pool: {_pre_dedup} \u2192 {len(pool)} unique players")
+
     # Compute edge metrics if not already on pool
     if "smash_prob" not in pool.columns:
         try:

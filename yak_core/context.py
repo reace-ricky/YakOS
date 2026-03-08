@@ -136,11 +136,13 @@ def get_lab_analysis() -> Dict[str, Any]:
             sim_cols = ["player_name", "smash_prob", "bust_prob", "leverage"]
             available = [c for c in sim_cols if c in sim.player_results.columns]
             if not pool.empty and "player_name" in pool.columns and len(available) > 1:
-                pool = pool.merge(
-                    sim.player_results[available],
-                    on="player_name",
-                    how="left",
+                # Deduplicate sim results by player_name before merge to
+                # prevent row multiplication (Showdown pools can produce
+                # duplicate sim entries for CPT/FLEX variants).
+                _sim_merge = sim.player_results[available].drop_duplicates(
+                    subset=["player_name"], keep="first"
                 )
+                pool = pool.merge(_sim_merge, on="player_name", how="left")
 
         result["pool"] = pool
         result["player_results"] = sim.player_results if sim.player_results is not None else pd.DataFrame()
