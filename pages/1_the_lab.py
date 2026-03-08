@@ -1016,7 +1016,7 @@ def main() -> None:
         # Game filter — checkboxes inside a collapsed expander
         selected_games: list[str] = []
         if all_games:
-            _game_exp_label = f"🎮 Games ({len(all_games)}) · {len(hub_pool)} players · Cap ${slate.salary_cap:,}"
+            _game_exp_label = f"🎮 Games ({len(all_games)}) · {len(hub_pool)} players"
             with st.expander(_game_exp_label, expanded=False):
                 for _g in all_games:
                     if st.checkbox(_g, value=False, key=f"_gf_{_g}"):
