@@ -2,86 +2,38 @@
   "2026-03-07": {
     "slate_date": "2026-03-07",
     "overall": {
-      "mean_error": 1.74,
-      "mae": 7.41,
-      "rmse": 9.33,
-      "correlation": 0.7243,
-      "n_players": 96
+      "mean_error": 1.4,
+      "mae": 4.28,
+      "rmse": 4.49,
+      "correlation": 0.9266,
+      "n_players": 8
     },
     "by_position": {
-      "C": {
-        "mean_error": -1.46,
-        "median_error": -4.49,
-        "n": 12,
-        "mae": 9.78
-      },
-      "PF": {
-        "mean_error": 4.2,
-        "median_error": 2.66,
-        "n": 22,
-        "mae": 7.81
-      },
       "PG": {
-        "mean_error": 1.03,
-        "median_error": -1.52,
-        "n": 26,
-        "mae": 7.08
+        "mean_error": -2.0,
+        "median_error": -3.5,
+        "n": 3,
+        "mae": 3.0
       },
       "SF": {
-        "mean_error": 2.81,
-        "median_error": 2.89,
-        "n": 13,
-        "mae": 7.55
-      },
-      "SG": {
-        "mean_error": 1.26,
-        "median_error": -0.58,
-        "n": 23,
-        "mae": 6.09
+        "mean_error": 0.0,
+        "median_error": 0.0,
+        "n": 2,
+        "mae": 4.0
       }
     },
     "by_salary_tier": {
-      "<4K": {
-        "mean_error": 1.36,
-        "median_error": -0.07,
-        "n": 30,
-        "mae": 6.78
-      },
-      "4-5K": {
-        "mean_error": 0.76,
-        "median_error": -0.58,
-        "n": 25,
-        "mae": 7.95
-      },
-      "5-6K": {
-        "mean_error": -1.69,
-        "median_error": -3.37,
-        "n": 20,
-        "mae": 6.08
-      },
-      "6-7K": {
-        "mean_error": 6.04,
-        "median_error": 3.64,
-        "n": 8,
-        "mae": 8.52
-      },
       "7-8K": {
-        "mean_error": 3.98,
-        "median_error": 4.36,
-        "n": 6,
-        "mae": 7.33
-      },
-      "8-9K": {
-        "mean_error": 16.8,
-        "median_error": 16.8,
+        "mean_error": -1.25,
+        "median_error": -1.25,
         "n": 2,
-        "mae": 16.8
+        "mae": 2.75
       },
       "9K+": {
-        "mean_error": 7.11,
-        "median_error": 5.75,
-        "n": 5,
-        "mae": 8.35
+        "mean_error": 2.28,
+        "median_error": 4.6,
+        "n": 6,
+        "mae": 4.78
       }
     }
   }

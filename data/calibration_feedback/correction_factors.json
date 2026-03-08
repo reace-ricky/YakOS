@@ -3,21 +3,10 @@
   "dates_used": [
     "2026-03-07"
   ],
-  "overall_bias_correction": 0.87,
-  "by_position": {
-    "C": -0.73,
-    "PF": 2.1,
-    "PG": 0.52,
-    "SF": 1.41,
-    "SG": 0.63
-  },
+  "overall_bias_correction": 0.7,
+  "by_position": {},
   "by_salary_tier": {
-    "<4K": 0.68,
-    "4-5K": 0.38,
-    "5-6K": -0.84,
-    "6-7K": 3.02,
-    "7-8K": 1.99,
-    "9K+": 3.56
+    "9K+": 1.14
   },
   "correction_strength": 0.5
 }
