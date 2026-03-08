@@ -240,7 +240,7 @@
         "n_hit": 1,
         "hit_rate": 0.25,
         "avg_actual": 17.56,
-        "avg_proj": 21.03
+        "avg_proj": 21.05
       },
       "smash_candidate": {
         "n_flagged": 0,
