@@ -640,7 +640,6 @@ def main() -> None:
                 st.caption("How did these lineups actually perform?")
                 try:
                     from yak_core.sim_accuracy import score_lineup_set, summarize_lineup_accuracy  # noqa: PLC0415
-                    from yak_core.display_format import standard_lineup_format  # noqa: PLC0415
 
                     _lu_verdicts = score_lineup_set(
                         lineups_df=view_df,
