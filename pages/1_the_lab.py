@@ -921,11 +921,26 @@ def _auto_load_pool(
                                 except Exception:
                                     pass
 
+                                # ── Compute edge metrics NOW so feedback + archive have full data ──
+                                _feedback_edge_df = None
+                                try:
+                                    _feedback_edge_df = compute_edge_metrics(
+                                        pool,
+                                        calibration_state=slate.calibration_state,
+                                        variance=sim.variance,
+                                    )
+                                    status_container.write(f"📊 Edge metrics computed for feedback ({len(_feedback_edge_df)} players).")
+                                except Exception:
+                                    pass
+
                                 # Auto-archive slate snapshot for learning loop
                                 try:
                                     from yak_core.slate_archive import archive_slate
-                                    archive_slate(pool, slate_date_str, contest_type=contest_type_label,
-                                                  sim_results=sim.player_results if sim.player_results is not None else None)
+                                    archive_slate(
+                                        pool, slate_date_str,
+                                        contest_type=contest_type_label,
+                                        edge_df=_feedback_edge_df,
+                                    )
                                     status_container.write("💾 Slate archived for model training.")
                                 except Exception:
                                     pass
@@ -950,9 +965,21 @@ def _auto_load_pool(
                                     pass
 
                                 # Record edge signal outcomes for feedback loop
+                                # Use the edge-enriched pool so signals actually fire
                                 try:
                                     from yak_core.edge_feedback import record_edge_outcomes
-                                    _ef_result = record_edge_outcomes(slate_date_str, pool, contest_type=contest_type_label)
+                                    _ef_pool = pool.copy()
+                                    if _feedback_edge_df is not None and not _feedback_edge_df.empty:
+                                        _ef_merge_cols = [c for c in ["player_name", "smash_prob", "bust_prob",
+                                                                       "leverage", "edge_score", "ceil", "floor"]
+                                                          if c in _feedback_edge_df.columns]
+                                        if "player_name" in _ef_merge_cols and len(_ef_merge_cols) > 1:
+                                            _ef_sub = _feedback_edge_df[_ef_merge_cols].drop_duplicates(subset=["player_name"])
+                                            for _mc in _ef_merge_cols:
+                                                if _mc != "player_name" and _mc in _ef_pool.columns:
+                                                    _ef_pool = _ef_pool.drop(columns=[_mc])
+                                            _ef_pool = _ef_pool.merge(_ef_sub, on="player_name", how="left")
+                                    _ef_result = record_edge_outcomes(slate_date_str, _ef_pool, contest_type=contest_type_label)
                                     if "error" not in _ef_result:
                                         _ef_sigs = _ef_result.get("signals", {})
                                         _ef_active = sum(1 for s in _ef_sigs.values() if s.get("n_flagged", 0) > 0)

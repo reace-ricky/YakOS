@@ -16,6 +16,7 @@ from typing import Optional
 import pandas as pd
 
 from yak_core.config import YAKOS_ROOT
+from yak_core.github_persistence import sync_feedback_async
 
 _ARCHIVE_DIR = os.path.join(YAKOS_ROOT, "data", "slate_archive")
 
@@ -109,6 +110,14 @@ def archive_slate(
     path = os.path.join(_ARCHIVE_DIR, filename)
     out.to_parquet(path, index=False)
     print(f"[slate_archive] Archived {len(out)} players → {path}")
+
+    # Sync parquet to GitHub so archive survives Streamlit Cloud redeploys
+    rel_path = os.path.relpath(path, YAKOS_ROOT)
+    sync_feedback_async(
+        files=[rel_path],
+        commit_message=f"Slate archive: {slate_date} {contest_type} ({len(out)} players)",
+    )
+
     return path
 
 

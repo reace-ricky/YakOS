@@ -43,6 +43,9 @@ _FEEDBACK_FILES = [
     "data/edge_feedback/signal_weights.json",
 ]
 
+# Binary file extensions that need base64 encoding directly from bytes
+_BINARY_EXTENSIONS = {".parquet", ".pkl", ".joblib", ".npy"}
+
 # Serialize all pushes so concurrent calls don't race on the ref
 _push_lock = threading.Lock()
 
@@ -120,9 +123,19 @@ def sync_feedback_to_github(
         abs_path = os.path.join(YAKOS_ROOT, rel_path)
         if not os.path.isfile(abs_path):
             continue
-        with open(abs_path, "r") as f:
-            content = f.read()
-        blobs_to_push.append({"path": rel_path, "content": content})
+        # Detect binary files by extension
+        _, ext = os.path.splitext(rel_path)
+        if ext.lower() in _BINARY_EXTENSIONS:
+            with open(abs_path, "rb") as f:
+                raw_bytes = f.read()
+            blobs_to_push.append({
+                "path": rel_path,
+                "b64": base64.b64encode(raw_bytes).decode(),
+            })
+        else:
+            with open(abs_path, "r") as f:
+                content = f.read()
+            blobs_to_push.append({"path": rel_path, "content": content})
 
     if not blobs_to_push:
         return {"status": "skipped", "reason": "No feedback files to push"}
@@ -150,13 +163,18 @@ def sync_feedback_to_github(
                 # 3. Create blobs
                 tree_items = []
                 for item in blobs_to_push:
+                    # Binary files already have b64, text files need encoding
+                    if "b64" in item:
+                        blob_b64 = item["b64"]
+                    else:
+                        blob_b64 = base64.b64encode(
+                            item["content"].encode()
+                        ).decode()
                     blob_resp = requests.post(
                         f"{_API}/git/blobs",
                         headers=hdrs,
                         json={
-                            "content": base64.b64encode(
-                                item["content"].encode()
-                            ).decode(),
+                            "content": blob_b64,
                             "encoding": "base64",
                         },
                         timeout=10,
