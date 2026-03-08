@@ -1519,6 +1519,118 @@ def main() -> None:
             except Exception as _score_exc:
                 st.warning(f"Score vs Actuals failed: {_score_exc}")
 
+    # ── Signal Accuracy (player-level verdicts) ──────────────────────
+    _has_actuals = "actual_fp" in pool.columns and pool["actual_fp"].notna().any()
+    _has_sims_for_verdicts = sim.player_results is not None and not sim.player_results.empty
+    if _has_actuals and _has_sims_for_verdicts:
+        with st.expander("📐 Signal Accuracy", expanded=True):
+            st.caption("Did smash_prob / bust_prob actually pan out? Full-loop signal check.")
+            try:
+                from yak_core.sim_accuracy import score_player_predictions, summarize_prediction_accuracy  # noqa: PLC0415
+                from yak_core.display_format import standard_player_format, normalise_ownership  # noqa: PLC0415
+
+                # Build a merged pool with actuals + sim predictions
+                _vpool = pool.copy()
+                _sim_pr = sim.player_results.copy()
+                # Merge sim signals into pool (smash_prob, bust_prob, etc.)
+                _sim_merge_cols = [c for c in ["player_name", "smash_prob", "bust_prob", "leverage", "edge_score"]
+                                   if c in _sim_pr.columns]
+                if "player_name" in _sim_merge_cols and len(_sim_merge_cols) > 1:
+                    for _mc in _sim_merge_cols:
+                        if _mc != "player_name" and _mc in _vpool.columns:
+                            _vpool = _vpool.drop(columns=[_mc])
+                    _vpool = _vpool.merge(_sim_pr[_sim_merge_cols], on="player_name", how="left")
+
+                _verdicts = score_player_predictions(_vpool)
+
+                if not _verdicts.empty:
+                    _summary = summarize_prediction_accuracy(_verdicts)
+
+                    # Summary metrics
+                    _sc1, _sc2, _sc3, _sc4 = st.columns(4)
+                    _sc1.metric("Players Scored", _summary.get("n_players", 0))
+                    _sc2.metric("MAE", f"{_summary.get('mae', 0):.1f} FP")
+
+                    _sp = _summary.get("smash_precision")
+                    _sc3.metric("Smash Precision", f"{_sp*100:.0f}%" if _sp is not None else "—")
+
+                    _bp = _summary.get("bust_precision")
+                    _sc4.metric("Bust Precision", f"{_bp*100:.0f}%" if _bp is not None else "—")
+
+                    # Verdict breakdown bar
+                    _sr = _summary.get("smash_rate", 0)
+                    _hr = _summary.get("hit_rate", 0)
+                    _mr = _summary.get("miss_rate", 0)
+                    _br = _summary.get("bust_rate", 0)
+                    st.markdown(
+                        f"**Outcome Distribution:** "
+                        f"🟢 SMASHED {_sr*100:.0f}% · "
+                        f"🔵 HIT {_hr*100:.0f}% · "
+                        f"🟡 MISS {_mr*100:.0f}% · "
+                        f"🔴 BUSTED {_br*100:.0f}%"
+                    )
+
+                    # Verdict table — show key columns
+                    _v_show_cols = [c for c in ["player_name", "salary", "proj", "actual_fp",
+                                                "proj_error", "smash_prob", "bust_prob",
+                                                "verdict"]
+                                    if c in _verdicts.columns]
+                    _v_display = _verdicts[_v_show_cols].copy()
+
+                    # Colour-code verdicts
+                    _verdict_colors = {
+                        "SMASHED": "background-color: #1a3a1a; color: #6abf69;",
+                        "HIT": "background-color: #1a2a3a; color: #6a9fbf;",
+                        "MISS": "background-color: #3a3418; color: #d4a046;",
+                        "BUSTED": "background-color: #3a1a1a; color: #c27a7a;",
+                    }
+
+                    def _style_verdict(val):
+                        return _verdict_colors.get(str(val), "")
+
+                    _v_fmt = standard_player_format(_v_display)
+                    for c in ["actual_fp", "proj_error"]:
+                        if c in _v_display.columns:
+                            _v_fmt[c] = "{:.1f}"
+
+                    try:
+                        _styled_v = (
+                            _v_display.style
+                            .applymap(_style_verdict, subset=["verdict"])
+                            .format(_v_fmt, na_rep="")
+                        )
+                        st.dataframe(_styled_v, use_container_width=True, hide_index=True)
+                    except Exception:
+                        st.dataframe(_v_display, use_container_width=True, hide_index=True)
+
+                    # Top hits + worst misses
+                    _top_hits = _summary.get("top_hits", [])
+                    _worst = _summary.get("worst_misses", [])
+                    if _top_hits or _worst:
+                        _th_col, _wm_col = st.columns(2)
+                        with _th_col:
+                            if _top_hits:
+                                st.markdown("**Top Smashes**")
+                                _th_df = pd.DataFrame(_top_hits)
+                                _th_fmt = {"salary": "${:,.0f}", "proj": "{:.1f}", "actual_fp": "{:.1f}", "proj_error": "{:+.1f}"}
+                                st.dataframe(
+                                    _th_df.style.format({k: v for k, v in _th_fmt.items() if k in _th_df.columns}, na_rep=""),
+                                    use_container_width=True, hide_index=True,
+                                )
+                        with _wm_col:
+                            if _worst:
+                                st.markdown("**Worst Busts**")
+                                _wm_df = pd.DataFrame(_worst)
+                                _wm_fmt = {"salary": "${:,.0f}", "proj": "{:.1f}", "actual_fp": "{:.1f}", "proj_error": "{:+.1f}"}
+                                st.dataframe(
+                                    _wm_df.style.format({k: v for k, v in _wm_fmt.items() if k in _wm_df.columns}, na_rep=""),
+                                    use_container_width=True, hide_index=True,
+                                )
+                else:
+                    st.info("Not enough scoreable players (need proj >= 5.0 and actual FP > 0).")
+            except Exception as _sig_exc:
+                st.warning(f"Signal accuracy failed: {_sig_exc}")
+
     # ── Apply Learnings (inline) ───────────────────────────────────
     if sim.player_results is not None and not sim.player_results.empty:
         with st.expander("⚡ Apply Sim Learnings", expanded=False):

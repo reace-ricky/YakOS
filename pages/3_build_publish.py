@@ -629,6 +629,88 @@ def main() -> None:
                 type_label = "safe floor for cash" if _mode == "floor" else "high ceiling for GPP"
                 st.caption(f"**{n_ab} lineup(s)** graded A or B ({type_label}).")
 
+            # ── Lineup Actuals (historical slates only) ───────────────
+            _bp_has_actuals = (
+                "actual_fp" in pool.columns
+                and pool["actual_fp"].notna().any()
+            )
+            if _bp_has_actuals:
+                st.divider()
+                st.subheader("🎯 Lineup vs Actuals")
+                st.caption("How did these lineups actually perform?")
+                try:
+                    from yak_core.sim_accuracy import score_lineup_set, summarize_lineup_accuracy  # noqa: PLC0415
+                    from yak_core.display_format import standard_lineup_format  # noqa: PLC0415
+
+                    _lu_verdicts = score_lineup_set(
+                        lineups_df=view_df,
+                        pool_df=pool,
+                        pipeline_df=pipeline_df,
+                    )
+                    if not _lu_verdicts.empty:
+                        _lu_summ = summarize_lineup_accuracy(_lu_verdicts)
+
+                        _lsc1, _lsc2, _lsc3 = st.columns(3)
+                        _lsc1.metric("Avg Actual", f"{_lu_summ.get('avg_actual', 0):.1f} FP")
+                        _avg_err = _lu_summ.get('avg_error', 0)
+                        _lsc2.metric("Avg Error", f"{_avg_err:+.1f} FP")
+                        _lsc3.metric("MAE", f"{_lu_summ.get('mae', 0):.1f} FP")
+
+                        # Show sim rating accuracy if available
+                        _rat_acc = _lu_summ.get("rating_accuracy")
+                        if _rat_acc is not None:
+                            _a_avg = _lu_summ.get("a_avg_actual")
+                            _d_avg = _lu_summ.get("d_avg_actual")
+                            _parts = [f"Rating accuracy: {_rat_acc*100:.0f}%"]
+                            if _a_avg is not None:
+                                _parts.append(f"A-rated avg: {_a_avg:.1f}")
+                            if _d_avg is not None:
+                                _parts.append(f"D-rated avg: {_d_avg:.1f}")
+                            st.caption(" · ".join(_parts))
+
+                        # Verdicts table
+                        _lv_show = [c for c in ["lineup_index", "total_proj", "total_actual",
+                                                "lineup_error", "actual_grade"]
+                                    if c in _lu_verdicts.columns]
+                        # Add sim columns if present
+                        for c in ["sim_rating", "sim_bucket", "rating_accurate"]:
+                            if c in _lu_verdicts.columns:
+                                _lv_show.append(c)
+
+                        _lv_display = _lu_verdicts[_lv_show].rename(columns={
+                            "lineup_index": "Lineup",
+                            "total_proj": "Projected",
+                            "total_actual": "Actual",
+                            "lineup_error": "Diff",
+                            "actual_grade": "Grade",
+                            "sim_rating": "Sim Rating",
+                            "sim_bucket": "Sim Grade",
+                            "rating_accurate": "Grade Match",
+                        })
+
+                        _lv_fmt = standard_lineup_format(_lv_display)
+                        if "Sim Rating" in _lv_display.columns:
+                            _lv_fmt["Sim Rating"] = "{:.0f}"
+
+                        def _color_lineup_diff(val):
+                            try:
+                                v = float(val)
+                            except (ValueError, TypeError):
+                                return ""
+                            return "color: #4caf82" if v > 0 else "color: #e05c5c" if v < 0 else ""
+
+                        try:
+                            _lv_styled = _lv_display.style.format(_lv_fmt, na_rep="")
+                            if "Diff" in _lv_display.columns:
+                                _lv_styled = _lv_styled.applymap(_color_lineup_diff, subset=["Diff"])
+                            st.dataframe(_lv_styled, use_container_width=True, hide_index=True)
+                        except Exception:
+                            st.dataframe(_lv_display, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("Not enough actuals to score lineups (need 50%+ of players matched).")
+                except Exception as _lv_exc:
+                    st.warning(f"Lineup scoring failed: {_lv_exc}")
+
             st.divider()
 
             # ── Export & Publish ──────────────────────────────────────────
