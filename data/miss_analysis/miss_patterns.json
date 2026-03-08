@@ -1,50 +1,50 @@
 {
-  "computed_at": "2026-03-08T23:24:27.633809+00:00",
+  "computed_at": "2026-03-08T23:27:38.107290+00:00",
   "n_slates": 2,
-  "n_player_slates": 112,
+  "n_player_slates": 192,
   "classification": {
-    "pop": 24,
-    "bust": 25,
-    "inline": 63,
-    "pop_rate": 0.214,
-    "bust_rate": 0.223
+    "pop": 38,
+    "bust": 47,
+    "inline": 107,
+    "pop_rate": 0.198,
+    "bust_rate": 0.245
   },
   "factor_breakdown": {},
   "bracket_breakdown": {
     "lt5k": {
-      "n": 54,
-      "pop_rate": 0.167,
-      "bust_rate": 0.296,
-      "avg_residual": -2.7,
+      "n": 96,
+      "pop_rate": 0.177,
+      "bust_rate": 0.312,
+      "avg_residual": -2.4,
       "mae": 7.5
     },
     "5_65k": {
-      "n": 24,
-      "pop_rate": 0.292,
-      "bust_rate": 0.208,
-      "avg_residual": -1.2,
-      "mae": 10.8
+      "n": 42,
+      "pop_rate": 0.286,
+      "bust_rate": 0.238,
+      "avg_residual": -2.1,
+      "mae": 11.3
     },
     "65_8k": {
-      "n": 15,
-      "pop_rate": 0.2,
-      "bust_rate": 0.133,
-      "avg_residual": -0.5,
-      "mae": 10.5
+      "n": 27,
+      "pop_rate": 0.148,
+      "bust_rate": 0.185,
+      "avg_residual": -2.8,
+      "mae": 10.6
     },
     "8_10k": {
-      "n": 11,
-      "pop_rate": 0.273,
-      "bust_rate": 0.091,
-      "avg_residual": 3.0,
-      "mae": 10.7
+      "n": 17,
+      "pop_rate": 0.176,
+      "bust_rate": 0.059,
+      "avg_residual": 1.4,
+      "mae": 8.2
     },
     "10k_plus": {
-      "n": 8,
-      "pop_rate": 0.25,
-      "bust_rate": 0.125,
-      "avg_residual": -4.1,
-      "mae": 13.5
+      "n": 10,
+      "pop_rate": 0.2,
+      "bust_rate": 0.1,
+      "avg_residual": -3.4,
+      "mae": 12.0
     }
   },
   "top_pops": [
@@ -69,6 +69,26 @@
       "date": "2026-03-04"
     },
     {
+      "player": "Jrue Holiday",
+      "salary": 7000,
+      "proj": 30.2,
+      "actual": 57.8,
+      "residual": 27.6,
+      "ratio": 1.91,
+      "context": [],
+      "date": "2026-03-04"
+    },
+    {
+      "player": "Jabari Walker",
+      "salary": 3000,
+      "proj": 12.4,
+      "actual": 39.5,
+      "residual": 27.1,
+      "ratio": 3.2,
+      "context": [],
+      "date": "2026-03-04"
+    },
+    {
       "player": "Yanic Konan Niederhauser",
       "salary": 3500,
       "proj": 14.9,
@@ -85,6 +105,16 @@
       "actual": 48.2,
       "residual": 22.5,
       "ratio": 1.87,
+      "context": [],
+      "date": "2026-03-04"
+    },
+    {
+      "player": "Jerami Grant",
+      "salary": 6100,
+      "proj": 26.8,
+      "actual": 48.2,
+      "residual": 21.4,
+      "ratio": 1.8,
       "context": [],
       "date": "2026-03-04"
     },
@@ -117,39 +147,29 @@
       "ratio": 2.45,
       "context": [],
       "date": "2026-03-02"
-    },
+    }
+  ],
+  "top_busts": [
     {
-      "player": "Nate Williams",
-      "salary": 3200,
-      "proj": 9.0,
-      "actual": 25.5,
-      "residual": 16.5,
-      "ratio": 2.83,
-      "context": [],
-      "date": "2026-03-02"
-    },
-    {
-      "player": "Olivier-Maxence Prosper",
-      "salary": 5600,
-      "proj": 17.5,
-      "actual": 33.8,
-      "residual": 16.3,
-      "ratio": 1.93,
+      "player": "Payton Pritchard",
+      "salary": 7500,
+      "proj": 32.9,
+      "actual": 0.5,
+      "residual": -32.4,
+      "ratio": 0.02,
       "context": [],
       "date": "2026-03-04"
     },
     {
-      "player": "Kris Dunn",
-      "salary": 5600,
-      "proj": 24.5,
-      "actual": 40.2,
-      "residual": 15.7,
-      "ratio": 1.64,
+      "player": "Neemias Queta",
+      "salary": 5500,
+      "proj": 31.4,
+      "actual": 5.5,
+      "residual": -25.9,
+      "ratio": 0.18,
       "context": [],
-      "date": "2026-03-02"
-    }
-  ],
-  "top_busts": [
+      "date": "2026-03-04"
+    },
     {
       "player": "Darius Garland",
       "salary": 7000,
@@ -171,6 +191,36 @@
       "date": "2026-03-02"
     },
     {
+      "player": "Isaiah Hartenstein",
+      "salary": 6100,
+      "proj": 29.2,
+      "actual": 8.2,
+      "residual": -20.9,
+      "ratio": 0.28,
+      "context": [],
+      "date": "2026-03-04"
+    },
+    {
+      "player": "Kenrich Williams",
+      "salary": 4200,
+      "proj": 23.9,
+      "actual": 3.0,
+      "residual": -20.9,
+      "ratio": 0.13,
+      "context": [],
+      "date": "2026-03-04"
+    },
+    {
+      "player": "Aaron Wiggins",
+      "salary": 4600,
+      "proj": 28.3,
+      "actual": 8.5,
+      "residual": -19.8,
+      "ratio": 0.3,
+      "context": [],
+      "date": "2026-03-04"
+    },
+    {
       "player": "Isaiah Collier",
       "salary": 8100,
       "proj": 38.8,
@@ -181,6 +231,16 @@
       "date": "2026-03-02"
     },
     {
+      "player": "Nikola Vucevic",
+      "salary": 6500,
+      "proj": 35.7,
+      "actual": 16.5,
+      "residual": -19.2,
+      "ratio": 0.46,
+      "context": [],
+      "date": "2026-03-04"
+    },
+    {
       "player": "AJ Green",
       "salary": 4500,
       "proj": 23.4,
@@ -189,84 +249,36 @@
       "ratio": 0.21,
       "context": [],
       "date": "2026-03-02"
-    },
-    {
-      "player": "Bobby Portis",
-      "salary": 5700,
-      "proj": 33.0,
-      "actual": 14.8,
-      "residual": -18.3,
-      "ratio": 0.45,
-      "context": [],
-      "date": "2026-03-02"
-    },
-    {
-      "player": "Cody Williams",
-      "salary": 4200,
-      "proj": 25.0,
-      "actual": 7.8,
-      "residual": -17.3,
-      "ratio": 0.31,
-      "context": [],
-      "date": "2026-03-02"
-    },
-    {
-      "player": "Myles Turner",
-      "salary": 5900,
-      "proj": 33.5,
-      "actual": 16.5,
-      "residual": -17.0,
-      "ratio": 0.49,
-      "context": [],
-      "date": "2026-03-02"
-    },
-    {
-      "player": "Cam Thomas",
-      "salary": 4200,
-      "proj": 22.4,
-      "actual": 7.0,
-      "residual": -15.4,
-      "ratio": 0.31,
-      "context": [],
-      "date": "2026-03-02"
-    },
-    {
-      "player": "Tim Hardaway Jr.",
-      "salary": 4600,
-      "proj": 28.4,
-      "actual": 14.0,
-      "residual": -14.4,
-      "ratio": 0.49,
-      "context": [],
-      "date": "2026-03-02"
-    },
-    {
-      "player": "Scoot Henderson",
-      "salary": 10200,
-      "proj": 28.2,
-      "actual": 14.8,
-      "residual": -13.4,
-      "ratio": 0.52,
-      "context": [],
-      "date": "2026-03-04"
     }
   ],
   "suggestions": [
     {
       "signal": "salary_lt5k",
       "direction": "over-projecting",
-      "detail": "Salary bracket lt5k: avg residual -2.7 FP (MAE 7.5). Systematic over-projecting in this range.",
+      "detail": "Salary bracket lt5k: avg residual -2.4 FP (MAE 7.5). Systematic over-projecting in this range.",
       "severity": "medium"
     },
     {
-      "signal": "salary_8_10k",
-      "direction": "under-projecting",
-      "detail": "Salary bracket 8_10k: avg residual +3.0 FP (MAE 10.7). Systematic under-projecting in this range.",
+      "signal": "salary_5_65k",
+      "direction": "over-projecting",
+      "detail": "Salary bracket 5_65k: avg residual -2.1 FP (MAE 11.3). Systematic over-projecting in this range.",
+      "severity": "medium"
+    },
+    {
+      "signal": "salary_65_8k",
+      "direction": "over-projecting",
+      "detail": "Salary bracket 65_8k: avg residual -2.8 FP (MAE 10.6). Systematic over-projecting in this range.",
+      "severity": "medium"
+    },
+    {
+      "signal": "salary_10k_plus",
+      "direction": "over-projecting",
+      "detail": "Salary bracket 10k_plus: avg residual -3.4 FP (MAE 12.0). Systematic over-projecting in this range.",
       "severity": "high"
     }
   ],
   "context_corrections": {
-    "computed_at": "2026-03-08T23:24:27.633778+00:00",
+    "computed_at": "2026-03-08T23:27:38.107260+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
