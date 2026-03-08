@@ -1,9 +1,9 @@
 {
-  "computed_at": "2026-03-08T23:13:08.833370+00:00",
-  "n_slates": 1,
-  "n_player_slates": 34,
+  "computed_at": "2026-03-08T23:24:27.572236+00:00",
+  "n_slates": 2,
+  "n_player_slates": 112,
   "ratios": {
-    "lt5k": 1.04,
+    "lt5k": 0.52,
     "5_65k": 0.64,
     "65_8k": 0.44,
     "8_10k": 0.35,
@@ -11,35 +11,39 @@
   },
   "brackets": {
     "lt5k": {
-      "n": 11,
-      "learned_ratio": null,
-      "using": "static",
-      "value": 1.04,
-      "reason": "< 30 samples"
+      "n": 54,
+      "learned_ratio": 0.4931,
+      "clamped_ratio": 0.52,
+      "static_ratio": 1.04,
+      "delta_pct": -50.0,
+      "using": "learned",
+      "value": 0.52,
+      "mean_proj": 17.7,
+      "residual_std": 8.7
     },
     "5_65k": {
-      "n": 6,
+      "n": 24,
       "learned_ratio": null,
       "using": "static",
       "value": 0.64,
       "reason": "< 30 samples"
     },
     "65_8k": {
-      "n": 6,
+      "n": 15,
       "learned_ratio": null,
       "using": "static",
       "value": 0.44,
       "reason": "< 30 samples"
     },
     "8_10k": {
-      "n": 5,
+      "n": 11,
       "learned_ratio": null,
       "using": "static",
       "value": 0.35,
       "reason": "< 30 samples"
     },
     "10k_plus": {
-      "n": 6,
+      "n": 8,
       "learned_ratio": null,
       "using": "static",
       "value": 0.3,
