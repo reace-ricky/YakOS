@@ -280,26 +280,23 @@ def _late_swap_suggestions(
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    st.title("🏗️ Build & Publish")
-    st.caption("Configure builds, optimize lineups, export CSVs, and publish to Edge Share.")
+    st.title("Build & Publish")
 
     slate = get_slate_state()
     edge = get_edge_state()
     sim = get_sim_state()
     lu_state = get_lineup_state()
 
-    st.divider()
-
     # ── Edge Check Gate ───────────────────────────────────────────────────
     if not edge.ricky_edge_check:
         st.error(
-            "⛔ **Ricky Edge Check not approved.** "
-            "Complete the Edge Check on the **Ricky Edge** page before building lineups."
+            "Edge Analysis not approved. "
+            "Complete the approval on **Ricky's Edge Analysis** before building lineups."
         )
         st.stop()
 
     if not slate.is_ready():
-        st.warning("⚠️ No slate published. Go to **The Lab** and load a slate first.")
+        st.warning("No slate published. Go to **The Lab** and load a slate first.")
         st.stop()
 
     pool: pd.DataFrame = slate.player_pool.copy()
@@ -376,7 +373,7 @@ def main() -> None:
     # ─────────────────────────────────────────────────────────────────────
     # Section 1: Contest Selection Advisor
     # ─────────────────────────────────────────────────────────────────────
-    st.subheader("🎯 Contest Selection Advisor")
+    st.subheader("Contest Advisor")
 
     gauge_summary = sim.contest_gauges
     if gauge_summary:
@@ -410,7 +407,7 @@ def main() -> None:
     # ─────────────────────────────────────────────────────────────────────
     # Section 2: Build Controls
     # ─────────────────────────────────────────────────────────────────────
-    st.subheader("⚙️ Build Config")
+    st.subheader("Build Config")
 
     # Auto-inherit contest type from Lab selection (mapped to UI labels)
     _REVERSE_UI_MAP = {v: k for k, v in UI_CONTEST_MAP.items()}
@@ -464,12 +461,14 @@ def main() -> None:
     build_games: list[str] = []
     if all_games:
         _lab_games = slate.selected_games if hasattr(slate, "selected_games") else []
-        with st.expander(f"🎮 Games ({len(all_games)})", expanded=False):
+        # Default: all games selected unless Lab had a subset
+        _default_all = not _lab_games
+        with st.expander(f"Games ({len(all_games)})", expanded=False):
             for _g in all_games:
-                _default_on = _g in _lab_games if _lab_games else False
+                _default_on = _g in _lab_games if _lab_games else _default_all
                 if st.checkbox(_g, value=_default_on, key=f"_bp_gf_{_g}"):
                     build_games.append(_g)
-        if build_games:
+        if build_games and len(build_games) < len(all_games):
             pool = _filter_pool_by_games_build(pool, build_games)
 
     # Lock/Exclude inline (no expander)
@@ -491,7 +490,7 @@ def main() -> None:
     # ─────────────────────────────────────────────────────────────────────
     # Section 3: Build Lineups
     # ─────────────────────────────────────────────────────────────────────
-    st.subheader("🔨 Build Lineups")
+    st.subheader("Build Lineups")
 
     proj_col = _get_proj_col(pool, build_mode)
 
@@ -502,7 +501,7 @@ def main() -> None:
     if _auto_excl:
         st.caption(f"Auto-excluded (bust risk): {', '.join(_auto_excl)}")
 
-    if st.button("▶️ Build Lineups", type="primary", key="_bp_build"):
+    if st.button("Build Lineups", type="primary", key="_bp_build"):
         with st.spinner(f"Building {num_lineups} {contest_label} lineups…"):
             lineups_df, expo_df = _build_lineups(
                 pool,
@@ -630,64 +629,53 @@ def main() -> None:
 
             st.divider()
 
-            # ── DK CSV Export ─────────────────────────────────────────────
-            st.subheader("📥 DK CSV Export")
-            if st.button("📊 Prepare DK CSV", key="_bp_prep_csv"):
-                try:
-                    if slate.is_showdown:
-                        csv_df = to_dk_showdown_upload_format(view_df)
-                    else:
-                        csv_df = to_dk_upload_format(view_df)
-                    csv_bytes = csv_df.to_csv(index=False).encode("utf-8")
-                    fname = f"yakos_{view_label.replace(' ', '_').lower()}_{slate.slate_date}.csv"
-                    st.download_button(
-                        label="⬇️ Download DK Upload CSV",
-                        data=csv_bytes,
-                        file_name=fname,
-                        mime="text/csv",
-                        key="_bp_download_csv",
-                    )
-                except Exception as exc:
-                    st.error(f"CSV export failed: {exc}")
+            # ── Export & Publish ──────────────────────────────────────────
+            st.subheader("Export & Publish")
 
-            # ── Publish to Edge Share ─────────────────────────────────────
-            st.divider()
-            st.subheader("📤 Publish to Edge Share")
-            if st.button(f"✅ Publish {view_label} to Edge Share", type="primary", key="_bp_publish"):
-                _ts = datetime.now(timezone.utc).isoformat()
-                lu_state.publish(view_label, _ts)
-                set_lineup_state(lu_state)
-                st.success(f"✅ **{view_label}** published to Edge Share at {_ts}")
-                st.balloons()
+            col_csv, col_publish = st.columns(2)
 
-            # ── Publish to Friends (Edge Share payload) ───────────────────
-            if st.button(f"👥 Publish {view_label} to Friends", key="_bp_publish_friends"):
-                try:
-                    # Ensure edge_df is populated; fall back to compute on the fly
-                    _eff_edge_df = slate.edge_df
-                    if _eff_edge_df is None or _eff_edge_df.empty:
-                        _eff_edge_df = compute_edge_metrics(
-                            pool,
-                            calibration_state=slate.calibration_state,
+            with col_csv:
+                if st.button("Prepare DK CSV", key="_bp_prep_csv"):
+                    try:
+                        if slate.is_showdown:
+                            csv_df = to_dk_showdown_upload_format(view_df)
+                        else:
+                            csv_df = to_dk_upload_format(view_df)
+                        csv_bytes = csv_df.to_csv(index=False).encode("utf-8")
+                        fname = f"yakos_{view_label.replace(' ', '_').lower()}_{slate.slate_date}.csv"
+                        st.download_button(
+                            label="Download DK CSV",
+                            data=csv_bytes,
+                            file_name=fname,
+                            mime="text/csv",
+                            key="_bp_download_csv",
                         )
-                        slate.edge_df = _eff_edge_df
-                        from yak_core.state import set_slate_state  # noqa: PLC0415
-                        set_slate_state(slate)
-                    payload = publish_edge_and_lineups(slate, view_df)
-                    st.session_state["_friends_payload"] = payload
-                    st.success(
-                        f"✅ **{view_label}** payload ready for Friends / Edge Share. "
-                        f"Core plays: {', '.join(payload['edge_sections']['core'][:5]) or '—'}"
-                    )
-                    with st.expander("📋 Payload preview", expanded=False):
-                        st.json({
-                            "slate_meta": payload["slate_meta"],
-                            "edge_sections": {k: v for k, v in payload["edge_sections"].items() if k != "notes"},
-                            "lineups_count": len(payload["lineups"]),
-                            "published_at": payload["published_at"],
-                        })
-                except Exception as exc:
-                    st.error(f"Friends publish failed: {exc}")
+                    except Exception as exc:
+                        st.error(f"CSV export failed: {exc}")
+
+            with col_publish:
+                if st.button(f"Publish {view_label} to Edge Share", type="primary", key="_bp_publish"):
+                    try:
+                        # Publish lineup state
+                        _ts = datetime.now(timezone.utc).isoformat()
+                        lu_state.publish(view_label, _ts)
+                        set_lineup_state(lu_state)
+
+                        # Build friends payload
+                        _eff_edge_df = slate.edge_df
+                        if _eff_edge_df is None or _eff_edge_df.empty:
+                            _eff_edge_df = compute_edge_metrics(
+                                pool,
+                                calibration_state=slate.calibration_state,
+                            )
+                            slate.edge_df = _eff_edge_df
+                            from yak_core.state import set_slate_state  # noqa: PLC0415
+                            set_slate_state(slate)
+                        payload = publish_edge_and_lineups(slate, view_df)
+                        st.session_state["_friends_payload"] = payload
+                        st.success(f"**{view_label}** published to Edge Share")
+                    except Exception as exc:
+                        st.error(f"Publish failed: {exc}")
 
     else:
         st.info("Build lineups above to see results and export options.")
@@ -697,8 +685,8 @@ def main() -> None:
     # ─────────────────────────────────────────────────────────────────────
     # Section 4: Late Swap Suggestions (S1.7)
     # ─────────────────────────────────────────────────────────────────────
-    st.subheader("⚡ Late Swap Suggestions")
-    st.caption("Pre-baked GTD rules: OUT → pivot, GTD/Limited → reduce exposure.")
+    st.subheader("Late Swap")
+    st.caption("OUT → pivot to best replacement, GTD/Limited → reduce exposure.")
 
     injury_updates = st.session_state.get("_hub_injury_updates", [])
     if not injury_updates:
