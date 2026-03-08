@@ -1161,8 +1161,8 @@ def main() -> None:
             _auto_fetch_status.empty()
 
     # ── Auto-select slate (no picker UI) ───────────────────────────────
-    # GPP / Cash → Main Slate (highest game-count Classic).
-    # Showdown → highest game-count Showdown pool; game filter picks the game.
+    # Showdown → let user pick the matchup.
+    # Classic (GPP/Cash) → let user pick the slate when multiple are available.
     selected_dg_id: Optional[int] = None
     selected_slate_label: Optional[str] = None
 
@@ -1185,12 +1185,23 @@ def main() -> None:
                 key=f"_sd_dg_pick_{slate_date_str}",
             )
             _pick = _candidates[_sd_idx] if _sd_idx is not None else _candidates[0]
+        elif not _is_sd and len(_candidates) > 1:
+            # Classic: multiple slates available (Main, Night, Turbo, etc.)
+            # Let user choose instead of silently auto-selecting the largest.
+            _classic_labels = [s["label"] for s in _candidates]
+            _classic_idx = st.selectbox(
+                "🏀 Select Slate",
+                options=range(len(_classic_labels)),
+                format_func=lambda i: _classic_labels[i],
+                key=f"_classic_dg_pick_{slate_date_str}",
+            )
+            _pick = _candidates[_classic_idx] if _classic_idx is not None else _candidates[0]
         else:
+            # Single candidate — auto-select it.
             _pick = max(_candidates, key=lambda s: s["game_count"])
 
         selected_dg_id = _pick["draft_group_id"]
         selected_slate_label = _pick["label"]
-        # Slate info stored internally — no visible caption (noise)
     else:
         st.info(f"No slates found for {slate_date_str}. Try a different date.")
 
