@@ -40,8 +40,11 @@ _BAR_RED = "#dc3545"
 _BAR_GOLD = "#ffc107"
 _CARD_BG = "#1e2130"
 _HEADER_BG = "#262c40"
+_ROW_DARK = "#1a1e2e"
+_ROW_LIGHT = "#222840"
 _TEXT_PRIMARY = "#f0f2f6"
 _TEXT_SECONDARY = "#9da5b4"
+_ACCENT_GREEN = "#00d26a"
 
 # Bucket colours for the overall rating badge
 _BUCKET_COLORS = {
@@ -89,6 +92,21 @@ def _pct_bar(label: str, value: float, lo: float, hi: float, color: str = _BAR_B
     )
 
 
+def _pct_bar_slim(label: str, value: float, lo: float, hi: float, color: str = _ACCENT_GREEN) -> str:
+    """Compact glow bar for premium card footer — label + bar + value on one line."""
+    pct = int(max(0, min(100, (value - lo) / max(hi - lo, 1e-9) * 100)))
+    return (
+        f"<div style='display:flex;align-items:center;gap:6px;margin-bottom:3px;'>"
+        f"<span style='color:{_TEXT_SECONDARY};font-size:0.7rem;min-width:60px;text-align:right;'>{label}</span>"
+        f"<div style='flex:1;background:#2d3350;border-radius:3px;height:8px;'>"
+        f"<div style='width:{pct}%;background:{color};border-radius:3px;height:8px;"
+        f"box-shadow:0 0 4px {color}80;'></div>"
+        f"</div>"
+        f"<span style='color:{_TEXT_PRIMARY};font-size:0.7rem;min-width:40px;'>{value:.2f}</span>"
+        f"</div>"
+    )
+
+
 def _rating_badge(rating: float, bucket: str) -> str:
     """Return an HTML badge for the overall YakOS Sim Rating."""
     color = _BUCKET_COLORS.get(bucket, _BAR_BLUE)
@@ -102,8 +120,300 @@ def _rating_badge(rating: float, bucket: str) -> str:
     )
 
 
+def _rating_badge_compact(rating: float, bucket: str) -> str:
+    """Smaller rating badge for premium card."""
+    color = _BUCKET_COLORS.get(bucket, _BAR_BLUE)
+    return (
+        f"<div style='text-align:center;'>"
+        f"<div style='font-size:0.65rem;color:{_TEXT_SECONDARY};margin-bottom:2px;'>YakOS Rating</div>"
+        f"<div style='display:inline-block;padding:6px 14px;"
+        f"background:{color};border-radius:10px;"
+        f"color:#fff;font-weight:700;font-size:1.2rem;"
+        f"box-shadow:0 0 12px {color}80;'>"
+        f"⭐ {rating:.0f}"
+        f"</div>"
+        f"<div style='font-size:0.7rem;color:{_TEXT_SECONDARY};margin-top:2px;'>Grade {bucket}</div>"
+        f"</div>"
+    )
+
+
 # ---------------------------------------------------------------------------
-# Public API
+# Premium lineup card (SimLabs-style HTML — self-contained single block)
+# ---------------------------------------------------------------------------
+
+def render_premium_lineup_card(
+    lineup_rows: pd.DataFrame,
+    sim_metrics: Optional[Dict[str, Any]] = None,
+    lineup_label: str = "",
+    salary_cap: int = 50000,
+    boom_bust_row: Optional[Dict[str, Any]] = None,
+    compact: bool = False,
+) -> None:
+    """Render a SimLabs-inspired premium lineup card as a single HTML block.
+
+    Dark banded rows showing: Slot | Player Name (Pos) | @Team Time | pOwn% | $Salary | Proj
+    Footer with glow rating bars and YakOS rating badge.
+
+    Parameters
+    ----------
+    lineup_rows : pd.DataFrame
+        Rows for a single lineup (one player per row).
+    sim_metrics : dict, optional
+        Pipeline-level metrics for this lineup.
+    lineup_label : str
+        Header label e.g. "Lineup 1 of 20".
+    salary_cap : int
+        DK salary cap used to compute remaining salary.
+    boom_bust_row : dict, optional
+        A row from boom/bust rankings — adds grade badge.
+    compact : bool
+        If True, renders a smaller card (for Edge Analysis top picks).
+    """
+    if st is None:
+        raise RuntimeError("Streamlit is not available.")
+
+    lu = lineup_rows.copy() if lineup_rows is not None else pd.DataFrame()
+    metrics = sim_metrics or {}
+
+    # ── Derived header values ──────────────────────────────────────────
+    total_salary = int(
+        pd.to_numeric(lu.get("salary", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()
+    )
+    remaining_salary = salary_cap - total_salary
+
+    projection = float(
+        metrics.get("projection")
+        or pd.to_numeric(lu.get("proj", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()
+    )
+
+    total_pown_frac = float(
+        metrics.get("total_pown")
+        or pd.to_numeric(lu.get("ownership", pd.Series(dtype=float)), errors="coerce").fillna(0).sum() / 100.0
+    )
+    total_pown_pct = total_pown_frac * 100.0
+
+    yakos_rating = float(metrics.get("yakos_sim_rating") or 0.0)
+    bucket = str(metrics.get("rating_bucket") or "-")
+
+    # Grade badge
+    grade_html = ""
+    if boom_bust_row:
+        grade = str(boom_bust_row.get("lineup_grade", ""))
+        boom = boom_bust_row.get("boom_score")
+        bust = boom_bust_row.get("bust_risk")
+        if grade:
+            gcolor = _GRADE_COLORS.get(grade, "#9da5b4")
+            grade_html = (
+                f"<span style='margin-left:8px;padding:2px 8px;"
+                f"border-radius:12px;background:{gcolor};color:#fff;"
+                f"font-size:0.75rem;font-weight:700;'>"
+                f"Grade {grade}</span>"
+            )
+            if boom is not None:
+                grade_html += (
+                    f"<span style='font-size:0.7rem;color:{_TEXT_SECONDARY};margin-left:6px;'>"
+                    f"Boom {boom:.0f} | Bust {bust:.0f}</span>"
+                )
+
+    # Remaining salary colour
+    rem_color = _ACCENT_GREEN if remaining_salary >= 0 else _BAR_RED
+
+    # ── Build the card as a single HTML block ──────────────────────────
+    font_size = "0.8rem" if compact else "0.85rem"
+    row_pad = "8px 12px" if compact else "10px 14px"
+
+    html_parts = []
+
+    # HEADER
+    html_parts.append(
+        f"<div style='background:{_HEADER_BG};border-radius:10px 10px 0 0;"
+        f"padding:12px 16px;border-bottom:1px solid #333;'>"
+        f"<div style='display:flex;justify-content:space-between;align-items:center;'>"
+        f"<div>"
+        f"<span style='font-weight:700;font-size:1rem;color:{_TEXT_PRIMARY};'>"
+        f"{lineup_label or 'Lineup'}</span>"
+        f"{grade_html}"
+        f"</div>"
+        f"<span style='font-size:0.85rem;color:{_TEXT_SECONDARY};'>"
+        f"Remaining: <b style='color:{rem_color};'>${remaining_salary:+,}</b></span>"
+        f"</div>"
+        f"<div style='display:flex;gap:24px;margin-top:6px;'>"
+        f"<span style='font-size:0.8rem;color:{_TEXT_SECONDARY};'>"
+        f"Proj <b style='color:{_TEXT_PRIMARY};'>{projection:.1f}</b></span>"
+        f"<span style='font-size:0.8rem;color:{_TEXT_SECONDARY};'>"
+        f"pOwn <b style='color:{_TEXT_PRIMARY};'>{total_pown_pct:.1f}</b></span>"
+        f"<span style='font-size:0.8rem;color:{_TEXT_SECONDARY};'>"
+        f"Salary <b style='color:{_TEXT_PRIMARY};'>${total_salary:,}</b></span>"
+        f"</div>"
+        f"</div>"
+    )
+
+    # PLAYER ROWS
+    if not lu.empty:
+        for i, (_, row) in enumerate(lu.iterrows()):
+            bg = _ROW_DARK if i % 2 == 0 else _ROW_LIGHT
+            slot = str(row.get("slot", row.get("pos", "")))
+            name = str(row.get("player_name", ""))
+            pos = str(row.get("pos", ""))
+            team = str(row.get("team", ""))
+            matchup = str(row.get("matchup", ""))
+            sal = pd.to_numeric(row.get("salary", 0), errors="coerce")
+            sal = int(sal) if pd.notna(sal) else 0
+            proj = pd.to_numeric(row.get("proj", 0), errors="coerce")
+            proj = float(proj) if pd.notna(proj) else 0.0
+            own = pd.to_numeric(row.get("ownership", 0), errors="coerce")
+            own = float(own) if pd.notna(own) else 0.0
+
+            # Format salary as $X.XK
+            sal_str = f"${sal / 1000:.1f}K" if sal >= 1000 else f"${sal:,}"
+
+            # Matchup line
+            match_line = f"@{matchup}" if matchup and matchup != "nan" else team
+
+            html_parts.append(
+                f"<div style='background:{bg};padding:{row_pad};"
+                f"display:flex;align-items:center;gap:0;"
+                f"border-bottom:1px solid #2a2e42;'>"
+                # Slot badge
+                f"<div style='min-width:42px;font-weight:700;font-size:{font_size};"
+                f"color:{_TEXT_PRIMARY};'>{slot}</div>"
+                # Player name + pos + matchup
+                f"<div style='flex:1;'>"
+                f"<div style='font-weight:600;font-size:{font_size};color:{_TEXT_PRIMARY};'>"
+                f"{name} <span style='color:{_TEXT_SECONDARY};font-weight:400;'>({pos})</span></div>"
+                f"<div style='font-size:0.7rem;color:{_TEXT_SECONDARY};'>{match_line}</div>"
+                f"</div>"
+                # pOwn
+                f"<div style='min-width:55px;text-align:right;'>"
+                f"<div style='font-weight:600;font-size:{font_size};color:{_TEXT_PRIMARY};'>"
+                f"{own:.1f}%</div>"
+                f"<div style='font-size:0.65rem;color:{_TEXT_SECONDARY};'>pOwn</div>"
+                f"</div>"
+                # Salary
+                f"<div style='min-width:55px;text-align:right;margin-left:12px;'>"
+                f"<div style='font-weight:700;font-size:{font_size};color:{_TEXT_PRIMARY};'>"
+                f"{sal_str}</div>"
+                f"</div>"
+                # Projection
+                f"<div style='min-width:55px;text-align:right;margin-left:12px;'>"
+                f"<div style='font-size:0.7rem;color:{_TEXT_SECONDARY};'>Proj</div>"
+                f"<div style='font-weight:600;font-size:{font_size};color:{_TEXT_PRIMARY};'>"
+                f"{proj:.1f}</div>"
+                f"</div>"
+                f"</div>"
+            )
+
+    # FOOTER — rating bars
+    show_footer = bool(metrics) and yakos_rating > 0
+    if show_footer:
+        bars_html = ""
+        bars_html += _pct_bar_slim("Projection", projection, 220, 350, _BAR_BLUE)
+        bars_html += _pct_bar_slim("pOwn", total_pown_pct, 20, 70, _BAR_ORANGE)
+        bars_html += _pct_bar_slim("Top-X%", float(metrics.get("top_x_rate") or 0), 0, 0.5, _ACCENT_GREEN)
+        bars_html += _pct_bar_slim("ITM", float(metrics.get("itm_rate") or 0), 0.1, 0.7, _BAR_BLUE)
+        bars_html += _pct_bar_slim("Sim ROI", float(metrics.get("sim_roi") or 0), -0.5, 1.0, _BAR_GOLD)
+        bars_html += _pct_bar_slim("Leverage", float(metrics.get("leverage") or 1), 0.5, 2.5, _ACCENT_GREEN)
+
+        rating_html = _rating_badge_compact(yakos_rating, bucket)
+
+        html_parts.append(
+            f"<div style='background:{_CARD_BG};padding:12px 16px;"
+            f"border-top:1px solid #333;border-radius:0 0 10px 10px;'>"
+            f"<div style='font-size:0.75rem;font-weight:700;color:{_TEXT_PRIMARY};"
+            f"margin-bottom:6px;'>YakOS Sim Rating</div>"
+            f"<div style='display:flex;gap:16px;'>"
+            f"<div style='flex:1;'>{bars_html}</div>"
+            f"<div style='min-width:90px;display:flex;align-items:center;'>{rating_html}</div>"
+            f"</div>"
+            f"</div>"
+        )
+    else:
+        # Close card with rounded bottom
+        html_parts.append(
+            f"<div style='background:{_CARD_BG};padding:4px;border-radius:0 0 10px 10px;'></div>"
+        )
+
+    # Render the whole card
+    full_html = "\n".join(html_parts)
+    st.markdown(
+        f"<div style='border-radius:10px;overflow:hidden;border:1px solid #333;"
+        f"margin-bottom:16px;'>{full_html}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def render_premium_cards_paged(
+    lineups_df: pd.DataFrame,
+    sim_results_df: Optional[pd.DataFrame] = None,
+    contest_type: str = "GPP_20",
+    salary_cap: int = 50000,
+    nav_key: str = "lineup_nav",
+    boom_bust_df: Optional[pd.DataFrame] = None,
+) -> None:
+    """Render paginated premium lineup cards with Prev/Next navigation."""
+    if st is None:
+        raise RuntimeError("Streamlit is not available.")
+
+    if lineups_df is None or lineups_df.empty:
+        st.info("No lineups to display.")
+        return
+
+    unique_idxs = (
+        sorted(lineups_df["lineup_index"].unique().tolist())
+        if "lineup_index" in lineups_df.columns
+        else [0]
+    )
+    n_lineups = len(unique_idxs)
+
+    nav_state_key = f"_{nav_key}_idx"
+    if nav_state_key not in st.session_state:
+        st.session_state[nav_state_key] = 0
+
+    # Navigation controls
+    nav_col1, nav_col2, nav_col3 = st.columns([1, 3, 1])
+    with nav_col1:
+        if st.button("◀ Prev", key=f"_{nav_key}_prev", disabled=st.session_state[nav_state_key] == 0):
+            st.session_state[nav_state_key] = max(0, st.session_state[nav_state_key] - 1)
+    with nav_col2:
+        cur = st.session_state[nav_state_key]
+        st.markdown(
+            f"<div style='text-align:center;padding-top:8px;font-size:0.9rem;color:{_TEXT_SECONDARY};'>"
+            f"Lineup {cur + 1} of {n_lineups}</div>",
+            unsafe_allow_html=True,
+        )
+    with nav_col3:
+        if st.button("Next ▶", key=f"_{nav_key}_next", disabled=st.session_state[nav_state_key] >= n_lineups - 1):
+            st.session_state[nav_state_key] = min(n_lineups - 1, st.session_state[nav_state_key] + 1)
+
+    cur = st.session_state[nav_state_key]
+    actual_idx = unique_idxs[min(cur, len(unique_idxs) - 1)]
+    lu_rows = lineups_df[lineups_df["lineup_index"] == actual_idx] if "lineup_index" in lineups_df.columns else lineups_df
+
+    # Resolve sim metrics
+    sim_metrics: Dict[str, Any] = {}
+    if sim_results_df is not None and not sim_results_df.empty and "lineup_index" in sim_results_df.columns:
+        match = sim_results_df[sim_results_df["lineup_index"] == actual_idx]
+        if not match.empty:
+            sim_metrics = match.iloc[0].to_dict()
+
+    # Resolve boom/bust row
+    bb_row: Optional[Dict[str, Any]] = None
+    if boom_bust_df is not None and not boom_bust_df.empty and "lineup_index" in boom_bust_df.columns:
+        bb_match = boom_bust_df[boom_bust_df["lineup_index"] == actual_idx]
+        if not bb_match.empty:
+            bb_row = bb_match.iloc[0].to_dict()
+
+    render_premium_lineup_card(
+        lineup_rows=lu_rows,
+        sim_metrics=sim_metrics if sim_metrics else None,
+        lineup_label=f"Lineup {cur + 1} of {n_lineups}",
+        salary_cap=salary_cap,
+        boom_bust_row=bb_row,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Legacy public API (still used by other pages)
 # ---------------------------------------------------------------------------
 
 def render_lineup_card(
