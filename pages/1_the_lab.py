@@ -1134,6 +1134,12 @@ def main() -> None:
     _slate_cache_key = f"_hub_slates_{sport}_{slate_date_str}"
     _cached_slates = st.session_state.get(_slate_cache_key)
 
+    # Live mode: let user refresh slates (DK removes locked slates over time)
+    if not _is_historical and _cached_slates is not None:
+        if st.button("🔄 Refresh Slates", key="_lab_refresh_slates", type="secondary"):
+            st.session_state.pop(_slate_cache_key, None)
+            _cached_slates = None
+
     # AUTO-FETCH: if no cached slates for this date/sport combo, fetch them
     if _cached_slates is None:
         _auto_fetch_status = st.empty()
