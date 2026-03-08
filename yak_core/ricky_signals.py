@@ -375,16 +375,32 @@ def generate_slate_overview(
         f" (avg salary ${avg_sal:,.0f})"
     )
 
-    # Bullet 2: Injury cascades
+    # Bullet 2: Injury / Pop Catalyst opportunities
+    # Check both legacy injury_bump_fp AND pop_catalyst signals so the
+    # overview bullet doesn't say "no injuries" when pop catalyst is firing.
     bump = _safe_numeric(signals_df.get("injury_bump_fp", pd.Series(0.0, index=signals_df.index)))
+    pop_score = _safe_numeric(signals_df.get("pop_catalyst_score", pd.Series(0.0, index=signals_df.index)))
+    pop_inj = _safe_numeric(signals_df.get("pop_injury_opp", pd.Series(0.0, index=signals_df.index)))
+
     cascade_players = signals_df[bump > 0.5]
+    pop_players = signals_df[pop_score >= 0.15]
+
     if not cascade_players.empty:
         top_bump = cascade_players.nlargest(2, "injury_bump_fp")
         names = [f"{r['player_name']} (+{r['injury_bump_fp']:.1f} FP)" for _, r in top_bump.iterrows()]
         injury_impact = f"{len(cascade_players)} players benefiting from injury cascades"
         bullets.append(f"Injury cascades: {', '.join(names)} — minutes opening up")
+    elif not pop_players.empty:
+        # Pop catalyst detected opportunity even without raw injury_bump_fp
+        top_pop = pop_players.nlargest(2, "pop_catalyst_score")
+        parts = []
+        for _, r in top_pop.iterrows():
+            tag = r.get("pop_catalyst_tag", "")
+            parts.append(f"{r['player_name']} ({tag})" if tag else r["player_name"])
+        injury_impact = f"{len(pop_players)} players with pop catalyst signals"
+        bullets.append(f"Pop catalysts firing: {', '.join(parts)} — situational upside detected")
     else:
-        bullets.append("No significant injury cascades on this slate")
+        bullets.append("No significant injury cascades or pop catalysts on this slate")
 
     # Bullet 3: Ownership concentration
     if not own.empty and own.max() > 0:
