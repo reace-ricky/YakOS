@@ -1,6 +1,6 @@
 {
-  "computed_at": "2026-03-08T03:31:21.880407+00:00",
-  "n_slates": 1,
+  "computed_at": "2026-03-08T16:57:09.001442+00:00",
+  "n_slates": 2,
   "signal_stats": {
     "high_leverage": {
       "total_flagged": 3,
@@ -24,11 +24,11 @@
       "n_slates_active": 0
     },
     "salary_value": {
-      "total_flagged": 0,
+      "total_flagged": 5,
       "total_hit": 0,
       "raw_hit_rate": 0.0,
       "weighted_hit_rate": 0.0,
-      "n_slates_active": 0
+      "n_slates_active": 1
     },
     "smash_candidate": {
       "total_flagged": 4,
