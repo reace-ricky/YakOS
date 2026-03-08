@@ -1,12 +1,25 @@
 {
-  "n_slates": 1,
+  "n_slates": 2,
   "dates_used": [
-    "2026-03-07"
+    "2026-03-07",
+    "2026-03-03"
   ],
-  "overall_bias_correction": 0.7,
-  "by_position": {},
+  "overall_bias_correction": 0.62,
+  "by_position": {
+    "PG": -0.72,
+    "SF": 1.11,
+    "C": 0.14,
+    "PF": -0.24,
+    "SG": 1.07
+  },
   "by_salary_tier": {
-    "9K+": 1.14
+    "7-8K": -0.44,
+    "9K+": 0.96,
+    "<4K": 0.79,
+    "4-5K": 0.23,
+    "5-6K": 1.5,
+    "6-7K": -0.9,
+    "8-9K": 0.81
   },
   "correction_strength": 0.5
 }
