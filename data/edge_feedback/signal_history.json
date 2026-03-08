@@ -169,8 +169,8 @@
   },
   "2026-03-04": {
     "slate_date": "2026-03-04",
-    "contest_type": "Cash Main",
-    "n_players": 80,
+    "contest_type": "Showdown",
+    "n_players": 34,
     "signals": {
       "high_leverage": {
         "n_flagged": 0,
@@ -194,11 +194,11 @@
         "avg_proj": null
       },
       "salary_value": {
-        "n_flagged": 43,
-        "n_hit": 3,
-        "hit_rate": 0.07,
-        "avg_actual": 18.25,
-        "avg_proj": 31.61
+        "n_flagged": 4,
+        "n_hit": 0,
+        "hit_rate": 0.0,
+        "avg_actual": 8.62,
+        "avg_proj": 16.52
       },
       "smash_candidate": {
         "n_flagged": 0,
