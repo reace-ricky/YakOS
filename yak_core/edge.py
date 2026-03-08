@@ -92,11 +92,26 @@ def _parse_numeric(series: pd.Series, default: float = 0.0) -> pd.Series:
     return pd.to_numeric(series, errors="coerce").fillna(default)
 
 
+# Cash variance dampening — tighten distributions to surface floor-safe plays.
+# GPP wants wide distributions (find ceiling outliers); Cash wants narrow
+# distributions (find players most likely to hit their floor).
+# Dampening factor applied multiplicatively on top of the salary-bracket ratio.
+_CONTEST_VARIANCE_MULT: Dict[str, float] = {
+    "gpp":      1.0,    # standard — full empirical variance
+    "gpp_150":  1.0,
+    "gpp_20":   1.0,
+    "se_3max":  0.90,   # slightly tighter for single-entry
+    "cash":     0.70,   # 30% tighter — floor-safe emphasis
+    "showdown": 1.05,   # slightly wider — single-game volatility
+}
+
+
 def compute_empirical_std(
     proj: "np.ndarray | pd.Series",
     salary: "np.ndarray | pd.Series",
     variance_mult: float = 1.0,
     min_std: float = 0.5,
+    contest_mode: str = "gpp",
 ) -> np.ndarray:
     """Return per-player standard deviation using the salary-bracket variance model.
 
@@ -119,6 +134,10 @@ def compute_empirical_std(
         UI volatility slider ("low" / "standard" / "high").
     min_std : float
         Floor on returned std values (default 0.5 FP).
+    contest_mode : str
+        Contest type key (e.g. ``"cash"``, ``"gpp"``, ``"showdown"``).
+        Cash mode dampens variance by 30% to surface floor-safe plays.
+        See ``_CONTEST_VARIANCE_MULT`` for all multipliers.
 
     Returns
     -------
@@ -143,7 +162,11 @@ def compute_empirical_std(
 
     vol_ratio[sal_arr >= 10000] = _EMPIRICAL_VOL_RATIO["10k_plus"]
 
-    std = proj_arr * vol_ratio * variance_mult
+    # Apply contest-mode dampening (cash = tighter, showdown = wider)
+    contest_key = contest_mode.strip().lower().replace(" ", "_").replace("-", "_")
+    contest_damp = _CONTEST_VARIANCE_MULT.get(contest_key, 1.0)
+
+    std = proj_arr * vol_ratio * variance_mult * contest_damp
     return np.clip(std, min_std, None)
 
 

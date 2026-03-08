@@ -545,10 +545,52 @@ def main() -> None:
                 set_lineup_state(lu_state)
                 st.success(f"Built {num_lineups} lineups for **{contest_label}**.")
 
-    # ── Show lineups ──────────────────────────────────────────────────────
+    # ── Built Lineups Summary (across all contest types) ──────────────────
     built_labels = [lbl for lbl, df in lu_state.lineups.items() if df is not None and not df.empty]
+    if len(built_labels) > 1:
+        st.divider()
+        st.subheader("Lineup Summary")
+        _summary_rows = []
+        for _bl in built_labels:
+            _bl_df = lu_state.lineups[_bl]
+            _bl_n = len(_bl_df["lineup_index"].unique()) if "lineup_index" in _bl_df.columns else 0
+            _bl_cfg = lu_state.build_configs.get(_bl, {})
+            _bl_pub = "✅" if _bl in lu_state.published_sets else "—"
+            _summary_rows.append({
+                "Contest": _bl,
+                "Lineups": _bl_n,
+                "Mode": _bl_cfg.get("build_mode", "—"),
+                "Archetype": _bl_cfg.get("archetype", "—"),
+                "Published": _bl_pub,
+            })
+        st.dataframe(pd.DataFrame(_summary_rows), use_container_width=True, hide_index=True)
+
+        # Publish All button
+        _unpublished = [lbl for lbl in built_labels if lbl not in lu_state.published_sets]
+        if _unpublished:
+            if st.button(f"Publish All ({len(built_labels)}) to Edge Share", type="primary", key="_bp_publish_all"):
+                _pub_ts = datetime.now(timezone.utc).isoformat()
+                for _pub_lbl in built_labels:
+                    lu_state.publish(_pub_lbl, _pub_ts)
+                set_lineup_state(lu_state)
+
+                # Build friends payload from the last-published slate
+                _eff_edge_df = slate.edge_df
+                if _eff_edge_df is None or _eff_edge_df.empty:
+                    try:
+                        _eff_edge_df = compute_edge_metrics(pool, calibration_state=slate.calibration_state)
+                        slate.edge_df = _eff_edge_df
+                        from yak_core.state import set_slate_state  # noqa: PLC0415
+                        set_slate_state(slate)
+                    except Exception:
+                        pass
+                st.success(f"Published **{len(built_labels)}** lineup sets to Edge Share.")
+
+    # ── View individual lineups ──────────────────────────────────────────
     if built_labels:
-        view_label = st.selectbox("View lineups for", built_labels, key="_bp_view_label")
+        # Default to the contest type that was just built (matches the selector above)
+        _default_view_idx = built_labels.index(contest_label) if contest_label in built_labels else 0
+        view_label = st.selectbox("View lineups for", built_labels, index=_default_view_idx, key="_bp_view_label")
         view_df = lu_state.lineups.get(view_label)
 
         if view_df is not None and not view_df.empty:

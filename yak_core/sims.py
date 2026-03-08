@@ -332,12 +332,18 @@ def run_monte_carlo_for_lineups(
     # ── Phase 1: run all lineup sims, collect totals ─────────────────────────
     per_lineup: List[Tuple[Any, np.ndarray, "LineupSimSummary"]] = []
 
+    # Derive contest_mode from contest_type enum for variance dampening
+    _contest_mode = contest_type.value.lower() if hasattr(contest_type, 'value') else str(contest_type).lower()
+    # Map known contest types to variance mode keys
+    _cm_map = {"gpp_large": "gpp_150", "gpp_small": "gpp_20", "single_entry": "se_3max"}
+    _contest_mode = _cm_map.get(_contest_mode, _contest_mode)
+
     for lu_id, grp in lineups_df.groupby("lineup_index"):
         projs = grp["proj"].fillna(0).values.astype(float)
         salaries = pd.to_numeric(grp.get("salary", pd.Series(6000, index=grp.index)), errors="coerce").fillna(6000).values.astype(float)
 
         # Empirical salary-bracket variance (calibrated from 21-slate backtest)
-        stds = compute_empirical_std(projs, salaries, variance_mult=variance_mult)
+        stds = compute_empirical_std(projs, salaries, variance_mult=variance_mult, contest_mode=_contest_mode)
 
         # (n_sims × n_players) outcome matrix
         sim_matrix = rng.normal(
@@ -1048,7 +1054,11 @@ def run_sims_pipeline(
         if pname:
             p_sal[pname] = float(row.get("salary", 6000) or 6000)
     _all_sals = np.array([p_sal.get(n, 6000) for n in _all_names])
-    _all_stds = compute_empirical_std(_all_projs, _all_sals, variance_mult=variance)
+    # Derive contest_mode for variance dampening
+    _pipe_contest_mode = contest_type.strip().lower().replace(" ", "_")
+    _pipe_cm_map = {"gpp_main": "gpp", "gpp_early": "gpp", "gpp_late": "gpp", "cash_main": "cash"}
+    _pipe_contest_mode = _pipe_cm_map.get(_pipe_contest_mode, _pipe_contest_mode)
+    _all_stds = compute_empirical_std(_all_projs, _all_sals, variance_mult=variance, contest_mode=_pipe_contest_mode)
     for i, pname in enumerate(_all_names):
         all_player_sims[pname] = rng.normal(_all_projs[i], _all_stds[i], n_sims)
 
@@ -1388,7 +1398,9 @@ def run_sims_for_contest_type(
 
     rng = np.random.default_rng(seed=42)
     # Empirical salary-bracket variance (calibrated from 21-slate backtest)
-    std = compute_empirical_std(proj.values, salary.values, variance_mult=variance)
+    # Contest-mode dampening: cash = tighter distributions, showdown = wider
+    _ct_mode = contest_type.strip().lower().replace(" ", "_")
+    std = compute_empirical_std(proj.values, salary.values, variance_mult=variance, contest_mode=_ct_mode)
     proj_vals = proj.values
 
     # Simulate n_sims score draws per player
