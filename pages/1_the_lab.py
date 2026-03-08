@@ -16,9 +16,9 @@ Responsibilities
 UI AUTOMATION (v2):
 - Slates auto-fetch when date/sport/contest changes — no manual button.
 - Player pool auto-loads when a slate is selected — no manual button.
-- Sims auto-run when pool loads — no manual button.
+- Sims are MANUAL — user clicks Run Sims when ready.
 - Expanders replaced with inline sections where possible.
-- Flow: Pick date+sport+contest → pick slate → everything else is automatic.
+- Flow: Pick date+sport+contest → pick slate → pool loads → user runs sims.
 
 State read:  SlateState, RickyEdgeState, SimState
 State written: SlateState, SimState
@@ -579,10 +579,10 @@ def _gauge_score(sim_results: Optional[pd.DataFrame], contest: str) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Auto-pipeline: loads pool + runs sims in one shot
+# Auto-pipeline: loads player pool (sims are manual)
 # ---------------------------------------------------------------------------
 
-def _auto_load_pool_and_sims(
+def _auto_load_pool(
     sport: str,
     slate_date_str: str,
     contest_type_label: str,
@@ -596,8 +596,9 @@ def _auto_load_pool_and_sims(
     _contest_safe: str,
     status_container,
 ) -> Optional[pd.DataFrame]:
-    """Combined pool load + sims pipeline. Returns the loaded pool or None.
+    """Load the player pool from DK / cache. Returns the loaded pool or None.
 
+    Sims are NOT run here — user triggers them manually via the Run Sims button.
     Streams status messages into status_container (a st.status context).
     """
     proj_source = "model"
@@ -931,57 +932,7 @@ def _auto_load_pool_and_sims(
                 slate.active_layers = ["Base"]
             set_slate_state(slate)
 
-            status_container.write(f"✅ Loaded {len(pool)} players.")
-
-            # ══════════════════════════════════════════════════════════
-            # AUTO-RUN SIMS (no button needed)
-            # ══════════════════════════════════════════════════════════
-            status_container.write(f"Running sims ({sim.n_sims:,} iterations)…")
-            try:
-                player_results = _build_player_level_sim_results(pool, sim.variance)
-                sim.player_results = player_results
-
-                # Determine pipeline contest
-                _CONTEST_NAME_TO_PIPELINE = {
-                    "GPP Main": "GPP_MAIN",
-                    "Cash Main": "CASH",
-                    "Showdown": "GPP_MAIN",
-                }
-                pipeline_contest = _CONTEST_NAME_TO_PIPELINE.get(contest_type_label, "GPP_MAIN")
-
-                _PIPELINE_TO_OPTIMIZER = {"GPP_MAIN": "GPP_150", "CASH": "CASH"}
-                optimizer_contest = _PIPELINE_TO_OPTIMIZER.get(pipeline_contest, "GPP_20")
-                real_lineups = build_ricky_lineups(
-                    edge_df=compute_edge_metrics(pool, calibration_state=slate.calibration_state, variance=sim.variance),
-                    contest_type=optimizer_contest,
-                    calibration_state=slate.calibration_state,
-                    salary_cap=SALARY_CAP,
-                )
-                if not real_lineups.empty:
-                    pipeline_df = run_sims_pipeline(
-                        pool=pool,
-                        lineups_df=real_lineups,
-                        contest_type=pipeline_contest,
-                        n_sims=sim.n_sims,
-                        variance=sim.variance,
-                        slate_date=slate.slate_date,
-                        draft_group_id=sim.draft_group_id,
-                    )
-                    sim.pipeline_output[pipeline_contest] = pipeline_df
-                set_sim_state(sim)
-
-                new_edge_df = compute_edge_metrics(
-                    pool,
-                    calibration_state=slate.calibration_state,
-                    variance=sim.variance,
-                )
-                slate.edge_df = new_edge_df
-                if "Edge" not in slate.active_layers:
-                    slate.active_layers.append("Edge")
-                set_slate_state(slate)
-                status_container.write(f"✅ Sims complete — {len(player_results)} players analyzed.")
-            except Exception as sim_exc:
-                status_container.write(f"⚠️ Sims failed: {sim_exc}")
+            status_container.write(f"✅ Pool locked — {len(pool)} players. Hit **Run Sims** when you're ready.")
 
             return pool
 
@@ -996,7 +947,7 @@ def _auto_load_pool_and_sims(
 
 def main() -> None:
     st.title("🧪 The Lab")
-    st.caption("Select date + contest → pick a slate → pool loads and sims run automatically.")
+    st.caption("Perpendicular to nonsense. Load the slate, check the pool, run sims when you're ready.")
 
     slate = get_slate_state()
     edge = get_edge_state()
@@ -1136,8 +1087,8 @@ def main() -> None:
         _need_load = True
 
     if _need_load:
-        with st.status("Loading pool & running sims…", expanded=True) as _load_status:
-            pool_result = _auto_load_pool_and_sims(
+        with st.status("Loading player pool…", expanded=True) as _load_status:
+            pool_result = _auto_load_pool(
                 sport=sport,
                 slate_date_str=slate_date_str,
                 contest_type_label=contest_type_label,
@@ -1153,14 +1104,14 @@ def main() -> None:
             )
             if pool_result is not None:
                 st.session_state[_prev_dg_key] = selected_dg_id
-                _load_status.update(label="✅ Pool loaded & sims complete", state="complete", expanded=False)
+                _load_status.update(label="✅ Pool loaded — run sims when ready", state="complete", expanded=False)
             else:
                 _load_status.update(label="Load failed", state="error")
 
     # Reload inside the completed status — expand to reveal
     if st.session_state.get(_pool_loaded_key) is not None and not _need_load:
-        with st.status("✅ Pool loaded & sims complete", state="complete", expanded=False) as _done_status:
-            if st.button("🔄 Reload Pool & Re-run Sims", key="_lab_force_reload"):
+        with st.status("✅ Pool loaded — run sims when ready", state="complete", expanded=False) as _done_status:
+            if st.button("🔄 Reload Pool", key="_lab_force_reload"):
                 st.session_state.pop(_pool_loaded_key, None)
                 st.rerun()
 
@@ -1201,49 +1152,11 @@ def main() -> None:
                     slate.player_pool = hub_pool
                 st.caption(f"{len(selected_games)} of {len(all_games)} matchups selected · {len(hub_pool)} players")
 
-                # Re-run sims on filtered pool if game selection changed
+                # Track game selection changes (sims must be re-run manually)
                 _prev_games = st.session_state.get(_prev_games_key, [])
                 if sorted(selected_games) != sorted(_prev_games):
                     st.session_state[_prev_games_key] = selected_games
-                    with st.spinner("Re-running sims on filtered pool..."):
-                        try:
-                            player_results = _build_player_level_sim_results(hub_pool, sim.variance)
-                            sim.player_results = player_results
-
-                            _CONTEST_NAME_TO_PIPELINE_GF = {
-                                "GPP Main": "GPP_MAIN", "Cash Main": "CASH", "Showdown": "GPP_MAIN",
-                            }
-                            _pc = _CONTEST_NAME_TO_PIPELINE_GF.get(contest_type_label, "GPP_MAIN")
-                            _PIPELINE_TO_OPTIMIZER_GF = {"GPP_MAIN": "GPP_150", "CASH": "CASH"}
-                            _oc = _PIPELINE_TO_OPTIMIZER_GF.get(_pc, "GPP_20")
-
-                            _edge_df = compute_edge_metrics(
-                                hub_pool,
-                                calibration_state=slate.calibration_state,
-                                variance=sim.variance,
-                            )
-                            _lu = build_ricky_lineups(
-                                edge_df=_edge_df,
-                                contest_type=_oc,
-                                calibration_state=slate.calibration_state,
-                                salary_cap=SALARY_CAP,
-                            )
-                            if not _lu.empty:
-                                _pipeline_df = run_sims_pipeline(
-                                    pool=hub_pool,
-                                    lineups_df=_lu,
-                                    contest_type=_pc,
-                                    n_sims=sim.n_sims,
-                                    variance=sim.variance,
-                                    slate_date=slate.slate_date,
-                                    draft_group_id=sim.draft_group_id,
-                                )
-                                sim.pipeline_output[_pc] = _pipeline_df
-
-                            slate.edge_df = _edge_df
-                            set_sim_state(sim)
-                        except Exception:
-                            pass  # sims will re-run when user hits the button
+                    st.caption("⚠️ Game filter changed — hit **Run Sims** below to refresh.")
             else:
                 # No games selected — clear the previous selection tracker
                 if st.session_state.get(_prev_games_key):
@@ -1416,10 +1329,10 @@ def main() -> None:
     }
     pipeline_contest = _CONTEST_NAME_TO_PIPELINE.get(contest_type_label, "GPP_MAIN")
 
-    # Manual re-run button (if you changed variance/mode and want fresh sims)
+    # Run sims — always manual, never auto
     if not pool.empty:
-        if st.button("🔄 Re-run Sims", key="_lab_run_sims"):
-            with st.spinner(f"Running {sim.n_sims:,} Monte Carlo iterations…"):
+        if st.button("🎲 Run Sims", key="_lab_run_sims", type="primary"):
+            with st.spinner(f"Ricky's crunching {sim.n_sims:,} Monte Carlo iterations…"):
                 try:
                     player_results = _build_player_level_sim_results(pool, sim.variance)
                     sim.player_results = player_results
@@ -1448,11 +1361,11 @@ def main() -> None:
                     if "Edge" not in slate.active_layers:
                         slate.active_layers.append("Edge")
                     set_slate_state(slate)
-                    st.success(f"Sims complete — {len(player_results)} players.")
+                    st.success(f"Sims locked — {len(player_results)} players analyzed. Scroll down for the data.")
                 except Exception as exc:
                     st.error(f"Sim failed: {exc}")
     else:
-        st.info("Load a slate above first to run sims.")
+        st.info("Load a slate above first. Ricky needs a pool before he can work.")
 
     # Sim results display
     if sim.player_results is not None and not sim.player_results.empty:

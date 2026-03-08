@@ -38,10 +38,10 @@ from yak_core.calibration_feedback import (  # noqa: E402
 
 
 def main() -> None:
-    st.title("Record Results")
+    st.title("📊 Record Results")
     st.caption(
-        "Feed completed contest results into the calibration engine. "
-        "Each recorded slate tightens projection accuracy and reweights edge signals."
+        "Feed the machine. Every recorded slate makes Ricky sharper — "
+        "tighter projections, better edge signals, fewer blind spots."
     )
 
     slate = get_slate_state()

@@ -26,8 +26,8 @@ if _repo_root not in sys.path:
 import streamlit as st
 
 st.set_page_config(
-    page_title="YakOS DFS Optimizer",
-    page_icon="🦅",
+    page_title="YakOS · Right Angle Ricky",
+    page_icon="📐",
     layout="wide",
     initial_sidebar_state="expanded",
 )

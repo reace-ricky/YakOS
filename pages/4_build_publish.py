@@ -280,7 +280,8 @@ def _late_swap_suggestions(
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    st.title("Build & Publish")
+    st.title("🏗️ Build & Publish")
+    st.caption("Lock in the lineups. Ricky builds from edges, not gut feels.")
 
     slate = get_slate_state()
     edge = get_edge_state()

@@ -182,8 +182,32 @@ def _get_best_lineup(lu_state, sim_state, contest_label: str) -> tuple:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Ricky flavor lines (rotated per session)
+# ---------------------------------------------------------------------------
+import hashlib as _hl
+
+_RICKY_LINES = [
+    "Hoodie on. Cold brew in hand. Let's find some edges.",
+    "Running quiet from the coffee shop. The angles don't lie.",
+    "Process over picks. Edges over hype.",
+    "Perpendicular to nonsense since day one.",
+    "Low-key analytics. High-key results.",
+    "The spreadsheet doesn't care about your feelings.",
+    "Calm process, sharp lines. That's the Ricky way.",
+    "Half-awake, fully locked in.",
+]
+
+def _ricky_quote() -> str:
+    """Pick a deterministic-but-rotating Ricky line based on session id."""
+    seed = st.session_state.get("_ricky_seed", "default")
+    idx = int(_hl.md5(str(seed).encode()).hexdigest(), 16) % len(_RICKY_LINES)
+    return _RICKY_LINES[idx]
+
+
 def main() -> None:
-    st.title("Right Angle Ricky")
+    st.title("📐 Right Angle Ricky")
+    st.caption(_ricky_quote())
 
     slate = get_slate_state()
     edge = get_edge_state()
@@ -199,8 +223,8 @@ def main() -> None:
 
     if not has_edge and not has_lineups and not has_pool:
         st.info(
-            "Nothing published yet. Load a slate in **The Lab**, approve in "
-            "**Ricky's Edge Analysis**, and publish from **Build & Publish**."
+            "Ricky's got nothing to show yet. Load a slate in **The Lab**, "
+            "approve in **Ricky's Edge Analysis**, and publish from **Build & Publish**."
         )
         return
 

@@ -46,13 +46,14 @@ _PLAYER_TAGS = ["core", "secondary", "value", "leverage", "neutral", "fade"]
 
 
 def main() -> None:
-    st.title("Ricky's Edge Analysis")
+    st.title("🎯 Ricky's Edge Analysis")
+    st.caption("Where the angles get sharp. Process-driven, data-backed, no vibes.")
 
     slate = get_slate_state()
     edge = get_edge_state()
 
     if not slate.is_ready():
-        st.warning("No slate loaded yet. Go to **The Lab** and load a slate first.")
+        st.warning("Ricky needs a slate first. Head to **The Lab** and load one up.")
         return
 
     # ── Get pool + merge sim data ─────────────────────────────────────
