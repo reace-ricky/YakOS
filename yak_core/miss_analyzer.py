@@ -36,6 +36,7 @@ from yak_core.github_persistence import sync_feedback_async
 
 _ANALYSIS_DIR = os.path.join(YAKOS_ROOT, "data", "miss_analysis")
 _PATTERNS_FILE = os.path.join(_ANALYSIS_DIR, "miss_patterns.json")
+_CORRECTIONS_FILE = os.path.join(_ANALYSIS_DIR, "context_corrections.json")
 
 # ---------------------------------------------------------------------------
 # Classification thresholds
@@ -236,6 +237,12 @@ def analyze_misses(
         factor_breakdown, bracket_breakdown, n_pops, n_busts, n_total
     )
 
+    # ── Compute context correction factors ──────────────────────────────
+    # Same philosophy as calibration_feedback: mean residual × strength,
+    # with min-sample gates.  These get applied to projections when the
+    # pool has the matching context columns.
+    context_corrections = _compute_context_corrections(df)
+
     # ── Persist ─────────────────────────────────────────────────────────
     result = {
         "computed_at": datetime.now(timezone.utc).isoformat(),
@@ -253,19 +260,123 @@ def analyze_misses(
         "top_pops": top_pops,
         "top_busts": top_busts,
         "suggestions": suggestions,
+        "context_corrections": context_corrections,
     }
 
     os.makedirs(_ANALYSIS_DIR, exist_ok=True)
     with open(_PATTERNS_FILE, "w") as f:
         json.dump(result, f, indent=2)
 
+    # Persist corrections separately for fast loading by calibration pipeline
+    with open(_CORRECTIONS_FILE, "w") as f:
+        json.dump(context_corrections, f, indent=2)
+
     # Sync to GitHub
     sync_feedback_async(
-        files=["data/miss_analysis/miss_patterns.json"],
+        files=[
+            "data/miss_analysis/miss_patterns.json",
+            "data/miss_analysis/context_corrections.json",
+        ],
         commit_message=f"Miss analysis: {n_slates} slates, {n_total} player-slates",
     )
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Context correction computation
+# ---------------------------------------------------------------------------
+
+# How aggressively to correct (same as calibration_feedback: 50%)
+_CONTEXT_CORRECTION_STRENGTH = 0.50
+
+# Minimum player-slates per factor before we trust the correction
+_CONTEXT_MIN_SAMPLES = 10
+
+# Maximum absolute correction (FP) per factor — safety cap
+_CONTEXT_MAX_CORRECTION = 4.0
+
+
+def _compute_context_corrections(df: pd.DataFrame) -> Dict[str, Any]:
+    """Compute per-context-factor projection corrections.
+
+    For each factor, computes the mean residual (actual - proj) among
+    players tagged with that factor, then applies a dampening strength.
+    The result is a dict of {factor: correction_fp} that can be added
+    to projections for players matching that context.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Analysis DataFrame with ``residual`` and ``context_tags`` columns.
+
+    Returns
+    -------
+    dict
+        Keys: ``factors`` (dict of factor → correction details),
+        ``computed_at``, ``strength``, ``n_active``.
+    """
+    all_factors = ["blowout", "high_pace", "low_pace", "b2b",
+                   "inconsistent", "injury_flag"]
+
+    factor_corrections: Dict[str, Dict[str, Any]] = {}
+    n_active = 0
+
+    for factor in all_factors:
+        mask = df["context_tags"].apply(lambda tags: factor in tags)
+        subset = df[mask]
+        n = len(subset)
+
+        if n < _CONTEXT_MIN_SAMPLES:
+            factor_corrections[factor] = {
+                "correction_fp": 0.0,
+                "raw_residual": 0.0,
+                "n": n,
+                "active": False,
+                "reason": f"< {_CONTEXT_MIN_SAMPLES} samples",
+            }
+            continue
+
+        mean_res = float(subset["residual"].mean())
+        raw_correction = mean_res * _CONTEXT_CORRECTION_STRENGTH
+
+        # Clamp to safety bounds
+        clamped = float(np.clip(raw_correction, -_CONTEXT_MAX_CORRECTION,
+                                _CONTEXT_MAX_CORRECTION))
+
+        factor_corrections[factor] = {
+            "correction_fp": round(clamped, 2),
+            "raw_residual": round(mean_res, 2),
+            "n": n,
+            "active": True,
+        }
+        n_active += 1
+
+    return {
+        "computed_at": datetime.now(timezone.utc).isoformat(),
+        "strength": _CONTEXT_CORRECTION_STRENGTH,
+        "n_active": n_active,
+        "n_total": len(all_factors),
+        "factors": factor_corrections,
+    }
+
+
+def get_context_corrections() -> Dict[str, Any]:
+    """Load persisted context corrections for use by the calibration pipeline.
+
+    Returns
+    -------
+    dict
+        Contains ``factors`` dict mapping factor name → correction details.
+        Returns empty structure if no corrections file exists.
+    """
+    if not os.path.isfile(_CORRECTIONS_FILE):
+        return {"n_active": 0, "factors": {}}
+    try:
+        with open(_CORRECTIONS_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {"n_active": 0, "factors": {}}
 
 
 def _player_rows(df: pd.DataFrame) -> List[Dict[str, Any]]:

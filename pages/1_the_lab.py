@@ -786,6 +786,17 @@ def _auto_load_pool(
             except Exception:
                 pass
 
+            # Apply context corrections from miss analysis (blowout, pace, B2B, etc.)
+            try:
+                from yak_core.calibration_feedback import apply_context_corrections
+                _ctx_pool = apply_context_corrections(pool)
+                _n_adjusted = int((_ctx_pool.get("context_correction", 0).abs() > 0).sum()) if "context_correction" in _ctx_pool.columns else 0
+                if _n_adjusted > 0:
+                    pool = _ctx_pool
+                    status_container.write(f"🔍 Context corrections applied ({_n_adjusted} players adjusted)")
+            except Exception:
+                pass
+
             pool = _enrich_pool(pool)
 
             # Dedup

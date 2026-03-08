@@ -351,6 +351,111 @@ def get_calibration_summary(store: Optional[Dict] = None) -> Dict[str, Any]:
     }
 
 
+def apply_context_corrections(
+    pool_df: pd.DataFrame,
+    context_corr: Optional[Dict[str, Any]] = None,
+) -> pd.DataFrame:
+    """Apply game-context correction factors from miss analysis.
+
+    Reads context corrections produced by ``miss_analyzer.compute_context_corrections``
+    and adjusts projections for players whose current game context matches a
+    learned pattern (blowout, high pace, B2B, etc.).
+
+    Parameters
+    ----------
+    pool_df : pd.DataFrame
+        Player pool.  Context columns checked: ``vegas_spread`` / ``spread``,
+        ``vegas_total``, ``b2b``, ``rolling_cv``, ``status``, ``injury_note``.
+    context_corr : dict, optional
+        Pre-loaded context corrections.  If None, loads from disk.
+
+    Returns
+    -------
+    pd.DataFrame
+        Pool with ``proj`` adjusted and ``context_correction`` column added.
+    """
+    if context_corr is None:
+        try:
+            from yak_core.miss_analyzer import get_context_corrections
+            context_corr = get_context_corrections()
+        except Exception:
+            return pool_df.copy()
+
+    factors = context_corr.get("factors", {})
+    n_active = context_corr.get("n_active", 0)
+    if n_active == 0 or not factors:
+        return pool_df.copy()
+
+    df = pool_df.copy()
+    adjustment = pd.Series(0.0, index=df.index)
+
+    # ── Blowout: |spread| >= 10 ──────────────────────────────────────────
+    blowout_corr = factors.get("blowout", {})
+    if blowout_corr.get("active"):
+        spread_col = None
+        for col in ("vegas_spread", "spread"):
+            if col in df.columns:
+                spread_col = col
+                break
+        if spread_col:
+            spread_vals = pd.to_numeric(df[spread_col], errors="coerce").fillna(0).abs()
+            blowout_mask = spread_vals >= 10
+            adjustment[blowout_mask] += blowout_corr["correction_fp"]
+
+    # ── High pace: vegas_total >= 230 ────────────────────────────────────
+    hp_corr = factors.get("high_pace", {})
+    if hp_corr.get("active") and "vegas_total" in df.columns:
+        total_vals = pd.to_numeric(df["vegas_total"], errors="coerce").fillna(220)
+        hp_mask = total_vals >= 230
+        adjustment[hp_mask] += hp_corr["correction_fp"]
+
+    # ── Low pace: vegas_total <= 210 ─────────────────────────────────────
+    lp_corr = factors.get("low_pace", {})
+    if lp_corr.get("active") and "vegas_total" in df.columns:
+        lp_total = pd.to_numeric(df["vegas_total"], errors="coerce").fillna(220)
+        lp_mask = lp_total <= 210
+        adjustment[lp_mask] += lp_corr["correction_fp"]
+
+    # ── Back-to-back ─────────────────────────────────────────────────────
+    b2b_corr = factors.get("b2b", {})
+    if b2b_corr.get("active") and "b2b" in df.columns:
+        b2b_mask = df["b2b"].apply(
+            lambda v: v is True or v == 1 or str(v).lower() == "true"
+        )
+        adjustment[b2b_mask] += b2b_corr["correction_fp"]
+
+    # ── Inconsistent player: rolling_cv >= 0.30 ─────────────────────────
+    inc_corr = factors.get("inconsistent", {})
+    if inc_corr.get("active") and "rolling_cv" in df.columns:
+        rcv = pd.to_numeric(df["rolling_cv"], errors="coerce").fillna(0)
+        inc_mask = rcv >= 0.30
+        adjustment[inc_mask] += inc_corr["correction_fp"]
+
+    # ── Injury flag: GTD/Questionable who are playing ────────────────────
+    inj_corr = factors.get("injury_flag", {})
+    if inj_corr.get("active") and "status" in df.columns:
+        inj_mask = df["status"].astype(str).str.upper().isin(
+            {"GTD", "QUESTIONABLE", "PROBABLE"}
+        )
+        # Also check injury_note
+        if "injury_note" in df.columns:
+            note_mask = (
+                df["injury_note"].astype(str).str.strip().ne("") &
+                df["injury_note"].astype(str).ne("nan")
+            )
+            inj_mask = inj_mask | note_mask
+        adjustment[inj_mask] += inj_corr["correction_fp"]
+
+    # Apply and ensure proj doesn't go negative
+    if adjustment.abs().sum() > 0:
+        df["proj"] = (df["proj"] + adjustment).clip(lower=0)
+        df["context_correction"] = adjustment.round(2)
+    else:
+        df["context_correction"] = 0.0
+
+    return df
+
+
 def clear_calibration_history(store: Optional[Dict] = None) -> None:
     """Remove all stored calibration feedback data."""
     if store is not None:
