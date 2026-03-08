@@ -37,6 +37,9 @@ _ARCHIVE_COLS = [
     "actual_fp", "actual_own", "mp_actual",
     # Status
     "status", "injury_note", "gtd_out_prob",
+    # Game context (Phase 3 — miss analysis cross-referencing)
+    "vegas_total", "vegas_spread", "spread", "home", "b2b",
+    "dvp", "days_rest", "rolling_cv", "rolling_fp_10",
 ]
 
 

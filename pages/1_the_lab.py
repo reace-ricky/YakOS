@@ -882,6 +882,21 @@ def _auto_load_pool(
                                         status_container.write(f"🎯 Edge feedback: {_ef_active} signals tracked.")
                                 except Exception:
                                     pass
+
+                                # Run miss analysis (pops/busts × context)
+                                try:
+                                    from yak_core.miss_analyzer import analyze_misses
+                                    _miss_result = analyze_misses()
+                                    if "error" not in _miss_result:
+                                        _n_sug = len(_miss_result.get("suggestions", []))
+                                        _cls = _miss_result.get("classification", {})
+                                        status_container.write(
+                                            f"🔍 Miss analysis: {_cls.get('pop', 0)} pops, "
+                                            f"{_cls.get('bust', 0)} busts"
+                                            + (f" — {_n_sug} suggestions" if _n_sug else "")
+                                        )
+                                except Exception:
+                                    pass
                 except Exception:
                     pass
 
@@ -1811,6 +1826,131 @@ def main() -> None:
                             st.rerun()
                     except Exception as _recalc_exc:
                         st.error(f"Recalculation error: {_recalc_exc}")
+
+        # Miss analysis (pops & busts × context)
+        try:
+            from yak_core.miss_analyzer import get_miss_analysis_status
+            _miss_status = get_miss_analysis_status()
+        except Exception:
+            _miss_status = {"status": "none", "message": "Miss analyzer not available"}
+
+        _miss_has_data = _miss_status.get("status") == "analysed"
+        _miss_label = (
+            f"🔍 Miss Analysis ({_miss_status.get('n_pops', 0)} pops, {_miss_status.get('n_busts', 0)} busts)"
+            if _miss_has_data
+            else "🔍 Miss Analysis (no data yet)"
+        )
+        with st.expander(_miss_label, expanded=False):
+            st.caption(_miss_status.get("message", ""))
+            if _miss_has_data and _miss_status.get("computed_at"):
+                st.caption(f"Last updated: {_miss_status['computed_at']}")
+
+            # Show detailed breakdown if we have persisted patterns
+            try:
+                from yak_core.miss_analyzer import _PATTERNS_FILE
+                import json as _json_miss
+                if os.path.isfile(_PATTERNS_FILE):
+                    with open(_PATTERNS_FILE) as _mf:
+                        _miss_data = _json_miss.load(_mf)
+
+                    # Classification summary
+                    _cls = _miss_data.get("classification", {})
+                    if _cls:
+                        _mc1, _mc2, _mc3 = st.columns(3)
+                        with _mc1:
+                            st.metric("Pops", f"{_cls.get('pop', 0)}",
+                                      delta=f"{_cls.get('pop_rate', 0):.1%} rate")
+                        with _mc2:
+                            st.metric("Busts", f"{_cls.get('bust', 0)}",
+                                      delta=f"{_cls.get('bust_rate', 0):.1%} rate")
+                        with _mc3:
+                            st.metric("Inline", f"{_cls.get('inline', 0)}")
+
+                    # Context factor breakdown table
+                    _factors = _miss_data.get("factor_breakdown", {})
+                    if _factors:
+                        st.markdown("**Context factor breakdown:**")
+                        _fb_rows = []
+                        for _fk, _fv in _factors.items():
+                            _fb_rows.append({
+                                "Factor": _fk.replace("_", " ").title(),
+                                "N": _fv.get("n", 0),
+                                "Pop Rate": f"{_fv.get('pop_rate', 0):.1%}",
+                                "Bust Rate": f"{_fv.get('bust_rate', 0):.1%}",
+                                "Pop Lift": f"{_fv.get('pop_lift', 0):+.0f}%",
+                                "Bust Lift": f"{_fv.get('bust_lift', 0):+.0f}%",
+                                "Avg Res": f"{_fv.get('avg_residual', 0):+.1f}",
+                            })
+                        if _fb_rows:
+                            st.dataframe(pd.DataFrame(_fb_rows), use_container_width=True, hide_index=True)
+
+                    # Bracket breakdown
+                    _brackets = _miss_data.get("bracket_breakdown", {})
+                    if _brackets:
+                        st.markdown("**Salary bracket breakdown:**")
+                        _bb_rows = []
+                        for _bbk, _bbv in _brackets.items():
+                            _bb_rows.append({
+                                "Bracket": _bbk,
+                                "N": _bbv.get("n", 0),
+                                "Pop Rate": f"{_bbv.get('pop_rate', 0):.1%}",
+                                "Bust Rate": f"{_bbv.get('bust_rate', 0):.1%}",
+                                "MAE": f"{_bbv.get('mae', 0):.1f}",
+                                "Avg Res": f"{_bbv.get('avg_residual', 0):+.1f}",
+                            })
+                        if _bb_rows:
+                            st.dataframe(pd.DataFrame(_bb_rows), use_container_width=True, hide_index=True)
+
+                    # Suggestions
+                    _suggestions = _miss_data.get("suggestions", [])
+                    if _suggestions:
+                        st.markdown("**Actionable suggestions:**")
+                        for _sug in _suggestions:
+                            _sev_icon = "🟥" if _sug.get("severity") == "high" else "🟨"
+                            st.markdown(f"{_sev_icon} **{_sug.get('signal', '')}** — {_sug.get('detail', '')}")
+
+                    # Top pops / busts
+                    _top_pops = _miss_data.get("top_pops", [])
+                    _top_busts = _miss_data.get("top_busts", [])
+                    if _top_pops or _top_busts:
+                        _tp_col, _tb_col = st.columns(2)
+                        with _tp_col:
+                            if _top_pops:
+                                st.markdown("**Top Pops 🚀**")
+                                _tp_df = pd.DataFrame(_top_pops)
+                                _tp_show = [c for c in ["player", "salary", "proj", "actual", "residual", "context", "date"] if c in _tp_df.columns]
+                                if "context" in _tp_show:
+                                    _tp_df["context"] = _tp_df["context"].apply(lambda x: ", ".join(x) if isinstance(x, list) else str(x))
+                                st.dataframe(_tp_df[_tp_show], use_container_width=True, hide_index=True)
+                        with _tb_col:
+                            if _top_busts:
+                                st.markdown("**Top Busts 💣**")
+                                _tb_df = pd.DataFrame(_top_busts)
+                                _tb_show = [c for c in ["player", "salary", "proj", "actual", "residual", "context", "date"] if c in _tb_df.columns]
+                                if "context" in _tb_show:
+                                    _tb_df["context"] = _tb_df["context"].apply(lambda x: ", ".join(x) if isinstance(x, list) else str(x))
+                                st.dataframe(_tb_df[_tb_show], use_container_width=True, hide_index=True)
+            except Exception:
+                pass
+
+            # Manual re-run button
+            if st.button("🔄 Re-run Miss Analysis", key="_lab_rerun_miss"):
+                with st.spinner("Analysing pops & busts..."):
+                    try:
+                        from yak_core.miss_analyzer import analyze_misses
+                        _miss_rerun = analyze_misses()
+                        if "error" in _miss_rerun:
+                            st.warning(_miss_rerun["error"])
+                        else:
+                            _cls_r = _miss_rerun.get("classification", {})
+                            st.success(
+                                f"Miss analysis complete: {_cls_r.get('pop', 0)} pops, "
+                                f"{_cls_r.get('bust', 0)} busts from "
+                                f"{_miss_rerun.get('n_player_slates', 0)} player-slates."
+                            )
+                            st.rerun()
+                    except Exception as _miss_exc:
+                        st.error(f"Miss analysis error: {_miss_exc}")
 
     except Exception as _cal_exc:
         st.caption(f"Calibration section unavailable: {_cal_exc}")
