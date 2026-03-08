@@ -1,7 +1,7 @@
 {
   "2026-03-07": {
     "slate_date": "2026-03-07",
-    "contest_type": "GPP Main",
+    "contest_type": "Showdown",
     "n_players": 96,
     "signals": {
       "high_leverage": {
@@ -30,7 +30,7 @@
         "n_hit": 0,
         "hit_rate": 0.0,
         "avg_actual": 18.25,
-        "avg_proj": 23.37
+        "avg_proj": 23.27
       },
       "smash_candidate": {
         "n_flagged": 0,
