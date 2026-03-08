@@ -296,6 +296,17 @@ def fetch_dk_draftables(draft_group_id: int) -> pd.DataFrame:
             if not pos_list:
                 pos_list = [primary_pos] if primary_pos else [""]
 
+        # Extract opponent + game info from competition field
+        team_abbr = str(p.get("teamAbbreviation") or p.get("teamAbv") or p.get("team") or "")
+        comp = p.get("competition") or {}
+        game_name = str(comp.get("name", ""))  # e.g. "HOU @ SAS"
+        game_time = str(comp.get("startTime", ""))
+        opp = ""
+        if game_name and "@" in game_name:
+            parts = [t.strip() for t in game_name.replace("@", "vs").split("vs")]
+            opp_candidates = [t for t in parts if t.upper() != team_abbr.upper()]
+            opp = opp_candidates[0] if opp_candidates else ""
+
         rows.append(
             {
                 "draft_group_id": int(draft_group_id),
@@ -303,7 +314,10 @@ def fetch_dk_draftables(draft_group_id: int) -> pd.DataFrame:
                 "name": str(p.get("displayName") or p.get("shortName") or p.get("playerName") or ""),
                 "name_suffix": str(p.get("nameSuffix") or ""),
                 "display_name": str(p.get("displayName") or p.get("playerName") or ""),
-                "team": str(p.get("teamAbbreviation") or p.get("teamAbv") or p.get("team") or ""),
+                "team": team_abbr,
+                "opp": opp,
+                "game_info": game_name,
+                "game_time": game_time,
                 "positions": "/".join(pos_list) if pos_list else "",
                 "salary": float(p.get("salary") or p.get("Salary") or 0),
                 "status": str(p.get("playerGameInfo", {}).get("status") or p.get("status") or "Active"),
@@ -738,6 +752,10 @@ def build_contest_scoped_pool(
     out["salary"] = pd.to_numeric(dk_merged.get("salary_dk", dk_merged.get("salary", 0)), errors="coerce").fillna(0)
     out["dk_salary"] = out["salary"]
     out["dk_player_id"] = dk_merged.get("dk_player_id", "")
+    # Opponent + game info from DK draftables
+    out["opp"] = dk_merged.get("opp", dk_merged.get("opp_dk", ""))
+    out["game_info"] = dk_merged.get("game_info", dk_merged.get("game_info_dk", ""))
+    out["game_time"] = dk_merged.get("game_time", dk_merged.get("game_time_dk", ""))
 
     # YakOS projection columns (fill 0 when unmapped)
     for col in _YAK_PROJECTION_COLS:
