@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -239,7 +239,7 @@ def _recompute_weights(history: Dict[str, Any]) -> None:
         weights = {sig: round(1.0 / n, 3) for sig in signal_stats}
 
     output = {
-        "computed_at": datetime.utcnow().isoformat(),
+        "computed_at": datetime.now(timezone.utc).isoformat(),
         "n_slates": len(history),
         "signal_stats": signal_stats,
         "weights": weights,

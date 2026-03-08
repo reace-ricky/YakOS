@@ -160,52 +160,11 @@ def record_slate_errors(
         "n_players": int(len(df)),
     }
 
-    # ── Ownership calibration ─────────────────────────────────────────
-    # Track projected ownership vs actual ownership when available.
-    ownership_cal = {}
-    _own_proj_col = (
-        "own_proj" if "own_proj" in df.columns else
-        "ownership" if "ownership" in df.columns else None
-    )
-    _own_actual_col = (
-        "actual_own" if "actual_own" in df.columns else None
-    )
-    if _own_proj_col:
-        own_p = pd.to_numeric(df[_own_proj_col], errors="coerce").fillna(0)
-        ownership_cal["mean_proj_own"] = round(float(own_p.mean()), 2)
-        ownership_cal["n_with_own"] = int(own_p.gt(0).sum())
-        if _own_actual_col and _own_actual_col in df.columns:
-            own_a = pd.to_numeric(df[_own_actual_col], errors="coerce")
-            if own_a.notna().any():
-                _own_err = (own_p - own_a).dropna()
-                ownership_cal["own_mae"] = round(float(_own_err.abs().mean()), 2)
-                ownership_cal["own_bias"] = round(float(_own_err.mean()), 2)
-                ownership_cal["own_corr"] = round(float(own_p.corr(own_a)), 4)
-
-    # ── Minutes calibration ───────────────────────────────────────────
-    minutes_cal = {}
-    _min_proj_col = "proj_minutes" if "proj_minutes" in df.columns else None
-    _min_actual_col = (
-        "mp_actual" if "mp_actual" in df.columns else
-        "minutes_actual" if "minutes_actual" in df.columns else None
-    )
-    if _min_proj_col and _min_actual_col and _min_actual_col in df.columns:
-        min_p = pd.to_numeric(df[_min_proj_col], errors="coerce").fillna(0)
-        min_a = pd.to_numeric(df[_min_actual_col], errors="coerce")
-        if min_a.notna().any():
-            _min_err = (min_p - min_a).dropna()
-            minutes_cal["min_mae"] = round(float(_min_err.abs().mean()), 2)
-            minutes_cal["min_bias"] = round(float(_min_err.mean()), 2)
-            minutes_cal["min_corr"] = round(float(min_p.corr(min_a)), 4)
-            minutes_cal["n_with_min"] = int(min_a.notna().sum())
-
     slate_record = {
         "slate_date": slate_date,
         "overall": overall,
         "by_position": pos_errors,
         "by_salary_tier": tier_errors,
-        "ownership": ownership_cal,
-        "minutes": minutes_cal,
     }
 
     # Load existing history and append/replace

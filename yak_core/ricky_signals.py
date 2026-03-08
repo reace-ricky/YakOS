@@ -54,22 +54,76 @@ def _safe_numeric(series: "pd.Series", default: float = 0.0) -> "pd.Series":
     return pd.to_numeric(series, errors="coerce").fillna(default)
 
 
+# Mapping from edge_feedback signal names → ricky_signals weight keys.
+# edge_feedback tracks hit rates on these 5 signals;
+# we map each to the ricky_signals dimension it most informs.
+_EDGE_FB_TO_RICKY: Dict[str, str] = {
+    "high_leverage": "leverage",
+    "low_ownership_upside": "own_proj_mismatch",
+    "chalk_fade": "own_proj_mismatch",    # both inform mismatch weighting
+    "salary_value": "salary_value",
+    "smash_candidate": "leverage",         # smash candidates reinforce leverage
+}
+
+
 def _load_feedback_weights() -> Dict[str, float]:
-    """Load learned signal weights from edge feedback, fall back to defaults."""
+    """Load learned signal weights from edge feedback, fall back to defaults.
+
+    The edge_feedback system stores per-signal hit rates under its own key
+    names (high_leverage, salary_value, etc.).  We map those into the 5
+    ricky_signals dimensions, blend with defaults using a 60/40 split
+    (feedback/default), and renormalize so weights sum to 1.0.
+    """
     try:
         import json
         import os
         from yak_core.config import YAKOS_ROOT
 
         path = os.path.join(YAKOS_ROOT, "data", "edge_feedback", "signal_weights.json")
-        if os.path.exists(path):
-            with open(path) as f:
-                w = json.load(f)
-            # Only use if keys overlap
-            if any(k in w for k in _DEFAULT_WEIGHTS):
-                merged = dict(_DEFAULT_WEIGHTS)
-                merged.update({k: float(v) for k, v in w.items() if k in _DEFAULT_WEIGHTS})
-                return merged
+        if not os.path.exists(path):
+            return dict(_DEFAULT_WEIGHTS)
+
+        with open(path) as f:
+            data = json.load(f)
+
+        # Direct key match (if weights file already uses ricky keys)
+        weights_raw = data.get("weights", data)
+        if isinstance(weights_raw, dict) and any(k in weights_raw for k in _DEFAULT_WEIGHTS):
+            merged = dict(_DEFAULT_WEIGHTS)
+            merged.update({k: float(v) for k, v in weights_raw.items() if k in _DEFAULT_WEIGHTS})
+            total = sum(merged.values())
+            if total > 0:
+                return {k: round(v / total, 4) for k, v in merged.items()}
+            return dict(_DEFAULT_WEIGHTS)
+
+        # Map from edge_feedback signal names → ricky dimensions
+        signal_stats = data.get("signal_stats", {})
+        if not signal_stats:
+            return dict(_DEFAULT_WEIGHTS)
+
+        # Accumulate weighted hit rates per ricky dimension
+        fb_accum: Dict[str, float] = {k: 0.0 for k in _DEFAULT_WEIGHTS}
+        fb_count: Dict[str, int] = {k: 0 for k in _DEFAULT_WEIGHTS}
+        for fb_sig, stats in signal_stats.items():
+            ricky_key = _EDGE_FB_TO_RICKY.get(fb_sig)
+            if ricky_key and stats.get("weighted_hit_rate", 0) > 0:
+                fb_accum[ricky_key] += stats["weighted_hit_rate"]
+                fb_count[ricky_key] += 1
+
+        # Average per dimension, then blend 60% feedback / 40% default
+        merged = {}
+        _FB_BLEND = 0.6
+        for key, default_w in _DEFAULT_WEIGHTS.items():
+            if fb_count[key] > 0:
+                fb_w = fb_accum[key] / fb_count[key]
+                merged[key] = _FB_BLEND * fb_w + (1 - _FB_BLEND) * default_w
+            else:
+                merged[key] = default_w
+
+        # Renormalize to sum to 1.0
+        total = sum(merged.values())
+        if total > 0:
+            return {k: round(v / total, 4) for k, v in merged.items()}
     except Exception:
         pass
     return dict(_DEFAULT_WEIGHTS)
