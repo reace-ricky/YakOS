@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from yak_core.config import YAKOS_ROOT
+from yak_core.github_persistence import sync_feedback_async
 
 _FEEDBACK_DIR = os.path.join(YAKOS_ROOT, "data", "calibration_feedback")
 _HISTORY_FILE = os.path.join(_FEEDBACK_DIR, "slate_errors.json")
@@ -174,6 +175,16 @@ def record_slate_errors(
 
     # Recompute correction factors
     _recompute_corrections(history, store)
+
+    # Sync to GitHub (background, non-blocking) so data survives redeploys
+    if store is None:  # file-backed mode
+        sync_feedback_async(
+            files=[
+                "data/calibration_feedback/slate_errors.json",
+                "data/calibration_feedback/correction_factors.json",
+            ],
+            commit_message=f"Calibration: record slate {slate_date}",
+        )
 
     return slate_record
 

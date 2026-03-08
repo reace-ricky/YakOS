@@ -9,4 +9,7 @@ __pycache__/
 yakos/
 .ipynb_checkpoints/
 data/api_config.json
+# Feedback data is auto-committed by the app to survive Streamlit Cloud redeploys
+# data/calibration_feedback/*.json  -- ALLOWED
+# data/edge_feedback/*.json          -- ALLOWED
 streamlit_app_legacy.py

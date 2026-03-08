@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 from yak_core.config import YAKOS_ROOT
+from yak_core.github_persistence import sync_feedback_async
 
 _FEEDBACK_DIR = os.path.join(YAKOS_ROOT, "data", "edge_feedback")
 _SIGNAL_FILE = os.path.join(_FEEDBACK_DIR, "signal_history.json")
@@ -181,6 +182,15 @@ def record_edge_outcomes(
 
     # Recompute rolling weights
     _recompute_weights(history)
+
+    # Sync to GitHub (background, non-blocking) so data survives redeploys
+    sync_feedback_async(
+        files=[
+            "data/edge_feedback/signal_history.json",
+            "data/edge_feedback/signal_weights.json",
+        ],
+        commit_message=f"Edge feedback: record slate {slate_date}",
+    )
 
     return slate_record
 
