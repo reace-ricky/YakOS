@@ -33,22 +33,36 @@ _MIN_OWN_FOR_LEVERAGE: float = 0.1
 # ---------------------------------------------------------------------------
 # Empirical variance model (shared by edge.py and sims.py)
 # ---------------------------------------------------------------------------
-# Calibrated from 21-slate backtest (Feb 7 – Mar 5 2026, 3512 player-slates,
-# 387 unique players with 3+ appearances).  Within-player std/proj ratios:
-#   <$5K:    1.04   (cheap reserves: wildly volatile)
-#   $5-6.5K: 0.64   (mid-value: high variance)
-#   $6.5-8K: 0.44   (mid-tier: moderate variance)
-#   $8-10K:  0.35   (studs: tighter distributions)
-#   $10K+:   0.30   (elite: tightest distributions)
-# Old constant: 0.15 for everyone.  Was 7x too low for bargain plays,
-# 2x too low for stars.
-_EMPIRICAL_VOL_RATIO: Dict[str, float] = {
+# Static fallbacks from 21-slate backtest (Feb 7 – Mar 5 2026).
+# When the variance_learner has enough archived data, learned ratios
+# override these per-bracket.  See variance_learner.py for details.
+_STATIC_VOL_RATIO: Dict[str, float] = {
     "lt5k":    1.04,
     "5_65k":   0.64,
     "65_8k":   0.44,
     "8_10k":   0.35,
     "10k_plus": 0.30,
 }
+
+# Active ratios — start with static, overwritten if learned model exists.
+# Loaded once at import time; refreshed by ``reload_variance_ratios()``.
+_EMPIRICAL_VOL_RATIO: Dict[str, float] = dict(_STATIC_VOL_RATIO)
+
+def reload_variance_ratios() -> bool:
+    """Reload learned variance ratios from disk.  Returns True if learned data was loaded."""
+    global _EMPIRICAL_VOL_RATIO  # noqa: PLW0603
+    try:
+        from yak_core.variance_learner import load_learned_ratios
+        learned = load_learned_ratios()
+        if learned:
+            _EMPIRICAL_VOL_RATIO.update(learned)
+            return True
+    except Exception:
+        pass
+    return False
+
+# Auto-load on first import
+reload_variance_ratios()
 
 # Columns always included in the returned edge_df.
 EDGE_DF_COLUMNS = [
@@ -81,20 +95,15 @@ def compute_empirical_std(
     variance_mult: float = 1.0,
     min_std: float = 0.5,
 ) -> np.ndarray:
-    """Return per-player standard deviation using the empirical salary-bracket model.
+    """Return per-player standard deviation using the salary-bracket variance model.
 
     This is the **single source of truth** for sim variance.  Both the Monte
     Carlo engine (``sims.py``) and the edge metric computation (``edge.py``)
     should call this rather than deriving std from constant ceil/floor ratios.
 
-    Calibrated from 21-slate backtest (Feb 7 – Mar 5 2026, 3512 player-slates).
-    Within-player std/proj ratios by salary bracket:
-
-    * <$5K:    1.04  (cheap reserves — wildly volatile)
-    * $5-6.5K: 0.64  (mid-value — high variance)
-    * $6.5-8K: 0.44  (mid-tier — moderate variance)
-    * $8-10K:  0.35  (studs — tighter distributions)
-    * $10K+:   0.30  (elite — tightest distributions)
+    Uses dynamically learned ratios from ``variance_learner.py`` when available,
+    falling back to static 21-slate backtest values per bracket.  Call
+    ``reload_variance_ratios()`` after recalculating to pick up new values.
 
     Parameters
     ----------

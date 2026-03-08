@@ -853,6 +853,25 @@ def _auto_load_pool(
                                 except Exception:
                                     pass
 
+                                # Recalculate dynamic variance model from archive
+                                try:
+                                    from yak_core.variance_learner import recalculate_variance_model
+                                    from yak_core.edge import reload_variance_ratios
+                                    _var_result = recalculate_variance_model()
+                                    if "error" not in _var_result:
+                                        reload_variance_ratios()
+                                        _n_learned = sum(
+                                            1 for b in _var_result.get("brackets", {}).values()
+                                            if b.get("using") == "learned"
+                                        )
+                                        if _n_learned > 0:
+                                            status_container.write(
+                                                f"🎯 Variance model updated: {_n_learned}/5 brackets learned "
+                                                f"from {_var_result.get('n_player_slates', 0)} player-slates."
+                                            )
+                                except Exception:
+                                    pass
+
                                 # Record edge signal outcomes for feedback loop
                                 try:
                                     from yak_core.edge_feedback import record_edge_outcomes
@@ -1643,10 +1662,12 @@ def main() -> None:
         from yak_core.slate_archive import archive_summary as _get_archive_summary
         from yak_core.calibration_feedback import get_calibration_summary, clear_calibration_history
         from yak_core.edge_feedback import get_edge_feedback_summary
+        from yak_core.variance_learner import get_variance_model_status
 
         _archive = _get_archive_summary()
         _cal_fb = get_calibration_summary()
         _edge_fb = get_edge_feedback_summary()
+        _var_status = get_variance_model_status()
 
         _n_archived = _archive.get("n_slates", 0)
         _n_dates = _archive.get("n_unique_dates", 0)
@@ -1657,7 +1678,7 @@ def main() -> None:
         _ready = _n_archived >= _retrain_threshold
 
         # Compact metrics row
-        _m1, _m2, _m3, _m4 = st.columns(4)
+        _m1, _m2, _m3, _m4, _m5 = st.columns(5)
         with _m1:
             st.metric("Archived", f"{_n_archived} slates", delta=f"{_n_dates} dates")
         with _m2:
@@ -1667,6 +1688,12 @@ def main() -> None:
         with _m3:
             st.metric("Edge Signals", f"{_ef_n} slates" if _ef_n else "No data")
         with _m4:
+            _var_learned = _var_status.get("n_learned_brackets", 0)
+            _var_total = _var_status.get("n_total_brackets", 5)
+            _var_icon = "🟢" if _var_learned == _var_total else "🟡" if _var_learned > 0 else "⚪"
+            st.metric("Variance", f"{_var_icon} {_var_learned}/{_var_total}",
+                      delta=f"{_var_status.get('n_player_slates', 0)} pts" if _var_status.get('n_player_slates', 0) else None)
+        with _m5:
             _retrain_label = "✅ Ready" if _ready else f"{_retrain_threshold - _n_archived} more"
             st.metric("Retrain", _retrain_label)
 
@@ -1732,6 +1759,58 @@ def main() -> None:
                         _ef_df["hit_rate"] = _ef_df["hit_rate"].apply(lambda x: f"{x:.1%}" if x else "—")
                         _ef_df["weight"] = _ef_df["weight"].apply(lambda x: f"{x:.1%}" if x else "—")
                         st.dataframe(_ef_df[_ef_show_cols], use_container_width=True, hide_index=True)
+
+        # Variance model detail (compact)
+        _var_is_learned = _var_status.get("status") == "learned"
+        _var_label = (
+            f"🎯 Variance Model ({_var_status.get('n_learned_brackets', 0)}/{_var_status.get('n_total_brackets', 5)} learned)"
+            if _var_is_learned
+            else "🎯 Variance Model (static — collecting data)"
+        )
+        with st.expander(_var_label, expanded=False):
+            st.caption(_var_status.get("message", ""))
+            if _var_status.get("computed_at"):
+                st.caption(f"Last updated: {_var_status['computed_at']}")
+
+            # Show per-bracket breakdown if we have learned data
+            try:
+                from yak_core.variance_learner import _RATIOS_FILE, _STATIC_FALLBACKS
+                import json as _json
+                if os.path.isfile(_RATIOS_FILE):
+                    with open(_RATIOS_FILE) as _vf:
+                        _var_data = _json.load(_vf)
+                    _var_brackets = _var_data.get("brackets", {})
+                    if _var_brackets:
+                        _vb_rows = []
+                        for _bk, _bv in _var_brackets.items():
+                            _vb_rows.append({
+                                "Bracket": _bk,
+                                "Status": _bv.get("using", "—").title(),
+                                "Ratio": f"{_bv.get('value', 0):.3f}",
+                                "Static": f"{_STATIC_FALLBACKS.get(_bk, 0):.3f}",
+                                "Δ%": f"{_bv.get('delta_pct', 0):+.1f}%" if _bv.get("using") == "learned" else "—",
+                                "Samples": _bv.get("n", 0),
+                            })
+                        st.dataframe(pd.DataFrame(_vb_rows), use_container_width=True, hide_index=True)
+            except Exception:
+                pass
+
+            # Manual recalc button
+            if st.button("🔄 Recalculate Variance Model", key="_lab_recalc_variance"):
+                with st.spinner("Recalculating from archive..."):
+                    try:
+                        from yak_core.variance_learner import recalculate_variance_model
+                        from yak_core.edge import reload_variance_ratios
+                        _recalc = recalculate_variance_model()
+                        if "error" in _recalc:
+                            st.warning(_recalc["error"])
+                        else:
+                            reload_variance_ratios()
+                            _n_l = sum(1 for b in _recalc.get("brackets", {}).values() if b.get("using") == "learned")
+                            st.success(f"Variance model recalculated: {_n_l}/5 brackets learned from {_recalc.get('n_player_slates', 0)} player-slates.")
+                            st.rerun()
+                    except Exception as _recalc_exc:
+                        st.error(f"Recalculation error: {_recalc_exc}")
 
     except Exception as _cal_exc:
         st.caption(f"Calibration section unavailable: {_cal_exc}")
