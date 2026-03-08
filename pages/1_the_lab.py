@@ -726,24 +726,29 @@ def _auto_load_pool_and_sims(
                 except Exception:
                     pass
 
-            # ── Ownership projections ──────────────
-            try:
-                from yak_core.ext_ownership import predict_ownership, blend_and_normalize
-                pool = predict_ownership(pool)
-                pool = blend_and_normalize(pool)
-                if "own_proj" in pool.columns:
-                    pool["ownership"] = pool["own_proj"]
-            except Exception:
-                pass
-
-            # ── Auto-merge saved RotoGrinders file ──
+            # ── Auto-merge saved RotoGrinders file (BEFORE model ownership) ──
             _rg_auto_path = os.path.join(
                 YAKOS_ROOT, "data", "rg_uploads", f"rg_{slate_date_str}.csv"
             )
+            _has_rg_ownership = False
             if os.path.isfile(_rg_auto_path):
                 try:
                     _saved_rg = load_rg_projections(_rg_auto_path)
                     pool = merge_rg_with_pool(pool, _saved_rg)
+                    # Check if RG actually provided ownership values
+                    if "own_proj" in pool.columns and pool["own_proj"].notna().any() and (pool["own_proj"] > 0).any():
+                        _has_rg_ownership = True
+                except Exception:
+                    pass
+
+            # ── Ownership projections (only when RG didn't provide ownership) ──
+            if not _has_rg_ownership:
+                try:
+                    from yak_core.ext_ownership import predict_ownership, blend_and_normalize
+                    pool = predict_ownership(pool)
+                    pool = blend_and_normalize(pool)
+                    if "own_proj" in pool.columns:
+                        pool["ownership"] = pool["own_proj"]
                 except Exception:
                     pass
 
