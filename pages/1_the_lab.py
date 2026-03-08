@@ -329,44 +329,100 @@ def _filter_ineligible_players(pool: pd.DataFrame) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
-def _extract_games(pool: pd.DataFrame) -> list[str]:
-    """Extract unique game matchups from the pool.
+def _extract_games(pool: pd.DataFrame) -> list[dict]:
+    """Extract unique game matchups with metadata from the pool.
 
-    Prefers the ``game_info`` column (e.g. "HOU @ SAS") set by
-    ``fetch_dk_draftables``.  Falls back to building matchups from
-    team + opp columns.
+    Returns a list of dicts with keys:
+      - matchup: str ("HOU @ SAS") — used as the canonical key
+      - time_et: str ("7:00 PM") — tipoff in Eastern time
+      - vegas_total: float or None
+      - spread: float or None (home spread)
+
+    Sorted by game time (earliest first).
     """
-    # Prefer DK game_info column ("HOU @ SAS" format)
-    if "game_info" in pool.columns:
-        games = pool["game_info"].dropna().str.strip()
-        games = games[games != ""].unique().tolist()
-        if games:
-            return sorted(games)
+    from datetime import datetime, timezone, timedelta
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:
+        from backports.zoneinfo import ZoneInfo  # type: ignore
 
-    opp_col = "opp" if "opp" in pool.columns else (
-        "opponent" if "opponent" in pool.columns else None
-    )
-    if opp_col and "team" in pool.columns:
-        teams = pool["team"].str.strip().str.upper().fillna("")
-        opps = pool[opp_col].str.strip().str.upper().fillna("")
-        pairs = {
-            f"{t} @ {o}" if t and o else ""
-            for t, o in zip(teams, opps)
-        }
-        # Dedupe: "HOU @ SAS" and "SAS @ HOU" are the same game
-        seen: set[frozenset] = set()
-        unique: list[str] = []
-        for p in sorted(pairs):
-            if not p:
+    ET = ZoneInfo("America/New_York")
+    games_map: dict[str, dict] = {}  # matchup -> metadata
+
+    # Build from game_info + game_time columns (DK draftables)
+    if "game_info" in pool.columns:
+        for _, row in pool.iterrows():
+            gi = str(row.get("game_info", "")).strip()
+            if not gi or gi in games_map:
                 continue
-            parts = frozenset(x.strip() for x in p.replace("@", " ").split())
-            if parts not in seen:
-                seen.add(parts)
-                unique.append(p)
-        return unique
-    elif "team" in pool.columns:
-        return sorted(pool["team"].dropna().str.strip().str.upper().unique().tolist())
-    return []
+            gt = str(row.get("game_time", "")).strip()
+            time_et = ""
+            sort_key = "9999"
+            if gt and gt != "" and gt != "None":
+                try:
+                    dt_utc = datetime.fromisoformat(gt.replace("Z", "+00:00").split(".")[0] + "+00:00")
+                    dt_et = dt_utc.astimezone(ET)
+                    time_et = dt_et.strftime("%-I:%M %p")
+                    sort_key = dt_et.strftime("%H%M")
+                except Exception:
+                    pass
+
+            # Pull odds from the first player in this game
+            vt = None
+            sp = None
+            if "vegas_total" in pool.columns:
+                team = str(row.get("team", "")).strip().upper()
+                match = pool[pool["game_info"].str.strip() == gi]
+                if not match.empty:
+                    vt_val = pd.to_numeric(match.iloc[0].get("vegas_total"), errors="coerce")
+                    sp_val = pd.to_numeric(match.iloc[0].get("spread"), errors="coerce")
+                    vt = float(vt_val) if pd.notna(vt_val) else None
+                    sp = float(sp_val) if pd.notna(sp_val) else None
+
+            games_map[gi] = {
+                "matchup": gi,
+                "time_et": time_et,
+                "vegas_total": vt,
+                "spread": sp,
+                "_sort": sort_key,
+            }
+
+    # Fallback: build from team + opp
+    if not games_map:
+        opp_col = "opp" if "opp" in pool.columns else (
+            "opponent" if "opponent" in pool.columns else None
+        )
+        if opp_col and "team" in pool.columns:
+            seen: set[frozenset] = set()
+            for _, row in pool.iterrows():
+                t = str(row.get("team", "")).strip().upper()
+                o = str(row.get(opp_col, "")).strip().upper()
+                if not t or not o:
+                    continue
+                pair = frozenset([t, o])
+                if pair in seen:
+                    continue
+                seen.add(pair)
+                matchup = f"{t} @ {o}"
+                games_map[matchup] = {
+                    "matchup": matchup,
+                    "time_et": "",
+                    "vegas_total": None,
+                    "spread": None,
+                    "_sort": "9999",
+                }
+        elif "team" in pool.columns:
+            for t in sorted(pool["team"].dropna().str.strip().str.upper().unique()):
+                games_map[t] = {
+                    "matchup": t,
+                    "time_et": "",
+                    "vegas_total": None,
+                    "spread": None,
+                    "_sort": "9999",
+                }
+
+    # Sort by game time
+    return sorted(games_map.values(), key=lambda g: g["_sort"])
 
 
 def _game_key(team: str, opp: str) -> str:
@@ -1115,15 +1171,24 @@ def main() -> None:
     if hub_pool is not None and not hub_pool.empty:
         all_games = _extract_games(hub_pool)
 
-        # Game filter — matchup checkboxes inside a collapsed expander
+        # Game filter — matchup checkboxes with odds + tipoff time
         selected_games: list[str] = []
         _prev_games_key = f"_prev_selected_games_{slate_date_str}_{_contest_safe}"
         if all_games:
             _game_exp_label = f"🏀 Matchups ({len(all_games)}) · {len(hub_pool)} players"
             with st.expander(_game_exp_label, expanded=False):
                 for _g in all_games:
-                    if st.checkbox(_g, value=False, key=f"_gf_{_g}"):
-                        selected_games.append(_g)
+                    matchup = _g["matchup"]
+                    # Build display label: "HOU @ SAS  ·  O/U 224.5  ·  7:00 PM"
+                    label_parts = [f"**{matchup}**"]
+                    if _g.get("vegas_total") is not None:
+                        label_parts.append(f"O/U {_g['vegas_total']:.1f}")
+                    if _g.get("time_et"):
+                        label_parts.append(_g["time_et"])
+                    _display = "  ·  ".join(label_parts)
+
+                    if st.checkbox(_display, value=False, key=f"_gf_{matchup}"):
+                        selected_games.append(matchup)
 
             # Persist game selection to SlateState so Build page inherits it
             slate.selected_games = selected_games if selected_games else []
