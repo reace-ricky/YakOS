@@ -74,6 +74,8 @@ EDGE_DF_COLUMNS = [
     "smash_prob",
     "bust_prob",
     "ceil_magnitude",
+    "pop_catalyst_score",
+    "pop_catalyst_tag",
     "edge_score",
     "edge_label",
     "is_anchor",
@@ -305,6 +307,12 @@ def _edge_label(row: pd.Series) -> str:
         elif lev <= 0.5:
             labels.append("⚠ Owned Trap")
 
+    # Pop Catalyst tag
+    pop_score = row.get("pop_catalyst_score", 0.0)
+    pop_tag = row.get("pop_catalyst_tag", "")
+    if pd.notna(pop_score) and float(pop_score) >= 0.15 and pop_tag:
+        labels.append(f"🚀 {pop_tag}")
+
     return " | ".join(labels) if labels else "—"
 
 
@@ -425,16 +433,24 @@ def compute_edge_metrics(
         _dampen = (1.0 - (rcv - 0.15).clip(lower=0.0) * 1.0).clip(lower=0.70)
     smash_dampened = smash_prob * _dampen
 
-    # ── Edge score: 4-component composite ──
-    # Ceiling Magnitude (0.30): rewards high absolute upside (studs)
-    # Smash Probability (0.30): rewards likelihood of hitting ceiling
-    # Safety (0.20): (1 - bust_prob), penalises bust risk
-    # Leverage (0.20): ownership edge, capped for studs
+    # ── Pop Catalyst score (from pool, computed upstream) ──
+    pop_cat = pd.to_numeric(
+        df.get("pop_catalyst_score", pd.Series(0.0, index=df.index)),
+        errors="coerce",
+    ).fillna(0.0)
+
+    # ── Edge score: 5-component composite ──
+    # Ceiling Magnitude (0.25): rewards high absolute upside (studs)
+    # Smash Probability (0.25): rewards likelihood of hitting ceiling
+    # Safety (0.18): (1 - bust_prob), penalises bust risk
+    # Leverage (0.17): ownership edge, capped for studs
+    # Pop Catalyst (0.15): situational upside (injury opp, salary lag, etc.)
     edge_score = (
-        ceil_magnitude * 0.30
-        + smash_dampened * 0.30
-        + (1.0 - bust_prob) * 0.20
-        + lev_norm_capped * 0.20
+        ceil_magnitude * 0.25
+        + smash_dampened * 0.25
+        + (1.0 - bust_prob) * 0.18
+        + lev_norm_capped * 0.17
+        + pop_cat * 0.15
     )
 
     # ── Tournament anchor flag ──
@@ -450,6 +466,10 @@ def compute_edge_metrics(
     out["smash_prob"] = smash_prob.values
     out["bust_prob"] = bust_prob.values
     out["ceil_magnitude"] = ceil_magnitude.values
+    out["pop_catalyst_score"] = pop_cat.values
+    # Preserve pop_catalyst_tag from pool if present
+    if "pop_catalyst_tag" not in out.columns:
+        out["pop_catalyst_tag"] = ""
     out["edge_score"] = edge_score.values
     out["is_anchor"] = is_anchor.values
 

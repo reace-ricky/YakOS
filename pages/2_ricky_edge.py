@@ -155,6 +155,48 @@ def main() -> None:
             height=min(35 * len(display_df) + 40, 560),
         )
 
+    # =====================================================================
+    # SECTION 2b: POP CATALYSTS
+    # =====================================================================
+    # Surface players with pop catalyst signals — situational upside
+    # that the base projection doesn't fully capture.
+    _pop_col = "pop_catalyst_score"
+    _pop_tag_col = "pop_catalyst_tag"
+    _has_pop = _pop_col in signals_df.columns and signals_df[_pop_col].sum() > 0
+
+    if not _has_pop and _pop_col in pool.columns:
+        # Fall back to pool-level pop scores
+        _pop_src = pool
+        _has_pop = pool[_pop_col].sum() > 0
+    else:
+        _pop_src = signals_df
+
+    if _has_pop:
+        pop_players = _pop_src[_pop_src[_pop_col] >= 0.15].nlargest(10, _pop_col)
+        if not pop_players.empty:
+            st.subheader("🚀 Pop Catalysts")
+            st.caption("Situational upside the model might miss — injury opps, salary lag, minutes trend, ceiling flash.")
+
+            pop_display = pd.DataFrame()
+            pop_display["Player"] = pop_players["player_name"].values
+            if "pos" in pop_players.columns:
+                pop_display["Pos"] = pop_players["pos"].values
+            if "team" in pop_players.columns:
+                pop_display["Team"] = pop_players["team"].values
+            pop_display["Salary"] = pop_players["salary"].values if "salary" in pop_players.columns else 0
+            pop_display["Proj"] = pop_players["proj"].values if "proj" in pop_players.columns else 0
+            pop_display["Pop Score"] = (pop_players[_pop_col].values * 100).round(0).astype(int)
+            if _pop_tag_col in pop_players.columns:
+                pop_display["Catalyst"] = pop_players[_pop_tag_col].values
+
+            _pop_fmt = {"Salary": "${:,.0f}", "Proj": "{:.1f}"}
+            st.dataframe(
+                pop_display.style.format(_pop_fmt, na_rep=""),
+                use_container_width=True,
+                hide_index=True,
+                height=min(35 * len(pop_display) + 40, 400),
+            )
+
     st.divider()
 
     # =====================================================================

@@ -116,7 +116,7 @@ def _render_edge_writeup(edge, contest_label: str) -> None:
     leverage = payload.get("leverage_players", [])
     fades = payload.get("fade_players", [])
 
-    _COLS = ["Player", "Team", "Salary", "Proj", "Own", "Confidence", "Tag"]
+    _COLS = ["Player", "Team", "Salary", "Proj", "Own", "Confidence", "Tag", "Catalyst"]
 
     def _to_df(players: list) -> pd.DataFrame:
         if not players:
@@ -125,6 +125,7 @@ def _render_edge_writeup(edge, contest_label: str) -> None:
         for p in players:
             if not isinstance(p, dict):
                 continue
+            cat = p.get("pop_catalyst_tag", p.get("Catalyst", ""))
             rows.append({
                 "Player": p.get("player_name", p.get("Player", "")),
                 "Team": p.get("team", p.get("Team", "")),
@@ -133,8 +134,13 @@ def _render_edge_writeup(edge, contest_label: str) -> None:
                 "Own": p.get("own", p.get("Own", p.get("own_pct", ""))),
                 "Confidence": p.get("confidence", p.get("Confidence", "")),
                 "Tag": p.get("tag", p.get("Tag", "")),
+                "Catalyst": f"\U0001f680 {cat}" if cat else "",
             })
-        return pd.DataFrame(rows, columns=_COLS)
+        df = pd.DataFrame(rows, columns=_COLS)
+        # Drop Catalyst column if no data
+        if df["Catalyst"].str.strip().eq("").all():
+            df = df.drop(columns=["Catalyst"])
+        return df
 
     for group_label, group_data in [
         ("Core & Value", core_value),
@@ -297,6 +303,15 @@ def main() -> None:
                     display_df["Own%"] = top_edges[own_col].values
                 display_df["Edge"] = (top_edges["edge_composite"].values * 100).round(0).astype(int)
                 display_df["Signals"] = top_edges["signal_badges"].values
+
+                # Pop catalyst tag if available
+                if "pop_catalyst_tag" in top_edges.columns:
+                    pop_tags = top_edges["pop_catalyst_tag"].values
+                    has_any = any(bool(t) for t in pop_tags)
+                    if has_any:
+                        display_df["Catalyst"] = [
+                            f"\U0001f680 {t}" if t else "" for t in pop_tags
+                        ]
 
                 _fmt = {"Salary": "${:,.0f}", "Proj": "{:.1f}"}
                 if "Own%" in display_df.columns:

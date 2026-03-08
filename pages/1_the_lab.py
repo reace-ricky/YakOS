@@ -777,6 +777,16 @@ def _auto_load_pool(
             except Exception:
                 pass
 
+            # Compute pop catalyst signals (injury opp, salary lag, minutes trend, ceiling flash)
+            try:
+                from yak_core.pop_catalyst import compute_pop_catalyst
+                pool = compute_pop_catalyst(pool)
+                _n_pop = int((pool.get("pop_catalyst_score", 0) > 0.15).sum()) if "pop_catalyst_score" in pool.columns else 0
+                if _n_pop > 0:
+                    status_container.write(f"🚀 Pop catalyst: {_n_pop} player(s) flagged with situational upside.")
+            except Exception as _pop_exc:
+                status_container.write(f"ℹ️ Pop catalyst skipped: {_pop_exc}")
+
             pool = _enrich_pool(pool)
 
             # Dedup
