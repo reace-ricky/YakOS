@@ -3,11 +3,10 @@
 Entry point for the Streamlit app.  Uses ``st.navigation`` to route between
 the pages:
 
-  1. The Lab           – load slate, sims, calibration, edge analysis
+  1. The Lab           – load slate, sims, calibration, edge analysis, learning status
   2. Ricky's Edge      – signal-driven edge analysis + approval gate
-  3. Record Results    – feed contest outcomes into calibration + edge feedback
-  4. Build & Publish   – build lineups, export CSV
-  5. Right Angle Ricky – public showcase
+  3. Build & Publish   – build lineups, export CSV
+  4. Right Angle Ricky – public showcase
 
 All shared state lives in ``yak_core/state.py`` (SlateState,
 RickyEdgeState, LineupSetState, SimState).
@@ -37,9 +36,8 @@ pg = st.navigation(
     [
         st.Page("pages/1_the_lab.py", title="The Lab", icon="🧪"),
         st.Page("pages/2_ricky_edge.py", title="Ricky's Edge Analysis", icon="🎯"),
-        st.Page("pages/3_record_results.py", title="Record Results", icon="📊"),
-        st.Page("pages/4_build_publish.py", title="Build & Publish", icon="🏗️"),
-        st.Page("pages/5_right_angle_ricky.py", title="Right Angle Ricky", icon="📐"),
+        st.Page("pages/3_build_publish.py", title="Build & Publish", icon="🏗️"),
+        st.Page("pages/4_right_angle_ricky.py", title="Right Angle Ricky", icon="📐"),
     ]
 )
 pg.run()

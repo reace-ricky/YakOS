@@ -46,11 +46,7 @@ from yak_core.state import (  # noqa: E402
     get_sim_state, set_sim_state,
 )
 from yak_core.sims import (  # noqa: E402
-    run_monte_carlo_for_lineups,
-    build_sim_player_accuracy_table,
-    compute_player_anomaly_table,
     run_sims_pipeline,
-    run_calibration_pipeline,
     prepare_sims_table,
     ContestType,
     run_sims_for_contest_type,
@@ -58,61 +54,45 @@ from yak_core.sims import (  # noqa: E402
     _INELIGIBLE_STATUSES,
 )
 from yak_core.edge import compute_edge_metrics  # noqa: E402
-from yak_core.publishing import build_ricky_lineups, publish_edge_and_lineups  # noqa: E402
-from yak_core.calibration import (  # noqa: E402
-    load_calibration_config,
-    save_calibration_config,
-    compute_slate_kpis,
-    DK_CONTEST_TYPES,
-    DFS_ARCHETYPES,
-)
+from yak_core.publishing import build_ricky_lineups  # noqa: E402
+from yak_core.calibration import DK_CONTEST_TYPES  # noqa: E402
 from yak_core.config import (  # noqa: E402
     YAKOS_ROOT,
     CONTEST_PRESETS,
     CONTEST_PRESET_LABELS,
     UI_CONTEST_LABELS,
     UI_CONTEST_MAP,
-    get_pool_size_range,
     merge_config,
     DK_POS_SLOTS,
     DK_LINEUP_SIZE,
     SALARY_CAP,
     DK_SHOWDOWN_SLOTS,
     DK_SHOWDOWN_LINEUP_SIZE,
-    DK_CONTEST_MATCH_RULES,
-    classify_draft_group,
     build_slate_options,
 )
 from yak_core.right_angle import (  # noqa: E402
     compute_stack_scores,
     compute_value_scores,
 )
-from yak_core.sim_rating import compare_rating_weights, get_weight_sets  # noqa: E402
-from yak_core.context import get_lab_analysis  # noqa: E402
+# sim_rating used internally by sims.run_sims_pipeline — no direct import needed
+
 from yak_core.rci import (  # noqa: E402
     compute_rci,
     DEFAULT_WEIGHTS as RCI_DEFAULT_WEIGHTS,
 )
 from yak_core.dk_ingest import (  # noqa: E402
-    fetch_dk_lobby_contests,
     fetch_dk_draftables,
     DK_GAME_TYPE_LABELS,
 )
-from yak_core.projections import (  # noqa: E402
-    yakos_fp_projection,
-    yakos_minutes_projection,
-    apply_projections,
-)
+from yak_core.projections import apply_projections  # noqa: E402
 from yak_core.ownership import apply_ownership  # noqa: E402
 from yak_core.rg_loader import load_rg_projections, merge_rg_with_pool  # noqa: E402
-from yak_core.live import fetch_injury_updates, fetch_player_game_logs, fetch_betting_odds, auto_flag_injuries  # noqa: E402
+from yak_core.live import fetch_player_game_logs, fetch_betting_odds, auto_flag_injuries  # noqa: E402
 from yak_core.injury_monitor import (  # noqa: E402
     InjuryMonitorState,
     poll_injuries,
     apply_monitor_to_pool,
     monitor_summary,
-    format_alerts_for_ui,
-    get_confirmed_outs,
     get_high_prob_outs,
 )
 from yak_core.injury_cascade import apply_injury_cascade  # noqa: E402
@@ -1374,9 +1354,17 @@ def main() -> None:
                 try:
                     player_results = _build_player_level_sim_results(pool, sim.variance)
                     sim.player_results = player_results
+
+                    # Compute edge metrics once — reused for lineups + slate state
+                    _edge_df = compute_edge_metrics(
+                        pool,
+                        calibration_state=slate.calibration_state,
+                        variance=sim.variance,
+                    )
+
                     _PIPELINE_TO_OPTIMIZER = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "CASH": "CASH"}
                     optimizer_contest = _PIPELINE_TO_OPTIMIZER.get(pipeline_contest, "GPP_20")
-                    real_lineups = build_ricky_lineups(edge_df=compute_edge_metrics(pool, calibration_state=slate.calibration_state, variance=sim.variance), contest_type=optimizer_contest, calibration_state=slate.calibration_state, salary_cap=SALARY_CAP)
+                    real_lineups = build_ricky_lineups(edge_df=_edge_df, contest_type=optimizer_contest, calibration_state=slate.calibration_state, salary_cap=SALARY_CAP)
                     if not real_lineups.empty:
                         pipeline_df = run_sims_pipeline(
                             pool=pool,
@@ -1388,17 +1376,12 @@ def main() -> None:
                             draft_group_id=sim.draft_group_id,
                         )
                         sim.pipeline_output[pipeline_contest] = pipeline_df
-                    set_sim_state(sim)
 
-                    new_edge_df = compute_edge_metrics(
-                        pool,
-                        calibration_state=slate.calibration_state,
-                        variance=sim.variance,
-                    )
-                    slate.edge_df = new_edge_df
+                    slate.edge_df = _edge_df
                     if "Edge" not in slate.active_layers:
                         slate.active_layers.append("Edge")
                     set_slate_state(slate)
+                    set_sim_state(sim)
                     st.success(f"Sims locked — {len(player_results)} players analyzed. Scroll down for the data.")
                 except Exception as exc:
                     st.error(f"Sim failed: {exc}")
@@ -1447,7 +1430,8 @@ def main() -> None:
             _lu_col = "lineup_index"
             _pn_col = "player_name"
             try:
-                _edge_for_score = compute_edge_metrics(pool, calibration_state=slate.calibration_state, variance=sim.variance)
+                # Re-use edge_df from slate state if available (avoid recomputing)
+                _edge_for_score = slate.edge_df if slate.edge_df is not None and not slate.edge_df.empty else compute_edge_metrics(pool, calibration_state=slate.calibration_state, variance=sim.variance)
                 _PIPELINE_TO_OPTIMIZER_SC = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "CASH": "CASH"}
                 _opt_contest = _PIPELINE_TO_OPTIMIZER_SC.get(pipeline_contest, "GPP_20")
                 _lu_long = build_ricky_lineups(edge_df=_edge_for_score, contest_type=_opt_contest, calibration_state=slate.calibration_state, salary_cap=SALARY_CAP)
@@ -1505,193 +1489,6 @@ def main() -> None:
                             _best_players["diff"] = (_best_players["actual_fp"] - _best_players["proj"]).round(1)
                         _bp_fmt = {c: "{:.1f}" for c in ["proj", "actual_fp", "diff"] if c in _best_players.columns}
                         st.dataframe(_best_players.style.format(_bp_fmt), use_container_width=True, hide_index=True)
-
-                    # ── Record Contest Result ────────────────────────────
-                    st.markdown("---")
-                    st.markdown("**Record Contest Result**")
-                    st.caption("Upload a RotoGrinders screenshot or enter results manually.")
-
-                    _cr_key = f"_contest_results_{slate.slate_date}"
-                    if _cr_key not in st.session_state:
-                        st.session_state[_cr_key] = []
-
-                    # Screenshot upload
-                    _cr_upload = st.file_uploader(
-                        "Drop a RotoGrinders screenshot",
-                        type=["png", "jpg", "jpeg"],
-                        key="_cr_screenshot",
-                    )
-
-                    # OCR extraction state
-                    _ocr_key = "_cr_ocr_result"
-
-                    if _cr_upload is not None:
-                        try:
-                            import tempfile
-                            from yak_core.contest_ocr import extract_contest_result
-
-                            _tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-                            _tmp.write(_cr_upload.getvalue())
-                            _tmp.flush()
-                            _ocr = extract_contest_result(_tmp.name)
-                            st.session_state[_ocr_key] = _ocr
-                        except Exception as _ocr_exc:
-                            st.warning(f"OCR extraction failed: {_ocr_exc}")
-
-                    _ocr = st.session_state.get(_ocr_key)
-
-                    if _ocr is not None:
-                        # Show extracted data with editable overrides
-                        _cr_c1, _cr_c2, _cr_c3 = st.columns(3)
-                        with _cr_c1:
-                            _cr_rank = st.number_input(
-                                "Finish position", min_value=1,
-                                value=max(_ocr.rank, 1), step=1, key="_cr_rank",
-                            )
-                        with _cr_c2:
-                            _cr_entries = st.number_input(
-                                "Field size", min_value=1,
-                                value=max(_ocr.field_size, 1), step=100, key="_cr_entries",
-                            )
-                        with _cr_c3:
-                            _cr_contest_label = st.text_input(
-                                "Contest name",
-                                value=_ocr.contest_name or contest_type_label,
-                                key="_cr_label",
-                            )
-
-                        _cr_d1, _cr_d2, _cr_d3 = st.columns(3)
-                        with _cr_d1:
-                            _cr_winnings = st.number_input(
-                                "Winnings ($)", min_value=0.0,
-                                value=float(_ocr.winnings), step=100.0, key="_cr_win",
-                            )
-                        with _cr_d2:
-                            _cr_total_pts = st.number_input(
-                                "Total points", min_value=0.0,
-                                value=float(_ocr.total_points), step=1.0, key="_cr_pts",
-                            )
-                        with _cr_d3:
-                            _cr_total_sal = st.number_input(
-                                "Total salary", min_value=0,
-                                value=int(_ocr.total_salary), step=100, key="_cr_sal",
-                            )
-
-                        # Lineup Trends
-                        if _ocr.team_stack is not None or _ocr.game_stack is not None:
-                            _trend_parts = []
-                            if _ocr.low_owned_player is True:
-                                _trend_parts.append("Low-owned")
-                            if _ocr.team_stack is True:
-                                _ts_label = f"Team Stack"
-                                if _ocr.team_stacks_count:
-                                    _ts_label += f" ({_ocr.team_stacks_count})"
-                                _trend_parts.append(_ts_label)
-                            if _ocr.game_stack is True:
-                                _gs_label = f"Game Stack"
-                                if _ocr.game_stacks_count:
-                                    _gs_label += f" ({_ocr.game_stacks_count})"
-                                _trend_parts.append(_gs_label)
-                            if _trend_parts:
-                                st.caption("Lineup Trends: " + " · ".join(_trend_parts))
-
-                        # Player preview
-                        if _ocr.players:
-                            with st.expander(f"Extracted Lineup ({len(_ocr.players)} players)", expanded=False):
-                                _ocr_rows = []
-                                for _p in _ocr.players:
-                                    _ocr_rows.append({
-                                        "Pos": _p.pos,
-                                        "Player": _p.player_name,
-                                        "Salary": _p.salary,
-                                        "Field%": _p.field_pct,
-                                        "Points": _p.points,
-                                    })
-                                st.dataframe(
-                                    pd.DataFrame(_ocr_rows),
-                                    use_container_width=True, hide_index=True,
-                                )
-
-                        _cr_conf = _ocr.confidence
-                        if _cr_conf < 0.8:
-                            st.caption(f"Extraction confidence: {_cr_conf:.0%} — review values above.")
-
-                    else:
-                        # Manual fallback when no screenshot uploaded
-                        _cr_c1, _cr_c2, _cr_c3 = st.columns(3)
-                        with _cr_c1:
-                            _cr_rank = st.number_input("Finish position", min_value=1, value=1, step=1, key="_cr_rank")
-                        with _cr_c2:
-                            _cr_entries = st.number_input("Field size", min_value=1, value=1000, step=100, key="_cr_entries")
-                        with _cr_c3:
-                            _cr_contest_label = st.text_input("Contest name", value=contest_type_label, key="_cr_label")
-                        _cr_winnings = 0.0
-                        _cr_total_pts = 0.0
-                        _cr_total_sal = 0
-
-                    if st.button("Record Result", key="_cr_record"):
-                        _cr_pct = round((_cr_rank / _cr_entries) * 100, 2)
-                        _cr_record = {
-                            "slate_date": slate.slate_date,
-                            "contest": _cr_contest_label,
-                            "rank": _cr_rank,
-                            "field_size": _cr_entries,
-                            "finish_pct": _cr_pct,
-                            "winnings": float(_cr_winnings),
-                            "total_points": float(_cr_total_pts),
-                            "total_salary": int(_cr_total_sal),
-                            "best_lineup_actual": float(_best["actual_total"]),
-                            "avg_projected": float(_avg_proj),
-                            "avg_actual": float(_avg_actual),
-                            "num_lineups": len(_lu_summary),
-                        }
-
-                        # Add lineup trends if available
-                        if _ocr is not None:
-                            _cr_record["low_owned_player"] = _ocr.low_owned_player
-                            _cr_record["team_stack"] = _ocr.team_stack
-                            _cr_record["game_stack"] = _ocr.game_stack
-                            _cr_record["team_stacks_count"] = _ocr.team_stacks_count
-                            _cr_record["game_stacks_count"] = _ocr.game_stacks_count
-                            _cr_record["ocr_players"] = [
-                                {"pos": p.pos, "name": p.player_name, "salary": p.salary,
-                                 "field_pct": p.field_pct, "points": p.points}
-                                for p in _ocr.players
-                            ]
-
-                        st.session_state[_cr_key].append(_cr_record)
-
-                        # Persist contest results to disk
-                        try:
-                            from yak_core.calibration_feedback import _FEEDBACK_DIR, _ensure_dir
-                            import json as _cr_json
-                            _ensure_dir()
-                            _cr_file = os.path.join(_FEEDBACK_DIR, "contest_results.json")
-                            _cr_hist = []
-                            if os.path.isfile(_cr_file):
-                                with open(_cr_file) as _crf:
-                                    _cr_hist = _cr_json.load(_crf)
-                            _cr_hist.append(_cr_record)
-                            with open(_cr_file, "w") as _crf:
-                                _cr_json.dump(_cr_hist, _crf, indent=2)
-                        except Exception:
-                            pass
-
-                        if _cr_pct <= 1:
-                            st.success(f"Top {_cr_pct}% — elite finish. ${_cr_winnings:,.0f} recorded.")
-                        elif _cr_pct <= 10:
-                            st.success(f"Top {_cr_pct}% — strong finish. ${_cr_winnings:,.0f} recorded.")
-                        elif _cr_pct <= 25:
-                            st.info(f"Top {_cr_pct}% — solid. Recorded.")
-                        else:
-                            st.warning(f"Top {_cr_pct}% — needs work. Recorded.")
-
-                    if st.session_state[_cr_key]:
-                        _cr_df = pd.DataFrame(st.session_state[_cr_key])
-                        _cr_cols = [c for c in ["contest", "rank", "field_size", "finish_pct", "winnings", "total_points"] if c in _cr_df.columns]
-                        _cr_show = _cr_df[_cr_cols].copy()
-                        _cr_show.columns = [c.replace("_", " ").title() for c in _cr_cols]
-                        st.dataframe(_cr_show, use_container_width=True, hide_index=True)
 
             except Exception as _score_exc:
                 st.warning(f"Score vs Actuals failed: {_score_exc}")
@@ -1834,11 +1631,14 @@ def main() -> None:
     st.divider()
 
     # =====================================================================
-    # SECTION 4: CALIBRATION
+    # SECTION 4: LEARNING STATUS
     # =====================================================================
-    st.subheader("🔬 Calibration & Model Training")
+    st.subheader("🧠 Learning Status")
+    st.caption(
+        "Every historical slate Ricky processes feeds the learning loop — "
+        "calibration corrections, edge signal weights, and variance tuning."
+    )
 
-    # ── Training Data Gauge + Retrain Button ────────────────────────
     try:
         from yak_core.slate_archive import archive_summary as _get_archive_summary
         from yak_core.calibration_feedback import get_calibration_summary, clear_calibration_history
@@ -1850,28 +1650,28 @@ def main() -> None:
 
         _n_archived = _archive.get("n_slates", 0)
         _n_dates = _archive.get("n_unique_dates", 0)
+        _cal_n = _cal_fb.get("n_slates", 0)
+        _ef_n = _edge_fb.get("n_slates", 0)
         _retrain_threshold = 10
         _pct_full = min(100, int((_n_archived / _retrain_threshold) * 100))
         _ready = _n_archived >= _retrain_threshold
 
-        # Gauge
-        _gauge_color = "green" if _ready else "orange" if _pct_full >= 50 else "gray"
-        _gauge_label = f"{_n_archived}/{_retrain_threshold} slates archived"
-        st.progress(_pct_full / 100, text=f"{'🟢' if _ready else '🟡' if _pct_full >= 50 else '⚪'} {_gauge_label} — {'Ready to retrain' if _ready else f'{_retrain_threshold - _n_archived} more needed'}")
-
-        # Key metrics row
+        # Compact metrics row
         _m1, _m2, _m3, _m4 = st.columns(4)
         with _m1:
-            st.metric("Slates Archived", _n_archived)
+            st.metric("Archived", f"{_n_archived} slates", delta=f"{_n_dates} dates")
         with _m2:
-            st.metric("Unique Dates", _n_dates)
+            _cal_mae = _cal_fb.get("latest_mae")
+            st.metric("Calibration", f"MAE {_cal_mae:.1f}" if _cal_mae else "No data",
+                      delta=f"{_cal_n} slates" if _cal_n else None)
         with _m3:
-            _cal_status = _cal_fb.get("status", "no_data")
-            _cal_n = _cal_fb.get("n_slates", 0)
-            st.metric("Calibration", f"{_cal_n} slates" if _cal_n > 0 else "No data")
+            st.metric("Edge Signals", f"{_ef_n} slates" if _ef_n else "No data")
         with _m4:
-            _ef_n = _edge_fb.get("n_slates", 0)
-            st.metric("Edge Feedback", f"{_ef_n} slates" if _ef_n > 0 else "No data")
+            _retrain_label = "✅ Ready" if _ready else f"{_retrain_threshold - _n_archived} more"
+            st.metric("Retrain", _retrain_label)
+
+        # Progress bar
+        st.progress(_pct_full / 100, text=f"{'🟢' if _ready else '🟡' if _pct_full >= 50 else '⚪'} {_n_archived}/{_retrain_threshold} slates — {'Ready to retrain' if _ready else 'Building'}")
 
         # Retrain button
         if _ready:
@@ -1885,29 +1685,11 @@ def main() -> None:
                         )
                         if _retrain_result.returncode == 0:
                             st.success("Models retrained successfully.")
-                            with st.expander("Retrain log", expanded=False):
-                                st.code(_retrain_result.stdout, language="text")
                         else:
                             st.error("Retrain failed.")
                             st.code(_retrain_result.stderr or _retrain_result.stdout, language="text")
                     except Exception as _rt_exc:
                         st.error(f"Retrain error: {_rt_exc}")
-        else:
-            st.button("🧠 Retrain Models", key="_lab_retrain", disabled=True,
-                      help=f"Need {_retrain_threshold - _n_archived} more archived slates")
-
-        # Last retrain info
-        _meta_path = os.path.join(YAKOS_ROOT, "models", "retrain_meta.json")
-        if os.path.isfile(_meta_path):
-            try:
-                import json as _rt_json
-                with open(_meta_path) as _mf:
-                    _rt_meta = _rt_json.load(_mf)
-                _rt_at = _rt_meta.get("retrained_at", "unknown")[:19]
-                _rt_models = _rt_meta.get("models_trained", [])
-                st.caption(f"Last retrain: {_rt_at} UTC — trained: {', '.join(_rt_models) if _rt_models else 'none'}")
-            except Exception:
-                pass
 
         # Calibration summary (compact)
         if _cal_fb.get("status") not in ("no_data", None):
