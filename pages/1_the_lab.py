@@ -1143,10 +1143,10 @@ def main() -> None:
                         _load_status.write(f"Running sims ({sim.n_sims:,} iterations)…")
                         try:
                             _CONTEST_NAME_TO_PIPELINE_BTN = {
-                                "GPP Main": "GPP_MAIN", "Cash Main": "CASH", "Showdown": "GPP_MAIN",
+                                "GPP Main": "GPP_MAIN", "Cash Main": "CASH", "Showdown": "SHOWDOWN",
                             }
                             _pc = _CONTEST_NAME_TO_PIPELINE_BTN.get(contest_type_label, "GPP_MAIN")
-                            _PIPELINE_TO_OPTIMIZER_BTN = {"GPP_MAIN": "GPP_150", "CASH": "CASH"}
+                            _PIPELINE_TO_OPTIMIZER_BTN = {"GPP_MAIN": "GPP_150", "CASH": "CASH", "SHOWDOWN": "SHOWDOWN"}
                             _oc = _PIPELINE_TO_OPTIMIZER_BTN.get(_pc, "GPP_20")
 
                             player_results = _build_player_level_sim_results(pool_result, sim.variance)
@@ -1386,7 +1386,7 @@ def main() -> None:
     _CONTEST_NAME_TO_PIPELINE = {
         "GPP Main": "GPP_MAIN",
         "Cash Main": "CASH",
-        "Showdown": "GPP_MAIN",
+        "Showdown": "SHOWDOWN",
     }
     pipeline_contest = _CONTEST_NAME_TO_PIPELINE.get(contest_type_label, "GPP_MAIN")
 
@@ -1405,7 +1405,7 @@ def main() -> None:
                         variance=sim.variance,
                     )
 
-                    _PIPELINE_TO_OPTIMIZER = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "CASH": "CASH"}
+                    _PIPELINE_TO_OPTIMIZER = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "CASH": "CASH", "SHOWDOWN": "SHOWDOWN"}
                     optimizer_contest = _PIPELINE_TO_OPTIMIZER.get(pipeline_contest, "GPP_20")
                     real_lineups = build_ricky_lineups(edge_df=_edge_df, contest_type=optimizer_contest, calibration_state=slate.calibration_state, salary_cap=SALARY_CAP)
                     if not real_lineups.empty:
