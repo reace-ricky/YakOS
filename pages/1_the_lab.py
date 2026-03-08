@@ -1360,19 +1360,125 @@ def main() -> None:
                     # ── Record Contest Result ────────────────────────────
                     st.markdown("---")
                     st.markdown("**Record Contest Result**")
-                    st.caption("Log how these lineups actually placed so the system learns which build strategies win.")
+                    st.caption("Upload a RotoGrinders screenshot or enter results manually.")
 
                     _cr_key = f"_contest_results_{slate.slate_date}"
                     if _cr_key not in st.session_state:
                         st.session_state[_cr_key] = []
 
-                    _cr_c1, _cr_c2, _cr_c3 = st.columns(3)
-                    with _cr_c1:
-                        _cr_rank = st.number_input("Finish position", min_value=1, value=1, step=1, key="_cr_rank")
-                    with _cr_c2:
-                        _cr_entries = st.number_input("Field size", min_value=1, value=1000, step=100, key="_cr_entries")
-                    with _cr_c3:
-                        _cr_contest_label = st.text_input("Contest name", value=contest_type_label, key="_cr_label")
+                    # Screenshot upload
+                    _cr_upload = st.file_uploader(
+                        "Drop a RotoGrinders screenshot",
+                        type=["png", "jpg", "jpeg"],
+                        key="_cr_screenshot",
+                    )
+
+                    # OCR extraction state
+                    _ocr_key = "_cr_ocr_result"
+
+                    if _cr_upload is not None:
+                        try:
+                            import tempfile
+                            from yak_core.contest_ocr import extract_contest_result
+
+                            _tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+                            _tmp.write(_cr_upload.getvalue())
+                            _tmp.flush()
+                            _ocr = extract_contest_result(_tmp.name)
+                            st.session_state[_ocr_key] = _ocr
+                        except Exception as _ocr_exc:
+                            st.warning(f"OCR extraction failed: {_ocr_exc}")
+
+                    _ocr = st.session_state.get(_ocr_key)
+
+                    if _ocr is not None:
+                        # Show extracted data with editable overrides
+                        _cr_c1, _cr_c2, _cr_c3 = st.columns(3)
+                        with _cr_c1:
+                            _cr_rank = st.number_input(
+                                "Finish position", min_value=1,
+                                value=max(_ocr.rank, 1), step=1, key="_cr_rank",
+                            )
+                        with _cr_c2:
+                            _cr_entries = st.number_input(
+                                "Field size", min_value=1,
+                                value=max(_ocr.field_size, 1), step=100, key="_cr_entries",
+                            )
+                        with _cr_c3:
+                            _cr_contest_label = st.text_input(
+                                "Contest name",
+                                value=_ocr.contest_name or contest_type_label,
+                                key="_cr_label",
+                            )
+
+                        _cr_d1, _cr_d2, _cr_d3 = st.columns(3)
+                        with _cr_d1:
+                            _cr_winnings = st.number_input(
+                                "Winnings ($)", min_value=0.0,
+                                value=float(_ocr.winnings), step=100.0, key="_cr_win",
+                            )
+                        with _cr_d2:
+                            _cr_total_pts = st.number_input(
+                                "Total points", min_value=0.0,
+                                value=float(_ocr.total_points), step=1.0, key="_cr_pts",
+                            )
+                        with _cr_d3:
+                            _cr_total_sal = st.number_input(
+                                "Total salary", min_value=0,
+                                value=int(_ocr.total_salary), step=100, key="_cr_sal",
+                            )
+
+                        # Lineup Trends
+                        if _ocr.team_stack is not None or _ocr.game_stack is not None:
+                            _trend_parts = []
+                            if _ocr.low_owned_player is True:
+                                _trend_parts.append("Low-owned")
+                            if _ocr.team_stack is True:
+                                _ts_label = f"Team Stack"
+                                if _ocr.team_stacks_count:
+                                    _ts_label += f" ({_ocr.team_stacks_count})"
+                                _trend_parts.append(_ts_label)
+                            if _ocr.game_stack is True:
+                                _gs_label = f"Game Stack"
+                                if _ocr.game_stacks_count:
+                                    _gs_label += f" ({_ocr.game_stacks_count})"
+                                _trend_parts.append(_gs_label)
+                            if _trend_parts:
+                                st.caption("Lineup Trends: " + " · ".join(_trend_parts))
+
+                        # Player preview
+                        if _ocr.players:
+                            with st.expander(f"Extracted Lineup ({len(_ocr.players)} players)", expanded=False):
+                                _ocr_rows = []
+                                for _p in _ocr.players:
+                                    _ocr_rows.append({
+                                        "Pos": _p.pos,
+                                        "Player": _p.player_name,
+                                        "Salary": _p.salary,
+                                        "Field%": _p.field_pct,
+                                        "Points": _p.points,
+                                    })
+                                st.dataframe(
+                                    pd.DataFrame(_ocr_rows),
+                                    use_container_width=True, hide_index=True,
+                                )
+
+                        _cr_conf = _ocr.confidence
+                        if _cr_conf < 0.8:
+                            st.caption(f"Extraction confidence: {_cr_conf:.0%} — review values above.")
+
+                    else:
+                        # Manual fallback when no screenshot uploaded
+                        _cr_c1, _cr_c2, _cr_c3 = st.columns(3)
+                        with _cr_c1:
+                            _cr_rank = st.number_input("Finish position", min_value=1, value=1, step=1, key="_cr_rank")
+                        with _cr_c2:
+                            _cr_entries = st.number_input("Field size", min_value=1, value=1000, step=100, key="_cr_entries")
+                        with _cr_c3:
+                            _cr_contest_label = st.text_input("Contest name", value=contest_type_label, key="_cr_label")
+                        _cr_winnings = 0.0
+                        _cr_total_pts = 0.0
+                        _cr_total_sal = 0
 
                     if st.button("Record Result", key="_cr_record"):
                         _cr_pct = round((_cr_rank / _cr_entries) * 100, 2)
@@ -1382,14 +1488,31 @@ def main() -> None:
                             "rank": _cr_rank,
                             "field_size": _cr_entries,
                             "finish_pct": _cr_pct,
+                            "winnings": float(_cr_winnings),
+                            "total_points": float(_cr_total_pts),
+                            "total_salary": int(_cr_total_sal),
                             "best_lineup_actual": float(_best["actual_total"]),
                             "avg_projected": float(_avg_proj),
                             "avg_actual": float(_avg_actual),
                             "num_lineups": len(_lu_summary),
                         }
+
+                        # Add lineup trends if available
+                        if _ocr is not None:
+                            _cr_record["low_owned_player"] = _ocr.low_owned_player
+                            _cr_record["team_stack"] = _ocr.team_stack
+                            _cr_record["game_stack"] = _ocr.game_stack
+                            _cr_record["team_stacks_count"] = _ocr.team_stacks_count
+                            _cr_record["game_stacks_count"] = _ocr.game_stacks_count
+                            _cr_record["ocr_players"] = [
+                                {"pos": p.pos, "name": p.player_name, "salary": p.salary,
+                                 "field_pct": p.field_pct, "points": p.points}
+                                for p in _ocr.players
+                            ]
+
                         st.session_state[_cr_key].append(_cr_record)
 
-                        # Persist contest results to disk alongside calibration
+                        # Persist contest results to disk
                         try:
                             from yak_core.calibration_feedback import _FEEDBACK_DIR, _ensure_dir
                             import json as _cr_json
@@ -1406,9 +1529,9 @@ def main() -> None:
                             pass
 
                         if _cr_pct <= 1:
-                            st.success(f"Top {_cr_pct}% — elite finish. Recorded.")
+                            st.success(f"Top {_cr_pct}% — elite finish. ${_cr_winnings:,.0f} recorded.")
                         elif _cr_pct <= 10:
-                            st.success(f"Top {_cr_pct}% — strong finish. Recorded.")
+                            st.success(f"Top {_cr_pct}% — strong finish. ${_cr_winnings:,.0f} recorded.")
                         elif _cr_pct <= 25:
                             st.info(f"Top {_cr_pct}% — solid. Recorded.")
                         else:
@@ -1416,8 +1539,9 @@ def main() -> None:
 
                     if st.session_state[_cr_key]:
                         _cr_df = pd.DataFrame(st.session_state[_cr_key])
-                        _cr_show = _cr_df[["contest", "rank", "field_size", "finish_pct", "best_lineup_actual"]].copy()
-                        _cr_show.columns = ["Contest", "Rank", "Field", "Finish %", "Best Actual"]
+                        _cr_cols = [c for c in ["contest", "rank", "field_size", "finish_pct", "winnings", "total_points"] if c in _cr_df.columns]
+                        _cr_show = _cr_df[_cr_cols].copy()
+                        _cr_show.columns = [c.replace("_", " ").title() for c in _cr_cols]
                         st.dataframe(_cr_show, use_container_width=True, hide_index=True)
 
             except Exception as _score_exc:
