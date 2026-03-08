@@ -995,7 +995,7 @@ def main() -> None:
             )
             if pool_result is not None:
                 st.session_state[_prev_dg_key] = selected_dg_id
-                _load_status.update(label="Pool loaded & sims complete", state="complete")
+                _load_status.update(label="✅ Pool loaded & sims complete", state="complete", expanded=False)
             else:
                 _load_status.update(label="Load failed", state="error")
 
@@ -1015,7 +1015,8 @@ def main() -> None:
         # Game filter — checkboxes inside a collapsed expander
         selected_games: list[str] = []
         if all_games:
-            with st.expander(f"🎮 Games ({len(all_games)})", expanded=False):
+            _game_exp_label = f"🎮 Games ({len(all_games)}) · {len(hub_pool)} players · Cap ${slate.salary_cap:,}"
+            with st.expander(_game_exp_label, expanded=False):
                 for _g in all_games:
                     if st.checkbox(_g, value=False, key=f"_gf_{_g}"):
                         selected_games.append(_g)
@@ -1029,11 +1030,8 @@ def main() -> None:
                 if opp_col:
                     hub_pool = _filter_pool_by_games(hub_pool, selected_games, opp_col)
                     slate.player_pool = hub_pool
+                st.caption(f"{len(selected_games)} of {len(all_games)} games selected · {len(hub_pool)} players")
             set_slate_state(slate)
-
-        # Pool summary line
-        _game_note = f"  |  {len(selected_games)} of {len(all_games)} games" if selected_games else ""
-        st.caption(f"**{len(hub_pool)} players** loaded  |  Cap: ${slate.salary_cap:,}{_game_note}")
 
         # RG upload
         with st.expander("External Projections Upload", expanded=False):
