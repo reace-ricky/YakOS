@@ -66,24 +66,30 @@ def _check(name: str, fn):
 
 
 def _make_test_pool(n: int = 12) -> pd.DataFrame:
-    """Build a minimal test player pool."""
-    teams = ["LAL", "GSW", "BOS", "MIA"]
-    pos_cycle = ["PG", "SG", "SF", "PF", "C", "G", "F", "PG"]
+    """Build a minimal test player pool.
+
+    Uses valid DK NBA player positions (PG/SG/SF/PF/C only) with enough
+    per-position depth to support building multiple diverse lineups.
+    """
+    teams = ["LAL", "GSW", "BOS", "MIA", "MIL", "DEN"]
+    # Valid player positions: PG/SG → eligible for G flex; SF/PF → F flex; C → C only.
+    # Cycle through 5 positions so every group of 5 covers all positions.
+    pos_cycle = ["PG", "SG", "SF", "PF", "C"]
     rows = []
     for i in range(n):
-        salary = 5000 + i * 300
-        proj = 15.0 + i * 2.0
+        salary = 4500 + i * 250
+        proj = 14.0 + i * 1.5
         rows.append({
             "player_id": f"player_{i}",
             "player_name": f"Player_{i}",
             "pos": pos_cycle[i % len(pos_cycle)],
             "team": teams[i % len(teams)],
-            "opponent": teams[(i + 2) % len(teams)],
+            "opponent": teams[(i + 3) % len(teams)],
             "salary": salary,
             "proj": proj,
             "floor": proj * 0.7,
             "ceil": proj * 1.4,
-            "ownership": 5.0 + i * 2.0,
+            "ownership": 5.0 + i * 1.5,
             "proj_minutes": 28.0 + (i % 5),
             "status": "",
             "sim_eligible": True,

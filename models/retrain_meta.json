@@ -1,0 +1,11 @@
+{
+  "retrained_at": "2026-03-08T18:49:30.641382",
+  "n_slates": 3,
+  "n_rows": 48,
+  "models_trained": [],
+  "models_skipped": [
+    "fp",
+    "minutes",
+    "ownership"
+  ]
+}

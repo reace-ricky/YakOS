@@ -1471,9 +1471,9 @@ def prepare_sims_table(df: pd.DataFrame) -> pd.DataFrame:
         if own_numeric.dropna().le(1).all():
             df["ownership"] = own_numeric * 100
 
-    # 3. Round key numeric columns to 2 decimal places
+    # 3. Round key numeric columns to 1 decimal place
     existing_round_cols = [c for c in _SIMS_ROUND_COLS if c in df.columns]
-    df[existing_round_cols] = df[existing_round_cols].round(2)
+    df[existing_round_cols] = df[existing_round_cols].round(1)
 
     # Cast salary to int — DK salaries are always whole-dollar amounts.
     if "salary" in df.columns:
