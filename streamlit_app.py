@@ -1,12 +1,13 @@
-"""YakOS DFS Optimizer – Sprint 1 multi-page shell.
+"""YakOS DFS Optimizer – multi-page shell.
 
 Entry point for the Streamlit app.  Uses ``st.navigation`` to route between
-the four pages:
+the pages:
 
   1. The Lab           – load slate, sims, calibration, edge analysis
-  2. Ricky Edge        – tag players / games / stacks, edge labels
-  3. Build & Publish   – build lineups, export CSV, publish to Edge Share
-  4. Friends / Edge Share – read-only lineup view + friend builder
+  2. Ricky's Edge      – signal-driven edge analysis + approval gate
+  3. Record Results    – feed contest outcomes into calibration + edge feedback
+  4. Build & Publish   – build lineups, export CSV
+  5. Right Angle Ricky – public showcase
 
 All shared state lives in ``yak_core/state.py`` (SlateState,
 RickyEdgeState, LineupSetState, SimState).
@@ -32,13 +33,13 @@ st.set_page_config(
 )
 
 # ── Navigation ─────────────────────────────────────────────────────────────
-# Nav order: 1) The Lab, 2) Ricky Edge, 3) Build & Publish, 4) Friends / Edge Share
 pg = st.navigation(
     [
         st.Page("pages/1_the_lab.py", title="The Lab", icon="🧪"),
-        st.Page("pages/2_ricky_edge.py", title="Ricky Edge", icon="🎯"),
+        st.Page("pages/2_ricky_edge.py", title="Ricky's Edge Analysis", icon="🎯"),
+        st.Page("pages/3_record_results.py", title="Record Results", icon="📊"),
         st.Page("pages/4_build_publish.py", title="Build & Publish", icon="🏗️"),
-        st.Page("pages/5_friends_edge_share.py", title="Friends / Edge Share", icon="👥"),
+        st.Page("pages/5_right_angle_ricky.py", title="Right Angle Ricky", icon="📐"),
     ]
 )
 pg.run()
