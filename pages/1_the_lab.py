@@ -1372,7 +1372,7 @@ def main() -> None:
                     with _cr_c2:
                         _cr_entries = st.number_input("Field size", min_value=1, value=1000, step=100, key="_cr_entries")
                     with _cr_c3:
-                        _cr_contest_label = st.text_input("Contest name", value=pipeline_contest_display_name, key="_cr_label")
+                        _cr_contest_label = st.text_input("Contest name", value=contest_type_label, key="_cr_label")
 
                     if st.button("Record Result", key="_cr_record"):
                         _cr_pct = round((_cr_rank / _cr_entries) * 100, 2)
