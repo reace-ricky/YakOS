@@ -115,6 +115,8 @@ from yak_core.injury_monitor import (  # noqa: E402
     get_confirmed_outs,
     get_high_prob_outs,
 )
+from yak_core.injury_cascade import apply_injury_cascade  # noqa: E402
+from yak_core.tank01_ids import resolve_pool_ids  # noqa: E402
 from yak_core.salary_history import SalaryHistoryClient  # noqa: E402
 from yak_core.dff_ingest import fetch_dff_pool  # noqa: E402
 
@@ -124,8 +126,15 @@ from yak_core.dff_ingest import fetch_dff_pool  # noqa: E402
 # ---------------------------------------------------------------------------
 
 def _fetch_dk_draft_groups(sport: str = "NBA") -> list:
-    """Fetch DraftGroup metadata from the LIVE DK lobby API."""
+    """Fetch DraftGroup metadata from the LIVE DK lobby API.
+
+    Filters to today's date (ET) so stale/future draft groups don't pollute
+    the slate selector.
+    """
     import requests
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
     url = "https://www.draftkings.com/lobby/getcontests"
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
@@ -135,7 +144,15 @@ def _fetch_dk_draft_groups(sport: str = "NBA") -> list:
     resp.raise_for_status()
     data = resp.json()
     draft_groups_raw = data.get("DraftGroups") or data.get("draftGroups") or []
-    return draft_groups_raw
+
+    # --- Date filter: keep only draft groups starting today (ET) ---
+    today_et = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    filtered = []
+    for dg in draft_groups_raw:
+        start_est = str(dg.get("StartDateEst") or dg.get("startDateEst") or "")
+        if start_est and start_est[:10] == today_et:
+            filtered.append(dg)
+    return filtered if filtered else draft_groups_raw  # fallback to all if none match
 
 
 def _fetch_historical_draft_groups(date_str: str) -> list:
@@ -570,18 +587,22 @@ def _auto_load_pool_and_sims(
                         pool[_save_cols].rename(columns=_cache_col_map),
                     )
 
-            # Tank01 enrichment
+            # Tank01 enrichment (ID resolution → game logs → odds → injuries → cascade)
             _api_key = st.session_state.get("rapidapi_key", "")
             if _api_key:
+                # ── Resolve Tank01 player IDs (single API call, cached 24h) ──
+                _player_names = pool["player_name"].dropna().tolist()
                 try:
-                    _t01_id_map: dict = {}
-                    for _id_col in ("player_id", "tank01_player_id", "t01_id"):
-                        if _id_col in pool.columns:
-                            _t01_id_map = dict(
-                                zip(pool["player_name"].astype(str), pool[_id_col].astype(str))
-                            )
-                            break
-                    _player_names = pool["player_name"].dropna().tolist()
+                    status_container.write("Resolving player IDs…")
+                    _t01_id_map = resolve_pool_ids(_player_names, _api_key)
+                    if _t01_id_map:
+                        # Store Tank01 IDs on the pool for downstream use
+                        pool["player_id"] = pool["player_name"].map(_t01_id_map)
+                except Exception as _id_exc:
+                    _t01_id_map = {}
+                    status_container.write(f"ℹ️ ID resolution: {_id_exc}")
+
+                try:
                     status_container.write("Fetching game log rolling stats…")
                     _game_log_df = fetch_player_game_logs(
                         _player_names,
@@ -627,7 +648,7 @@ def _auto_load_pool_and_sims(
                 except Exception as t01_exc:
                     status_container.write(f"ℹ️ Tank01 enrichment: {t01_exc}")
 
-                # ── Auto injury detection ────────
+                # ── Auto injury detection (Tank01 injury list + stale game log) ──
                 status_container.write("Auto-detecting injuries…")
                 try:
                     pool = auto_flag_injuries(
@@ -642,6 +663,22 @@ def _auto_load_pool_and_sims(
                         status_container.write(f"⚠️ {len(_inj_flagged)} player(s) flagged as injured/inactive.")
                 except Exception as _inj_exc:
                     status_container.write(f"ℹ️ Injury detection skipped: {_inj_exc}")
+
+                # ── Injury cascade: redistribute OUT player minutes ──────
+                # Must happen BEFORE _filter_ineligible removes OUT players,
+                # so beneficiaries get their bumps calculated first.
+                try:
+                    pool, _cascade_report = apply_injury_cascade(pool)
+                    if _cascade_report:
+                        _total_beneficiaries = sum(
+                            len(c["beneficiaries"]) for c in _cascade_report
+                        )
+                        status_container.write(
+                            f"🔄 Injury cascade: {len(_cascade_report)} OUT player(s), "
+                            f"{_total_beneficiaries} beneficiary bump(s) applied."
+                        )
+                except Exception as _casc_exc:
+                    status_container.write(f"ℹ️ Injury cascade skipped: {_casc_exc}")
 
             # Apply projection pipeline
             parsed_rules = _rules_from_preset(preset)

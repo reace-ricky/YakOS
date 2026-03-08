@@ -125,7 +125,12 @@ def _score_salary_value(df: pd.DataFrame) -> pd.Series:
 
 
 def _score_leverage(df: pd.DataFrame) -> pd.Series:
-    """Upside per percent owned -- GPP differentiators."""
+    """Upside per percent owned -- GPP differentiators.
+
+    When rolling minutes data is available (rolling_min_5), we boost
+    players whose recent minutes trend upward (gaining role) but
+    haven't been reflected in ownership yet.
+    """
     smash = _safe_numeric(df.get("smash_prob", pd.Series(0.0, index=df.index)))
     own = _safe_numeric(df.get("ownership", df.get("own_pct", pd.Series(15.0, index=df.index))))
     own_safe = own.clip(lower=1.0)
@@ -133,6 +138,17 @@ def _score_leverage(df: pd.DataFrame) -> pd.Series:
     lev = smash / (own_safe / 100.0)
     if lev.max() <= 0:
         return pd.Series(0.0, index=df.index)
+
+    # Minutes trend boost: if recent 5-game mins > 10-game mins, player is
+    # gaining role — extra leverage the field hasn't priced in.
+    rolling_min_5 = _safe_numeric(df.get("rolling_min_5", pd.Series(0.0, index=df.index)))
+    rolling_min_10 = _safe_numeric(df.get("rolling_min_10", pd.Series(0.0, index=df.index)))
+    if rolling_min_5.max() > 0 and rolling_min_10.max() > 0:
+        mins_trend = (rolling_min_5 - rolling_min_10).clip(lower=0)
+        # Normalize: +5 min trend = 0.5 boost, capped at 1.0
+        trend_boost = (mins_trend / 10.0).clip(0, 0.5)
+        lev = lev + (trend_boost * lev.max())
+
     # Normalise: leverage of 5+ is near-max
     return (lev / 5.0).clip(0, 1)
 
@@ -142,15 +158,33 @@ def _score_salary_stickiness(df: pd.DataFrame) -> pd.Series:
 
     Classic edge: a $4K player projecting like a $6K player. DK sets
     salaries days before lock and doesn't react to late news.
+
+    When rolling game log stats are available (rolling_fp_5, rolling_min_5),
+    we use actual recent performance instead of projection rank alone.
+    This catches players whose recent production outstrips their stale salary.
     """
     proj = _safe_numeric(df.get("proj", pd.Series(0.0, index=df.index)))
     sal = _safe_numeric(df.get("salary", pd.Series(5000.0, index=df.index)))
 
-    # "Expected salary" based on projection rank (simple linear model)
     if proj.max() <= 0 or sal.max() <= 0:
         return pd.Series(0.0, index=df.index)
 
-    # Estimate what salary "should be" based on projection
+    # If we have real game log rolling stats, use them for a stronger signal
+    rolling_fp = _safe_numeric(df.get("rolling_fp_5", pd.Series(0.0, index=df.index)))
+    has_rolling = rolling_fp.max() > 0
+
+    if has_rolling:
+        # Use rolling 5-game FP average as "what salary should be"
+        # Compare actual salary vs salary implied by recent performance
+        sal_k = (sal / 1000.0).clip(lower=1.0)
+        actual_val = rolling_fp / sal_k  # recent FP per $1K
+        median_val = actual_val.median()
+        if median_val > 0:
+            # Players producing well above their salary tier
+            score = ((actual_val - median_val) / median_val).clip(0, 1)
+            return score
+
+    # Fallback: projection-rank-based estimate
     proj_rank = proj.rank(pct=True)
     sal_range = sal.max() - sal.min()
     expected_sal = sal.min() + proj_rank * sal_range
@@ -270,6 +304,10 @@ def generate_slate_overview(
             "injury_impact": "",
         }
 
+    # Reset indexes to avoid misaligned boolean indexing after sort
+    pool = pool.reset_index(drop=True)
+    signals_df = signals_df.reset_index(drop=True)
+
     sal = _safe_numeric(pool.get("salary", pd.Series()))
     proj = _safe_numeric(pool.get("proj", pd.Series()))
     own = _safe_numeric(pool.get("ownership", pool.get("own_pct", pd.Series())))
@@ -284,7 +322,7 @@ def generate_slate_overview(
     )
 
     # Bullet 2: Injury cascades
-    bump = _safe_numeric(signals_df.get("injury_bump_fp", pd.Series(0.0)))
+    bump = _safe_numeric(signals_df.get("injury_bump_fp", pd.Series(0.0, index=signals_df.index)))
     cascade_players = signals_df[bump > 0.5]
     if not cascade_players.empty:
         top_bump = cascade_players.nlargest(2, "injury_bump_fp")
@@ -316,7 +354,22 @@ def generate_slate_overview(
             edge_names = [r["player_name"] for _, r in top_edges.head(3).iterrows()]
         bullets.append(f"Top edges: {', '.join(edge_names)}")
 
-    # Bullet 5: Fades
+    # Bullet 5: Minutes trend (game-log driven) or Fades
+    _rolling5 = _safe_numeric(signals_df.get("rolling_min_5", pd.Series(0.0)))
+    _rolling10 = _safe_numeric(signals_df.get("rolling_min_10", pd.Series(0.0)))
+    _has_game_logs = _rolling5.max() > 0 and _rolling10.max() > 0
+    if _has_game_logs:
+        _trend = _rolling5 - _rolling10
+        _risers = signals_df[_trend > 3].copy()
+        if not _risers.empty:
+            _risers = _risers.assign(_trend=_trend[_risers.index])
+            _top_risers = _risers.nlargest(3, "_trend")
+            riser_names = [
+                f"{r['player_name']} (+{r['_trend']:.0f} min)"
+                for _, r in _top_risers.iterrows()
+            ]
+            bullets.append(f"Minutes risers: {', '.join(riser_names)} — role expanding")
+
     if "sig_own_mismatch" in signals_df.columns:
         # Fades = high ownership, low projection rank (overvalued by field)
         overvalued = signals_df[
