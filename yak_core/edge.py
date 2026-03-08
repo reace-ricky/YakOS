@@ -20,6 +20,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
+from scipy.stats import norm as _norm
 
 
 # ---------------------------------------------------------------------------
@@ -146,41 +147,42 @@ def compute_empirical_std(
     return np.clip(std, min_std, None)
 
 
-def _ceiling_gap_factor(
-    proj: pd.Series,
-    ceil: pd.Series,
-    floor: pd.Series,
-) -> tuple[pd.Series, pd.Series]:
-    """Return (smash_gap_mult, bust_gap_mult) using continuous interpolation.
+# ---------------------------------------------------------------------------
+# Smash / Bust — Normal CDF model (Stokastic-inspired)
+# ---------------------------------------------------------------------------
+#
+# Industry context:
+#   Stokastic: boom% = P(player > 5x salary value), bust% = P(player < 4x)
+#   SaberSim:  full play-by-play sim distributions, percentile thresholds
+#   FantasyLabs: floor = 15th pctile, ceil = 85th pctile of sim distribution
+#
+# Our approach (hybrid):
+#   Standard deviation is derived from the player's own floor/ceil range,
+#   treating them as ~15th / 85th percentile estimates, then adjusted by
+#   a salary-bracket volatility factor.
+#
+#   smash_prob = P(outcome >= salary_value_target)  — 5x DK value
+#   bust_prob  = P(outcome <= floor)                — projector's floor
+#
+#   Using salary-value for smash (instead of ceiling) creates meaningful
+#   differentiation: studs projecting above their value line get high smash,
+#   while compressed-ceiling punts (e.g. Barnhizer) get near-zero smash
+#   because they can't realistically reach 5x salary value.
+#
+#   Bust uses the projector's floor (not salary-based) because floor captures
+#   actual downside risk from the projection model, independent of price.
+#
+# Z-score for the 85th percentile of a standard normal.
+_Z_85: float = float(_norm.ppf(0.85))  # ≈ 1.036
 
-    Uses ``np.interp`` for smooth multipliers instead of discrete buckets.
-    This ensures every player gets a unique adjustment based on their actual
-    ceiling/floor gap, eliminating the "everyone gets 0.59" problem.
+# Salary-based volatility multiplier applied on top of the range-implied std.
+# Low-salary players have bimodal outcomes (garbage time blowup vs DNP-level
+# minutes) that their floor/ceil estimates tend to understate.
+_SAL_VOL_X = [3000, 5000, 6500, 8000, 10000, 12000]
+_SAL_VOL_Y = [1.25, 1.15, 1.05, 1.00, 0.95, 0.90]
 
-    Smash gap (ceil/proj ratio):
-      1.00 → 0.05 | 1.10 → 0.20 | 1.20 → 0.50 | 1.30 → 0.80 | 1.40 → 1.00
-      1.50 → 1.10 | 1.60 → 1.18 | 1.80 → 1.25
-
-    Bust gap (floor/proj ratio):
-      0.95 → 0.05 | 0.90 → 0.15 | 0.80 → 0.50 | 0.70 → 0.85 | 0.65 → 1.00
-      0.55 → 1.15 | 0.45 → 1.30 | 0.30 → 1.40
-    """
-    proj_safe = proj.clip(lower=1.0)
-    ceil_ratio = (ceil / proj_safe).values
-    floor_ratio = (floor / proj_safe).values
-
-    # Continuous smash gap: interpolate on ceil/proj ratio
-    _SMASH_X = [1.00, 1.10, 1.20, 1.30, 1.40, 1.50, 1.60, 1.80]
-    _SMASH_Y = [0.05, 0.20, 0.50, 0.80, 1.00, 1.10, 1.18, 1.25]
-    smash_gap = pd.Series(np.interp(ceil_ratio, _SMASH_X, _SMASH_Y), index=proj.index)
-
-    # Continuous bust gap: interpolate on floor/proj ratio (note: lower ratio = more bust risk)
-    # np.interp needs ascending x, so we reverse the relationship
-    _BUST_X = [0.30, 0.45, 0.55, 0.65, 0.70, 0.80, 0.90, 0.95]
-    _BUST_Y = [1.40, 1.30, 1.15, 1.00, 0.85, 0.50, 0.15, 0.05]
-    bust_gap = pd.Series(np.interp(floor_ratio, _BUST_X, _BUST_Y), index=proj.index)
-
-    return smash_gap, bust_gap
+# DK salary-to-value divisor: salary / _SMASH_VALUE_DIV = 5x DK value.
+_SMASH_VALUE_DIV: float = 200.0
 
 
 def _compute_smash_bust(
@@ -191,67 +193,66 @@ def _compute_smash_bust(
     floor: pd.Series,
     variance: float,
 ) -> tuple[pd.Series, pd.Series]:
-    """Return (smash_prob, bust_prob) using empirically calibrated model.
+    """Return (smash_prob, bust_prob) via Normal CDF.
 
-    Calibrated from 21-slate backtest (Feb 7 – Mar 5 2026, 3512 player-slates).
+    For each player:
+      1. ``base_std = (ceil - floor) / (2 * Z_85)``  — range-implied std
+         treating floor/ceil as 15th/85th percentile estimates.
+      2. ``std = base_std * salary_vol_mult * variance``  — adjusted for
+         salary-bracket volatility and the user's variance slider.
+      3. ``smash_prob = 1 - Φ((smash_line - proj) / std)``
+         where ``smash_line = salary / 200`` (5x DK value).
+      4. ``bust_prob  = Φ((floor - proj) / std)``
 
-    Model uses salary bracket base rates adjusted by:
-      1. Ownership (low own → higher smash potential)
-      2. Value efficiency (proj / salary_k)
-      3. **Ceiling gap** (actual ceil/proj ratio vs bracket average)
-      4. **Floor gap** (actual floor/proj ratio vs bracket average)
-
-    Base rates by salary bracket:
-      - <$5K: 43% smash, 36% bust
-      - $5-6.5K: 30% smash, 26% bust
-      - $6.5-8K: 21% smash, 16% bust
-      - $8-10K: 13% smash, 12% bust
-      - $10K+: 7% smash, 9% bust
+    This produces unique probabilities for every player because each has
+    a different projection relative to their salary value target, a
+    different range width (std), and a different salary bracket.
     """
-    # Base rates by salary bracket — continuous interpolation (from backtest actuals)
-    # Anchor points: 3K→0.48, 5K→0.43, 6.5K→0.30, 8K→0.21, 10K→0.13, 12K→0.07
-    _SAL_X = [3000, 5000, 6500, 8000, 10000, 12000]
-    _SMASH_BASE_Y = [0.48, 0.43, 0.30, 0.21, 0.13, 0.07]
-    _BUST_BASE_Y = [0.40, 0.36, 0.26, 0.16, 0.12, 0.09]
-    smash_base = pd.Series(
-        np.interp(salary.values, _SAL_X, _SMASH_BASE_Y), index=proj.index
-    )
-    bust_base = pd.Series(
-        np.interp(salary.values, _SAL_X, _BUST_BASE_Y), index=proj.index
-    )
+    proj_arr = proj.values.astype(float)
+    sal_arr = salary.values.astype(float)
+    ceil_arr = ceil.values.astype(float)
+    floor_arr = floor.values.astype(float)
 
-    # Ownership adjustment — continuous: low own → higher smash (inverse)
-    # Anchor: 2%→1.20, 8%→1.12, 15%→1.00, 25%→0.92, 40%→0.82
-    _OWN_X = [2, 8, 15, 25, 40]
-    _OWN_SMASH_Y = [1.20, 1.12, 1.00, 0.92, 0.82]
-    own_mult_smash = pd.Series(
-        np.interp(own.values, _OWN_X, _OWN_SMASH_Y), index=proj.index
-    )
+    # 1. Range-implied standard deviation
+    base_std = (ceil_arr - floor_arr) / (2.0 * _Z_85)
+    base_std = np.clip(base_std, 0.5, None)  # minimum 0.5 FP
 
-    # Chalk bust trap: high salary + high ownership → continuous bust boost
-    # Only kicks in when salary >= 7K; scales with ownership above 20%
-    _chalk_own = own.clip(lower=20) - 20  # 0 when own<=20, grows after
-    _chalk_sal = ((salary - 7000) / 3000).clip(0, 1)  # 0 at 7K, 1 at 10K
-    own_mult_bust = 1.0 + (_chalk_own / 100.0) * _chalk_sal * 1.0  # up to ~1.20
+    # 2. Salary-bracket volatility adjustment
+    sal_mult = np.interp(sal_arr, _SAL_VOL_X, _SAL_VOL_Y)
 
-    # Value efficiency adjustment — continuous
-    # Anchor: 2.5→0.85, 3.5→0.95, 4.5→1.05, 5.5→1.18, 6.5→1.25
-    val_eff = proj / (salary / 1000.0).clip(lower=1.0)
-    _VAL_X = [2.5, 3.5, 4.5, 5.5, 6.5]
-    _VAL_Y = [0.85, 0.95, 1.05, 1.18, 1.25]
-    val_mult = pd.Series(
-        np.interp(val_eff.values, _VAL_X, _VAL_Y), index=proj.index
-    )
+    std = base_std * sal_mult * variance
+    std = np.clip(std, 0.5, None)
 
-    # Ceiling/floor gap adjustment — the key fix.
-    # Prevents inflated smash_prob when ceiling is barely above projection.
-    smash_gap, bust_gap = _ceiling_gap_factor(proj, ceil, floor)
+    # 3. Smash: P(outcome >= 5x salary value)
+    smash_line = sal_arr / _SMASH_VALUE_DIV
+    smash_z = (smash_line - proj_arr) / std
+    smash_prob = pd.Series(1.0 - _norm.cdf(smash_z), index=proj.index)
 
-    # Apply all multipliers + variance tuning
-    smash_prob = (smash_base * own_mult_smash * val_mult * smash_gap * variance).clip(0.01, 0.95)
-    bust_prob = (bust_base * own_mult_bust * bust_gap * variance).clip(0.01, 0.95)
+    # 4. Bust: P(outcome <= projector floor)
+    bust_z = (floor_arr - proj_arr) / std  # negative when floor < proj
+    bust_prob = pd.Series(_norm.cdf(bust_z), index=proj.index)
+
+    # Clip to sane range
+    smash_prob = smash_prob.clip(0.01, 0.95)
+    bust_prob = bust_prob.clip(0.01, 0.95)
 
     return smash_prob, bust_prob
+
+
+# Keep the old function name as a no-op for any tests that import it directly.
+def _ceiling_gap_factor(
+    proj: pd.Series, ceil: pd.Series, floor: pd.Series,
+) -> tuple[pd.Series, pd.Series]:
+    """Legacy stub — retained for backward compatibility with tests.
+
+    The ceiling/floor gap is now handled implicitly by the CDF model:
+    a narrow ceil/proj gap produces a low smash_prob naturally because
+    the z-score is higher.
+
+    Returns (1.0, 1.0) for all players.
+    """
+    ones = pd.Series(1.0, index=proj.index)
+    return ones, ones
 
 
 def _apply_calibration_bumps(
