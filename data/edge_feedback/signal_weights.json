@@ -1,5 +1,5 @@
 {
-  "computed_at": "2026-03-08T16:57:09.001442+00:00",
+  "computed_at": "2026-03-08T17:11:44.379654+00:00",
   "n_slates": 2,
   "signal_stats": {
     "high_leverage": {
@@ -24,10 +24,10 @@
       "n_slates_active": 0
     },
     "salary_value": {
-      "total_flagged": 5,
-      "total_hit": 0,
-      "raw_hit_rate": 0.0,
-      "weighted_hit_rate": 0.0,
+      "total_flagged": 14,
+      "total_hit": 3,
+      "raw_hit_rate": 0.214,
+      "weighted_hit_rate": 0.214,
       "n_slates_active": 1
     },
     "smash_candidate": {
@@ -39,10 +39,10 @@
     }
   },
   "weights": {
-    "high_leverage": 0.2,
-    "low_ownership_upside": 0.2,
-    "chalk_fade": 0.2,
-    "salary_value": 0.2,
-    "smash_candidate": 0.2
+    "high_leverage": 0.0,
+    "low_ownership_upside": 0.0,
+    "chalk_fade": 0.0,
+    "salary_value": 1.0,
+    "smash_candidate": 0.0
   }
 }
