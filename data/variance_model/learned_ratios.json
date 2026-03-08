@@ -1,9 +1,9 @@
 {
-  "computed_at": "2026-03-08T16:15:45.205550+00:00",
+  "computed_at": "2026-03-08T16:27:06.869024+00:00",
   "n_slates": 1,
   "n_player_slates": 96,
   "ratios": {
-    "lt5k": 0.5722,
+    "lt5k": 0.5727,
     "5_65k": 0.64,
     "65_8k": 0.44,
     "8_10k": 0.35,
@@ -12,14 +12,14 @@
   "brackets": {
     "lt5k": {
       "n": 53,
-      "learned_ratio": 0.5722,
-      "clamped_ratio": 0.5722,
+      "learned_ratio": 0.5727,
+      "clamped_ratio": 0.5727,
       "static_ratio": 1.04,
-      "delta_pct": -45.0,
+      "delta_pct": -44.9,
       "using": "learned",
-      "value": 0.5722,
+      "value": 0.5727,
       "mean_proj": 15.8,
-      "residual_std": 9.0
+      "residual_std": 9.1
     },
     "5_65k": {
       "n": 26,
