@@ -158,7 +158,7 @@ class TestGetDraftables:
             df = self._client().get_draftables(12345)
 
         assert len(df) == 2
-        assert list(df.columns) == ["player_name", "position", "team", "salary", "player_dk_id"]
+        assert list(df.columns) == ["player_name", "position", "team", "opp", "game_info", "game_time", "salary", "player_dk_id"]
         assert df.iloc[0]["player_name"] == "LeBron James"
         assert df.iloc[0]["salary"] == 9800
         assert df.iloc[1]["team"] == "GSW"

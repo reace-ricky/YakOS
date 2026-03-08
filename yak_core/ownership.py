@@ -99,9 +99,10 @@ def salary_rank_ownership(pool_df: pd.DataFrame, col: str = "ownership") -> pd.D
         return df
 
     # ── Gather signals ────────────────────────────────────────────────
-    sal = pd.to_numeric(df.get("salary", 0), errors="coerce").fillna(0).clip(lower=0)
-    proj = pd.to_numeric(df.get("proj", 0), errors="coerce").fillna(0).clip(lower=0)
-    ceil = pd.to_numeric(df.get("ceil", 0), errors="coerce").fillna(0).clip(lower=0)
+    _zero = pd.Series(0, index=df.index)
+    sal = pd.to_numeric(df["salary"] if "salary" in df.columns else _zero, errors="coerce").fillna(0).clip(lower=0)
+    proj = pd.to_numeric(df["proj"] if "proj" in df.columns else _zero, errors="coerce").fillna(0).clip(lower=0)
+    ceil = pd.to_numeric(df["ceil"] if "ceil" in df.columns else _zero, errors="coerce").fillna(0).clip(lower=0)
 
     # If proj is missing, fall back to salary-implied projection
     if (proj == 0).all() and (sal > 0).any():
@@ -132,7 +133,7 @@ def salary_rank_ownership(pool_df: pd.DataFrame, col: str = "ownership") -> pd.D
     # We REDUCE their projected ownership slightly to reflect that the
     # field hasn't caught up — which increases their leverage in the edge score.
     min_pop_adj = pd.Series(1.0, index=df.index)
-    proj_min = pd.to_numeric(df.get("proj_minutes", 0), errors="coerce").fillna(0)
+    proj_min = pd.to_numeric(df["proj_minutes"] if "proj_minutes" in df.columns else _zero, errors="coerce").fillna(0)
     for _rm_col, _rm_w in [("rolling_min_5", 0.50), ("rolling_min_10", 0.30), ("rolling_min_20", 0.20)]:
         if _rm_col in df.columns:
             pass  # rolling data available

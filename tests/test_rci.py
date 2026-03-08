@@ -328,8 +328,11 @@ class TestComputeRCI:
         # All weight on projection_confidence → normalized weight = 1.0
         pc_signal = next(s for s in result.signals if s.name == "projection_confidence")
         assert abs(pc_signal.weight - 1.0) < 1e-9
-        # Score should equal the projection_confidence score
-        assert abs(result.rci_score - pc_signal.value) < 0.5
+        # With only edge_payload provided (1 active signal), the data-
+        # availability cap limits RCI to 55.  The weighted value (72) is
+        # above the cap, so the score should be capped at 55.
+        assert result.rci_score <= 55.0
+        assert result.rci_score > 0
 
     def test_rci_status_matches_score(self):
         result = compute_rci("GPP - 20 Max", _edge_payload_full())

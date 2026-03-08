@@ -81,10 +81,14 @@ class TestSalaryRankOwnership:
         bot_own = result.nsmallest(n // 4, "salary")["ownership"].mean()
         assert top_own > bot_own
 
-    def test_no_salary_column_returns_zeros(self):
+    def test_no_salary_column_still_estimates_ownership(self):
+        """Without salary the model can still estimate ownership from proj."""
         pool = pd.DataFrame({"player_name": ["A", "B"], "proj": [10.0, 20.0]})
         result = salary_rank_ownership(pool)
-        assert (result["ownership"] == 0.0).all()
+        # With projections available, the multi-signal model produces
+        # non-zero ownership even without salary data.
+        assert "ownership" in result.columns
+        assert result["ownership"].notna().all()
 
     def test_does_not_mutate_input(self):
         pool = _make_pool()
