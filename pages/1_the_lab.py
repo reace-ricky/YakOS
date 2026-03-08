@@ -999,11 +999,12 @@ def main() -> None:
             else:
                 _load_status.update(label="Load failed", state="error")
 
-    # Force-reload button (kept as escape hatch)
-    if st.session_state.get(_pool_loaded_key) is not None:
-        if st.button("🔄 Reload Pool & Re-run Sims", key="_lab_force_reload"):
-            st.session_state.pop(_pool_loaded_key, None)
-            st.rerun()
+    # Reload inside the completed status — expand to reveal
+    if st.session_state.get(_pool_loaded_key) is not None and not _need_load:
+        with st.status("✅ Pool loaded & sims complete", state="complete", expanded=False) as _done_status:
+            if st.button("🔄 Reload Pool & Re-run Sims", key="_lab_force_reload"):
+                st.session_state.pop(_pool_loaded_key, None)
+                st.rerun()
 
     # ── Game Filter / External Projections ─────────────────────────────────
     hub_pool: Optional[pd.DataFrame] = st.session_state.get(f"_hub_pool_{slate_date_str}_{_contest_safe}")
