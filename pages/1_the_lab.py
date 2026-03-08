@@ -1089,7 +1089,20 @@ def main() -> None:
             _candidates = [s for s in _cached_slates if s["game_style"] == "Classic"]
         if not _candidates:
             _candidates = _cached_slates  # fallback
-        _pick = max(_candidates, key=lambda s: s["game_count"])
+
+        if _is_sd and len(_candidates) > 1:
+            # Showdown: each game is its own draft group — let user pick.
+            _sd_labels = [s["label"] for s in _candidates]
+            _sd_idx = st.selectbox(
+                "🏀 Select Game (Showdown)",
+                options=range(len(_sd_labels)),
+                format_func=lambda i: _sd_labels[i],
+                key=f"_sd_dg_pick_{slate_date_str}",
+            )
+            _pick = _candidates[_sd_idx] if _sd_idx is not None else _candidates[0]
+        else:
+            _pick = max(_candidates, key=lambda s: s["game_count"])
+
         selected_dg_id = _pick["draft_group_id"]
         selected_slate_label = _pick["label"]
         # Slate info stored internally — no visible caption (noise)
@@ -1190,50 +1203,27 @@ def main() -> None:
         all_games = _extract_games(hub_pool)
 
         # Game filter — matchup checkboxes with odds + tipoff time
+        # For Showdown, game selection already happened at the draft-group
+        # level (each DK Showdown DG = one game), so the pool is already
+        # filtered.  Only show the game filter for Classic slates.
         selected_games: list[str] = []
         _prev_games_key = f"_prev_selected_games_{slate_date_str}_{_contest_safe}"
         _is_showdown_mode = (contest_type_label == "Showdown")
-        if all_games:
-            if _is_showdown_mode:
-                # ── Showdown: prominent single-game selector ──────────────
-                # Showdown is per-game; user MUST pick one.
-                _sd_options = []
+        if all_games and not _is_showdown_mode:
+            _game_exp_label = f"🏀 Matchups ({len(all_games)}) · {len(hub_pool)} players"
+            with st.expander(_game_exp_label, expanded=False):
                 for _g in all_games:
                     matchup = _g["matchup"]
-                    parts = [matchup]
+                    # Build display label: "HOU @ SAS  ·  O/U 224.5  ·  7:00 PM"
+                    label_parts = [f"**{matchup}**"]
                     if _g.get("vegas_total") is not None:
-                        parts.append(f"O/U {_g['vegas_total']:.1f}")
+                        label_parts.append(f"O/U {_g['vegas_total']:.1f}")
                     if _g.get("time_et"):
-                        parts.append(_g["time_et"])
-                    _sd_options.append("  ·  ".join(parts))
+                        label_parts.append(_g["time_et"])
+                    _display = "  ·  ".join(label_parts)
 
-                _sd_matchups = [_g["matchup"] for _g in all_games]
-                _sd_choice = st.selectbox(
-                    "🏀 Select Game (Showdown)",
-                    options=range(len(_sd_options)),
-                    format_func=lambda i: _sd_options[i],
-                    key=f"_sd_game_{slate_date_str}",
-                )
-                if _sd_choice is not None:
-                    selected_games = [_sd_matchups[_sd_choice]]
-                else:
-                    st.warning("Pick a game to run Showdown analysis.")
-            else:
-                # ── Classic: matchup checkboxes in expander ───────────────
-                _game_exp_label = f"🏀 Matchups ({len(all_games)}) · {len(hub_pool)} players"
-                with st.expander(_game_exp_label, expanded=False):
-                    for _g in all_games:
-                        matchup = _g["matchup"]
-                        # Build display label: "HOU @ SAS  ·  O/U 224.5  ·  7:00 PM"
-                        label_parts = [f"**{matchup}**"]
-                        if _g.get("vegas_total") is not None:
-                            label_parts.append(f"O/U {_g['vegas_total']:.1f}")
-                        if _g.get("time_et"):
-                            label_parts.append(_g["time_et"])
-                        _display = "  ·  ".join(label_parts)
-
-                        if st.checkbox(_display, value=False, key=f"_gf_{matchup}"):
-                            selected_games.append(matchup)
+                    if st.checkbox(_display, value=False, key=f"_gf_{matchup}"):
+                        selected_games.append(matchup)
 
             # Persist game selection to SlateState so Build page inherits it
             slate.selected_games = selected_games if selected_games else []
