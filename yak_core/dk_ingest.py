@@ -310,7 +310,8 @@ def fetch_dk_draftables(draft_group_id: int) -> pd.DataFrame:
         rows.append(
             {
                 "draft_group_id": int(draft_group_id),
-                "dk_player_id": str(p.get("draftableId") or p.get("playerId") or p.get("PlayerID") or ""),
+                "dk_player_id": str(p.get("playerId") or p.get("PlayerID") or p.get("draftableId") or ""),
+                "draftable_id": str(p.get("draftableId") or ""),
                 "name": str(p.get("displayName") or p.get("shortName") or p.get("playerName") or ""),
                 "name_suffix": str(p.get("nameSuffix") or ""),
                 "display_name": str(p.get("displayName") or p.get("playerName") or ""),
@@ -325,6 +326,19 @@ def fetch_dk_draftables(draft_group_id: int) -> pd.DataFrame:
         )
 
     df = pd.DataFrame(rows) if rows else _empty_player_pool_df()
+
+    # Dedup: DK returns one row per roster-slot (PG, SG, UTIL, …) for the
+    # same player.  Keep only the first entry per playerId so downstream
+    # code sees exactly one row per player.
+    if not df.empty and "dk_player_id" in df.columns:
+        _before = len(df)
+        df = df.drop_duplicates(subset=["dk_player_id"], keep="first").reset_index(drop=True)
+        if len(df) < _before:
+            log.info(
+                "[dk_ingest] Deduped %d roster-slot rows → %d unique players for DG %s",
+                _before, len(df), draft_group_id,
+            )
+
     log.info(
         "[dk_ingest] Fetched %d draftables for draft_group_id=%s", len(df), draft_group_id
     )
@@ -334,8 +348,9 @@ def fetch_dk_draftables(draft_group_id: int) -> pd.DataFrame:
 def _empty_player_pool_df() -> pd.DataFrame:
     return pd.DataFrame(
         columns=[
-            "draft_group_id", "dk_player_id", "name", "name_suffix",
-            "display_name", "team", "positions", "salary", "status",
+            "draft_group_id", "dk_player_id", "draftable_id", "name",
+            "name_suffix", "display_name", "team", "positions", "salary",
+            "status",
         ]
     )
 

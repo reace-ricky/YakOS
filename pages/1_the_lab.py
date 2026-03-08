@@ -1650,7 +1650,13 @@ def main() -> None:
 
                 # Build a merged pool with actuals + sim predictions
                 _vpool = pool.copy()
+                # Dedup pool by player_name — DK draftables can have multiple
+                # roster-slot rows per player (PG, SG, UTIL, etc.)
+                if "player_name" in _vpool.columns:
+                    _vpool = _vpool.drop_duplicates(subset=["player_name"], keep="first")
                 _sim_pr = sim.player_results.copy()
+                if "player_name" in _sim_pr.columns:
+                    _sim_pr = _sim_pr.drop_duplicates(subset=["player_name"], keep="first")
                 # Merge sim signals into pool (smash_prob, bust_prob, etc.)
                 _sim_merge_cols = [c for c in ["player_name", "smash_prob", "bust_prob", "leverage", "edge_score"]
                                    if c in _sim_pr.columns]
