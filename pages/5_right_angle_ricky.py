@@ -62,6 +62,14 @@ def _status_strip(slate) -> None:
         st.caption(" \u00b7 ".join(parts))
 
 
+# Muted status colors for dark backgrounds
+_PILL_COLORS = {
+    "green": {"bg": "#1a3a1a", "text": "#6abf69", "border": "#3a6b3a"},
+    "yellow": {"bg": "#3a3418", "text": "#d4a046", "border": "#6b5a2a"},
+    "red": {"bg": "#3a1a1a", "text": "#c27a7a", "border": "#6b3a3a"},
+}
+
+
 def _confidence_pills(edge) -> None:
     """Render compact confidence pills across contests that have data."""
     available = [c for c in _CONTEST_ORDER if c in edge.edge_analysis_by_contest]
@@ -80,7 +88,17 @@ def _confidence_pills(edge) -> None:
             elif color == "yellow":
                 st.warning(f"**{short}** \u2014 {score:.0f}/100")
             else:
-                st.error(f"**{short}** \u2014 {score:.0f}/100")
+                # Use muted red instead of st.error() bright red
+                _bg = _PILL_COLORS["red"]["bg"]
+                _tx = _PILL_COLORS["red"]["text"]
+                _bd = _PILL_COLORS["red"]["border"]
+                st.markdown(
+                    f"<div style='padding:0.75rem 1rem;border-radius:0.5rem;"
+                    f"background:{_bg};border:1px solid {_bd};"
+                    f"color:{_tx};font-size:0.9rem;'>"
+                    f"<strong>{short}</strong> \u2014 {score:.0f}/100</div>",
+                    unsafe_allow_html=True,
+                )
 
 
 def _render_edge_writeup(edge, contest_label: str) -> None:

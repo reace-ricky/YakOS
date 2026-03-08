@@ -330,7 +330,7 @@ class SimState:
     sim_mode: str = "Live"
     draft_group_id: Optional[int] = None
     variance: float = 1.0
-    n_sims: int = 10000
+    n_sims: int = 5000
     sim_results: Dict[str, Optional[pd.DataFrame]] = field(default_factory=dict)
     player_results: Optional[pd.DataFrame] = None
     sim_learnings: Dict[str, Dict[str, Any]] = field(default_factory=dict)

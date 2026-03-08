@@ -15,7 +15,7 @@ Responsibilities
 
 UI AUTOMATION (v2):
 - Slates auto-fetch when date/sport/contest changes — no manual button.
-- Player pool auto-loads when a slate is selected — no manual button.
+- Player pool + sims load on button click (Load Pool & Run Sims).
 - Sims are MANUAL — user clicks Run Sims when ready.
 - Expanders replaced with inline sections where possible.
 - Flow: Pick date+sport+contest → pick slate → pool loads → user runs sims.
@@ -468,6 +468,9 @@ def _filter_pool_by_games(pool: pd.DataFrame, selected_games: list[str], opp_col
 
 _CONTEST_GAUGE_LABELS = ["Cash", "SE", "3-Max", "20-Max", "150-Max"]
 _LAYER_ALL = ["Base", "Calibration", "Edge", "Sims"]
+
+# Muted status colors for dark backgrounds (avoid harsh bright red)
+_STATUS_COLORS = {"green": "#6abf69", "orange": "#d4a046", "red": "#c27a7a"}
 
 
 def _color_smash(val: float) -> str:
@@ -932,7 +935,7 @@ def _auto_load_pool(
                 slate.active_layers = ["Base"]
             set_slate_state(slate)
 
-            status_container.write(f"✅ Pool locked — {len(pool)} players. Hit **Run Sims** when you're ready.")
+            status_container.write(f"✅ Pool locked — {len(pool)} players.")
 
             return pool
 
@@ -971,6 +974,29 @@ def main() -> None:
         _ui_contest = st.selectbox("Contest Type", UI_CONTEST_LABELS)
         contest_type_label = UI_CONTEST_MAP[_ui_contest]
         preset = CONTEST_PRESETS[contest_type_label]
+
+    # ── Row 2: Sim Controls (set before loading) ─────────────────────────
+    col_mode, col_var, col_nsims = st.columns(3)
+    with col_mode:
+        sim_mode = st.radio("Mode", ["Live", "Historical"], horizontal=True, key="_lab_mode",
+                            index=0 if sim.sim_mode == "Live" else 1)
+        if sim_mode != sim.sim_mode:
+            sim.sim_mode = sim_mode
+            set_sim_state(sim)
+    with col_var:
+        variance = st.slider(
+            "Sim Variance", min_value=0.5, max_value=2.0, step=0.1,
+            value=float(sim.variance), key="_lab_variance",
+        )
+        if variance != sim.variance:
+            sim.variance = variance
+            set_sim_state(sim)
+    with col_nsims:
+        n_sims = st.number_input("MC Iterations", min_value=500, max_value=50000,
+                                 step=500, value=int(sim.n_sims), key="_lab_nsims")
+        if n_sims != sim.n_sims:
+            sim.n_sims = int(n_sims)
+            set_sim_state(sim)
 
     # Read Tank01 RapidAPI key from secrets
     rapidapi_key = st.secrets.get("TANK01_RAPIDAPI_KEY")
@@ -1070,48 +1096,83 @@ def main() -> None:
     else:
         selected_dg_id = st.session_state.get("_lab_selected_dg_id")
 
-    # ── AUTO-LOAD POOL + SIMS ─────────────────────────────────────────────
-    # Triggers when a new slate is selected (dg_id changes)
+    # ── MANUAL LOAD ─────────────────────────────────────────────────────────
+    # User clicks this button to load pool + run sims in one shot.
     _pool_loaded_key = f"_hub_pool_{slate_date_str}_{_contest_safe}"
-    _prev_dg_key = "_lab_prev_loaded_dg"
-    _need_load = (
-        selected_dg_id is not None
-        and st.session_state.get(_pool_loaded_key) is None
-    )
-    # Also reload if the draft group changed
-    if (
-        selected_dg_id is not None
-        and st.session_state.get(_prev_dg_key) is not None
-        and st.session_state.get(_prev_dg_key) != selected_dg_id
-    ):
-        _need_load = True
+    _already_loaded = st.session_state.get(_pool_loaded_key) is not None
 
-    if _need_load:
-        with st.status("Loading player pool…", expanded=True) as _load_status:
-            pool_result = _auto_load_pool(
-                sport=sport,
-                slate_date_str=slate_date_str,
-                contest_type_label=contest_type_label,
-                preset=preset,
-                selected_dg_id=selected_dg_id,
-                _is_historical=_is_historical,
-                _salary_client=_salary_client,
-                _today_date=_today_date,
-                slate=slate,
-                sim=sim,
-                _contest_safe=_contest_safe,
-                status_container=_load_status,
-            )
-            if pool_result is not None:
-                st.session_state[_prev_dg_key] = selected_dg_id
-                _load_status.update(label="✅ Pool loaded — run sims when ready", state="complete", expanded=False)
-            else:
-                _load_status.update(label="Load failed", state="error")
+    if not _already_loaded:
+        if selected_dg_id is not None:
+            if st.button("🚀 Load Pool & Run Sims", key="_lab_load_go", type="primary"):
+                with st.status("Ricky's loading the pool & crunching sims…", expanded=True) as _load_status:
+                    pool_result = _auto_load_pool(
+                        sport=sport,
+                        slate_date_str=slate_date_str,
+                        contest_type_label=contest_type_label,
+                        preset=preset,
+                        selected_dg_id=selected_dg_id,
+                        _is_historical=_is_historical,
+                        _salary_client=_salary_client,
+                        _today_date=_today_date,
+                        slate=slate,
+                        sim=sim,
+                        _contest_safe=_contest_safe,
+                        status_container=_load_status,
+                    )
+                    if pool_result is not None:
+                        # Run sims immediately after pool loads
+                        _load_status.write(f"Running sims ({sim.n_sims:,} iterations)…")
+                        try:
+                            _CONTEST_NAME_TO_PIPELINE_BTN = {
+                                "GPP Main": "GPP_MAIN", "Cash Main": "CASH", "Showdown": "GPP_MAIN",
+                            }
+                            _pc = _CONTEST_NAME_TO_PIPELINE_BTN.get(contest_type_label, "GPP_MAIN")
+                            _PIPELINE_TO_OPTIMIZER_BTN = {"GPP_MAIN": "GPP_150", "CASH": "CASH"}
+                            _oc = _PIPELINE_TO_OPTIMIZER_BTN.get(_pc, "GPP_20")
 
-    # Reload inside the completed status — expand to reveal
-    if st.session_state.get(_pool_loaded_key) is not None and not _need_load:
-        with st.status("✅ Pool loaded — run sims when ready", state="complete", expanded=False) as _done_status:
-            if st.button("🔄 Reload Pool", key="_lab_force_reload"):
+                            player_results = _build_player_level_sim_results(pool_result, sim.variance)
+                            sim.player_results = player_results
+
+                            _edge_df = compute_edge_metrics(
+                                pool_result,
+                                calibration_state=slate.calibration_state,
+                                variance=sim.variance,
+                            )
+                            _lu = build_ricky_lineups(
+                                edge_df=_edge_df,
+                                contest_type=_oc,
+                                calibration_state=slate.calibration_state,
+                                salary_cap=SALARY_CAP,
+                            )
+                            if not _lu.empty:
+                                _pipeline_df = run_sims_pipeline(
+                                    pool=pool_result,
+                                    lineups_df=_lu,
+                                    contest_type=_pc,
+                                    n_sims=sim.n_sims,
+                                    variance=sim.variance,
+                                    slate_date=slate.slate_date,
+                                    draft_group_id=sim.draft_group_id,
+                                )
+                                sim.pipeline_output[_pc] = _pipeline_df
+
+                            slate.edge_df = _edge_df
+                            if "Edge" not in slate.active_layers:
+                                slate.active_layers.append("Edge")
+                            set_slate_state(slate)
+                            set_sim_state(sim)
+                            _load_status.write(f"✅ Sims complete — {len(player_results)} players analyzed.")
+                        except Exception as _sim_exc:
+                            _load_status.write(f"⚠️ Sims failed: {_sim_exc}")
+                        _load_status.update(label="✅ Pool & sims loaded", state="complete", expanded=False)
+                    else:
+                        _load_status.update(label="Load failed", state="error")
+                st.rerun()
+        # else: no slate — message already shown above by the slate picker
+    else:
+        # Already loaded — show status + reload option
+        with st.status("✅ Pool & sims loaded", state="complete", expanded=False):
+            if st.button("🔄 Reload Pool & Sims", key="_lab_force_reload"):
                 st.session_state.pop(_pool_loaded_key, None)
                 st.rerun()
 
@@ -1156,7 +1217,7 @@ def main() -> None:
                 _prev_games = st.session_state.get(_prev_games_key, [])
                 if sorted(selected_games) != sorted(_prev_games):
                     st.session_state[_prev_games_key] = selected_games
-                    st.caption("⚠️ Game filter changed — hit **Run Sims** below to refresh.")
+                    st.caption("⚠️ Game filter changed — hit **Re-run Sims** below to refresh.")
             else:
                 # No games selected — clear the previous selection tracker
                 if st.session_state.get(_prev_games_key):
@@ -1298,29 +1359,6 @@ def main() -> None:
         sim.draft_group_id = int(slate.draft_group_id)
         set_sim_state(sim)
 
-    # Sim controls — compact row
-    col_mode, col_var, col_nsims = st.columns(3)
-    with col_mode:
-        sim_mode = st.radio("Mode", ["Live", "Historical"], horizontal=True, key="_lab_mode",
-                            index=0 if sim.sim_mode == "Live" else 1)
-        if sim_mode != sim.sim_mode:
-            sim.sim_mode = sim_mode
-            set_sim_state(sim)
-    with col_var:
-        variance = st.slider(
-            "Sim Variance", min_value=0.5, max_value=2.0, step=0.1,
-            value=float(sim.variance), key="_lab_variance",
-        )
-        if variance != sim.variance:
-            sim.variance = variance
-            set_sim_state(sim)
-    with col_nsims:
-        n_sims = st.number_input("MC Iterations", min_value=1000, max_value=50000,
-                                 step=1000, value=int(sim.n_sims), key="_lab_nsims")
-        if n_sims != sim.n_sims:
-            sim.n_sims = int(n_sims)
-            set_sim_state(sim)
-
     # Map contest type to pipeline key (no extra selector needed)
     _CONTEST_NAME_TO_PIPELINE = {
         "GPP Main": "GPP_MAIN",
@@ -1329,9 +1367,9 @@ def main() -> None:
     }
     pipeline_contest = _CONTEST_NAME_TO_PIPELINE.get(contest_type_label, "GPP_MAIN")
 
-    # Run sims — always manual, never auto
+    # Re-run sims (if user changed variance, game filter, etc.)
     if not pool.empty:
-        if st.button("🎲 Run Sims", key="_lab_run_sims", type="primary"):
+        if st.button("🔄 Re-run Sims", key="_lab_run_sims"):
             with st.spinner(f"Ricky's crunching {sim.n_sims:,} Monte Carlo iterations…"):
                 try:
                     player_results = _build_player_level_sim_results(pool, sim.variance)
@@ -1948,15 +1986,16 @@ def main() -> None:
                     )
                     sim.set_rci_result(contest_label, rci_result)
                     pct = int(rci_result.rci_score)
-                    color = (
+                    _status_key = (
                         "green" if rci_result.rci_status == "green"
                         else "orange" if rci_result.rci_status == "yellow"
                         else "red"
                     )
+                    _hex = _STATUS_COLORS.get(_status_key, "#c27a7a")
                     st.markdown(f"**{contest_label}**")
                     st.progress(pct)
                     st.markdown(
-                        f"<span style='color:{color}'>RCI: {pct}/100</span>",
+                        f"<span style='color:{_hex}'>RCI: {pct}/100</span>",
                         unsafe_allow_html=True,
                     )
                     st.caption(rci_result.recommendation)
@@ -2022,10 +2061,11 @@ def main() -> None:
         with gcol:
             score = _gauge_score(pr, contest)
             pct = int(score * 100)
-            color = "green" if pct >= 60 else "orange" if pct >= 35 else "red"
+            _gk = "green" if pct >= 60 else "orange" if pct >= 35 else "red"
+            _ghex = _STATUS_COLORS.get(_gk, "#c27a7a")
             st.markdown(f"**{contest}**")
             st.progress(pct)
-            st.markdown(f"<span style='color:{color}'>{pct}%</span>", unsafe_allow_html=True)
+            st.markdown(f"<span style='color:{_ghex}'>{pct}%</span>", unsafe_allow_html=True)
             sim.contest_gauges[contest] = {"score": score, "label": contest}
     set_sim_state(sim)
 
