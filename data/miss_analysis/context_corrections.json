@@ -1,0 +1,50 @@
+{
+  "computed_at": "2026-03-08T16:15:45.249261+00:00",
+  "strength": 0.5,
+  "n_active": 0,
+  "n_total": 6,
+  "factors": {
+    "blowout": {
+      "correction_fp": 0.0,
+      "raw_residual": 0.0,
+      "n": 0,
+      "active": false,
+      "reason": "< 10 samples"
+    },
+    "high_pace": {
+      "correction_fp": 0.0,
+      "raw_residual": 0.0,
+      "n": 0,
+      "active": false,
+      "reason": "< 10 samples"
+    },
+    "low_pace": {
+      "correction_fp": 0.0,
+      "raw_residual": 0.0,
+      "n": 0,
+      "active": false,
+      "reason": "< 10 samples"
+    },
+    "b2b": {
+      "correction_fp": 0.0,
+      "raw_residual": 0.0,
+      "n": 0,
+      "active": false,
+      "reason": "< 10 samples"
+    },
+    "inconsistent": {
+      "correction_fp": 0.0,
+      "raw_residual": 0.0,
+      "n": 0,
+      "active": false,
+      "reason": "< 10 samples"
+    },
+    "injury_flag": {
+      "correction_fp": 0.0,
+      "raw_residual": 0.0,
+      "n": 0,
+      "active": false,
+      "reason": "< 10 samples"
+    }
+  }
+}

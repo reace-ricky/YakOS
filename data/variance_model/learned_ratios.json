@@ -1,0 +1,53 @@
+{
+  "computed_at": "2026-03-08T16:15:45.205550+00:00",
+  "n_slates": 1,
+  "n_player_slates": 96,
+  "ratios": {
+    "lt5k": 0.5722,
+    "5_65k": 0.64,
+    "65_8k": 0.44,
+    "8_10k": 0.35,
+    "10k_plus": 0.3
+  },
+  "brackets": {
+    "lt5k": {
+      "n": 53,
+      "learned_ratio": 0.5722,
+      "clamped_ratio": 0.5722,
+      "static_ratio": 1.04,
+      "delta_pct": -45.0,
+      "using": "learned",
+      "value": 0.5722,
+      "mean_proj": 15.8,
+      "residual_std": 9.0
+    },
+    "5_65k": {
+      "n": 26,
+      "learned_ratio": null,
+      "using": "static",
+      "value": 0.64,
+      "reason": "< 30 samples"
+    },
+    "65_8k": {
+      "n": 9,
+      "learned_ratio": null,
+      "using": "static",
+      "value": 0.44,
+      "reason": "< 30 samples"
+    },
+    "8_10k": {
+      "n": 4,
+      "learned_ratio": null,
+      "using": "static",
+      "value": 0.35,
+      "reason": "< 30 samples"
+    },
+    "10k_plus": {
+      "n": 4,
+      "learned_ratio": null,
+      "using": "static",
+      "value": 0.3,
+      "reason": "< 30 samples"
+    }
+  }
+}
