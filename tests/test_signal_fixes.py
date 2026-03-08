@@ -38,34 +38,34 @@ def _edge(pool: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 class TestCeilingGapFactor:
-    """Test the new _ceiling_gap_factor function."""
+    """Test the continuous _ceiling_gap_factor interpolation."""
 
     def test_very_compressed_ceiling(self):
-        """ceil/proj < 1.10 → smash_gap = 0.10."""
+        """ceil/proj 1.05 → smash_gap ≈ 0.125 (interpolated)."""
         proj = pd.Series([10.0])
         ceil = pd.Series([10.5])   # 1.05x
         floor = pd.Series([7.0])
         smash_gap, _ = _ceiling_gap_factor(proj, ceil, floor)
-        assert smash_gap.iloc[0] == pytest.approx(0.10)
+        assert smash_gap.iloc[0] == pytest.approx(0.125, abs=0.01)
 
     def test_compressed_ceiling(self):
-        """ceil/proj 1.10-1.20 → smash_gap = 0.30."""
+        """ceil/proj 1.15 → smash_gap ≈ 0.35 (interpolated)."""
         proj = pd.Series([10.0])
         ceil = pd.Series([11.5])   # 1.15x
         floor = pd.Series([7.0])
         smash_gap, _ = _ceiling_gap_factor(proj, ceil, floor)
-        assert smash_gap.iloc[0] == pytest.approx(0.30)
+        assert smash_gap.iloc[0] == pytest.approx(0.35, abs=0.01)
 
     def test_below_normal_ceiling(self):
-        """ceil/proj 1.20-1.30 → smash_gap = 0.60."""
+        """ceil/proj 1.25 → smash_gap ≈ 0.65 (interpolated)."""
         proj = pd.Series([10.0])
         ceil = pd.Series([12.5])   # 1.25x
         floor = pd.Series([7.0])
         smash_gap, _ = _ceiling_gap_factor(proj, ceil, floor)
-        assert smash_gap.iloc[0] == pytest.approx(0.60)
+        assert smash_gap.iloc[0] == pytest.approx(0.65, abs=0.01)
 
     def test_normal_ceiling(self):
-        """ceil/proj 1.30-1.45 → smash_gap = 1.00 (no adjustment)."""
+        """ceil/proj 1.40 → smash_gap = 1.00 (anchor point)."""
         proj = pd.Series([10.0])
         ceil = pd.Series([14.0])   # 1.40x
         floor = pd.Series([7.0])
@@ -73,7 +73,7 @@ class TestCeilingGapFactor:
         assert smash_gap.iloc[0] == pytest.approx(1.00)
 
     def test_above_normal_ceiling(self):
-        """ceil/proj 1.45-1.60 → smash_gap = 1.10."""
+        """ceil/proj 1.50 → smash_gap = 1.10 (anchor point)."""
         proj = pd.Series([10.0])
         ceil = pd.Series([15.0])   # 1.50x
         floor = pd.Series([7.0])
@@ -81,43 +81,43 @@ class TestCeilingGapFactor:
         assert smash_gap.iloc[0] == pytest.approx(1.10)
 
     def test_huge_ceiling(self):
-        """ceil/proj >= 1.60 → smash_gap = 1.20."""
+        """ceil/proj 2.00 → smash_gap = 1.25 (extrapolated max)."""
         proj = pd.Series([10.0])
         ceil = pd.Series([20.0])   # 2.00x
         floor = pd.Series([7.0])
         smash_gap, _ = _ceiling_gap_factor(proj, ceil, floor)
-        assert smash_gap.iloc[0] == pytest.approx(1.20)
+        assert smash_gap.iloc[0] == pytest.approx(1.25)
 
 
 class TestFloorGapFactor:
-    """Test bust_gap from _ceiling_gap_factor."""
+    """Test bust_gap continuous interpolation from _ceiling_gap_factor."""
 
     def test_very_safe_floor(self):
-        """floor/proj > 0.90 → bust_gap = 0.10."""
+        """floor/proj 0.95 → bust_gap ≈ 0.05 (near-zero bust risk)."""
         proj = pd.Series([10.0])
         ceil = pd.Series([14.0])
         floor = pd.Series([9.5])   # 0.95x
         _, bust_gap = _ceiling_gap_factor(proj, ceil, floor)
-        assert bust_gap.iloc[0] == pytest.approx(0.10)
+        assert bust_gap.iloc[0] == pytest.approx(0.05, abs=0.01)
 
     def test_safe_floor(self):
-        """floor/proj 0.80-0.90 → bust_gap = 0.50."""
+        """floor/proj 0.85 → bust_gap ≈ 0.325 (interpolated)."""
         proj = pd.Series([10.0])
         ceil = pd.Series([14.0])
         floor = pd.Series([8.5])   # 0.85x
         _, bust_gap = _ceiling_gap_factor(proj, ceil, floor)
-        assert bust_gap.iloc[0] == pytest.approx(0.50)
+        assert bust_gap.iloc[0] == pytest.approx(0.325, abs=0.01)
 
     def test_normal_floor(self):
-        """floor/proj 0.65-0.80 → bust_gap = 1.00 (no adjustment)."""
+        """floor/proj 0.70 → bust_gap ≈ 0.85 (interpolated)."""
         proj = pd.Series([10.0])
         ceil = pd.Series([14.0])
         floor = pd.Series([7.0])   # 0.70x
         _, bust_gap = _ceiling_gap_factor(proj, ceil, floor)
-        assert bust_gap.iloc[0] == pytest.approx(1.00)
+        assert bust_gap.iloc[0] == pytest.approx(0.85, abs=0.01)
 
     def test_risky_floor(self):
-        """floor/proj 0.50-0.65 → bust_gap = 1.15."""
+        """floor/proj 0.55 → bust_gap = 1.15 (anchor point)."""
         proj = pd.Series([10.0])
         ceil = pd.Series([14.0])
         floor = pd.Series([5.5])   # 0.55x
@@ -125,12 +125,12 @@ class TestFloorGapFactor:
         assert bust_gap.iloc[0] == pytest.approx(1.15)
 
     def test_extreme_bust_floor(self):
-        """floor/proj < 0.50 → bust_gap = 1.30."""
+        """floor/proj 0.30 → bust_gap = 1.40 (max bust risk)."""
         proj = pd.Series([10.0])
         ceil = pd.Series([14.0])
         floor = pd.Series([3.0])   # 0.30x
         _, bust_gap = _ceiling_gap_factor(proj, ceil, floor)
-        assert bust_gap.iloc[0] == pytest.approx(1.30)
+        assert bust_gap.iloc[0] == pytest.approx(1.40)
 
 
 # ---------------------------------------------------------------------------

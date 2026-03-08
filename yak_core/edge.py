@@ -151,49 +151,34 @@ def _ceiling_gap_factor(
     ceil: pd.Series,
     floor: pd.Series,
 ) -> tuple[pd.Series, pd.Series]:
-    """Return (smash_gap_mult, bust_gap_mult) based on actual ceiling/floor gap.
+    """Return (smash_gap_mult, bust_gap_mult) using continuous interpolation.
 
-    The salary-bracket base rates assume an *average* ceiling gap for each
-    bracket.  Individual players can have much tighter or wider ranges.
-    This factor corrects for that so a player with proj=9.4 and ceil=10.75
-    (ratio 1.14) doesn't get the same smash_prob as a player with ceil=20
-    (ratio 2.12).
+    Uses ``np.interp`` for smooth multipliers instead of discrete buckets.
+    This ensures every player gets a unique adjustment based on their actual
+    ceiling/floor gap, eliminating the "everyone gets 0.59" problem.
 
     Smash gap (ceil/proj ratio):
-      < 1.10 → 0.10  (nearly zero upside)
-      1.10–1.20 → 0.30  (very compressed)
-      1.20–1.30 → 0.60  (below normal)
-      1.30–1.45 → 1.00  (normal — no adjustment)
-      1.45–1.60 → 1.10  (above normal)
-      ≥ 1.60 → 1.20  (huge ceiling)
+      1.00 → 0.05 | 1.10 → 0.20 | 1.20 → 0.50 | 1.30 → 0.80 | 1.40 → 1.00
+      1.50 → 1.10 | 1.60 → 1.18 | 1.80 → 1.25
 
     Bust gap (floor/proj ratio):
-      > 0.90 → 0.10  (very safe floor)
-      0.80–0.90 → 0.50  (safe)
-      0.65–0.80 → 1.00  (normal — no adjustment)
-      0.50–0.65 → 1.15  (risky)
-      < 0.50 → 1.30  (extreme bust risk)
+      0.95 → 0.05 | 0.90 → 0.15 | 0.80 → 0.50 | 0.70 → 0.85 | 0.65 → 1.00
+      0.55 → 1.15 | 0.45 → 1.30 | 0.30 → 1.40
     """
     proj_safe = proj.clip(lower=1.0)
-    ceil_ratio = ceil / proj_safe
-    floor_ratio = floor / proj_safe
+    ceil_ratio = (ceil / proj_safe).values
+    floor_ratio = (floor / proj_safe).values
 
-    # Smash gap multiplier
-    smash_gap = pd.Series(1.0, index=proj.index)
-    smash_gap[ceil_ratio < 1.10] = 0.10
-    smash_gap[(ceil_ratio >= 1.10) & (ceil_ratio < 1.20)] = 0.30
-    smash_gap[(ceil_ratio >= 1.20) & (ceil_ratio < 1.30)] = 0.60
-    # 1.30–1.45 stays at 1.0 (normal)
-    smash_gap[(ceil_ratio >= 1.45) & (ceil_ratio < 1.60)] = 1.10
-    smash_gap[ceil_ratio >= 1.60] = 1.20
+    # Continuous smash gap: interpolate on ceil/proj ratio
+    _SMASH_X = [1.00, 1.10, 1.20, 1.30, 1.40, 1.50, 1.60, 1.80]
+    _SMASH_Y = [0.05, 0.20, 0.50, 0.80, 1.00, 1.10, 1.18, 1.25]
+    smash_gap = pd.Series(np.interp(ceil_ratio, _SMASH_X, _SMASH_Y), index=proj.index)
 
-    # Bust gap multiplier
-    bust_gap = pd.Series(1.0, index=proj.index)
-    bust_gap[floor_ratio > 0.90] = 0.10
-    bust_gap[(floor_ratio > 0.80) & (floor_ratio <= 0.90)] = 0.50
-    # 0.65–0.80 stays at 1.0 (normal)
-    bust_gap[(floor_ratio >= 0.50) & (floor_ratio < 0.65)] = 1.15
-    bust_gap[floor_ratio < 0.50] = 1.30
+    # Continuous bust gap: interpolate on floor/proj ratio (note: lower ratio = more bust risk)
+    # np.interp needs ascending x, so we reverse the relationship
+    _BUST_X = [0.30, 0.45, 0.55, 0.65, 0.70, 0.80, 0.90, 0.95]
+    _BUST_Y = [1.40, 1.30, 1.15, 1.00, 0.85, 0.50, 0.15, 0.05]
+    bust_gap = pd.Series(np.interp(floor_ratio, _BUST_X, _BUST_Y), index=proj.index)
 
     return smash_gap, bust_gap
 
@@ -223,46 +208,40 @@ def _compute_smash_bust(
       - $8-10K: 13% smash, 12% bust
       - $10K+: 7% smash, 9% bust
     """
-    # Base rates by salary bracket (from backtest actuals)
-    smash_base = pd.Series(0.21, index=proj.index)  # default mid-tier
-    bust_base = pd.Series(0.16, index=proj.index)
+    # Base rates by salary bracket — continuous interpolation (from backtest actuals)
+    # Anchor points: 3K→0.48, 5K→0.43, 6.5K→0.30, 8K→0.21, 10K→0.13, 12K→0.07
+    _SAL_X = [3000, 5000, 6500, 8000, 10000, 12000]
+    _SMASH_BASE_Y = [0.48, 0.43, 0.30, 0.21, 0.13, 0.07]
+    _BUST_BASE_Y = [0.40, 0.36, 0.26, 0.16, 0.12, 0.09]
+    smash_base = pd.Series(
+        np.interp(salary.values, _SAL_X, _SMASH_BASE_Y), index=proj.index
+    )
+    bust_base = pd.Series(
+        np.interp(salary.values, _SAL_X, _BUST_BASE_Y), index=proj.index
+    )
 
-    smash_base[salary < 5000] = 0.43
-    bust_base[salary < 5000] = 0.36
+    # Ownership adjustment — continuous: low own → higher smash (inverse)
+    # Anchor: 2%→1.20, 8%→1.12, 15%→1.00, 25%→0.92, 40%→0.82
+    _OWN_X = [2, 8, 15, 25, 40]
+    _OWN_SMASH_Y = [1.20, 1.12, 1.00, 0.92, 0.82]
+    own_mult_smash = pd.Series(
+        np.interp(own.values, _OWN_X, _OWN_SMASH_Y), index=proj.index
+    )
 
-    mask_5_65 = (salary >= 5000) & (salary < 6500)
-    smash_base[mask_5_65] = 0.30
-    bust_base[mask_5_65] = 0.26
+    # Chalk bust trap: high salary + high ownership → continuous bust boost
+    # Only kicks in when salary >= 7K; scales with ownership above 20%
+    _chalk_own = own.clip(lower=20) - 20  # 0 when own<=20, grows after
+    _chalk_sal = ((salary - 7000) / 3000).clip(0, 1)  # 0 at 7K, 1 at 10K
+    own_mult_bust = 1.0 + (_chalk_own / 100.0) * _chalk_sal * 1.0  # up to ~1.20
 
-    mask_65_8 = (salary >= 6500) & (salary < 8000)
-    smash_base[mask_65_8] = 0.21
-    bust_base[mask_65_8] = 0.16
-
-    mask_8_10 = (salary >= 8000) & (salary < 10000)
-    smash_base[mask_8_10] = 0.13
-    bust_base[mask_8_10] = 0.12
-
-    smash_base[salary >= 10000] = 0.07
-    bust_base[salary >= 10000] = 0.09
-
-    # Ownership adjustment: low ownership = higher smash (inverse correlation)
-    own_mult_smash = pd.Series(1.0, index=proj.index)
-    own_mult_smash[own < 10] = 1.15
-    own_mult_smash[(own >= 10) & (own < 20)] = 1.05
-    own_mult_smash[(own >= 20) & (own < 30)] = 0.95
-    own_mult_smash[own >= 30] = 0.85
-
-    # Chalk bust trap: high salary + high ownership
-    own_mult_bust = pd.Series(1.0, index=proj.index)
-    chalk_trap = (salary >= 8000) & (own >= 25)
-    own_mult_bust[chalk_trap] = 1.20
-
-    # Value efficiency adjustment
+    # Value efficiency adjustment — continuous
+    # Anchor: 2.5→0.85, 3.5→0.95, 4.5→1.05, 5.5→1.18, 6.5→1.25
     val_eff = proj / (salary / 1000.0).clip(lower=1.0)
-    val_mult = pd.Series(1.0, index=proj.index)
-    val_mult[val_eff >= 5.0] = 1.20
-    val_mult[(val_eff >= 4.0) & (val_eff < 5.0)] = 1.10
-    val_mult[val_eff < 3.0] = 0.90
+    _VAL_X = [2.5, 3.5, 4.5, 5.5, 6.5]
+    _VAL_Y = [0.85, 0.95, 1.05, 1.18, 1.25]
+    val_mult = pd.Series(
+        np.interp(val_eff.values, _VAL_X, _VAL_Y), index=proj.index
+    )
 
     # Ceiling/floor gap adjustment — the key fix.
     # Prevents inflated smash_prob when ceiling is barely above projection.
