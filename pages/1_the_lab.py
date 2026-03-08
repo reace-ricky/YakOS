@@ -948,10 +948,7 @@ def main() -> None:
         _pick = max(_candidates, key=lambda s: s["game_count"])
         selected_dg_id = _pick["draft_group_id"]
         selected_slate_label = _pick["label"]
-        st.caption(
-            f"{_pick['label']} · DG {selected_dg_id} · "
-            f"{_pick['game_count']} game(s)"
-        )
+        # Slate info stored internally — no visible caption (noise)
     else:
         st.info(f"No slates found for {slate_date_str}. Try a different date.")
 
