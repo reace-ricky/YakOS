@@ -362,108 +362,162 @@ def generate_slate_overview(
     pool = pool.reset_index(drop=True)
     signals_df = signals_df.reset_index(drop=True)
 
-    sal = _safe_numeric(pool.get("salary", pd.Series()))
-    proj = _safe_numeric(pool.get("proj", pd.Series()))
-    own = _safe_numeric(pool.get("ownership", pool.get("own_pct", pd.Series())))
-    n_players = len(pool)
+    # IMPORTANT: Use signals_df for all column lookups since it's sorted by
+    # edge_rank and its rows won't match pool order after reset_index.
+    sal = _safe_numeric(signals_df.get("salary", pd.Series()))
+    proj = _safe_numeric(signals_df.get("proj", pd.Series()))
+    own = _safe_numeric(signals_df.get(
+        "ownership", signals_df.get("own_pct", pd.Series())
+    ))
+    n_players = len(signals_df)
 
-    # Bullet 1: Core plays — top players to build lineups around
-    # Use edge_score if available, fall back to projection rank
+    # Track player names used in bullets so we never repeat a name.
+    _used_names: set = set()
+
+    # ------------------------------------------------------------------
+    # Bullet 1: ANCHOR STUDS — $7K+ players with best edge.
+    # "Who are you paying up for tonight?"
+    # ------------------------------------------------------------------
     _edge_col = "edge_score" if "edge_score" in signals_df.columns else "edge_composite"
     _has_edge = _edge_col in signals_df.columns and signals_df[_edge_col].max() > 0
-    if _has_edge:
-        _core = signals_df.nlargest(4, _edge_col)
-    else:
-        _core = signals_df.nlargest(4, "proj") if "proj" in signals_df.columns else pd.DataFrame()
 
-    if not _core.empty:
-        core_parts = []
-        for _, r in _core.iterrows():
+    _stud_mask = sal >= 7000
+    _studs = signals_df[_stud_mask]
+    if _has_edge and not _studs.empty:
+        _studs = _studs.nlargest(3, _edge_col)
+    elif not _studs.empty:
+        _studs = _studs.nlargest(3, "proj")
+    else:
+        _studs = pd.DataFrame()
+
+    if not _studs.empty:
+        parts = []
+        for _, r in _studs.iterrows():
             name = r.get("player_name", "?")
             s = r.get("salary", 0)
             p = r.get("proj", 0)
-            core_parts.append(f"{name} (${s:,.0f}/{p:.1f})")
-        bullets.append(f"Core builds: {', '.join(core_parts)}")
-    else:
-        bullets.append(f"{n_players} players on the slate")
+            parts.append(f"{name} (${s:,.0f}/{p:.1f})")
+            _used_names.add(name)
+        bullets.append(f"Anchor studs: {', '.join(parts)}")
 
-    # Bullet 2: Injury / Pop Catalyst opportunities
-    # Check both legacy injury_bump_fp AND pop_catalyst signals so the
-    # overview bullet doesn't say "no injuries" when pop catalyst is firing.
-    bump = _safe_numeric(signals_df.get("injury_bump_fp", pd.Series(0.0, index=signals_df.index)))
-    pop_score = _safe_numeric(signals_df.get("pop_catalyst_score", pd.Series(0.0, index=signals_df.index)))
-    pop_inj = _safe_numeric(signals_df.get("pop_injury_opp", pd.Series(0.0, index=signals_df.index)))
+    # ------------------------------------------------------------------
+    # Bullet 2: VALUE / LEVERAGE — cheap players with the best edge.
+    # "Where are you saving salary and still getting upside?"
+    # Excludes anyone already in Bullet 1.
+    # ------------------------------------------------------------------
+    _val_mask = sal < 7000
+    _vals = signals_df[_val_mask]
+    if _has_edge and not _vals.empty:
+        _vals = _vals.nlargest(10, _edge_col)  # grab extra so we can filter
+    elif not _vals.empty:
+        _vals = _vals.nlargest(10, "proj")
 
-    cascade_players = signals_df[bump > 0.5]
-    pop_players = signals_df[pop_score >= 0.15]
+    # Prefer players with pop catalyst or leverage signals
+    _pop_col = "pop_catalyst_score"
+    if _pop_col in _vals.columns:
+        _vals = _vals.sort_values(
+            [_pop_col, _edge_col if _has_edge else "proj"], ascending=False
+        )
+    _vals = _vals[~_vals["player_name"].isin(_used_names)].head(3)
 
-    if not cascade_players.empty:
-        top_bump = cascade_players.nlargest(2, "injury_bump_fp")
-        names = [f"{r['player_name']} (+{r['injury_bump_fp']:.1f} FP)" for _, r in top_bump.iterrows()]
-        injury_impact = f"{len(cascade_players)} players benefiting from injury cascades"
-        bullets.append(f"Injury cascades: {', '.join(names)} — minutes opening up")
-    elif not pop_players.empty:
-        # Pop catalyst detected opportunity even without raw injury_bump_fp
-        top_pop = pop_players.nlargest(2, "pop_catalyst_score")
+    if not _vals.empty:
         parts = []
-        for _, r in top_pop.iterrows():
+        for _, r in _vals.iterrows():
+            name = r.get("player_name", "?")
+            s = r.get("salary", 0)
+            p = r.get("proj", 0)
+            # Add the pop catalyst tag if it exists for context
             tag = r.get("pop_catalyst_tag", "")
-            parts.append(f"{r['player_name']} ({tag})" if tag else r["player_name"])
-        injury_impact = f"{len(pop_players)} players with pop catalyst signals"
-        bullets.append(f"Pop catalysts firing: {', '.join(parts)} — situational upside detected")
-    else:
-        bullets.append("No significant injury cascades or pop catalysts on this slate")
+            if tag:
+                parts.append(f"{name} (${s:,.0f} — {tag})")
+            else:
+                parts.append(f"{name} (${s:,.0f}/{p:.1f})")
+            _used_names.add(name)
+        bullets.append(f"Value plays: {', '.join(parts)}")
 
-    # Bullet 3: Ownership concentration
+    # ------------------------------------------------------------------
+    # Bullet 3: CHALK / FADES — ownership traps or high-owned fades.
+    # "Who should you avoid or at least be aware of?"
+    # Excludes anyone already named.
+    # ------------------------------------------------------------------
+    _own_col = "ownership" if "ownership" in signals_df.columns else "own_pct"
     if not own.empty and own.max() > 0:
-        chalk = pool[own >= 25]
-        if not chalk.empty:
-            chalk_names = chalk.nlargest(2, "ownership" if "ownership" in chalk.columns else "own_pct")
-            names = [f"{r.get('player_name', '?')} ({own.iloc[i]:.0f}%)" for i, (_, r) in enumerate(chalk_names.iterrows())]
-            bullets.append(f"Chalk alert: {', '.join(names)} — fade or pay up knowingly")
+        # Fades: high ownership + low edge signal
+        _fade_mask = (own >= 15) & (sal >= 6000)
+        if "sig_own_mismatch" in signals_df.columns:
+            _fade_mask = _fade_mask & (signals_df["sig_own_mismatch"] <= 0.15)
+        _fades = signals_df[_fade_mask & ~signals_df["player_name"].isin(_used_names)]
+        _fades = _fades.nlargest(3, _own_col if _own_col in _fades.columns else "proj")
+
+        # Chalk: high ownership but might still be good
+        chalk = signals_df[(own >= 25) & ~signals_df["player_name"].isin(_used_names)]
+        chalk = chalk.nlargest(2, _own_col if _own_col in chalk.columns else "proj")
+
+        if not _fades.empty:
+            fade_parts = []
+            for _, r in _fades.iterrows():
+                name = r.get("player_name", "?")
+                o = r.get("ownership", r.get("own_pct", 0))
+                fade_parts.append(f"{name} ({o:.0f}%)")
+                _used_names.add(name)
+            top_fades = _fades["player_name"].tolist()
+            bullets.append(f"Fade candidates: {', '.join(fade_parts)} — chalk without edge")
+        elif not chalk.empty:
+            chalk_parts = []
+            for _, r in chalk.iterrows():
+                name = r.get("player_name", "?")
+                o = r.get("ownership", r.get("own_pct", 0))
+                chalk_parts.append(f"{name} ({o:.0f}%)")
+                _used_names.add(name)
+            bullets.append(f"Chalk alert: {', '.join(chalk_parts)} — pay up or fade")
         else:
             bullets.append("Ownership spread is flat — no extreme chalk")
+    else:
+        bullets.append("No ownership data — can't assess chalk")
 
-    # Bullet 4: Top value mismatches
-    top_edges = signals_df.nlargest(3, "edge_composite")
-    if not top_edges.empty:
-        top_plays = top_edges["player_name"].tolist()
-        edge_names = [
-            f"{r['player_name']} ({r['n_signals']} signal{'s' if r['n_signals'] != 1 else ''})"
-            for _, r in top_edges.iterrows() if r["n_signals"] > 0
-        ]
-        if not edge_names:
-            edge_names = [r["player_name"] for _, r in top_edges.head(3).iterrows()]
-        bullets.append(f"Top edges: {', '.join(edge_names)}")
+    # ------------------------------------------------------------------
+    # Bullet 4: SLATE TEXTURE — what kind of night is it?
+    # Injury-driven? Minutes shifts? Condensed edges?
+    # Only names NOT already used.
+    # ------------------------------------------------------------------
+    bump = _safe_numeric(signals_df.get("injury_bump_fp", pd.Series(0.0, index=signals_df.index)))
+    pop_score = _safe_numeric(signals_df.get("pop_catalyst_score", pd.Series(0.0, index=signals_df.index)))
 
-    # Bullet 5: Minutes trend (game-log driven) or Fades
+    cascade_count = int((bump > 0.5).sum())
+    pop_count = int((pop_score >= 0.15).sum())
+
     _rolling5 = _safe_numeric(signals_df.get("rolling_min_5", pd.Series(0.0)))
     _rolling10 = _safe_numeric(signals_df.get("rolling_min_10", pd.Series(0.0)))
     _has_game_logs = _rolling5.max() > 0 and _rolling10.max() > 0
+    riser_count = 0
     if _has_game_logs:
         _trend = _rolling5 - _rolling10
-        _risers = signals_df[_trend > 3].copy()
-        if not _risers.empty:
-            _risers = _risers.assign(_trend=_trend[_risers.index])
-            _top_risers = _risers.nlargest(3, "_trend")
-            riser_names = [
-                f"{r['player_name']} (+{r['_trend']:.0f} min)"
-                for _, r in _top_risers.iterrows()
-            ]
-            bullets.append(f"Minutes risers: {', '.join(riser_names)} — role expanding")
+        riser_count = int((_trend > 3).sum())
 
-    if "sig_own_mismatch" in signals_df.columns:
-        # Fades = high ownership, low projection rank (overvalued by field)
-        overvalued = signals_df[
-            (own >= 20) & (signals_df["sig_own_mismatch"] <= 0.1) & (sal >= 7000)
-        ]
-        if not overvalued.empty:
-            fade_rows = overvalued.nlargest(3, "ownership" if "ownership" in overvalued.columns else "own_pct")
-            top_fades = fade_rows["player_name"].tolist()
-            bullets.append(f"Fade candidates: {', '.join(top_fades)} — chalk without edge")
+    texture_parts = []
+    if cascade_count > 0:
+        texture_parts.append(f"{cascade_count} injury cascade{'s' if cascade_count != 1 else ''}")
+        injury_impact = f"{cascade_count} players benefiting from injury cascades"
+    if pop_count > 0:
+        texture_parts.append(f"{pop_count} pop catalyst{'s' if pop_count != 1 else ''}")
+        if not injury_impact:
+            injury_impact = f"{pop_count} players with pop catalyst signals"
+    if riser_count > 0:
+        texture_parts.append(f"{riser_count} minutes riser{'s' if riser_count != 1 else ''}")
 
-    # Trim to 5 bullets max
-    bullets = bullets[:5]
+    if texture_parts:
+        bullets.append(f"Slate drivers: {', '.join(texture_parts)} creating opportunity")
+    else:
+        bullets.append("Clean slate — no major injury or role shifts detected")
+
+    # ------------------------------------------------------------------
+    # Populate top_plays / top_fades for downstream use
+    # ------------------------------------------------------------------
+    top_edges_df = signals_df.nlargest(3, _edge_col if _has_edge else "proj")
+    top_plays = top_edges_df["player_name"].tolist()
+
+    # Trim to 4 bullets max — keep it tight
+    bullets = bullets[:4]
 
     # Recommendation
     n_strong = (signals_df["n_signals"] >= 2).sum()
