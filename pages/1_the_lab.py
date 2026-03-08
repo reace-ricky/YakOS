@@ -330,6 +330,19 @@ def _filter_ineligible_players(pool: pd.DataFrame) -> pd.DataFrame:
 
 
 def _extract_games(pool: pd.DataFrame) -> list[str]:
+    """Extract unique game matchups from the pool.
+
+    Prefers the ``game_info`` column (e.g. "HOU @ SAS") set by
+    ``fetch_dk_draftables``.  Falls back to building matchups from
+    team + opp columns.
+    """
+    # Prefer DK game_info column ("HOU @ SAS" format)
+    if "game_info" in pool.columns:
+        games = pool["game_info"].dropna().str.strip()
+        games = games[games != ""].unique().tolist()
+        if games:
+            return sorted(games)
+
     opp_col = "opp" if "opp" in pool.columns else (
         "opponent" if "opponent" in pool.columns else None
     )
@@ -337,26 +350,60 @@ def _extract_games(pool: pd.DataFrame) -> list[str]:
         teams = pool["team"].str.strip().str.upper().fillna("")
         opps = pool[opp_col].str.strip().str.upper().fillna("")
         pairs = {
-            " vs ".join(sorted([t, o]))
+            f"{t} @ {o}" if t and o else ""
             for t, o in zip(teams, opps)
-            if t and o
         }
-        return sorted(pairs)
+        # Dedupe: "HOU @ SAS" and "SAS @ HOU" are the same game
+        seen: set[frozenset] = set()
+        unique: list[str] = []
+        for p in sorted(pairs):
+            if not p:
+                continue
+            parts = frozenset(x.strip() for x in p.replace("@", " ").split())
+            if parts not in seen:
+                seen.add(parts)
+                unique.append(p)
+        return unique
     elif "team" in pool.columns:
         return sorted(pool["team"].dropna().str.strip().str.upper().unique().tolist())
     return []
 
 
+def _game_key(team: str, opp: str) -> str:
+    """Canonical key for matching a game: sorted alphabetically."""
+    return " vs ".join(sorted([team.upper().strip(), opp.upper().strip()]))
+
+
 def _filter_pool_by_games(pool: pd.DataFrame, selected_games: list[str], opp_col: str) -> pd.DataFrame:
     if not selected_games:
         return pool
+
+    # Build canonical keys from the selected games ("HOU @ SAS" → {"HOU", "SAS"})
+    selected_sets = []
+    for g in selected_games:
+        parts = [t.strip().upper() for t in g.replace("@", " vs ").split("vs") if t.strip()]
+        selected_sets.append(frozenset(parts))
+
+    # Match if the player's team+opp pair is in any selected game
     teams = pool["team"].str.strip().str.upper().fillna("")
-    opps = pool[opp_col].str.strip().str.upper().fillna("")
-    keys = pd.Series(
-        [" vs ".join(sorted([t, o])) if t and o else t for t, o in zip(teams, opps)],
-        index=pool.index,
-    )
-    return pool[keys.isin(selected_games)].reset_index(drop=True)
+    opps = pool[opp_col].str.strip().str.upper().fillna("") if opp_col in pool.columns else pd.Series("", index=pool.index)
+
+    # Also check game_info column directly if available
+    if "game_info" in pool.columns:
+        game_infos = pool["game_info"].fillna("").str.strip()
+        mask = game_infos.isin(selected_games)
+    else:
+        mask = pd.Series(False, index=pool.index)
+
+    # Fallback: match via team/opp pairs
+    for idx in pool.index:
+        if mask.get(idx, False):
+            continue
+        pair = frozenset([teams.get(idx, ""), opps.get(idx, "")])
+        if pair in selected_sets:
+            mask.at[idx] = True
+
+    return pool[mask].reset_index(drop=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1068,10 +1115,11 @@ def main() -> None:
     if hub_pool is not None and not hub_pool.empty:
         all_games = _extract_games(hub_pool)
 
-        # Game filter — checkboxes inside a collapsed expander
+        # Game filter — matchup checkboxes inside a collapsed expander
         selected_games: list[str] = []
+        _prev_games_key = f"_prev_selected_games_{slate_date_str}_{_contest_safe}"
         if all_games:
-            _game_exp_label = f"🎮 Games ({len(all_games)}) · {len(hub_pool)} players"
+            _game_exp_label = f"🏀 Matchups ({len(all_games)}) · {len(hub_pool)} players"
             with st.expander(_game_exp_label, expanded=False):
                 for _g in all_games:
                     if st.checkbox(_g, value=False, key=f"_gf_{_g}"):
@@ -1086,7 +1134,55 @@ def main() -> None:
                 if opp_col:
                     hub_pool = _filter_pool_by_games(hub_pool, selected_games, opp_col)
                     slate.player_pool = hub_pool
-                st.caption(f"{len(selected_games)} of {len(all_games)} games selected · {len(hub_pool)} players")
+                st.caption(f"{len(selected_games)} of {len(all_games)} matchups selected · {len(hub_pool)} players")
+
+                # Re-run sims on filtered pool if game selection changed
+                _prev_games = st.session_state.get(_prev_games_key, [])
+                if sorted(selected_games) != sorted(_prev_games):
+                    st.session_state[_prev_games_key] = selected_games
+                    with st.spinner("Re-running sims on filtered pool..."):
+                        try:
+                            player_results = _build_player_level_sim_results(hub_pool, sim.variance)
+                            sim.player_results = player_results
+
+                            _CONTEST_NAME_TO_PIPELINE_GF = {
+                                "GPP Main": "GPP_MAIN", "Cash Main": "CASH", "Showdown": "GPP_MAIN",
+                            }
+                            _pc = _CONTEST_NAME_TO_PIPELINE_GF.get(contest_type_label, "GPP_MAIN")
+                            _PIPELINE_TO_OPTIMIZER_GF = {"GPP_MAIN": "GPP_150", "CASH": "CASH"}
+                            _oc = _PIPELINE_TO_OPTIMIZER_GF.get(_pc, "GPP_20")
+
+                            _edge_df = compute_edge_metrics(
+                                hub_pool,
+                                calibration_state=slate.calibration_state,
+                                variance=sim.variance,
+                            )
+                            _lu = build_ricky_lineups(
+                                edge_df=_edge_df,
+                                contest_type=_oc,
+                                calibration_state=slate.calibration_state,
+                                salary_cap=SALARY_CAP,
+                            )
+                            if not _lu.empty:
+                                _pipeline_df = run_sims_pipeline(
+                                    pool=hub_pool,
+                                    lineups_df=_lu,
+                                    contest_type=_pc,
+                                    n_sims=sim.n_sims,
+                                    variance=sim.variance,
+                                    slate_date=slate.slate_date,
+                                    draft_group_id=sim.draft_group_id,
+                                )
+                                sim.pipeline_output[_pc] = _pipeline_df
+
+                            slate.edge_df = _edge_df
+                            set_sim_state(sim)
+                        except Exception:
+                            pass  # sims will re-run when user hits the button
+            else:
+                # No games selected — clear the previous selection tracker
+                if st.session_state.get(_prev_games_key):
+                    st.session_state[_prev_games_key] = []
             set_slate_state(slate)
 
         # RG upload
