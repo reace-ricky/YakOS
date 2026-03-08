@@ -26,11 +26,11 @@
         "avg_proj": null
       },
       "salary_value": {
-        "n_flagged": 2,
-        "n_hit": 0,
-        "hit_rate": 0.0,
-        "avg_actual": 15.62,
-        "avg_proj": 24.86
+        "n_flagged": 3,
+        "n_hit": 1,
+        "hit_rate": 0.333,
+        "avg_actual": 19.75,
+        "avg_proj": 25.06
       },
       "smash_candidate": {
         "n_flagged": 0,
