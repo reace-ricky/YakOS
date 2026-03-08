@@ -490,6 +490,14 @@ def _make_real_lineups_df(pool: pd.DataFrame, n_lineups: int = 5) -> pd.DataFram
 
 
 def _build_player_level_sim_results(pool: pd.DataFrame, variance: float) -> pd.DataFrame:
+    """Build player-level sim results using the authoritative edge model.
+
+    Delegates to ``compute_edge_metrics`` so that smash_prob, bust_prob,
+    and leverage are computed identically on every page.
+    """
+    from yak_core.edge import compute_edge_metrics  # noqa: PLC0415
+    from yak_core.display_format import normalise_ownership  # noqa: PLC0415
+
     if pool.empty:
         return pd.DataFrame()
     df = pool.copy()
@@ -501,41 +509,24 @@ def _build_player_level_sim_results(pool: pd.DataFrame, variance: float) -> pd.D
         df = df[mp > 0].reset_index(drop=True)
     if df.empty:
         return pd.DataFrame()
-    proj = pd.to_numeric(df.get("proj", 0), errors="coerce").fillna(0)
-    ceil = pd.to_numeric(df.get("ceil", proj * 1.4), errors="coerce").fillna(proj * 1.4)
-    floor = pd.to_numeric(df.get("floor", proj * 0.7), errors="coerce").fillna(proj * 0.7)
-    own = pd.to_numeric(df.get("ownership", 5.0), errors="coerce").fillna(5.0)
 
-    _bad_fc = (ceil <= proj) | (floor >= proj) | (ceil < floor)
-    ceil = ceil.where(~_bad_fc, proj * 1.45)
-    floor = floor.where(~_bad_fc, proj * 0.65)
+    # Normalise ownership to 0-100 before edge computation
+    if "ownership" in df.columns:
+        df["ownership"] = normalise_ownership(df["ownership"])
 
-    std = (ceil - floor) / 4 * variance
-    std = std.clip(lower=0.5)
-    smash_z = (ceil * 0.9 - proj) / std
-    bust_z = (floor * 1.1 - proj) / std
+    edge_df = compute_edge_metrics(df, variance=variance)
 
-    from scipy.stats import norm  # type: ignore
-    smash_prob = 1 - norm.cdf(smash_z)
-    bust_prob = norm.cdf(bust_z)
+    # Select the columns the sims table needs
+    keep_cols = ["player_name", "pos", "team", "salary", "proj", "floor",
+                 "ceil", "own_pct", "smash_prob", "bust_prob", "leverage"]
+    keep_cols = [c for c in keep_cols if c in edge_df.columns]
+    result = edge_df[keep_cols].copy()
 
-    own_frac = (own / 100.0).clip(lower=0.01)
-    leverage = smash_prob / own_frac
+    # Sort by leverage descending (matching original behaviour)
+    if "leverage" in result.columns:
+        result = result.sort_values("leverage", ascending=False, na_position="last")
 
-    result = pd.DataFrame({
-        "player_name": df.get("player_name", pd.Series(dtype=str)),
-        "pos": df.get("pos", pd.Series(dtype=str)),
-        "team": df.get("team", pd.Series(dtype=str)),
-        "salary": df.get("salary", pd.Series(dtype=float)),
-        "proj": proj,
-        "floor": floor,
-        "ceil": ceil,
-        "ownership": own,
-        "smash_prob": smash_prob.round(2),
-        "bust_prob": bust_prob.round(2),
-        "leverage": leverage.round(2),
-    })
-    return result.sort_values("leverage", ascending=False).reset_index(drop=True)
+    return result.reset_index(drop=True)
 
 
 # (_gauge_score removed — Contest-type Gauges consolidated into RCI)
@@ -1428,8 +1419,8 @@ def main() -> None:
         st.caption("Player-level smash / bust / leverage (sorted by leverage)")
         display_df = prepare_sims_table(sim.player_results)
 
-        _float_fmt = {c: "{:.2f}" for c in display_df.select_dtypes(include="number").columns
-                      if c != "salary"}
+        from yak_core.display_format import standard_player_format  # noqa: PLC0415
+        _std_fmt = standard_player_format(display_df)
 
         def _style_row(row: pd.Series) -> list:
             styles = [""] * len(row)
@@ -1443,7 +1434,7 @@ def main() -> None:
             return styles
 
         try:
-            styled = display_df.style.apply(_style_row, axis=1).format(_float_fmt)
+            styled = display_df.style.apply(_style_row, axis=1).format(_std_fmt, na_rep="")
             st.dataframe(styled, use_container_width=True, hide_index=True)
         except Exception:
             st.dataframe(display_df, use_container_width=True, hide_index=True)
@@ -1601,6 +1592,12 @@ def main() -> None:
     if not pool.empty and sim.player_results is not None and not sim.player_results.empty:
         pr = sim.player_results.copy()
 
+        from yak_core.display_format import standard_player_format  # noqa: PLC0415
+
+        # Rename ownership → own_pct for consistent display
+        if "ownership" in pr.columns and "own_pct" not in pr.columns:
+            pr = pr.rename(columns={"ownership": "own_pct"})
+
         pos_edge = pr[pr["leverage"] > 1.2].nlargest(5, "leverage")
         neg_edge = pr[pr["leverage"] < 0.7].nsmallest(5, "leverage")
 
@@ -1608,24 +1605,18 @@ def main() -> None:
         with ea_col1:
             st.markdown("**Positive Leverage** — high smash, low owned")
             if not pos_edge.empty:
-                _pe = pos_edge[["player_name", "salary", "ownership", "smash_prob", "leverage"]].copy()
-                _pe["salary"] = _pe["salary"].astype(int)
-                for _c in ["ownership", "smash_prob", "leverage"]:
-                    if _c in _pe.columns:
-                        _pe[_c] = _pe[_c].round(2)
-                st.dataframe(_pe, use_container_width=True, hide_index=True)
+                _pe = pos_edge[[c for c in ["player_name", "salary", "own_pct", "smash_prob", "leverage"] if c in pos_edge.columns]].copy()
+                _pe_fmt = standard_player_format(_pe)
+                st.dataframe(_pe.style.format(_pe_fmt, na_rep=""), use_container_width=True, hide_index=True)
             else:
                 st.caption("No high-leverage plays found.")
 
         with ea_col2:
             st.markdown("**Negative Leverage** — bust risk, over-owned")
             if not neg_edge.empty:
-                _ne = neg_edge[["player_name", "salary", "ownership", "bust_prob", "leverage"]].copy()
-                _ne["salary"] = _ne["salary"].astype(int)
-                for _c in ["ownership", "bust_prob", "leverage"]:
-                    if _c in _ne.columns:
-                        _ne[_c] = _ne[_c].round(2)
-                st.dataframe(_ne, use_container_width=True, hide_index=True)
+                _ne = neg_edge[[c for c in ["player_name", "salary", "own_pct", "bust_prob", "leverage"] if c in neg_edge.columns]].copy()
+                _ne_fmt = standard_player_format(_ne)
+                st.dataframe(_ne.style.format(_ne_fmt, na_rep=""), use_container_width=True, hide_index=True)
             else:
                 st.caption("No over-owned bust risks found.")
 

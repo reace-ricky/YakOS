@@ -27,6 +27,7 @@ except ImportError:  # allow import outside Streamlit (tests, etc.)
     st = None  # type: ignore[assignment]
 
 from yak_core.lineup_scoring import GRADE_COLORS as _GRADE_COLORS, GRADE_EMOJI as _GRADE_EMOJI  # noqa: E402
+from yak_core.display_format import normalise_ownership  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -186,11 +187,13 @@ def render_premium_lineup_card(
         or pd.to_numeric(lu.get("proj", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()
     )
 
-    total_pown_frac = float(
-        metrics.get("total_pown")
-        or pd.to_numeric(lu.get("ownership", pd.Series(dtype=float)), errors="coerce").fillna(0).sum() / 100.0
-    )
-    total_pown_pct = total_pown_frac * 100.0
+    _own_raw = pd.to_numeric(lu.get("ownership", pd.Series(dtype=float)), errors="coerce").fillna(0)
+    _own_normed = normalise_ownership(_own_raw)  # guaranteed 0-100
+    total_pown_pct = float(metrics.get("total_pown", 0) or 0)
+    if total_pown_pct:
+        total_pown_pct = total_pown_pct * 100.0  # pipeline stores as 0-1 fraction
+    else:
+        total_pown_pct = float(_own_normed.sum())
 
     yakos_rating = float(metrics.get("yakos_sim_rating") or 0.0)
     bucket = str(metrics.get("rating_bucket") or "-")
@@ -263,6 +266,9 @@ def render_premium_lineup_card(
             proj = float(proj) if pd.notna(proj) else 0.0
             own = pd.to_numeric(row.get("ownership", 0), errors="coerce")
             own = float(own) if pd.notna(own) else 0.0
+            # Normalise: if all player ownerships are < 1, it's fractional
+            if own > 0 and own < 1.0:
+                own = own * 100.0
 
             # Format salary as $X.XK
             sal_str = f"${sal / 1000:.1f}K" if sal >= 1000 else f"${sal:,}"
@@ -472,10 +478,13 @@ def render_lineup_card(
     projection = float(metrics.get("projection") or
                        pd.to_numeric(lu.get("proj", pd.Series(dtype=float)), errors="coerce").fillna(0).sum())
 
-    total_pown_frac = float(metrics.get("total_pown") or
-                            pd.to_numeric(lu.get("ownership", pd.Series(dtype=float)),
-                                          errors="coerce").fillna(0).sum() / 100.0)
-    total_pown_pct = total_pown_frac * 100.0
+    _own_raw_lg = pd.to_numeric(lu.get("ownership", pd.Series(dtype=float)), errors="coerce").fillna(0)
+    _own_normed_lg = normalise_ownership(_own_raw_lg)  # guaranteed 0-100
+    total_pown_pct = float(metrics.get("total_pown", 0) or 0)
+    if total_pown_pct:
+        total_pown_pct = total_pown_pct * 100.0  # pipeline stores as 0-1 fraction
+    else:
+        total_pown_pct = float(_own_normed_lg.sum())
 
     yakos_rating = float(metrics.get("yakos_sim_rating") or 0.0)
     bucket = str(metrics.get("rating_bucket") or "-")
@@ -547,7 +556,8 @@ def render_lineup_card(
                 )
         for col in ["Own%"]:
             if col in display_df.columns:
-                display_df[col] = pd.to_numeric(display_df[col], errors="coerce").apply(
+                _own_series = normalise_ownership(pd.to_numeric(display_df[col], errors="coerce").fillna(0))
+                display_df[col] = _own_series.apply(
                     lambda v: f"{v:.1f}%" if pd.notna(v) else ""
                 )
 

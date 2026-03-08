@@ -38,6 +38,7 @@ from yak_core.edge_metrics import (  # noqa: E402
 from yak_core.config import CONTEST_PRESETS, UI_CONTEST_LABELS, UI_CONTEST_MAP  # noqa: E402
 from yak_core.ricky_signals import compute_ricky_signals, generate_slate_overview, SIGNAL_BADGES  # noqa: E402
 from yak_core.context import get_lab_analysis  # noqa: E402
+from yak_core.display_format import normalise_ownership, standard_player_format  # noqa: E402
 
 # Internal preset labels in display order
 _CONTEST_ORDER = [UI_CONTEST_MAP[k] for k in UI_CONTEST_LABELS]
@@ -142,6 +143,7 @@ def _render_edge_writeup(edge, contest_label: str) -> None:
             df = df.drop(columns=["Catalyst"])
         return df
 
+    _writeup_fmt = {"Salary": "${:,.0f}", "Proj": "{:.1f}", "Own": "{:.1f}%"}
     for group_label, group_data in [
         ("Core & Value", core_value),
         ("Leverage", leverage),
@@ -150,8 +152,14 @@ def _render_edge_writeup(edge, contest_label: str) -> None:
         df = _to_df(group_data)
         if df.empty:
             continue
+        # Normalise ownership values
+        if "Own" in df.columns:
+            df["Own"] = normalise_ownership(pd.to_numeric(df["Own"], errors="coerce").fillna(0))
         st.markdown(f"**{group_label}**")
-        st.dataframe(df, use_container_width=True, hide_index=True, height=min(38 * len(df) + 38, 300))
+        st.dataframe(
+            df.style.format({k: v for k, v in _writeup_fmt.items() if k in df.columns}, na_rep=""),
+            use_container_width=True, hide_index=True, height=min(38 * len(df) + 38, 300),
+        )
 
     warnings = payload.get("contest_fit_warnings", [])
     for w in warnings:
@@ -300,7 +308,7 @@ def main() -> None:
                 display_df["Proj"] = top_edges["proj"].values if "proj" in top_edges.columns else 0
                 own_col = "ownership" if "ownership" in top_edges.columns else "own_pct"
                 if own_col in top_edges.columns:
-                    display_df["Own%"] = top_edges[own_col].values
+                    display_df["Own%"] = normalise_ownership(pd.Series(top_edges[own_col].values)).values
                 display_df["Edge"] = (top_edges["edge_composite"].values * 100).round(0).astype(int)
                 display_df["Signals"] = top_edges["signal_badges"].values
 
@@ -313,9 +321,7 @@ def main() -> None:
                             f"\U0001f680 {t}" if t else "" for t in pop_tags
                         ]
 
-                _fmt = {"Salary": "${:,.0f}", "Proj": "{:.1f}"}
-                if "Own%" in display_df.columns:
-                    _fmt["Own%"] = "{:.1f}%"
+                _fmt = standard_player_format(display_df)
                 st.dataframe(
                     display_df.style.format(_fmt, na_rep=""),
                     use_container_width=True,
@@ -409,8 +415,19 @@ def main() -> None:
                             "player", "team", "salary", "your_exposure_pct",
                             "field_own_pct", "delta", "leverage_ratio",
                         ] if c in exposure_df.columns]
+                        _expo_display = exposure_df[display_cols].head(25)
+                        _expo_fmt = {}
+                        for c in ("salary",):
+                            if c in _expo_display.columns:
+                                _expo_fmt[c] = "${:,.0f}"
+                        for c in ("your_exposure_pct", "field_own_pct"):
+                            if c in _expo_display.columns:
+                                _expo_fmt[c] = "{:.1f}%"
+                        for c in ("delta", "leverage_ratio"):
+                            if c in _expo_display.columns:
+                                _expo_fmt[c] = "{:.2f}"
                         st.dataframe(
-                            exposure_df[display_cols].head(25),
+                            _expo_display.style.format(_expo_fmt, na_rep=""),
                             use_container_width=True,
                             hide_index=True,
                         )

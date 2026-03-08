@@ -146,20 +146,77 @@ def compute_empirical_std(
     return np.clip(std, min_std, None)
 
 
+def _ceiling_gap_factor(
+    proj: pd.Series,
+    ceil: pd.Series,
+    floor: pd.Series,
+) -> tuple[pd.Series, pd.Series]:
+    """Return (smash_gap_mult, bust_gap_mult) based on actual ceiling/floor gap.
+
+    The salary-bracket base rates assume an *average* ceiling gap for each
+    bracket.  Individual players can have much tighter or wider ranges.
+    This factor corrects for that so a player with proj=9.4 and ceil=10.75
+    (ratio 1.14) doesn't get the same smash_prob as a player with ceil=20
+    (ratio 2.12).
+
+    Smash gap (ceil/proj ratio):
+      < 1.10 → 0.10  (nearly zero upside)
+      1.10–1.20 → 0.30  (very compressed)
+      1.20–1.30 → 0.60  (below normal)
+      1.30–1.45 → 1.00  (normal — no adjustment)
+      1.45–1.60 → 1.10  (above normal)
+      ≥ 1.60 → 1.20  (huge ceiling)
+
+    Bust gap (floor/proj ratio):
+      > 0.90 → 0.10  (very safe floor)
+      0.80–0.90 → 0.50  (safe)
+      0.65–0.80 → 1.00  (normal — no adjustment)
+      0.50–0.65 → 1.15  (risky)
+      < 0.50 → 1.30  (extreme bust risk)
+    """
+    proj_safe = proj.clip(lower=1.0)
+    ceil_ratio = ceil / proj_safe
+    floor_ratio = floor / proj_safe
+
+    # Smash gap multiplier
+    smash_gap = pd.Series(1.0, index=proj.index)
+    smash_gap[ceil_ratio < 1.10] = 0.10
+    smash_gap[(ceil_ratio >= 1.10) & (ceil_ratio < 1.20)] = 0.30
+    smash_gap[(ceil_ratio >= 1.20) & (ceil_ratio < 1.30)] = 0.60
+    # 1.30–1.45 stays at 1.0 (normal)
+    smash_gap[(ceil_ratio >= 1.45) & (ceil_ratio < 1.60)] = 1.10
+    smash_gap[ceil_ratio >= 1.60] = 1.20
+
+    # Bust gap multiplier
+    bust_gap = pd.Series(1.0, index=proj.index)
+    bust_gap[floor_ratio > 0.90] = 0.10
+    bust_gap[(floor_ratio > 0.80) & (floor_ratio <= 0.90)] = 0.50
+    # 0.65–0.80 stays at 1.0 (normal)
+    bust_gap[(floor_ratio >= 0.50) & (floor_ratio < 0.65)] = 1.15
+    bust_gap[floor_ratio < 0.50] = 1.30
+
+    return smash_gap, bust_gap
+
+
 def _compute_smash_bust(
     proj: pd.Series,
     salary: pd.Series,
     own: pd.Series,
+    ceil: pd.Series,
+    floor: pd.Series,
     variance: float,
 ) -> tuple[pd.Series, pd.Series]:
     """Return (smash_prob, bust_prob) using empirically calibrated model.
 
     Calibrated from 21-slate backtest (Feb 7 – Mar 5 2026, 3512 player-slates).
-    Old normal approximation produced CONSTANT probabilities (~0.069 smash,
-    ~0.094 bust) because ceil/floor were always proportional to proj.
 
-    New model uses salary bracket base rates adjusted by ownership and
-    value efficiency, matching observed actuals:
+    Model uses salary bracket base rates adjusted by:
+      1. Ownership (low own → higher smash potential)
+      2. Value efficiency (proj / salary_k)
+      3. **Ceiling gap** (actual ceil/proj ratio vs bracket average)
+      4. **Floor gap** (actual floor/proj ratio vs bracket average)
+
+    Base rates by salary bracket:
       - <$5K: 43% smash, 36% bust
       - $5-6.5K: 30% smash, 26% bust
       - $6.5-8K: 21% smash, 16% bust
@@ -207,9 +264,13 @@ def _compute_smash_bust(
     val_mult[(val_eff >= 4.0) & (val_eff < 5.0)] = 1.10
     val_mult[val_eff < 3.0] = 0.90
 
-    # Apply variance multiplier (allows UI tuning)
-    smash_prob = (smash_base * own_mult_smash * val_mult * variance).clip(0.01, 0.95)
-    bust_prob = (bust_base * own_mult_bust * variance).clip(0.01, 0.95)
+    # Ceiling/floor gap adjustment — the key fix.
+    # Prevents inflated smash_prob when ceiling is barely above projection.
+    smash_gap, bust_gap = _ceiling_gap_factor(proj, ceil, floor)
+
+    # Apply all multipliers + variance tuning
+    smash_prob = (smash_base * own_mult_smash * val_mult * smash_gap * variance).clip(0.01, 0.95)
+    bust_prob = (bust_base * own_mult_bust * bust_gap * variance).clip(0.01, 0.95)
 
     return smash_prob, bust_prob
 
@@ -393,13 +454,18 @@ def compute_edge_metrics(
     eff_proj = _apply_calibration_bumps(proj, salary, cal)
 
     # Compute smash/bust probabilities (empirical model, calibrated from backtest)
-    smash_prob, bust_prob = _compute_smash_bust(eff_proj, salary, own, variance)
+    # Now incorporates ceiling/floor gap — narrow-range players get dampened.
+    smash_prob, bust_prob = _compute_smash_bust(eff_proj, salary, own, ceil, floor, variance)
 
     # Compute leverage: proj / (own * scale_factor)
-    # Represents: reward-per-ownership-unit
+    # Represents: reward-per-ownership-unit.
+    # Quality gate: players with proj < 10 FP get NaN leverage — their low
+    # ownership reflects low upside, not a market mispricing.
+    _MIN_PROJ_FOR_LEVERAGE = 10.0
     own_safe = own.clip(lower=_MIN_OWN_FOR_LEVERAGE)
     leverage = eff_proj / own_safe
     leverage[own < _MIN_OWN_FOR_LEVERAGE] = np.nan
+    leverage[eff_proj < _MIN_PROJ_FOR_LEVERAGE] = np.nan
 
     # ── Ceiling magnitude: normalised raw ceiling value ──
     # This ensures studs with 60+ FP ceilings surface alongside value plays.

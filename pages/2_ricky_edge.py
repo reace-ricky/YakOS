@@ -37,6 +37,7 @@ from yak_core.ricky_signals import (  # noqa: E402
     generate_slate_overview,
     SIGNAL_BADGES,
 )
+from yak_core.display_format import normalise_ownership, standard_player_format  # noqa: E402
 
 _TAG_COLORS = {
     "core": "\U0001f7e2", "secondary": "\U0001f535", "value": "\U0001f7e1",
@@ -128,10 +129,10 @@ def main() -> None:
         display_df["Salary"] = top_edges["salary"].values if "salary" in top_edges.columns else 0
         display_df["Proj"] = top_edges["proj"].values if "proj" in top_edges.columns else 0
 
-        # Ownership
+        # Ownership — normalise to 0-100 scale
         own_col = "ownership" if "ownership" in top_edges.columns else "own_pct"
         if own_col in top_edges.columns:
-            display_df["Own%"] = top_edges[own_col].values
+            display_df["Own%"] = normalise_ownership(pd.Series(top_edges[own_col].values)).values
 
         # Edge composite score scaled to 100
         display_df["Edge"] = (top_edges["edge_composite"].values * 100).round(0).astype(int)
@@ -144,9 +145,7 @@ def main() -> None:
             bump = top_edges["injury_bump_fp"].values
             display_df["Inj+"] = [f"+{b:.1f}" if b > 0 else "" for b in bump]
 
-        _fmt = {"Salary": "${:,.0f}", "Proj": "{:.1f}"}
-        if "Own%" in display_df.columns:
-            _fmt["Own%"] = "{:.1f}%"
+        _fmt = standard_player_format(display_df)
 
         st.dataframe(
             display_df.style.format(_fmt, na_rep=""),
@@ -189,7 +188,7 @@ def main() -> None:
             if _pop_tag_col in pop_players.columns:
                 pop_display["Catalyst"] = pop_players[_pop_tag_col].values
 
-            _pop_fmt = {"Salary": "${:,.0f}", "Proj": "{:.1f}"}
+            _pop_fmt = standard_player_format(pop_display)
             st.dataframe(
                 pop_display.style.format(_pop_fmt, na_rep=""),
                 use_container_width=True,

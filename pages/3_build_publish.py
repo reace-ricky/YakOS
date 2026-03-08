@@ -48,6 +48,7 @@ from yak_core.publishing import publish_edge_and_lineups  # noqa: E402
 from yak_core.edge import compute_edge_metrics  # noqa: E402
 from yak_core.lineup_scoring import compute_lineup_boom_bust, GRADE_COLORS as _GRADE_COLORS_HEX  # noqa: E402
 from yak_core.right_angle import apply_edge_adjustments, compute_breakout_candidates  # noqa: E402
+from yak_core.display_format import normalise_ownership, standard_player_format, standard_lineup_format  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -572,7 +573,11 @@ def main() -> None:
             expo_df = lu_state.exposures.get(view_label)
             if expo_df is not None and not expo_df.empty:
                 with st.expander("Player Exposures", expanded=False):
-                    st.dataframe(expo_df, use_container_width=True, hide_index=True)
+                    _expo_fmt = standard_player_format(expo_df)
+                    st.dataframe(
+                        expo_df.style.format(_expo_fmt, na_rep=""),
+                        use_container_width=True, hide_index=True,
+                    )
 
             # ── Boom/Bust Rankings ────────────────────────────────────────
             if bb_df is not None and not bb_df.empty:
@@ -613,15 +618,10 @@ def main() -> None:
                     "lineup_grade": "Grade",
                 }).copy()
 
-                # Format percentage columns
-                for c in ["Avg Smash%", "Avg Bust%"]:
-                    if c in display_bb.columns:
-                        display_bb[c] = (
-                            pd.to_numeric(display_bb[c], errors="coerce")
-                            .apply(lambda v: f"{v*100:.1f}%" if pd.notna(v) else "")
-                        )
+                # Apply standard lineup formatting
+                _bb_fmt = standard_lineup_format(display_bb)
 
-                styled = display_bb.style.applymap(_colour_grade, subset=["Grade"])
+                styled = display_bb.style.format(_bb_fmt, na_rep="").applymap(_colour_grade, subset=["Grade"])
                 st.dataframe(styled, use_container_width=True, hide_index=True)
 
                 # Summary line
