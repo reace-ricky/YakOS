@@ -136,7 +136,12 @@ def _fetch_dk_draft_groups(sport: str = "NBA") -> list:
 
 
 def _fetch_historical_draft_groups(date_str: str) -> list:
-    """Fetch draft groups for a historical date via FantasyLabs → DK."""
+    """Fetch draft groups for a historical date via FantasyLabs → DK.
+
+    FantasyLabs only returns Classic draft groups.  For Showdown, we probe
+    DK draft-group IDs near the known Classic ones and identify single-game
+    Showdown DGs by checking whether the draftables contain exactly 2 teams.
+    """
     client = SalaryHistoryClient()
     fl_groups = client.get_draft_group_ids(date_str)
     if not fl_groups:
@@ -152,7 +157,87 @@ def _fetch_historical_draft_groups(date_str: str) -> list:
             "StartDate": g.get("start_time", ""),
             "SortOrder": g.get("sort_order", 99),
         })
+
+    # ── Discover Showdown DGs by probing nearby IDs ──────────────────────
+    # FantasyLabs doesn't list Showdown DGs.  DK assigns DG IDs sequentially
+    # per day, so Showdown DGs are interleaved near the Classic ones.  We
+    # probe IDs in the range [min_id, max_id+20] and look for single-game
+    # (2-team) draftable sets with Showdown-style positions.
+    known_ids = {e["DraftGroupId"] for e in dk_format}
+    if known_ids:
+        try:
+            sd_entries = _discover_showdown_draft_groups(
+                min(known_ids), max(known_ids), known_ids,
+            )
+            dk_format.extend(sd_entries)
+        except Exception:
+            pass  # Showdown discovery is best-effort
+
     return dk_format
+
+
+def _discover_showdown_draft_groups(
+    min_id: int, max_id: int, skip_ids: set,
+) -> list:
+    """Probe DK draftables API for Showdown DGs near known Classic IDs.
+
+    Returns a list of DK-format dicts for each discovered Showdown DG.
+    Only keeps one DG per unique matchup (the one with the most players,
+    which is the standard Showdown Captain Mode format).
+    """
+    import requests as _req
+
+    candidates: dict[str, dict] = {}  # matchup -> best candidate
+    # Scan from min_id-5 to max_id+15 to cover the day's games without
+    # leaking too far into adjacent dates.
+    for dg_id in range(max(1, min_id - 5), max_id + 16):
+        if dg_id in skip_ids:
+            continue
+        try:
+            url = f"https://api.draftkings.com/draftgroups/v1/draftgroups/{dg_id}/draftables"
+            resp = _req.get(url, timeout=5, headers={"User-Agent": "Mozilla/5.0"})
+            if resp.status_code != 200:
+                continue
+            draftables = (resp.json() or {}).get("draftables", [])
+            if not draftables or len(draftables) < 10:
+                continue
+
+            # Showdown = exactly 2 teams + has slash positions (CPT/FLEX dual)
+            teams = {str(d.get("teamAbbreviation", "")).upper() for d in draftables}
+            teams.discard("")
+            if len(teams) != 2:
+                continue
+
+            positions = {str(d.get("position", "")) for d in draftables}
+            has_slash = any("/" in p for p in positions)
+            if not has_slash:
+                continue
+
+            # Extract matchup from competition field
+            comp = (draftables[0].get("competition") or {})
+            game_name = str(comp.get("name", ""))  # e.g. "PHI @ ATL"
+            matchup = game_name if game_name else " @ ".join(sorted(teams))
+
+            entry = {
+                "DraftGroupId": dg_id,
+                "GameCount": 1,
+                "ContestStartTimeSuffix": f" ({matchup})",
+                "GameTypeId": 81,
+                "GameStyle": "Showdown Captain Mode",
+                "StartDate": "",
+                "SortOrder": 99,
+                "_n_players": len(draftables),
+            }
+            # Keep the DG with the most players per matchup (standard SD)
+            if matchup not in candidates or len(draftables) > candidates[matchup]["_n_players"]:
+                candidates[matchup] = entry
+        except Exception:
+            continue
+
+    # Strip internal helper key before returning
+    for entry in candidates.values():
+        entry.pop("_n_players", None)
+    return list(candidates.values())
 
 
 _SHOWDOWN_GAME_TYPE_IDS = {
