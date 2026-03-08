@@ -154,15 +154,30 @@ class SalaryHistoryClient:
         rows: list[dict] = []
         for d in draftables:
             try:
+                team_abbr = str(
+                    (d.get("teamAbbreviation") or d.get("team") or "")
+                ).upper()
+
+                # Extract opponent + game info from competition field
+                comp = d.get("competition") or {}
+                game_name = str(comp.get("name", ""))   # e.g. "HOU @ SAS"
+                game_time = str(comp.get("startTime", ""))
+                opp = ""
+                if game_name and "@" in game_name:
+                    parts = [t.strip() for t in game_name.replace("@", "vs").split("vs")]
+                    opp_candidates = [t for t in parts if t.upper() != team_abbr]
+                    opp = opp_candidates[0].upper() if opp_candidates else ""
+
                 rows.append(
                     {
                         "player_name": str(
                             d.get("displayName") or d.get("playerName") or ""
                         ),
                         "position": str(d.get("position") or ""),
-                        "team": str(
-                            (d.get("teamAbbreviation") or d.get("team") or "")
-                        ).upper(),
+                        "team": team_abbr,
+                        "opp": opp,
+                        "game_info": game_name,
+                        "game_time": game_time,
                         "salary": int(d.get("salary") or 0),
                         "player_dk_id": int(d.get("playerId") or 0),
                     }
