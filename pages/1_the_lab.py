@@ -1563,232 +1563,88 @@ def main() -> None:
     # =====================================================================
     # SECTION 4: CALIBRATION
     # =====================================================================
-    st.subheader("🔬 Calibration")
+    st.subheader("🔬 Calibration & Model Training")
 
-    _cal_slate_label = (
-        f"{slate.sport or '—'} | {slate.site or '—'} | "
-        f"{slate.slate_date or '—'} | DG {slate.draft_group_id or '—'}"
-    )
-    st.info(f"**Calibrating:** {_cal_slate_label}")
+    # ── Training Data Gauge + Retrain Button ────────────────────────
+    try:
+        from yak_core.slate_archive import archive_summary as _get_archive_summary
+        from yak_core.calibration_feedback import get_calibration_summary, clear_calibration_history
+        from yak_core.edge_feedback import get_edge_feedback_summary
 
-    with st.expander("Calibration Profiles", expanded=False):
-        existing_profiles = list(sim.calibration_profiles.keys())
-        c_col1, c_col2 = st.columns(2)
-        with c_col1:
-            new_profile_name = st.text_input("New profile name", key="_lab_new_profile")
-            if st.button("💾 Save Profile", key="_lab_save_profile"):
-                if new_profile_name:
+        _archive = _get_archive_summary()
+        _cal_fb = get_calibration_summary()
+        _edge_fb = get_edge_feedback_summary()
+
+        _n_archived = _archive.get("n_slates", 0)
+        _n_dates = _archive.get("n_unique_dates", 0)
+        _retrain_threshold = 10
+        _pct_full = min(100, int((_n_archived / _retrain_threshold) * 100))
+        _ready = _n_archived >= _retrain_threshold
+
+        # Gauge
+        _gauge_color = "green" if _ready else "orange" if _pct_full >= 50 else "gray"
+        _gauge_label = f"{_n_archived}/{_retrain_threshold} slates archived"
+        st.progress(_pct_full / 100, text=f"{'🟢' if _ready else '🟡' if _pct_full >= 50 else '⚪'} {_gauge_label} — {'Ready to retrain' if _ready else f'{_retrain_threshold - _n_archived} more needed'}")
+
+        # Key metrics row
+        _m1, _m2, _m3, _m4 = st.columns(4)
+        with _m1:
+            st.metric("Slates Archived", _n_archived)
+        with _m2:
+            st.metric("Unique Dates", _n_dates)
+        with _m3:
+            _cal_status = _cal_fb.get("status", "no_data")
+            _cal_n = _cal_fb.get("n_slates", 0)
+            st.metric("Calibration", f"{_cal_n} slates" if _cal_n > 0 else "No data")
+        with _m4:
+            _ef_n = _edge_fb.get("n_slates", 0)
+            st.metric("Edge Feedback", f"{_ef_n} slates" if _ef_n > 0 else "No data")
+
+        # Retrain button
+        if _ready:
+            if st.button("🧠 Retrain Models", key="_lab_retrain", type="primary"):
+                with st.spinner("Retraining models on archived data..."):
                     try:
-                        current_cal = load_calibration_config()
-                    except Exception:
-                        current_cal = {}
-                    sim.save_calibration_profile(new_profile_name, current_cal)
-                    slate.calibration_state = dict(current_cal)
-                    if "Calibration" not in slate.active_layers:
-                        slate.active_layers.append("Calibration")
-                    if pool is not None and not pool.empty:
-                        slate.edge_df = compute_edge_metrics(
-                            pool, calibration_state=slate.calibration_state, variance=sim.variance,
+                        import subprocess
+                        _retrain_result = subprocess.run(
+                            [sys.executable, os.path.join(YAKOS_ROOT, "scripts", "retrain_models.py"), "--force"],
+                            capture_output=True, text=True, timeout=120,
                         )
-                    set_slate_state(slate)
-                    set_sim_state(sim)
-                    st.success(f"Profile '{new_profile_name}' saved.")
-
-        with c_col2:
-            if existing_profiles:
-                active_profile = st.selectbox("Active profile", ["(none)"] + existing_profiles, key="_lab_active_profile")
-                if active_profile != "(none)" and active_profile != sim.active_profile:
-                    sim.active_profile = active_profile
-                    profile_cal = sim.calibration_profiles.get(active_profile, {})
-                    slate.calibration_state = dict(profile_cal)
-                    if pool is not None and not pool.empty:
-                        slate.edge_df = compute_edge_metrics(
-                            pool, calibration_state=slate.calibration_state, variance=sim.variance,
-                        )
-                    set_slate_state(slate)
-                    set_sim_state(sim)
-                    st.success(f"Profile '{active_profile}' activated.")
-
-                clone_src = st.selectbox("Clone profile", [""] + existing_profiles, key="_lab_clone_src")
-                clone_dst = st.text_input("Clone to name", key="_lab_clone_dst")
-                if st.button("📋 Clone", key="_lab_clone_btn") and clone_src and clone_dst:
-                    ok = sim.clone_profile(clone_src, clone_dst)
-                    set_sim_state(sim)
-                    if ok:
-                        st.success(f"Cloned '{clone_src}' → '{clone_dst}'.")
-                    else:
-                        st.error(f"Profile '{clone_src}' not found.")
-            else:
-                st.info("No profiles saved yet.")
-
-    with st.expander("Bucketed Calibration Table", expanded=False):
-        st.caption("Shows projection error by salary bucket and position. Requires at least 10 samples per bucket.")
-        _MIN_SAMPLES = 10
-        if not pool.empty and "proj" in pool.columns and "salary" in pool.columns:
-            cal_pool = pool.copy()
-            cal_pool["salary_bucket"] = pd.cut(
-                pd.to_numeric(cal_pool["salary"], errors="coerce"),
-                bins=[0, 4500, 5500, 6500, 7500, 8500, 99999],
-                labels=["<4.5K", "4.5–5.5K", "5.5–6.5K", "6.5–7.5K", "7.5–8.5K", "8.5K+"],
-            )
-            bucket_counts = cal_pool.groupby("salary_bucket", observed=True).size().reset_index(name="n")
-            valid_buckets = bucket_counts[bucket_counts["n"] >= _MIN_SAMPLES]["salary_bucket"].tolist()
-            if valid_buckets:
-                bucket_stats = (
-                    cal_pool[cal_pool["salary_bucket"].isin(valid_buckets)]
-                    .groupby("salary_bucket", observed=True)
-                    .agg(n=("proj", "count"), avg_proj=("proj", "mean"), avg_salary=("salary", "mean"))
-                    .reset_index()
-                )
-                st.dataframe(bucket_stats, use_container_width=True, hide_index=True)
-            else:
-                st.info(f"No salary buckets have ≥{_MIN_SAMPLES} samples.")
-        else:
-            st.info("Load a slate to see calibration buckets.")
-
-    with st.expander("📈 Historical Calibration Pipeline (Bucket-level)", expanded=False):
-        st.caption(
-            "Accumulates historical sims output and computes realized ROI / top-finish rates "
-            "per YakOS Sim Rating bucket (A/B/C/D)."
-        )
-        if st.button("🔄 Run Calibration Pipeline", key="_lab_run_cal_pipeline"):
-            with st.spinner("Running calibration pipeline…"):
-                try:
-                    cal_summary = run_calibration_pipeline()
-                    if not cal_summary.empty:
-                        st.dataframe(cal_summary, use_container_width=True, hide_index=True)
-                        _buckets_ready = cal_summary[cal_summary.get("meets_threshold", False)]["rating_bucket"].tolist() if "meets_threshold" in cal_summary.columns else []
-                        if _buckets_ready:
-                            st.success(f"Buckets with sufficient volume: {', '.join(_buckets_ready)}")
+                        if _retrain_result.returncode == 0:
+                            st.success("Models retrained successfully.")
+                            with st.expander("Retrain log", expanded=False):
+                                st.code(_retrain_result.stdout, language="text")
                         else:
-                            st.info("Not enough volume yet to update weights.")
-                    else:
-                        st.info("No historical pipeline data found.")
-                except Exception as exc:
-                    st.error(f"Calibration pipeline failed: {exc}")
+                            st.error("Retrain failed.")
+                            st.code(_retrain_result.stderr or _retrain_result.stdout, language="text")
+                    except Exception as _rt_exc:
+                        st.error(f"Retrain error: {_rt_exc}")
+        else:
+            st.button("🧠 Retrain Models", key="_lab_retrain", disabled=True,
+                      help=f"Need {_retrain_threshold - _n_archived} more archived slates")
 
-    with st.expander("🧪 Rating Weight Update Tester", expanded=False):
-        st.caption("Compare two sets of rating weights on historical data before committing new weights.")
-        default_weights = get_weight_sets().get("GPP_20", {})
-        weight_keys = list(default_weights.keys())
-
-        st.markdown("**Old weights (current):**")
-        old_w_cols = st.columns(len(weight_keys))
-        old_weights: dict = {}
-        for i, k in enumerate(weight_keys):
-            with old_w_cols[i]:
-                old_weights[k] = st.number_input(
-                    k, min_value=0.0, max_value=1.0, step=0.01,
-                    value=float(default_weights.get(k, 0.0)), key=f"_lab_old_w_{k}",
-                )
-
-        st.markdown("**New weights (proposed):**")
-        new_w_cols = st.columns(len(weight_keys))
-        new_weights: dict = {}
-        for i, k in enumerate(weight_keys):
-            with new_w_cols[i]:
-                new_weights[k] = st.number_input(
-                    k, min_value=0.0, max_value=1.0, step=0.01,
-                    value=float(default_weights.get(k, 0.0)), key=f"_lab_new_w_{k}",
-                )
-
-        if st.button("🔍 Compare Weights", key="_lab_compare_weights"):
-            with st.spinner("Running before/after comparison…"):
-                try:
-                    comparison_df = compare_rating_weights(
-                        old_params={"weights": old_weights},
-                        new_params={"weights": new_weights},
-                        contest_type=pipeline_contest,
-                    )
-                    st.dataframe(comparison_df, use_container_width=True, hide_index=True)
-                except Exception as exc:
-                    st.error(f"Weight comparison failed: {exc}")
-
-    with st.expander("📐 Calibration Feedback (Actuals Loop)", expanded=True):
-        try:
-            from yak_core.calibration_feedback import (
-                record_slate_errors, get_calibration_summary,
-                get_correction_factors, clear_calibration_history,
-            )
-
-            if "_cal_fb_store" not in st.session_state:
-                st.session_state["_cal_fb_store"] = {}
-            _fb_store = st.session_state["_cal_fb_store"]
-
-            _fb_is_hist = False
+        # Last retrain info
+        _meta_path = os.path.join(YAKOS_ROOT, "models", "retrain_meta.json")
+        if os.path.isfile(_meta_path):
             try:
-                _fb_is_hist = pd.to_datetime(slate.slate_date).date() < _today_date if slate.slate_date else False
+                import json as _rt_json
+                with open(_meta_path) as _mf:
+                    _rt_meta = _rt_json.load(_mf)
+                _rt_at = _rt_meta.get("retrained_at", "unknown")[:19]
+                _rt_models = _rt_meta.get("models_trained", [])
+                st.caption(f"Last retrain: {_rt_at} UTC — trained: {', '.join(_rt_models) if _rt_models else 'none'}")
             except Exception:
                 pass
 
-            if _fb_is_hist and pool is not None and not pool.empty:
-                _fb_has_actuals = "actual_fp" in pool.columns and pool["actual_fp"].notna().any()
-                _fb_has_proj = "proj" in pool.columns and pool["proj"].notna().any()
-
-                if _fb_has_actuals and _fb_has_proj:
-                    if st.button("📐 Record Calibration from Current Pool", key="_lab_record_cal_pool"):
-                        _fb_result = record_slate_errors(slate.slate_date, pool, store=_fb_store)
-                        if "error" not in _fb_result:
-                            _ov = _fb_result.get("overall", {})
-                            st.success(f"Recorded: MAE {_ov.get('mae', '?')}, Corr {_ov.get('correlation', '?')}, {_ov.get('n_players', 0)} players")
-                        else:
-                            st.warning(f"Could not record: {_fb_result['error']}")
-                else:
-                    _fb_api_key = st.session_state.get("rapidapi_key", "")
-                    if _fb_api_key:
-                        if st.button("📐 Fetch Actuals & Record Calibration", key="_lab_fetch_record_cal"):
-                            with st.spinner("Fetching box scores..."):
-                                try:
-                                    from yak_core.live import fetch_actuals_from_api
-                                    _fb_date = slate.slate_date.replace("-", "")
-                                    _fb_actuals = fetch_actuals_from_api(_fb_date, {"RAPIDAPI_KEY": _fb_api_key})
-                                    if not _fb_actuals.empty and "actual_fp" in _fb_actuals.columns:
-                                        _fb_act_map = _fb_actuals.set_index("player_name")["actual_fp"].to_dict()
-                                        _fb_pool = pool.copy()
-                                        _fb_pool["actual_fp"] = _fb_pool["player_name"].map(_fb_act_map)
-                                        _fb_result = record_slate_errors(slate.slate_date, _fb_pool, store=_fb_store)
-                                        if "error" not in _fb_result:
-                                            _ov = _fb_result.get("overall", {})
-                                            st.success(f"Recorded: MAE {_ov.get('mae', '?')}, Corr {_ov.get('correlation', '?')}, {_ov.get('n_players', 0)} players")
-                                        else:
-                                            st.warning(f"Could not record: {_fb_result['error']}")
-                                    else:
-                                        st.warning("No actuals returned from Tank01 for this date.")
-                                except Exception as _fb_fetch_exc:
-                                    st.error(f"Failed to fetch actuals: {_fb_fetch_exc}")
-                    else:
-                        st.caption(
-                            "⚠️ Tank01 API key not set and pool has no actuals. "
-                            "Either add TANK01_RAPIDAPI_KEY to secrets or upload an external projections file with actual results."
-                        )
-            elif not _fb_is_hist:
-                st.caption("Switch to a historical date to record calibration data.")
-
-            st.markdown("---")
-
-            _cal_fb = get_calibration_summary(store=_fb_store)
-            _fb_status = _cal_fb.get("status", "no_data")
-
-            if _fb_status == "no_data":
-                st.info(
-                    "No calibration data yet. Load a historical slate above, then click "
-                    "**Record Calibration** to start building the correction model."
-                )
-            else:
-                _n = _cal_fb.get("n_slates", 0)
-                _status_emoji = "🟡" if _fb_status == "building" else "🟢"
-                _status_label = f"{_status_emoji} {_fb_status.upper()} — {_n} slate(s) recorded"
-                st.markdown(f"**{_status_label}**")
-
-                if _fb_status == "building":
-                    st.caption(f"Need {3 - _n} more slate(s) for full correction model. Keep running historical dates.")
-
-                m1, m2, m3 = st.columns(3)
-                with m1:
+        # Calibration summary (compact)
+        if _cal_fb.get("status") not in ("no_data", None):
+            with st.expander(f"📐 Calibration Detail ({_cal_fb.get('n_slates', 0)} slates)", expanded=False):
+                _cm1, _cm2, _cm3 = st.columns(3)
+                with _cm1:
                     st.metric("Avg MAE", _cal_fb.get("avg_mae", "—"))
-                with m2:
+                with _cm2:
                     st.metric("Latest MAE", _cal_fb.get("latest_mae", "—"))
-                with m3:
+                with _cm3:
                     st.metric("Overall Bias", f"{_cal_fb.get('overall_bias', 0):+.2f}")
 
                 _pos_corr = _cal_fb.get("position_corrections", [])
@@ -1805,16 +1661,25 @@ def main() -> None:
                     _tier_df["correction"] = _tier_df["correction"].apply(lambda x: f"{x:+.2f}")
                     st.dataframe(_tier_df, use_container_width=True, hide_index=True)
 
-                _dates = _cal_fb.get("dates", [])
-                if _dates:
-                    st.caption(f"Slates: {', '.join(_dates)}")
-
                 if st.button("🗑️ Reset Calibration History", key="_lab_reset_cal_fb"):
-                    st.session_state["_cal_fb_store"] = {}
+                    clear_calibration_history()
                     st.info("Calibration feedback cleared.")
+                    st.rerun()
 
-        except Exception as _cal_fb_exc:
-            st.caption(f"Calibration feedback unavailable: {_cal_fb_exc}")
+        # Edge feedback summary (compact)
+        if _edge_fb.get("status") not in ("no_data", None):
+            with st.expander(f"🎯 Edge Signal Hit Rates ({_edge_fb.get('n_slates', 0)} slates)", expanded=False):
+                _ef_rows = _edge_fb.get("signals", [])
+                if _ef_rows:
+                    _ef_df = pd.DataFrame(_ef_rows)
+                    _ef_show_cols = [c for c in ["signal", "hit_rate", "total_calls", "total_hits", "weight"] if c in _ef_df.columns]
+                    if _ef_show_cols:
+                        _ef_df["hit_rate"] = _ef_df["hit_rate"].apply(lambda x: f"{x:.1%}" if x else "—")
+                        _ef_df["weight"] = _ef_df["weight"].apply(lambda x: f"{x:.1%}" if x else "—")
+                        st.dataframe(_ef_df[_ef_show_cols], use_container_width=True, hide_index=True)
+
+    except Exception as _cal_exc:
+        st.caption(f"Calibration section unavailable: {_cal_exc}")
 
     st.divider()
 
