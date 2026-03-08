@@ -1,0 +1,40 @@
+{
+  "2026-03-07": {
+    "slate_date": "2026-03-07",
+    "overall": {
+      "mean_error": 1.4,
+      "mae": 4.28,
+      "rmse": 4.49,
+      "correlation": 0.9266,
+      "n_players": 8
+    },
+    "by_position": {
+      "PG": {
+        "mean_error": -2.0,
+        "median_error": -3.5,
+        "n": 3,
+        "mae": 3.0
+      },
+      "SF": {
+        "mean_error": 0.0,
+        "median_error": 0.0,
+        "n": 2,
+        "mae": 4.0
+      }
+    },
+    "by_salary_tier": {
+      "7-8K": {
+        "mean_error": -1.25,
+        "median_error": -1.25,
+        "n": 2,
+        "mae": 2.75
+      },
+      "9K+": {
+        "mean_error": 2.28,
+        "median_error": 4.6,
+        "n": 6,
+        "mae": 4.78
+      }
+    }
+  }
+}
