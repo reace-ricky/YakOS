@@ -446,7 +446,7 @@ def _filter_pool_by_games(pool: pd.DataFrame, selected_games: list[str], opp_col
 # Sim helpers
 # ---------------------------------------------------------------------------
 
-_CONTEST_GAUGE_LABELS = ["Cash", "SE", "3-Max", "20-Max", "150-Max"]
+# (Contest-type gauges removed — consolidated into RCI)
 _LAYER_ALL = ["Base", "Calibration", "Edge", "Sims"]
 
 # Muted status colors for dark backgrounds (avoid harsh bright red)
@@ -538,27 +538,7 @@ def _build_player_level_sim_results(pool: pd.DataFrame, variance: float) -> pd.D
     return result.sort_values("leverage", ascending=False).reset_index(drop=True)
 
 
-def _gauge_score(sim_results: Optional[pd.DataFrame], contest: str) -> float:
-    if sim_results is None or sim_results.empty:
-        return 0.0
-    _TOP_N = 8
-    if contest == "Cash":
-        if "bust_prob" not in sim_results.columns:
-            return 0.0
-        bust = pd.to_numeric(sim_results["bust_prob"], errors="coerce").dropna()
-        if bust.empty:
-            return 0.0
-        top_n_bust = bust.nsmallest(_TOP_N).mean()
-        return float(np.clip(1.0 - top_n_bust, 0.0, 1.0))
-    if "smash_prob" not in sim_results.columns:
-        return 0.0
-    smash = pd.to_numeric(sim_results["smash_prob"], errors="coerce").dropna()
-    if smash.empty:
-        return 0.0
-    top_n_smash = smash.nlargest(_TOP_N).mean()
-    weights = {"SE": 0.7, "3-Max": 0.85, "20-Max": 1.0, "150-Max": 1.2}
-    w = weights.get(contest, 1.0)
-    return float(np.clip(top_n_smash * w, 0.0, 1.0))
+# (_gauge_score removed — Contest-type Gauges consolidated into RCI)
 
 
 # ---------------------------------------------------------------------------
@@ -1977,26 +1957,36 @@ def main() -> None:
         "Ownership Accuracy, and Historical ROI → per-contest 0–100 score."
     )
 
-    rci_contests = list(edge.edge_analysis_by_contest.keys()) or list(CONTEST_PRESETS.keys())
+    # Build RCI list: current contest type + any others with real edge data.
+    # Never fall back to all 5 presets — only show what has been worked on.
+    _rci_active = list(edge.edge_analysis_by_contest.keys())
+    if contest_type_label not in _rci_active:
+        _rci_active.insert(0, contest_type_label)
+    rci_contests = _rci_active
 
-    if not rci_contests:
-        st.info("Run Edge Analysis on the Ricky Edge page to enable RCI gauges.")
+    # Check if there's enough data to show anything meaningful
+    _has_edge = bool(edge.edge_analysis_by_contest)
+    _has_sims = sim.player_results is not None and not sim.player_results.empty
+    _has_pool = pool is not None and not pool.empty
+
+    if not _has_edge and not _has_sims and not _has_pool:
+        st.info("Load a slate and run sims or edge analysis to activate RCI.")
     else:
         rci_cols = st.columns(min(len(rci_contests), 3))
-        for ci, contest_label in enumerate(rci_contests):
+        for ci, _rci_label in enumerate(rci_contests):
             col_idx = ci % len(rci_cols)
             with rci_cols[col_idx]:
-                edge_payload = edge.edge_analysis_by_contest.get(contest_label, {})
-                custom_weights = sim.get_rci_weights(contest_label)
+                edge_payload = edge.edge_analysis_by_contest.get(_rci_label, {})
+                custom_weights = sim.get_rci_weights(_rci_label)
                 try:
                     rci_result = compute_rci(
-                        contest_label=contest_label,
+                        contest_label=_rci_label,
                         edge_payload=edge_payload,
                         sim_results=sim.player_results,
                         weights=custom_weights,
                         player_pool=pool,
                     )
-                    sim.set_rci_result(contest_label, rci_result)
+                    sim.set_rci_result(_rci_label, rci_result)
                     pct = int(rci_result.rci_score)
                     _status_key = (
                         "green" if rci_result.rci_status == "green"
@@ -2004,7 +1994,7 @@ def main() -> None:
                         else "red"
                     )
                     _hex = _STATUS_COLORS.get(_status_key, "#c27a7a")
-                    st.markdown(f"**{contest_label}**")
+                    st.markdown(f"**{_rci_label}**")
                     st.progress(pct)
                     st.markdown(
                         f"<span style='color:{_hex}'>RCI: {pct}/100</span>",
@@ -2012,13 +2002,13 @@ def main() -> None:
                     )
                     st.caption(rci_result.recommendation)
                 except Exception as _rci_err:
-                    st.warning(f"{contest_label}: RCI error — {_rci_err}")
+                    st.warning(f"{_rci_label}: RCI error — {_rci_err}")
 
         with st.expander("📊 RCI Signal Breakdown", expanded=False):
-            for contest_label in rci_contests:
-                stored = sim.get_rci_result(contest_label)
+            for _rci_label in rci_contests:
+                stored = sim.get_rci_result(_rci_label)
                 if stored and stored.get("signals"):
-                    st.markdown(f"**{contest_label}** — RCI {stored['rci_score']:.0f}/100")
+                    st.markdown(f"**{_rci_label}** — RCI {stored['rci_score']:.0f}/100")
                     signal_rows = [
                         {
                             "Signal": s["name"].replace("_", " ").title(),
@@ -2056,35 +2046,20 @@ def main() -> None:
                     set_sim_state(sim)
                     st.success(f"RCI weights reset to defaults for '{tune_contest}'.")
 
+        # ── Inactive contest types (collapsed, informational) ──
+        _other_presets = [k for k in CONTEST_PRESETS if k not in rci_contests]
+        if _other_presets:
+            with st.expander(f"Other contest types ({len(_other_presets)} not active)", expanded=False):
+                st.caption("Switch contest type or run edge analysis to activate RCI for these.")
+                for _op in _other_presets:
+                    st.markdown(f"- {_op}")
+
     set_sim_state(sim)
 
     st.divider()
 
     # =====================================================================
-    # SECTION 6: CONTEST-TYPE GAUGES
-    # =====================================================================
-    st.subheader("📈 Contest-type Gauges")
-    st.caption("Score driven by sim smash probability and calibration outputs.")
-
-    gauge_cols = st.columns(len(_CONTEST_GAUGE_LABELS))
-    pr = sim.player_results
-
-    for gcol, contest in zip(gauge_cols, _CONTEST_GAUGE_LABELS):
-        with gcol:
-            score = _gauge_score(pr, contest)
-            pct = int(score * 100)
-            _gk = "green" if pct >= 60 else "orange" if pct >= 35 else "red"
-            _ghex = _STATUS_COLORS.get(_gk, "#c27a7a")
-            st.markdown(f"**{contest}**")
-            st.progress(pct)
-            st.markdown(f"<span style='color:{_ghex}'>{pct}%</span>", unsafe_allow_html=True)
-            sim.contest_gauges[contest] = {"score": score, "label": contest}
-    set_sim_state(sim)
-
-    st.divider()
-
-    # =====================================================================
-    # SECTION 7: RICKY EDGE CHECK GATE
+    # SECTION 6: RICKY EDGE CHECK GATE  (was Section 7; Contest-type Gauges removed)
     # =====================================================================
     st.subheader("🔐 Ricky Edge Check Gate")
 

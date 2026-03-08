@@ -376,32 +376,33 @@ def main() -> None:
     # ─────────────────────────────────────────────────────────────────────
     st.subheader("Contest Advisor")
 
-    gauge_summary = sim.contest_gauges
-    if gauge_summary:
+    # Read RCI results from sim state (written by The Lab's RCI section)
+    _rci_data = sim.contest_gauges  # RCI stores results here via set_rci_result
+    _UI_ADVISOR_LABELS = [("GPP", "GPP Main"), ("Cash", "Cash Main"), ("Showdown", "Showdown")]
+    _any_rci = any(_rci_data.get(label, {}).get("rci_score") for _, label in _UI_ADVISOR_LABELS)
+    if _any_rci:
         advisor_rows = []
-        _UI_ADVISOR_LABELS = [("GPP", "GPP Main"), ("Cash", "Cash Main"), ("Showdown", "Showdown")]
         for ui_label, label in _UI_ADVISOR_LABELS:
             preset = CONTEST_PRESETS.get(label, {})
-            _label_map = {
-                "GPP Main": "150-Max",
-                "Showdown": "3-Max",
-                "Cash Main": "Cash",
-            }
-            gauge_label = _label_map.get(label, "SE")
-            gauge = gauge_summary.get(gauge_label, {})
-            score = float(gauge.get("score", 0))
-            # Smash-based scores typically range 0.05–0.30; adjust thresholds
-            rec = "✅ Strong" if score >= 0.25 else "✅ Playable" if score >= 0.12 else "⚠️ Thin" if score >= 0.06 else "❌ Weak"
+            rci_entry = _rci_data.get(label, {})
+            rci_score = float(rci_entry.get("rci_score", 0))
+            rci_status = rci_entry.get("rci_status", "red")
+            rec = (
+                "✅ Strong" if rci_score >= 70
+                else "✅ Playable" if rci_score >= 45
+                else "⚠️ Thin" if rci_score >= 25
+                else "❌ Not calibrated"
+            )
             advisor_rows.append({
                 "Contest": ui_label,
                 "Build Mode": _CONTEST_TO_BUILD_MODE.get(label, "median"),
                 "Default Lineups": preset.get("default_lineups", 1),
-                "Sim Score": f"{int(score * 100)}%",
+                "RCI": f"{int(rci_score)}/100",
                 "Recommendation": rec,
             })
         st.dataframe(pd.DataFrame(advisor_rows), use_container_width=True, hide_index=True)
     else:
-        st.info("Run sims in **The Lab** for contest recommendations.")
+        st.info("Run edge analysis or sims in **The Lab** for contest recommendations.")
 
     st.divider()
 
