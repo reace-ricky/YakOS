@@ -1,53 +1,63 @@
 {
-  "computed_at": "2026-03-09T00:13:29.633066+00:00",
-  "n_slates": 3,
-  "n_player_slates": 434,
+  "computed_at": "2026-03-09T00:24:02.843069+00:00",
+  "n_slates": 4,
+  "n_player_slates": 577,
   "classification": {
-    "pop": 84,
-    "bust": 72,
-    "inline": 278,
-    "pop_rate": 0.194,
-    "bust_rate": 0.166
+    "pop": 123,
+    "bust": 98,
+    "inline": 356,
+    "pop_rate": 0.213,
+    "bust_rate": 0.17
   },
   "factor_breakdown": {},
   "bracket_breakdown": {
     "lt5k": {
-      "n": 230,
-      "pop_rate": 0.2,
-      "bust_rate": 0.257,
-      "avg_residual": -0.8,
-      "mae": 7.1
+      "n": 316,
+      "pop_rate": 0.244,
+      "bust_rate": 0.25,
+      "avg_residual": 0.0,
+      "mae": 7.6
     },
     "5_65k": {
-      "n": 105,
-      "pop_rate": 0.21,
-      "bust_rate": 0.086,
-      "avg_residual": 0.1,
-      "mae": 7.9
+      "n": 137,
+      "pop_rate": 0.19,
+      "bust_rate": 0.102,
+      "avg_residual": 0.2,
+      "mae": 7.8
     },
     "65_8k": {
-      "n": 52,
-      "pop_rate": 0.192,
-      "bust_rate": 0.038,
-      "avg_residual": 1.8,
-      "mae": 8.4
+      "n": 65,
+      "pop_rate": 0.2,
+      "bust_rate": 0.031,
+      "avg_residual": 1.6,
+      "mae": 8.2
     },
     "8_10k": {
-      "n": 34,
-      "pop_rate": 0.088,
-      "bust_rate": 0.059,
-      "avg_residual": -0.1,
-      "mae": 9.3
+      "n": 45,
+      "pop_rate": 0.089,
+      "bust_rate": 0.067,
+      "avg_residual": -0.8,
+      "mae": 9.7
     },
     "10k_plus": {
-      "n": 13,
-      "pop_rate": 0.231,
+      "n": 14,
+      "pop_rate": 0.214,
       "bust_rate": 0.0,
-      "avg_residual": 6.3,
-      "mae": 10.0
+      "avg_residual": 6.2,
+      "mae": 9.6
     }
   },
   "top_pops": [
+    {
+      "player": "Alondes Williams",
+      "salary": 3000,
+      "proj": 5.5,
+      "actual": 51.5,
+      "residual": 46.0,
+      "ratio": 9.37,
+      "context": [],
+      "date": "2026-02-20"
+    },
     {
       "player": "Kel'el Ware",
       "salary": 4900,
@@ -89,6 +99,16 @@
       "date": "2026-03-06"
     },
     {
+      "player": "Javon Small",
+      "salary": 3500,
+      "proj": 14.8,
+      "actual": 41.5,
+      "residual": 26.7,
+      "ratio": 2.81,
+      "context": [],
+      "date": "2026-02-20"
+    },
+    {
       "player": "Julian Reese",
       "salary": 3700,
       "proj": 20.4,
@@ -109,44 +129,24 @@
       "date": "2026-03-06"
     },
     {
-      "player": "Kyle Filipowski",
-      "salary": 7500,
-      "proj": 29.6,
-      "actual": 52.0,
-      "residual": 22.4,
-      "ratio": 1.75,
+      "player": "Sion James",
+      "salary": 3700,
+      "proj": 12.1,
+      "actual": 35.0,
+      "residual": 22.9,
+      "ratio": 2.9,
       "context": [],
-      "date": "2026-03-05"
+      "date": "2026-02-20"
     },
     {
-      "player": "Taylor Hendricks",
-      "salary": 4700,
-      "proj": 14.8,
-      "actual": 37.0,
-      "residual": 22.2,
-      "ratio": 2.5,
+      "player": "Olivier-Maxence Prosper",
+      "salary": 3500,
+      "proj": 14.3,
+      "actual": 36.8,
+      "residual": 22.5,
+      "ratio": 2.57,
       "context": [],
-      "date": "2026-03-07"
-    },
-    {
-      "player": "Taylor Hendricks",
-      "salary": 4700,
-      "proj": 14.9,
-      "actual": 37.0,
-      "residual": 22.1,
-      "ratio": 2.48,
-      "context": [],
-      "date": "2026-03-07"
-    },
-    {
-      "player": "Rudy Gobert",
-      "salary": 7000,
-      "proj": 31.4,
-      "actual": 52.5,
-      "residual": 21.1,
-      "ratio": 1.67,
-      "context": [],
-      "date": "2026-03-05"
+      "date": "2026-02-20"
     }
   ],
   "top_busts": [
@@ -159,6 +159,16 @@
       "ratio": 0.07,
       "context": [],
       "date": "2026-03-05"
+    },
+    {
+      "player": "Jaylon Tyson",
+      "salary": 5500,
+      "proj": 27.7,
+      "actual": 5.2,
+      "residual": -22.5,
+      "ratio": 0.19,
+      "context": [],
+      "date": "2026-02-20"
     },
     {
       "player": "Jamal Murray",
@@ -211,6 +221,16 @@
       "date": "2026-03-07"
     },
     {
+      "player": "Simone Fontecchio",
+      "salary": 4600,
+      "proj": 24.2,
+      "actual": 4.5,
+      "residual": -19.7,
+      "ratio": 0.19,
+      "context": [],
+      "date": "2026-02-20"
+    },
+    {
       "player": "Danny Wolf",
       "salary": 4800,
       "proj": 23.1,
@@ -229,38 +249,18 @@
       "ratio": 0.3,
       "context": [],
       "date": "2026-03-07"
-    },
-    {
-      "player": "Naji Marshall",
-      "salary": 6600,
-      "proj": 35.6,
-      "actual": 17.8,
-      "residual": -17.9,
-      "ratio": 0.5,
-      "context": [],
-      "date": "2026-03-06"
-    },
-    {
-      "player": "Jalen Pickett",
-      "salary": 3300,
-      "proj": 19.3,
-      "actual": 1.5,
-      "residual": -17.8,
-      "ratio": 0.08,
-      "context": [],
-      "date": "2026-03-06"
     }
   ],
   "suggestions": [
     {
       "signal": "salary_10k_plus",
       "direction": "under-projecting",
-      "detail": "Salary bracket 10k_plus: avg residual +6.3 FP (MAE 10.0). Systematic under-projecting in this range.",
+      "detail": "Salary bracket 10k_plus: avg residual +6.2 FP (MAE 9.6). Systematic under-projecting in this range.",
       "severity": "high"
     }
   ],
   "context_corrections": {
-    "computed_at": "2026-03-09T00:13:29.633046+00:00",
+    "computed_at": "2026-03-09T00:24:02.843050+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
