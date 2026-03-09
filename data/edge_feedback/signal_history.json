@@ -421,7 +421,7 @@
   },
   "2026-02-23": {
     "slate_date": "2026-02-23",
-    "contest_type": "GPP Main",
+    "contest_type": "Cash Main",
     "n_players": 57,
     "signals": {
       "high_leverage": {
@@ -429,14 +429,14 @@
         "n_hit": 18,
         "hit_rate": 0.327,
         "avg_actual": 25.42,
-        "avg_proj": 24.04
+        "avg_proj": 24.09
       },
       "low_ownership_upside": {
         "n_flagged": 43,
         "n_hit": 8,
         "hit_rate": 0.186,
-        "avg_actual": 25.22,
-        "avg_proj": 26.12
+        "avg_actual": 25.17,
+        "avg_proj": 26.24
       },
       "chalk_fade": {
         "n_flagged": 0,
@@ -450,14 +450,14 @@
         "n_hit": 1,
         "hit_rate": 0.333,
         "avg_actual": 31.42,
-        "avg_proj": 32.33
+        "avg_proj": 32.34
       },
       "smash_candidate": {
         "n_flagged": 35,
         "n_hit": 5,
         "hit_rate": 0.143,
         "avg_actual": 25.74,
-        "avg_proj": 28.01
+        "avg_proj": 28.08
       }
     }
   }
