@@ -1,19 +1,19 @@
 {
-  "computed_at": "2026-03-09T00:07:05.903934+00:00",
+  "computed_at": "2026-03-09T00:09:26.211992+00:00",
   "n_slates": 7,
   "signal_stats": {
     "high_leverage": {
-      "total_flagged": 83,
-      "total_hit": 27,
-      "raw_hit_rate": 0.325,
-      "weighted_hit_rate": 0.325,
+      "total_flagged": 82,
+      "total_hit": 26,
+      "raw_hit_rate": 0.317,
+      "weighted_hit_rate": 0.317,
       "n_slates_active": 1
     },
     "low_ownership_upside": {
-      "total_flagged": 68,
-      "total_hit": 22,
-      "raw_hit_rate": 0.324,
-      "weighted_hit_rate": 0.324,
+      "total_flagged": 69,
+      "total_hit": 20,
+      "raw_hit_rate": 0.29,
+      "weighted_hit_rate": 0.29,
       "n_slates_active": 1
     },
     "chalk_fade": {
@@ -24,25 +24,25 @@
       "n_slates_active": 0
     },
     "salary_value": {
-      "total_flagged": 74,
+      "total_flagged": 73,
       "total_hit": 9,
-      "raw_hit_rate": 0.122,
+      "raw_hit_rate": 0.123,
       "weighted_hit_rate": 0.185,
       "n_slates_active": 6
     },
     "smash_candidate": {
-      "total_flagged": 49,
-      "total_hit": 13,
-      "raw_hit_rate": 0.265,
-      "weighted_hit_rate": 0.265,
+      "total_flagged": 55,
+      "total_hit": 16,
+      "raw_hit_rate": 0.291,
+      "weighted_hit_rate": 0.291,
       "n_slates_active": 1
     }
   },
   "weights": {
-    "high_leverage": 0.296,
-    "low_ownership_upside": 0.295,
+    "high_leverage": 0.293,
+    "low_ownership_upside": 0.268,
     "chalk_fade": 0.0,
-    "salary_value": 0.168,
-    "smash_candidate": 0.241
+    "salary_value": 0.171,
+    "smash_candidate": 0.269
   }
 }
