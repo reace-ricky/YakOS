@@ -1,50 +1,50 @@
 {
-  "computed_at": "2026-03-09T00:34:03.152022+00:00",
+  "computed_at": "2026-03-09T00:36:30.108096+00:00",
   "n_slates": 7,
-  "n_player_slates": 1012,
+  "n_player_slates": 1181,
   "classification": {
-    "pop": 231,
-    "bust": 184,
-    "inline": 597,
-    "pop_rate": 0.228,
-    "bust_rate": 0.182
+    "pop": 273,
+    "bust": 218,
+    "inline": 690,
+    "pop_rate": 0.231,
+    "bust_rate": 0.185
   },
   "factor_breakdown": {},
   "bracket_breakdown": {
     "lt5k": {
-      "n": 558,
-      "pop_rate": 0.272,
-      "bust_rate": 0.258,
-      "avg_residual": 0.2,
+      "n": 650,
+      "pop_rate": 0.28,
+      "bust_rate": 0.255,
+      "avg_residual": 0.3,
       "mae": 7.6
     },
     "5_65k": {
-      "n": 224,
-      "pop_rate": 0.219,
-      "bust_rate": 0.116,
+      "n": 262,
+      "pop_rate": 0.225,
+      "bust_rate": 0.122,
       "avg_residual": 0.1,
-      "mae": 8.2
+      "mae": 8.3
     },
     "65_8k": {
-      "n": 118,
-      "pop_rate": 0.144,
-      "bust_rate": 0.076,
-      "avg_residual": 0.3,
-      "mae": 8.4
+      "n": 143,
+      "pop_rate": 0.126,
+      "bust_rate": 0.098,
+      "avg_residual": -0.5,
+      "mae": 8.5
     },
     "8_10k": {
-      "n": 84,
-      "pop_rate": 0.119,
-      "bust_rate": 0.048,
-      "avg_residual": -1.1,
+      "n": 97,
+      "pop_rate": 0.113,
+      "bust_rate": 0.041,
+      "avg_residual": -1.6,
       "mae": 9.1
     },
     "10k_plus": {
-      "n": 28,
-      "pop_rate": 0.107,
-      "bust_rate": 0.036,
-      "avg_residual": 0.8,
-      "mae": 11.1
+      "n": 29,
+      "pop_rate": 0.103,
+      "bust_rate": 0.069,
+      "avg_residual": -0.3,
+      "mae": 11.7
     }
   },
   "top_pops": [
@@ -161,6 +161,16 @@
       "date": "2026-02-24"
     },
     {
+      "player": "Jalen Johnson",
+      "salary": 10800,
+      "proj": 44.3,
+      "actual": 14.8,
+      "residual": -29.6,
+      "ratio": 0.33,
+      "context": [],
+      "date": "2026-02-24"
+    },
+    {
       "player": "Jaylon Tyson",
       "salary": 9900,
       "proj": 32.9,
@@ -231,29 +241,19 @@
       "date": "2026-02-24"
     },
     {
-      "player": "Jalen Duren",
-      "salary": 8200,
-      "proj": 38.3,
-      "actual": 17.8,
-      "residual": -20.5,
-      "ratio": 0.46,
-      "context": [],
-      "date": "2026-03-05"
-    },
-    {
-      "player": "Aaron Gordon",
-      "salary": 6600,
-      "proj": 31.7,
-      "actual": 11.2,
-      "residual": -20.4,
+      "player": "Kyshawn George",
+      "salary": 6700,
+      "proj": 34.5,
+      "actual": 12.5,
+      "residual": -22.0,
       "ratio": 0.36,
       "context": [],
-      "date": "2026-03-06"
+      "date": "2026-02-24"
     }
   ],
   "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-09T00:34:03.152002+00:00",
+    "computed_at": "2026-03-09T00:36:30.108077+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,

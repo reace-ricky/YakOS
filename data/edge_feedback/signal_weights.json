@@ -1,5 +1,5 @@
 {
-  "computed_at": "2026-03-09T00:34:03.059371+00:00",
+  "computed_at": "2026-03-09T00:36:29.980151+00:00",
   "n_slates": 12,
   "signal_stats": {
     "high_leverage": {
@@ -10,10 +10,10 @@
       "n_slates_active": 7
     },
     "low_ownership_upside": {
-      "total_flagged": 500,
-      "total_hit": 131,
-      "raw_hit_rate": 0.262,
-      "weighted_hit_rate": 0.262,
+      "total_flagged": 499,
+      "total_hit": 132,
+      "raw_hit_rate": 0.265,
+      "weighted_hit_rate": 0.263,
       "n_slates_active": 7
     },
     "chalk_fade": {
@@ -31,7 +31,7 @@
       "n_slates_active": 11
     },
     "smash_candidate": {
-      "total_flagged": 390,
+      "total_flagged": 391,
       "total_hit": 96,
       "raw_hit_rate": 0.246,
       "weighted_hit_rate": 0.249,
