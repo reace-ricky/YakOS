@@ -460,5 +460,47 @@
         "avg_proj": 28.08
       }
     }
+  },
+  "2026-02-24": {
+    "slate_date": "2026-02-24",
+    "contest_type": "Cash Main",
+    "n_players": 170,
+    "signals": {
+      "high_leverage": {
+        "n_flagged": 133,
+        "n_hit": 42,
+        "hit_rate": 0.316,
+        "avg_actual": 24.69,
+        "avg_proj": 25.84
+      },
+      "low_ownership_upside": {
+        "n_flagged": 121,
+        "n_hit": 35,
+        "hit_rate": 0.289,
+        "avg_actual": 25.02,
+        "avg_proj": 26.64
+      },
+      "chalk_fade": {
+        "n_flagged": 0,
+        "n_hit": 0,
+        "hit_rate": null,
+        "avg_actual": null,
+        "avg_proj": null
+      },
+      "salary_value": {
+        "n_flagged": 7,
+        "n_hit": 2,
+        "hit_rate": 0.286,
+        "avg_actual": 21.71,
+        "avg_proj": 28.32
+      },
+      "smash_candidate": {
+        "n_flagged": 88,
+        "n_hit": 22,
+        "hit_rate": 0.25,
+        "avg_actual": 24.79,
+        "avg_proj": 27.91
+      }
+    }
   }
 }
