@@ -1640,19 +1640,54 @@ def main() -> None:
                 if "error" in _sb_result:
                     st.error(_sb_result["error"])
                 else:
-                    # Save run to history
+                    # Grab previous run BEFORE saving new one (for deltas)
+                    _sb_hist = get_sandbox_history()
+                    _sb_prev = _sb_hist[-1] if _sb_hist else None
                     save_sandbox_run(_sb_result)
                     st.session_state["_sb_last_result"] = _sb_result
+                    st.session_state["_sb_prev_result"] = _sb_prev
 
             # Display last result if available
             _sb_result = st.session_state.get("_sb_last_result")
+            _sb_prev = st.session_state.get("_sb_prev_result")
             if _sb_result and "error" not in _sb_result:
-                # KPI row
+                # KPI row with deltas from previous run
                 _k1, _k2, _k3, _k4, _k5 = st.columns(5)
-                _k1.metric("MAE", f"{_sb_result['avg_mae']:.1f} FP")
-                _k2.metric("Smash Prec", f"{_sb_result['avg_smash_precision']*100:.0f}%")
-                _k3.metric("Bust Prec", f"{_sb_result['avg_bust_precision']*100:.0f}%")
-                _k4.metric("Coverage", f"{_sb_result['avg_coverage']*100:.0f}%")
+
+                def _delta(key, fmt_pct=False, invert=False):
+                    """Compute delta string vs previous run. invert=True means lower is better (MAE)."""
+                    if _sb_prev is None or key not in _sb_prev:
+                        return None
+                    diff = _sb_result[key] - _sb_prev[key]
+                    if abs(diff) < 0.001:
+                        return None
+                    if fmt_pct:
+                        return f"{diff*100:+.0f}%"
+                    return f"{diff:+.1f}"
+
+                # Targets: what "good" looks like
+                _targets = {"avg_mae": 6.0, "avg_smash_precision": 0.25, "avg_bust_precision": 0.40, "avg_coverage": 0.80}
+
+                def _help(key):
+                    t = _targets.get(key)
+                    if t is None:
+                        return None
+                    if key == "avg_mae":
+                        return f"target: {t:.0f} FP"
+                    return f"target: {t*100:.0f}%"
+
+                _k1.metric("MAE", f"{_sb_result['avg_mae']:.1f} FP",
+                           delta=_delta("avg_mae"), delta_color="inverse",
+                           help=_help("avg_mae"))
+                _k2.metric("Smash Prec", f"{_sb_result['avg_smash_precision']*100:.0f}%",
+                           delta=_delta("avg_smash_precision", fmt_pct=True),
+                           help=_help("avg_smash_precision"))
+                _k3.metric("Bust Prec", f"{_sb_result['avg_bust_precision']*100:.0f}%",
+                           delta=_delta("avg_bust_precision", fmt_pct=True),
+                           help=_help("avg_bust_precision"))
+                _k4.metric("Coverage", f"{_sb_result['avg_coverage']*100:.0f}%",
+                           delta=_delta("avg_coverage", fmt_pct=True),
+                           help=_help("avg_coverage"))
                 _k5.metric("Slates", _sb_result['n_slates'])
 
                 # Top smashes + worst busts side by side
