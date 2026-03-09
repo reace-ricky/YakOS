@@ -1,7 +1,7 @@
 {
-  "retrained_at": "2026-03-09T01:03:36.641742+00:00",
-  "n_slates": 8,
-  "n_rows": 1376,
+  "retrained_at": "2026-03-09T14:27:57.396996+00:00",
+  "n_slates": 10,
+  "n_rows": 1768,
   "models_trained": [
     "fp",
     "ownership"
