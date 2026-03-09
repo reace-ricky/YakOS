@@ -215,18 +215,18 @@
     "n_players": 118,
     "signals": {
       "high_leverage": {
-        "n_flagged": 0,
-        "n_hit": 0,
-        "hit_rate": null,
-        "avg_actual": null,
-        "avg_proj": null
+        "n_flagged": 104,
+        "n_hit": 35,
+        "hit_rate": 0.337,
+        "avg_actual": 25.41,
+        "avg_proj": 25.37
       },
       "low_ownership_upside": {
-        "n_flagged": 0,
-        "n_hit": 0,
-        "hit_rate": null,
-        "avg_actual": null,
-        "avg_proj": null
+        "n_flagged": 93,
+        "n_hit": 28,
+        "hit_rate": 0.301,
+        "avg_actual": 25.86,
+        "avg_proj": 26.25
       },
       "chalk_fade": {
         "n_flagged": 0,
@@ -236,18 +236,18 @@
         "avg_proj": null
       },
       "salary_value": {
-        "n_flagged": 28,
-        "n_hit": 4,
-        "hit_rate": 0.143,
-        "avg_actual": 21.89,
-        "avg_proj": 28.37
+        "n_flagged": 6,
+        "n_hit": 2,
+        "hit_rate": 0.333,
+        "avg_actual": 20.0,
+        "avg_proj": 21.5
       },
       "smash_candidate": {
-        "n_flagged": 0,
-        "n_hit": 0,
-        "hit_rate": null,
-        "avg_actual": null,
-        "avg_proj": null
+        "n_flagged": 76,
+        "n_hit": 23,
+        "hit_rate": 0.303,
+        "avg_actual": 26.11,
+        "avg_proj": 26.88
       }
     }
   },

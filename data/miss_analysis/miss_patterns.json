@@ -1,53 +1,63 @@
 {
-  "computed_at": "2026-03-09T00:12:03.680259+00:00",
-  "n_slates": 2,
-  "n_player_slates": 316,
+  "computed_at": "2026-03-09T00:13:29.633066+00:00",
+  "n_slates": 3,
+  "n_player_slates": 434,
   "classification": {
-    "pop": 56,
-    "bust": 51,
-    "inline": 209,
-    "pop_rate": 0.177,
-    "bust_rate": 0.161
+    "pop": 84,
+    "bust": 72,
+    "inline": 278,
+    "pop_rate": 0.194,
+    "bust_rate": 0.166
   },
   "factor_breakdown": {},
   "bracket_breakdown": {
     "lt5k": {
-      "n": 167,
-      "pop_rate": 0.18,
-      "bust_rate": 0.246,
+      "n": 230,
+      "pop_rate": 0.2,
+      "bust_rate": 0.257,
       "avg_residual": -0.8,
-      "mae": 6.7
+      "mae": 7.1
     },
     "5_65k": {
-      "n": 80,
-      "pop_rate": 0.2,
-      "bust_rate": 0.088,
-      "avg_residual": -0.1,
-      "mae": 7.7
-    },
-    "65_8k": {
-      "n": 37,
-      "pop_rate": 0.162,
-      "bust_rate": 0.054,
-      "avg_residual": 0.9,
+      "n": 105,
+      "pop_rate": 0.21,
+      "bust_rate": 0.086,
+      "avg_residual": 0.1,
       "mae": 7.9
     },
+    "65_8k": {
+      "n": 52,
+      "pop_rate": 0.192,
+      "bust_rate": 0.038,
+      "avg_residual": 1.8,
+      "mae": 8.4
+    },
     "8_10k": {
-      "n": 21,
-      "pop_rate": 0.095,
-      "bust_rate": 0.048,
-      "avg_residual": 2.9,
-      "mae": 8.5
+      "n": 34,
+      "pop_rate": 0.088,
+      "bust_rate": 0.059,
+      "avg_residual": -0.1,
+      "mae": 9.3
     },
     "10k_plus": {
-      "n": 11,
-      "pop_rate": 0.182,
+      "n": 13,
+      "pop_rate": 0.231,
       "bust_rate": 0.0,
-      "avg_residual": 5.8,
-      "mae": 8.4
+      "avg_residual": 6.3,
+      "mae": 10.0
     }
   },
   "top_pops": [
+    {
+      "player": "Kel'el Ware",
+      "salary": 4900,
+      "proj": 21.2,
+      "actual": 66.2,
+      "residual": 45.0,
+      "ratio": 3.12,
+      "context": [],
+      "date": "2026-03-05"
+    },
     {
       "player": "OG Anunoby",
       "salary": 6600,
@@ -57,6 +67,16 @@
       "ratio": 2.0,
       "context": [],
       "date": "2026-03-06"
+    },
+    {
+      "player": "Victor Wembanyama",
+      "salary": 10900,
+      "proj": 49.3,
+      "actual": 77.5,
+      "residual": 28.2,
+      "ratio": 1.57,
+      "context": [],
+      "date": "2026-03-05"
     },
     {
       "player": "Tyler Herro",
@@ -69,6 +89,16 @@
       "date": "2026-03-06"
     },
     {
+      "player": "Julian Reese",
+      "salary": 3700,
+      "proj": 20.4,
+      "actual": 47.0,
+      "residual": 26.6,
+      "ratio": 2.3,
+      "context": [],
+      "date": "2026-03-05"
+    },
+    {
       "player": "Brook Lopez",
       "salary": 5100,
       "proj": 20.5,
@@ -77,6 +107,16 @@
       "ratio": 2.27,
       "context": [],
       "date": "2026-03-06"
+    },
+    {
+      "player": "Kyle Filipowski",
+      "salary": 7500,
+      "proj": 29.6,
+      "actual": 52.0,
+      "residual": 22.4,
+      "ratio": 1.75,
+      "context": [],
+      "date": "2026-03-05"
     },
     {
       "player": "Taylor Hendricks",
@@ -99,57 +139,27 @@
       "date": "2026-03-07"
     },
     {
-      "player": "Gui Santos",
-      "salary": 6400,
-      "proj": 24.5,
-      "actual": 45.2,
-      "residual": 20.7,
-      "ratio": 1.84,
+      "player": "Rudy Gobert",
+      "salary": 7000,
+      "proj": 31.4,
+      "actual": 52.5,
+      "residual": 21.1,
+      "ratio": 1.67,
       "context": [],
-      "date": "2026-03-07"
-    },
-    {
-      "player": "Michael Porter Jr.",
-      "salary": 8100,
-      "proj": 34.1,
-      "actual": 54.8,
-      "residual": 20.6,
-      "ratio": 1.6,
-      "context": [],
-      "date": "2026-03-07"
-    },
-    {
-      "player": "Gui Santos",
-      "salary": 6400,
-      "proj": 25.1,
-      "actual": 45.2,
-      "residual": 20.1,
-      "ratio": 1.8,
-      "context": [],
-      "date": "2026-03-07"
-    },
-    {
-      "player": "Ousmane Dieng",
-      "salary": 4000,
-      "proj": 12.8,
-      "actual": 32.5,
-      "residual": 19.7,
-      "ratio": 2.54,
-      "context": [],
-      "date": "2026-03-07"
-    },
-    {
-      "player": "Ousmane Dieng",
-      "salary": 4000,
-      "proj": 13.4,
-      "actual": 32.5,
-      "residual": 19.1,
-      "ratio": 2.42,
-      "context": [],
-      "date": "2026-03-07"
+      "date": "2026-03-05"
     }
   ],
   "top_busts": [
+    {
+      "player": "Ausar Thompson",
+      "salary": 5700,
+      "proj": 28.3,
+      "actual": 2.0,
+      "residual": -26.3,
+      "ratio": 0.07,
+      "context": [],
+      "date": "2026-03-05"
+    },
     {
       "player": "Jamal Murray",
       "salary": 9100,
@@ -171,6 +181,16 @@
       "date": "2026-03-06"
     },
     {
+      "player": "Jalen Duren",
+      "salary": 8200,
+      "proj": 38.3,
+      "actual": 17.8,
+      "residual": -20.5,
+      "ratio": 0.46,
+      "context": [],
+      "date": "2026-03-05"
+    },
+    {
       "player": "Aaron Gordon",
       "salary": 6600,
       "proj": 31.7,
@@ -189,6 +209,16 @@
       "ratio": 0.29,
       "context": [],
       "date": "2026-03-07"
+    },
+    {
+      "player": "Danny Wolf",
+      "salary": 4800,
+      "proj": 23.1,
+      "actual": 3.8,
+      "residual": -19.4,
+      "ratio": 0.16,
+      "context": [],
+      "date": "2026-03-05"
     },
     {
       "player": "Jock Landale",
@@ -219,54 +249,18 @@
       "ratio": 0.08,
       "context": [],
       "date": "2026-03-06"
-    },
-    {
-      "player": "Tim Hardaway Jr.",
-      "salary": 4800,
-      "proj": 24.3,
-      "actual": 7.8,
-      "residual": -16.5,
-      "ratio": 0.32,
-      "context": [],
-      "date": "2026-03-06"
-    },
-    {
-      "player": "Julian Strawther",
-      "salary": 4500,
-      "proj": 21.2,
-      "actual": 6.0,
-      "residual": -15.2,
-      "ratio": 0.28,
-      "context": [],
-      "date": "2026-03-06"
-    },
-    {
-      "player": "Ben Saraf",
-      "salary": 3100,
-      "proj": 15.1,
-      "actual": 0.5,
-      "residual": -14.6,
-      "ratio": 0.03,
-      "context": [],
-      "date": "2026-03-07"
     }
   ],
   "suggestions": [
     {
-      "signal": "salary_8_10k",
-      "direction": "under-projecting",
-      "detail": "Salary bracket 8_10k: avg residual +2.9 FP (MAE 8.5). Systematic under-projecting in this range.",
-      "severity": "medium"
-    },
-    {
       "signal": "salary_10k_plus",
       "direction": "under-projecting",
-      "detail": "Salary bracket 10k_plus: avg residual +5.8 FP (MAE 8.4). Systematic under-projecting in this range.",
+      "detail": "Salary bracket 10k_plus: avg residual +6.3 FP (MAE 10.0). Systematic under-projecting in this range.",
       "severity": "high"
     }
   ],
   "context_corrections": {
-    "computed_at": "2026-03-09T00:12:03.680232+00:00",
+    "computed_at": "2026-03-09T00:13:29.633046+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
