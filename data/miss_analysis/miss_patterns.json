@@ -1,50 +1,50 @@
 {
-  "computed_at": "2026-03-09T00:28:04.403539+00:00",
-  "n_slates": 5,
-  "n_player_slates": 729,
+  "computed_at": "2026-03-09T00:29:37.204296+00:00",
+  "n_slates": 6,
+  "n_player_slates": 786,
   "classification": {
-    "pop": 160,
-    "bust": 132,
-    "inline": 437,
-    "pop_rate": 0.219,
-    "bust_rate": 0.181
+    "pop": 174,
+    "bust": 141,
+    "inline": 471,
+    "pop_rate": 0.221,
+    "bust_rate": 0.179
   },
   "factor_breakdown": {},
   "bracket_breakdown": {
     "lt5k": {
-      "n": 402,
-      "pop_rate": 0.254,
-      "bust_rate": 0.264,
-      "avg_residual": -0.0,
-      "mae": 7.5
+      "n": 434,
+      "pop_rate": 0.258,
+      "bust_rate": 0.263,
+      "avg_residual": 0.0,
+      "mae": 7.6
     },
     "5_65k": {
-      "n": 162,
-      "pop_rate": 0.185,
-      "bust_rate": 0.111,
-      "avg_residual": -0.1,
-      "mae": 7.9
+      "n": 174,
+      "pop_rate": 0.195,
+      "bust_rate": 0.109,
+      "avg_residual": 0.0,
+      "mae": 8.0
     },
     "65_8k": {
-      "n": 81,
-      "pop_rate": 0.198,
-      "bust_rate": 0.049,
-      "avg_residual": 0.8,
-      "mae": 8.5
+      "n": 87,
+      "pop_rate": 0.184,
+      "bust_rate": 0.046,
+      "avg_residual": 1.2,
+      "mae": 8.3
     },
     "8_10k": {
-      "n": 61,
-      "pop_rate": 0.148,
-      "bust_rate": 0.066,
-      "avg_residual": 0.0,
-      "mae": 9.9
+      "n": 66,
+      "pop_rate": 0.136,
+      "bust_rate": 0.061,
+      "avg_residual": -0.2,
+      "mae": 9.5
     },
     "10k_plus": {
-      "n": 23,
-      "pop_rate": 0.13,
+      "n": 25,
+      "pop_rate": 0.12,
       "bust_rate": 0.0,
-      "avg_residual": 0.8,
-      "mae": 10.8
+      "avg_residual": 1.4,
+      "mae": 10.6
     }
   },
   "top_pops": [
@@ -100,6 +100,16 @@
     },
     {
       "player": "Javon Small",
+      "salary": 3800,
+      "proj": 14.1,
+      "actual": 41.0,
+      "residual": 26.9,
+      "ratio": 2.9,
+      "context": [],
+      "date": "2026-02-23"
+    },
+    {
+      "player": "Javon Small",
       "salary": 3500,
       "proj": 14.8,
       "actual": 41.5,
@@ -135,16 +145,6 @@
       "actual": 35.0,
       "residual": 22.9,
       "ratio": 2.9,
-      "context": [],
-      "date": "2026-02-20"
-    },
-    {
-      "player": "Sion James",
-      "salary": 3600,
-      "proj": 12.4,
-      "actual": 35.0,
-      "residual": 22.6,
-      "ratio": 2.81,
       "context": [],
       "date": "2026-02-20"
     }
@@ -253,7 +253,7 @@
   ],
   "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-09T00:28:04.403518+00:00",
+    "computed_at": "2026-03-09T00:29:37.204276+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
