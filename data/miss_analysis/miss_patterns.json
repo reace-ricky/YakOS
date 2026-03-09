@@ -1,43 +1,43 @@
 {
-  "computed_at": "2026-03-09T00:43:15.870132+00:00",
-  "n_slates": 7,
-  "n_player_slates": 1299,
+  "computed_at": "2026-03-09T01:02:59.722675+00:00",
+  "n_slates": 8,
+  "n_player_slates": 1374,
   "classification": {
-    "pop": 301,
-    "bust": 241,
-    "inline": 757,
-    "pop_rate": 0.232,
-    "bust_rate": 0.186
+    "pop": 312,
+    "bust": 257,
+    "inline": 805,
+    "pop_rate": 0.227,
+    "bust_rate": 0.187
   },
   "factor_breakdown": {},
   "bracket_breakdown": {
     "lt5k": {
-      "n": 713,
-      "pop_rate": 0.279,
-      "bust_rate": 0.259,
+      "n": 753,
+      "pop_rate": 0.274,
+      "bust_rate": 0.264,
       "avg_residual": 0.2,
-      "mae": 7.7
+      "mae": 7.6
     },
     "5_65k": {
-      "n": 287,
-      "pop_rate": 0.223,
-      "bust_rate": 0.122,
+      "n": 302,
+      "pop_rate": 0.222,
+      "bust_rate": 0.119,
       "avg_residual": 0.2,
       "mae": 8.3
     },
     "65_8k": {
-      "n": 158,
-      "pop_rate": 0.139,
+      "n": 169,
+      "pop_rate": 0.13,
       "bust_rate": 0.089,
-      "avg_residual": -0.1,
+      "avg_residual": -0.5,
       "mae": 8.6
     },
     "8_10k": {
-      "n": 110,
+      "n": 119,
       "pop_rate": 0.109,
-      "bust_rate": 0.045,
-      "avg_residual": -2.1,
-      "mae": 9.3
+      "bust_rate": 0.042,
+      "avg_residual": -1.6,
+      "mae": 9.2
     },
     "10k_plus": {
       "n": 31,
@@ -251,16 +251,9 @@
       "date": "2026-02-24"
     }
   ],
-  "suggestions": [
-    {
-      "signal": "salary_8_10k",
-      "direction": "over-projecting",
-      "detail": "Salary bracket 8_10k: avg residual -2.1 FP (MAE 9.3). Systematic over-projecting in this range.",
-      "severity": "medium"
-    }
-  ],
+  "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-09T00:43:15.870109+00:00",
+    "computed_at": "2026-03-09T01:02:59.722646+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
