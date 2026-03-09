@@ -1921,7 +1921,146 @@ def main() -> None:
     st.divider()
 
     # =====================================================================
-    # SECTION 4: LEARNING STATUS
+    # SECTION 4: CONTEST RESULTS & CALIBRATION (Blueprint Layer 4)
+    # =====================================================================
+    st.subheader("🎯 Contest Results")
+    st.caption(
+        "Enter actual contest bands after each slate. "
+        "Ricky scores your lineups against these to track hit rates over time."
+    )
+
+    try:
+        from yak_core.contest_calibration import (
+            ContestResult, score_vs_bands, diagnose_miss,
+            save_contest_result, get_calibration_history, get_hit_rate_summary,
+        )
+
+        # ── Input form ────────────────────────────────────────────────
+        with st.expander("Enter Contest Results", expanded=False):
+            _cr_c1, _cr_c2 = st.columns(2)
+            with _cr_c1:
+                _cr_date = st.text_input(
+                    "Slate Date", value=slate.slate_date if slate.is_ready() else "",
+                    key="_cr_date",
+                )
+                _cr_type = st.selectbox(
+                    "Contest Type", ["gpp", "cash", "showdown"], key="_cr_type",
+                )
+            with _cr_c2:
+                _cr_cash = st.number_input("Cash Line", min_value=0.0, step=5.0, key="_cr_cash")
+                _cr_entries = st.number_input("# Entries", min_value=0, step=100, key="_cr_entries")
+
+            _cr_c3, _cr_c4, _cr_c5 = st.columns(3)
+            with _cr_c3:
+                _cr_top15 = st.number_input("Top 15% Score", min_value=0.0, step=5.0, key="_cr_top15")
+            with _cr_c4:
+                _cr_top1 = st.number_input("Top 1% Score", min_value=0.0, step=5.0, key="_cr_top1")
+            with _cr_c5:
+                _cr_winner = st.number_input("Winning Score", min_value=0.0, step=5.0, key="_cr_winner")
+
+            _cr_notes = st.text_input("Notes (optional)", key="_cr_notes")
+
+            if st.button("Save & Score", key="_cr_save", type="primary"):
+                if _cr_date and _cr_cash > 0:
+                    bands = ContestResult(
+                        slate_date=_cr_date,
+                        contest_type=_cr_type,
+                        cash_line=_cr_cash,
+                        top_15_score=_cr_top15,
+                        top_1_score=_cr_top1,
+                        winning_score=_cr_winner,
+                        num_entries=int(_cr_entries),
+                        notes=_cr_notes,
+                    )
+
+                    # Score lineups if we have built lineups with actuals
+                    lu_state = get_lineup_state()
+                    _contest_map = {"gpp": "GPP Main", "cash": "Cash Main", "showdown": "Showdown"}
+                    _lu_label = _contest_map.get(_cr_type, "GPP Main")
+                    _lu_df = lu_state.lineups.get(_lu_label)
+
+                    scores = None
+                    diag = None
+
+                    if _lu_df is not None and not _lu_df.empty and "actual_fp" in pool.columns:
+                        # Map actuals onto lineups
+                        actual_map = pool.set_index("player_name")["actual_fp"].to_dict() if "player_name" in pool.columns else {}
+                        _lu_df = _lu_df.copy()
+                        if actual_map:
+                            _lu_df["actual_fp"] = _lu_df["player_name"].map(actual_map).fillna(0)
+                        lu_actuals = _lu_df.groupby("lineup_index")["actual_fp"].sum().tolist()
+                        scores = score_vs_bands(lu_actuals, bands)
+                        diag = diagnose_miss(_lu_df, pool, bands)
+
+                    save_contest_result(bands, scores=scores, diagnoses=diag)
+
+                    if scores:
+                        st.success(
+                            f"Saved {_cr_date} {_cr_type.upper()} — "
+                            f"Cash rate: {scores['cash_rate']*100:.0f}% "
+                            f"({scores['cashed']}/{scores['n_lineups']})"
+                        )
+                        if scores.get("top_15"):
+                            st.caption(
+                                f"Top 15%: {scores['top_15']}/{scores['n_lineups']} · "
+                                f"Top 1%: {scores['top_1']}/{scores['n_lineups']}"
+                            )
+                    else:
+                        st.success(f"Saved {_cr_date} {_cr_type.upper()} bands (no lineups to score yet).")
+                else:
+                    st.warning("Need at least a date and cash line to save.")
+
+        # ── Hit Rate Summary ──────────────────────────────────────────
+        _hr = get_hit_rate_summary()
+        if _hr.get("n_slates", 0) > 0:
+            _hr_c1, _hr_c2, _hr_c3, _hr_c4 = st.columns(4)
+            _targets = _hr.get("targets", {})
+            with _hr_c1:
+                st.metric("Slates Tracked", _hr["n_slates"])
+            with _hr_c2:
+                _cr_val = _hr.get("avg_cash_rate", 0)
+                _cr_target = _targets.get("cash_rate", 0.7)
+                _cr_delta = f"target: {_cr_target*100:.0f}%"
+                st.metric("Cash Rate", f"{_cr_val*100:.0f}%", delta=_cr_delta,
+                          delta_color="off")
+            with _hr_c3:
+                _t15_val = _hr.get("avg_top_15_rate", 0)
+                st.metric("GPP Top 15%", f"{_t15_val*100:.0f}%",
+                          delta=f"target: {_targets.get('top_15_rate', 0.2)*100:.0f}%",
+                          delta_color="off")
+            with _hr_c4:
+                _t1_val = _hr.get("avg_top_1_rate", 0)
+                st.metric("GPP Top 1%", f"{_t1_val*100:.0f}%",
+                          delta=f"target: {_targets.get('top_1_rate', 0.03)*100:.0f}%",
+                          delta_color="off")
+
+            # History table
+            _hist = get_calibration_history()
+            if _hist:
+                with st.expander(f"History ({len(_hist)} results)", expanded=False):
+                    _hist_rows = []
+                    for h in _hist:
+                        _s = h.get("scores", {})
+                        _hist_rows.append({
+                            "Date": h.get("slate_date", ""),
+                            "Type": h.get("contest_type", "").upper(),
+                            "Cash Line": h.get("cash_line", 0),
+                            "Cash Rate": f"{_s.get('cash_rate', 0)*100:.0f}%" if _s else "—",
+                            "Best": _s.get("best", "—") if _s else "—",
+                            "Avg": _s.get("avg", "—") if _s else "—",
+                            "Missed": h.get("n_missed", "—"),
+                        })
+                    st.dataframe(pd.DataFrame(_hist_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("No contest results entered yet. Enter bands above after each slate.")
+
+    except Exception as _cr_exc:
+        st.warning(f"Contest calibration unavailable: {_cr_exc}")
+
+    st.divider()
+
+    # =====================================================================
+    # SECTION 5: LEARNING STATUS
     # =====================================================================
     st.subheader("🧠 Learning Status")
     st.caption(
