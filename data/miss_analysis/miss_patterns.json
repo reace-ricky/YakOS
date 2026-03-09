@@ -1,50 +1,50 @@
 {
-  "computed_at": "2026-03-09T00:38:21.846445+00:00",
+  "computed_at": "2026-03-09T00:43:15.870132+00:00",
   "n_slates": 7,
-  "n_player_slates": 1181,
+  "n_player_slates": 1299,
   "classification": {
-    "pop": 273,
-    "bust": 219,
-    "inline": 689,
-    "pop_rate": 0.231,
-    "bust_rate": 0.185
+    "pop": 301,
+    "bust": 241,
+    "inline": 757,
+    "pop_rate": 0.232,
+    "bust_rate": 0.186
   },
   "factor_breakdown": {},
   "bracket_breakdown": {
     "lt5k": {
-      "n": 650,
-      "pop_rate": 0.28,
-      "bust_rate": 0.257,
-      "avg_residual": 0.4,
-      "mae": 7.6
+      "n": 713,
+      "pop_rate": 0.279,
+      "bust_rate": 0.259,
+      "avg_residual": 0.2,
+      "mae": 7.7
     },
     "5_65k": {
-      "n": 262,
-      "pop_rate": 0.225,
+      "n": 287,
+      "pop_rate": 0.223,
       "bust_rate": 0.122,
-      "avg_residual": 0.1,
+      "avg_residual": 0.2,
       "mae": 8.3
     },
     "65_8k": {
-      "n": 143,
-      "pop_rate": 0.126,
-      "bust_rate": 0.098,
-      "avg_residual": -0.5,
-      "mae": 8.5
+      "n": 158,
+      "pop_rate": 0.139,
+      "bust_rate": 0.089,
+      "avg_residual": -0.1,
+      "mae": 8.6
     },
     "8_10k": {
-      "n": 97,
-      "pop_rate": 0.113,
-      "bust_rate": 0.041,
-      "avg_residual": -1.7,
-      "mae": 9.0
+      "n": 110,
+      "pop_rate": 0.109,
+      "bust_rate": 0.045,
+      "avg_residual": -2.1,
+      "mae": 9.3
     },
     "10k_plus": {
-      "n": 29,
-      "pop_rate": 0.103,
-      "bust_rate": 0.069,
-      "avg_residual": -0.3,
-      "mae": 11.7
+      "n": 31,
+      "pop_rate": 0.129,
+      "bust_rate": 0.065,
+      "avg_residual": 0.3,
+      "mae": 12.1
     }
   },
   "top_pops": [
@@ -65,6 +65,16 @@
       "actual": 66.2,
       "residual": 45.0,
       "ratio": 3.12,
+      "context": [],
+      "date": "2026-03-05"
+    },
+    {
+      "player": "Kel'el Ware",
+      "salary": 4900,
+      "proj": 21.8,
+      "actual": 66.2,
+      "residual": 44.5,
+      "ratio": 3.04,
       "context": [],
       "date": "2026-03-05"
     },
@@ -137,16 +147,6 @@
       "ratio": 2.3,
       "context": [],
       "date": "2026-03-05"
-    },
-    {
-      "player": "Brook Lopez",
-      "salary": 5100,
-      "proj": 20.5,
-      "actual": 46.5,
-      "residual": 26.0,
-      "ratio": 2.27,
-      "context": [],
-      "date": "2026-03-06"
     }
   ],
   "top_busts": [
@@ -179,6 +179,16 @@
       "ratio": 0.16,
       "context": [],
       "date": "2026-02-20"
+    },
+    {
+      "player": "Ausar Thompson",
+      "salary": 5700,
+      "proj": 28.7,
+      "actual": 2.0,
+      "residual": -26.7,
+      "ratio": 0.07,
+      "context": [],
+      "date": "2026-03-05"
     },
     {
       "player": "Ausar Thompson",
@@ -239,21 +249,18 @@
       "ratio": 0.36,
       "context": [],
       "date": "2026-02-24"
-    },
-    {
-      "player": "Kyshawn George",
-      "salary": 6700,
-      "proj": 34.5,
-      "actual": 12.5,
-      "residual": -22.0,
-      "ratio": 0.36,
-      "context": [],
-      "date": "2026-02-24"
     }
   ],
-  "suggestions": [],
+  "suggestions": [
+    {
+      "signal": "salary_8_10k",
+      "direction": "over-projecting",
+      "detail": "Salary bracket 8_10k: avg residual -2.1 FP (MAE 9.3). Systematic over-projecting in this range.",
+      "severity": "medium"
+    }
+  ],
   "context_corrections": {
-    "computed_at": "2026-03-09T00:38:21.846425+00:00",
+    "computed_at": "2026-03-09T00:43:15.870109+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
