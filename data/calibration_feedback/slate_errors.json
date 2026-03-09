@@ -552,5 +552,91 @@
         "mae": 9.44
       }
     }
+  },
+  "2026-03-08": {
+    "slate_date": "2026-03-08",
+    "overall": {
+      "mean_error": 0.37,
+      "mae": 7.25,
+      "rmse": 9.67,
+      "correlation": 0.72,
+      "n_players": 107
+    },
+    "by_position": {
+      "C": {
+        "mean_error": -1.0,
+        "median_error": 0.52,
+        "n": 21,
+        "mae": 10.18
+      },
+      "PF": {
+        "mean_error": 0.51,
+        "median_error": 2.07,
+        "n": 16,
+        "mae": 5.58
+      },
+      "PG": {
+        "mean_error": 2.53,
+        "median_error": 0.31,
+        "n": 29,
+        "mae": 6.95
+      },
+      "SF": {
+        "mean_error": 0.88,
+        "median_error": 3.05,
+        "n": 19,
+        "mae": 6.98
+      },
+      "SG": {
+        "mean_error": -1.7,
+        "median_error": -1.03,
+        "n": 22,
+        "mae": 6.28
+      }
+    },
+    "by_salary_tier": {
+      "<4K": {
+        "mean_error": -2.09,
+        "median_error": -0.98,
+        "n": 41,
+        "mae": 5.44
+      },
+      "4-5K": {
+        "mean_error": 2.22,
+        "median_error": 1.88,
+        "n": 21,
+        "mae": 6.69
+      },
+      "5-6K": {
+        "mean_error": 1.4,
+        "median_error": 0.99,
+        "n": 15,
+        "mae": 11.01
+      },
+      "6-7K": {
+        "mean_error": 3.81,
+        "median_error": 4.32,
+        "n": 13,
+        "mae": 9.15
+      },
+      "7-8K": {
+        "mean_error": 0.34,
+        "median_error": 0.6,
+        "n": 9,
+        "mae": 7.27
+      },
+      "8-9K": {
+        "mean_error": 2.56,
+        "median_error": 4.83,
+        "n": 5,
+        "mae": 5.04
+      },
+      "9K+": {
+        "mean_error": -2.54,
+        "median_error": 2.48,
+        "n": 3,
+        "mae": 12.46
+      }
+    }
   }
 }
