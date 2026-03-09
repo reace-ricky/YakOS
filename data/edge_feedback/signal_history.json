@@ -219,14 +219,14 @@
         "n_hit": 35,
         "hit_rate": 0.34,
         "avg_actual": 25.49,
-        "avg_proj": 25.76
+        "avg_proj": 25.86
       },
       "salary_value": {
-        "n_flagged": 3,
+        "n_flagged": 5,
         "n_hit": 1,
-        "hit_rate": 0.333,
-        "avg_actual": 28.17,
-        "avg_proj": 24.77
+        "hit_rate": 0.2,
+        "avg_actual": 22.05,
+        "avg_proj": 26.05
       }
     }
   },
