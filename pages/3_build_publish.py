@@ -143,6 +143,7 @@ def _build_lineups(
     slate: "SlateState",
     lock_names: list,
     exclude_names: list,
+    contest_label: str = "GPP Main",
 ) -> tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
     """Build lineups using the appropriate engine (Classic / Showdown)."""
     pool = pool.copy()
@@ -158,6 +159,12 @@ def _build_lineups(
         elif "dk_player_id" in pool.columns:
             pool["player_id"] = pool["dk_player_id"]
     try:
+        # Map UI contest label → CONTEST_TYPE for the optimizer
+        # GPP Main/Early/Late → "gpp", Cash Main → "cash", Showdown → "showdown"
+        _contest_type_map = {
+            "GPP Main": "gpp", "GPP Early": "gpp", "GPP Late": "gpp",
+            "Cash Main": "cash", "Showdown": "showdown",
+        }
         cfg = {
             "NUM_LINEUPS": num_lineups,
             "SALARY_CAP": slate.salary_cap,
@@ -166,6 +173,7 @@ def _build_lineups(
             "LOCK": lock_names or [],
             "EXCLUDE": exclude_names or [],
             "PROJ_COL": proj_col,
+            "CONTEST_TYPE": _contest_type_map.get(contest_label, "gpp"),
         }
         # Inject per-player exposure caps from edge overrides
         _eo = st.session_state.get("_edge_overrides", {})
@@ -517,6 +525,7 @@ def main() -> None:
                 slate=slate,
                 lock_names=list(lock_names),
                 exclude_names=_merged_exclude,
+                contest_label=contest_label,
             )
             if lineups_df is not None:
                 lu_state.set_lineups(
