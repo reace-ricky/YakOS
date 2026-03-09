@@ -1,11 +1,12 @@
 {
-  "retrained_at": "2026-03-08T18:49:30.641382",
-  "n_slates": 3,
-  "n_rows": 48,
-  "models_trained": [],
-  "models_skipped": [
+  "retrained_at": "2026-03-09T00:50:52.610674+00:00",
+  "n_slates": 7,
+  "n_rows": 1301,
+  "models_trained": [
     "fp",
-    "minutes",
     "ownership"
+  ],
+  "models_skipped": [
+    "minutes"
   ]
 }
