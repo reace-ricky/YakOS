@@ -1,9 +1,9 @@
 {
-  "computed_at": "2026-03-09T14:26:14.664474+00:00",
+  "computed_at": "2026-03-09T15:25:55.501870+00:00",
   "n_slates": 8,
   "signal_stats": {
     "high_leverage": {
-      "total_flagged": 431,
+      "total_flagged": 432,
       "total_hit": 117,
       "raw_hit_rate": 0.271,
       "weighted_hit_rate": 0.258,
