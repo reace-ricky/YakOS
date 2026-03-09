@@ -30,24 +30,13 @@ _WEIGHTS_FILE = os.path.join(_FEEDBACK_DIR, "signal_weights.json")
 _MAX_SLATES = 30
 
 # Edge signal thresholds — what qualifies as a "call"
+# PRUNED: removed smash_candidate (0% hit rate over 84 flags),
+#         chalk_fade (0 calls ever), low_ownership_upside (0% hit rate).
+# Kept: salary_value (38.2% hit rate), high_leverage (12.7% hit rate).
 _SIGNAL_DEFS = {
     "high_leverage": {
         "description": "Smash prob / ownership > 2.0",
         "filter": lambda df: df["leverage"] >= 2.0 if "leverage" in df.columns else pd.Series(False, index=df.index),
-    },
-    "low_ownership_upside": {
-        "description": "Ownership < 8% with smash_prob > 0.25",
-        "filter": lambda df: (
-            (df.get("ownership", pd.Series(99)) < 8) &
-            (df.get("smash_prob", pd.Series(0)) > 0.25)
-        ),
-    },
-    "chalk_fade": {
-        "description": "Ownership > 25% with bust_prob > 0.30",
-        "filter": lambda df: (
-            (df.get("ownership", pd.Series(0)) > 25) &
-            (df.get("bust_prob", pd.Series(0)) > 0.30)
-        ),
     },
     "salary_value": {
         "description": "Proj/salary_k > 5.5 (strong value)",
@@ -56,19 +45,12 @@ _SIGNAL_DEFS = {
             (pd.to_numeric(df.get("salary", 1), errors="coerce").fillna(1) / 1000).clip(lower=0.1)
         ) > 5.5,
     },
-    "smash_candidate": {
-        "description": "Smash prob > 0.35",
-        "filter": lambda df: df.get("smash_prob", pd.Series(0)) > 0.35,
-    },
 }
 
 # What counts as a "hit" for each signal
 _HIT_DEFS = {
     "high_leverage": lambda df: df["actual_fp"] >= df["ceil"] * 0.85,
-    "low_ownership_upside": lambda df: df["actual_fp"] >= df["proj"] * 1.2,
-    "chalk_fade": lambda df: df["actual_fp"] < df["proj"] * 0.8,  # bust = hit for fade signal
     "salary_value": lambda df: df["actual_fp"] >= df["proj"] * 1.1,
-    "smash_candidate": lambda df: df["actual_fp"] >= df["ceil"] * 0.85,
 }
 
 

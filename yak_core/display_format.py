@@ -31,9 +31,10 @@ import numpy as np
 def normalise_ownership(series: pd.Series) -> pd.Series:
     """Ensure ownership is on a 0-100 scale (percentage points).
 
-    Detects whether the input is 0-1 (fractional) or already 0-100 and
-    converts accordingly.  Safe to call multiple times — if already on
-    0-100 scale, returns as-is.
+    Delegates to the centralized ``ownership_scale.enforce_pct_scale``
+    so there is ONE implementation of the detection heuristic.
+
+    Safe to call multiple times — if already on 0-100 scale, returns as-is.
 
     Parameters
     ----------
@@ -45,11 +46,8 @@ def normalise_ownership(series: pd.Series) -> pd.Series:
     pd.Series
         Ownership on 0-100 scale.
     """
-    s = pd.to_numeric(series, errors="coerce").fillna(0.0)
-    # Heuristic: if max <= 1.0 and no value exceeds 1, it's fractional
-    if s.max() <= 1.0 and len(s) > 0:
-        return s * 100.0
-    return s
+    from yak_core.ownership_scale import enforce_pct_scale
+    return enforce_pct_scale(series, col_name="display_normalise")
 
 
 # ---------------------------------------------------------------------------

@@ -59,10 +59,9 @@ def _safe_numeric(series: "pd.Series", default: float = 0.0) -> "pd.Series":
 # we map each to the ricky_signals dimension it most informs.
 _EDGE_FB_TO_RICKY: Dict[str, str] = {
     "high_leverage": "leverage",
-    "low_ownership_upside": "own_proj_mismatch",
-    "chalk_fade": "own_proj_mismatch",    # both inform mismatch weighting
     "salary_value": "salary_value",
-    "smash_candidate": "leverage",         # smash candidates reinforce leverage
+    # Pruned: low_ownership_upside (0% hit rate), chalk_fade (0 calls),
+    #         smash_candidate (0% hit rate) — removed from edge_feedback.py
 }
 
 

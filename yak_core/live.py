@@ -201,6 +201,12 @@ def fetch_live_dfs(date_key, cfg):
     if not rows:
         raise ValueError("No DFS player rows parsed for " + date_key)
     df = pd.DataFrame(rows)
+
+    # Enforce 0-100 scale on ownership from Tank01 API
+    if "own_proj" in df.columns and df["own_proj"].notna().any():
+        from yak_core.ownership_scale import enforce_pct_scale
+        df["own_proj"] = enforce_pct_scale(df["own_proj"], col_name="Tank01 own_proj")
+
     print("[fetch_live_dfs] Fetched " + str(len(df)) + " players for " + date_key)
     return df
 

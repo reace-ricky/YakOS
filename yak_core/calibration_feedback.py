@@ -37,7 +37,16 @@ _SALARY_LABELS = ["<4K", "4-5K", "5-6K", "6-7K", "7-8K", "8-9K", "9K+"]
 _CORRECTION_STRENGTH = 0.5
 
 # Minimum samples per bucket before we trust the correction
-_MIN_SAMPLES = 5
+_MIN_SAMPLES = 15
+
+# Hard cap on correction magnitude (FP).  Prevents tiny sample sizes from
+# producing extreme swings like UTIL +10.49.
+_MAX_CORRECTION = 3.0
+
+# Valid basketball positions for per-position corrections.
+# DK roster slots (G, F, UTIL) are NOT real positions — they come from
+# dedup artifacts and should be excluded.
+_VALID_POSITIONS = {"PG", "SG", "SF", "PF", "C", "PG/SG", "SG/SF", "SF/PF", "PF/C"}
 
 # Maximum number of historical slates to include (recency-weighted)
 _MAX_SLATES = 15
@@ -220,15 +229,20 @@ def _recompute_corrections(history: Dict[str, Any], store: Optional[Dict] = None
 
     pos_corrections = {}
     for pos, acc in pos_accum.items():
+        # Skip DK roster slots (G, F, UTIL) — only use real basketball positions
+        if pos not in _VALID_POSITIONS:
+            continue
         if acc["n"] >= _MIN_SAMPLES and acc["weight"] > 0:
             raw = acc["weighted_error"] / acc["weight"]
-            pos_corrections[pos] = round(raw * _CORRECTION_STRENGTH, 2)
+            capped = max(-_MAX_CORRECTION, min(_MAX_CORRECTION, raw * _CORRECTION_STRENGTH))
+            pos_corrections[pos] = round(capped, 2)
 
     tier_corrections = {}
     for tier, acc in tier_accum.items():
         if acc["n"] >= _MIN_SAMPLES and acc["weight"] > 0:
             raw = acc["weighted_error"] / acc["weight"]
-            tier_corrections[tier] = round(raw * _CORRECTION_STRENGTH, 2)
+            capped = max(-_MAX_CORRECTION, min(_MAX_CORRECTION, raw * _CORRECTION_STRENGTH))
+            tier_corrections[tier] = round(capped, 2)
 
     overall_errors = []
     overall_weights = []
@@ -241,9 +255,8 @@ def _recompute_corrections(history: Dict[str, Any], store: Optional[Dict] = None
 
     overall_bias = 0.0
     if overall_weights:
-        overall_bias = round(
-            sum(overall_errors) / sum(overall_weights) * _CORRECTION_STRENGTH, 2
-        )
+        raw_bias = sum(overall_errors) / sum(overall_weights) * _CORRECTION_STRENGTH
+        overall_bias = round(max(-_MAX_CORRECTION, min(_MAX_CORRECTION, raw_bias)), 2)
 
     corrections = {
         "n_slates": len(dates),

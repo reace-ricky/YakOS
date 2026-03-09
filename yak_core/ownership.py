@@ -612,8 +612,10 @@ def apply_ownership(
       3. ``Own%``     — another common alias used in some imports
       4. Field simulation (SaberSim-style, default) OR salary-rank fallback
     """
-    # If canonical column already exists, only sync the alias — never overwrite.
+    # If canonical column already exists, enforce scale and sync the alias.
     if "own_proj" in pool_df.columns:
+        from yak_core.ownership_scale import enforce_pct_scale
+        pool_df["own_proj"] = enforce_pct_scale(pool_df["own_proj"], col_name="own_proj")
         pool_df["ownership"] = pool_df["own_proj"]
         mean_own = pool_df["own_proj"].mean()
         print(f"[ownership] own_proj already present (mean={mean_own:.1f}%)")
@@ -822,6 +824,12 @@ def apply_ownership_pipeline(
             )
             pool = predict_ownership(pool, model_path=model_path)
             pool = blend_and_normalize(pool, alpha=effective_alpha, target_mean=target_mean)
+
+    # Final enforcement: own_proj MUST be 0-100 scale exiting the pipeline
+    if "own_proj" in pool.columns:
+        from yak_core.ownership_scale import enforce_pct_scale
+        pool["own_proj"] = enforce_pct_scale(pool["own_proj"], col_name="pipeline_exit")
+        pool["ownership"] = pool["own_proj"]  # keep alias in sync
 
     own_model_mean = pool["own_model"].mean() if "own_model" in pool.columns else float("nan")
     own_proj_mean = pool["own_proj"].mean() if "own_proj" in pool.columns else float("nan")

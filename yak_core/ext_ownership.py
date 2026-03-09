@@ -493,6 +493,11 @@ def blend_and_normalize(
             combined = (combined * (target_mean / current_mean)).clip(0.0, clip_max)
 
     pool["own_proj"] = combined.round(1)
+
+    # Final safety net: enforce 0-100 scale on own_proj output
+    from yak_core.ownership_scale import enforce_pct_scale
+    pool["own_proj"] = enforce_pct_scale(pool["own_proj"], col_name="blend_and_normalize output")
+
     return pool
 
 

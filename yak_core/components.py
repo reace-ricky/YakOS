@@ -191,7 +191,10 @@ def render_premium_lineup_card(
     _own_normed = normalise_ownership(_own_raw)  # guaranteed 0-100
     total_pown_pct = float(metrics.get("total_pown", 0) or 0)
     if total_pown_pct:
-        total_pown_pct = total_pown_pct * 100.0  # pipeline stores as 0-1 fraction
+        # Pipeline now stores ownership on 0-100 scale (enforced by ownership_scale.py).
+        # If value looks fractional (< 1.5), scale up for backward compat with old data.
+        if total_pown_pct < 1.5:
+            total_pown_pct = total_pown_pct * 100.0
     else:
         total_pown_pct = float(_own_normed.sum())
 
@@ -482,7 +485,10 @@ def render_lineup_card(
     _own_normed_lg = normalise_ownership(_own_raw_lg)  # guaranteed 0-100
     total_pown_pct = float(metrics.get("total_pown", 0) or 0)
     if total_pown_pct:
-        total_pown_pct = total_pown_pct * 100.0  # pipeline stores as 0-1 fraction
+        # Pipeline now stores ownership on 0-100 scale (enforced by ownership_scale.py).
+        # If value looks fractional (< 1.5), scale up for backward compat with old data.
+        if total_pown_pct < 1.5:
+            total_pown_pct = total_pown_pct * 100.0
     else:
         total_pown_pct = float(_own_normed_lg.sum())
 
