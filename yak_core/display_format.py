@@ -87,6 +87,11 @@ def standard_player_format(df: pd.DataFrame) -> Dict[str, str]:
         if col in df.columns:
             fmt[col] = "{:.1f}%"
 
+    # Minutes → X.X
+    for col in ("proj_minutes", "Mins"):
+        if col in df.columns:
+            fmt[col] = "{:.1f}"
+
     # Projections / FP → X.X
     for col in ("proj", "Proj", "floor", "Floor", "ceil", "Ceil",
                 "actual_fp", "Actual", "proj_error", "Diff"):

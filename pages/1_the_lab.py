@@ -602,7 +602,7 @@ def _build_player_level_sim_results(pool: pd.DataFrame, variance: float) -> pd.D
     edge_df = compute_edge_metrics(df, variance=variance)
 
     # Select the columns the sims table needs
-    keep_cols = ["player_name", "pos", "team", "salary", "proj", "floor",
+    keep_cols = ["player_name", "pos", "team", "salary", "proj", "proj_minutes", "floor",
                  "ceil", "own_pct", "smash_prob", "bust_prob", "leverage"]
     keep_cols = [c for c in keep_cols if c in edge_df.columns]
     result = edge_df[keep_cols].copy()
@@ -1869,7 +1869,7 @@ def main() -> None:
         with ea_col1:
             st.markdown("**Positive Leverage** — high smash, low owned")
             if not pos_edge.empty:
-                _pe = pos_edge[[c for c in ["player_name", "salary", "own_pct", "smash_prob", "leverage"] if c in pos_edge.columns]].copy()
+                _pe = pos_edge[[c for c in ["player_name", "salary", "proj_minutes", "own_pct", "smash_prob", "leverage"] if c in pos_edge.columns]].copy()
                 _pe_fmt = standard_player_format(_pe)
                 st.dataframe(_pe.style.format(_pe_fmt, na_rep=""), use_container_width=True, hide_index=True)
             else:
@@ -1878,7 +1878,7 @@ def main() -> None:
         with ea_col2:
             st.markdown("**Negative Leverage** — bust risk, over-owned")
             if not neg_edge.empty:
-                _ne = neg_edge[[c for c in ["player_name", "salary", "own_pct", "bust_prob", "leverage"] if c in neg_edge.columns]].copy()
+                _ne = neg_edge[[c for c in ["player_name", "salary", "proj_minutes", "own_pct", "bust_prob", "leverage"] if c in neg_edge.columns]].copy()
                 _ne_fmt = standard_player_format(_ne)
                 st.dataframe(_ne.style.format(_ne_fmt, na_rep=""), use_container_width=True, hide_index=True)
             else:

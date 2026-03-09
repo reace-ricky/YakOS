@@ -1437,6 +1437,7 @@ _SIMS_ROUND_COLS = [
     "proj",
     "floor",
     "ceil",
+    "proj_minutes",
     "ownership",
     "smash_prob",
     "bust_prob",
@@ -1492,7 +1493,12 @@ def prepare_sims_table(df: pd.DataFrame) -> pd.DataFrame:
         df["salary"] = pd.to_numeric(df["salary"], errors="coerce").fillna(0).astype(int)
 
     # 4. Rename for UI friendliness
+    rename_map = {}
     if "ownership" in df.columns:
-        df = df.rename(columns={"ownership": "own_pct"})
+        rename_map["ownership"] = "own_pct"
+    if "proj_minutes" in df.columns:
+        rename_map["proj_minutes"] = "Mins"
+    if rename_map:
+        df = df.rename(columns=rename_map)
 
     return df
