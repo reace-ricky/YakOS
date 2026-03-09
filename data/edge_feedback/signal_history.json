@@ -544,5 +544,47 @@
         "avg_proj": 27.85
       }
     }
+  },
+  "2026-02-03": {
+    "slate_date": "2026-02-03",
+    "contest_type": "GPP Main",
+    "n_players": 161,
+    "signals": {
+      "high_leverage": {
+        "n_flagged": 122,
+        "n_hit": 42,
+        "hit_rate": 0.344,
+        "avg_actual": 26.5,
+        "avg_proj": 25.81
+      },
+      "low_ownership_upside": {
+        "n_flagged": 124,
+        "n_hit": 39,
+        "hit_rate": 0.315,
+        "avg_actual": 25.89,
+        "avg_proj": 25.39
+      },
+      "chalk_fade": {
+        "n_flagged": 0,
+        "n_hit": 0,
+        "hit_rate": null,
+        "avg_actual": null,
+        "avg_proj": null
+      },
+      "salary_value": {
+        "n_flagged": 5,
+        "n_hit": 4,
+        "hit_rate": 0.8,
+        "avg_actual": 37.2,
+        "avg_proj": 30.44
+      },
+      "smash_candidate": {
+        "n_flagged": 90,
+        "n_hit": 27,
+        "hit_rate": 0.3,
+        "avg_actual": 27.12,
+        "avg_proj": 26.86
+      }
+    }
   }
 }

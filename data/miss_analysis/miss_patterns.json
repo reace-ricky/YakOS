@@ -1,50 +1,50 @@
 {
-  "computed_at": "2026-03-09T01:02:59.722675+00:00",
-  "n_slates": 8,
-  "n_player_slates": 1374,
+  "computed_at": "2026-03-09T01:06:18.752729+00:00",
+  "n_slates": 9,
+  "n_player_slates": 1535,
   "classification": {
-    "pop": 312,
-    "bust": 257,
-    "inline": 805,
-    "pop_rate": 0.227,
-    "bust_rate": 0.187
+    "pop": 355,
+    "bust": 285,
+    "inline": 895,
+    "pop_rate": 0.231,
+    "bust_rate": 0.186
   },
   "factor_breakdown": {},
   "bracket_breakdown": {
     "lt5k": {
-      "n": 753,
-      "pop_rate": 0.274,
-      "bust_rate": 0.264,
-      "avg_residual": 0.2,
+      "n": 852,
+      "pop_rate": 0.283,
+      "bust_rate": 0.258,
+      "avg_residual": 0.4,
       "mae": 7.6
     },
     "5_65k": {
-      "n": 302,
-      "pop_rate": 0.222,
-      "bust_rate": 0.119,
+      "n": 331,
+      "pop_rate": 0.218,
+      "bust_rate": 0.127,
       "avg_residual": 0.2,
       "mae": 8.3
     },
     "65_8k": {
-      "n": 169,
+      "n": 184,
       "pop_rate": 0.13,
-      "bust_rate": 0.089,
-      "avg_residual": -0.5,
-      "mae": 8.6
+      "bust_rate": 0.087,
+      "avg_residual": -0.6,
+      "mae": 8.7
     },
     "8_10k": {
-      "n": 119,
-      "pop_rate": 0.109,
-      "bust_rate": 0.042,
-      "avg_residual": -1.6,
-      "mae": 9.2
+      "n": 132,
+      "pop_rate": 0.106,
+      "bust_rate": 0.038,
+      "avg_residual": -1.5,
+      "mae": 9.1
     },
     "10k_plus": {
-      "n": 31,
-      "pop_rate": 0.129,
-      "bust_rate": 0.065,
-      "avg_residual": 0.3,
-      "mae": 12.1
+      "n": 36,
+      "pop_rate": 0.111,
+      "bust_rate": 0.056,
+      "avg_residual": -0.3,
+      "mae": 11.7
     }
   },
   "top_pops": [
@@ -87,6 +87,16 @@
       "ratio": 2.0,
       "context": [],
       "date": "2026-03-06"
+    },
+    {
+      "player": "Isaiah Collier",
+      "salary": 6200,
+      "proj": 32.9,
+      "actual": 63.2,
+      "residual": 30.4,
+      "ratio": 1.92,
+      "context": [],
+      "date": "2026-02-03"
     },
     {
       "player": "Victor Wembanyama",
@@ -137,16 +147,6 @@
       "ratio": 2.81,
       "context": [],
       "date": "2026-02-20"
-    },
-    {
-      "player": "Julian Reese",
-      "salary": 3700,
-      "proj": 20.4,
-      "actual": 47.0,
-      "residual": 26.6,
-      "ratio": 2.3,
-      "context": [],
-      "date": "2026-03-05"
     }
   ],
   "top_busts": [
@@ -253,7 +253,7 @@
   ],
   "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-09T01:02:59.722646+00:00",
+    "computed_at": "2026-03-09T01:06:18.752667+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
