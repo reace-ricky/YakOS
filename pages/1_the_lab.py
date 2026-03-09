@@ -46,10 +46,7 @@ from yak_core.state import (  # noqa: E402
     get_sim_state, set_sim_state,
 )
 from yak_core.sims import (  # noqa: E402
-    run_sims_pipeline,
     prepare_sims_table,
-    ContestType,
-    run_sims_for_contest_type,
     compute_sim_eligible,
     _INELIGIBLE_STATUSES,
 )
@@ -74,7 +71,6 @@ from yak_core.right_angle import (  # noqa: E402
     compute_stack_scores,
     compute_value_scores,
 )
-# sim_rating used internally by sims.run_sims_pipeline — no direct import needed
 
 from yak_core.rci import (  # noqa: E402
     compute_rci,
@@ -1251,8 +1247,8 @@ def main() -> None:
 
     if not _already_loaded:
         if selected_dg_id is not None:
-            if st.button("🚀 Load Pool & Run Sims", key="_lab_load_go", type="primary"):
-                with st.status("Ricky's loading the pool & crunching sims…", expanded=True) as _load_status:
+            if st.button("🚀 Load Pool", key="_lab_load_go", type="primary"):
+                with st.status("Ricky's loading the pool…", expanded=True) as _load_status:
                     pool_result = _auto_load_pool(
                         sport=sport,
                         slate_date_str=slate_date_str,
@@ -1268,14 +1264,13 @@ def main() -> None:
                         status_container=_load_status,
                     )
                     if pool_result is not None:
-                        # Run sims immediately after pool loads
-                        _load_status.write(f"Running sims ({sim.n_sims:,} iterations)…")
+                        _load_status.write("Computing edge metrics…")
                         try:
+                            _PIPELINE_TO_OPTIMIZER_BTN = {"GPP_MAIN": "GPP_150", "CASH": "CASH", "SHOWDOWN": "SHOWDOWN"}
                             _CONTEST_NAME_TO_PIPELINE_BTN = {
                                 "GPP Main": "GPP_MAIN", "Cash Main": "CASH", "Showdown": "SHOWDOWN",
                             }
                             _pc = _CONTEST_NAME_TO_PIPELINE_BTN.get(contest_type_label, "GPP_MAIN")
-                            _PIPELINE_TO_OPTIMIZER_BTN = {"GPP_MAIN": "GPP_150", "CASH": "CASH", "SHOWDOWN": "SHOWDOWN"}
                             _oc = _PIPELINE_TO_OPTIMIZER_BTN.get(_pc, "GPP_20")
 
                             player_results = _build_player_level_sim_results(pool_result, sim.variance)
@@ -1286,41 +1281,24 @@ def main() -> None:
                                 calibration_state=slate.calibration_state,
                                 variance=sim.variance,
                             )
-                            _lu = build_ricky_lineups(
-                                edge_df=_edge_df,
-                                contest_type=_oc,
-                                calibration_state=slate.calibration_state,
-                                salary_cap=SALARY_CAP,
-                            )
-                            if not _lu.empty:
-                                _pipeline_df = run_sims_pipeline(
-                                    pool=pool_result,
-                                    lineups_df=_lu,
-                                    contest_type=_pc,
-                                    n_sims=sim.n_sims,
-                                    variance=sim.variance,
-                                    slate_date=slate.slate_date,
-                                    draft_group_id=sim.draft_group_id,
-                                )
-                                sim.pipeline_output[_pc] = _pipeline_df
 
                             slate.edge_df = _edge_df
                             if "Edge" not in slate.active_layers:
                                 slate.active_layers.append("Edge")
                             set_slate_state(slate)
                             set_sim_state(sim)
-                            _load_status.write(f"✅ Sims complete — {len(player_results)} players analyzed.")
-                        except Exception as _sim_exc:
-                            _load_status.write(f"⚠️ Sims failed: {_sim_exc}")
-                        _load_status.update(label="✅ Pool & sims loaded", state="complete", expanded=False)
+                            _load_status.write(f"✅ Pool loaded — {len(player_results)} players analyzed.")
+                        except Exception as _edge_exc:
+                            _load_status.write(f"⚠️ Edge metrics failed: {_edge_exc}")
+                        _load_status.update(label="✅ Pool loaded", state="complete", expanded=False)
                     else:
                         _load_status.update(label="Load failed", state="error")
                 st.rerun()
         # else: no slate — message already shown above by the slate picker
     else:
         # Already loaded — show status + reload option
-        with st.status("✅ Pool & sims loaded", state="complete", expanded=False):
-            if st.button("🔄 Reload Pool & Sims", key="_lab_force_reload"):
+        with st.status("✅ Pool loaded", state="complete", expanded=False):
+            if st.button("🔄 Reload Pool", key="_lab_force_reload"):
                 st.session_state.pop(_pool_loaded_key, None)
                 st.rerun()
 
@@ -1519,44 +1497,28 @@ def main() -> None:
     }
     pipeline_contest = _CONTEST_NAME_TO_PIPELINE.get(contest_type_label, "GPP_MAIN")
 
-    # Re-run sims (if user changed variance, game filter, etc.)
+    # Re-run edge metrics (if user changed variance, game filter, etc.)
     if not pool.empty:
-        if st.button("🔄 Re-run Sims", key="_lab_run_sims"):
-            with st.spinner(f"Ricky's crunching {sim.n_sims:,} Monte Carlo iterations…"):
+        if st.button("🔄 Re-run Edge Metrics", key="_lab_run_sims"):
+            with st.spinner("Recomputing edge metrics…"):
                 try:
                     player_results = _build_player_level_sim_results(pool, sim.variance)
                     sim.player_results = player_results
 
-                    # Compute edge metrics once — reused for lineups + slate state
                     _edge_df = compute_edge_metrics(
                         pool,
                         calibration_state=slate.calibration_state,
                         variance=sim.variance,
                     )
 
-                    _PIPELINE_TO_OPTIMIZER = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "CASH": "CASH", "SHOWDOWN": "SHOWDOWN"}
-                    optimizer_contest = _PIPELINE_TO_OPTIMIZER.get(pipeline_contest, "GPP_20")
-                    real_lineups = build_ricky_lineups(edge_df=_edge_df, contest_type=optimizer_contest, calibration_state=slate.calibration_state, salary_cap=SALARY_CAP)
-                    if not real_lineups.empty:
-                        pipeline_df = run_sims_pipeline(
-                            pool=pool,
-                            lineups_df=real_lineups,
-                            contest_type=pipeline_contest,
-                            n_sims=sim.n_sims,
-                            variance=sim.variance,
-                            slate_date=slate.slate_date,
-                            draft_group_id=sim.draft_group_id,
-                        )
-                        sim.pipeline_output[pipeline_contest] = pipeline_df
-
                     slate.edge_df = _edge_df
                     if "Edge" not in slate.active_layers:
                         slate.active_layers.append("Edge")
                     set_slate_state(slate)
                     set_sim_state(sim)
-                    st.success(f"Sims locked — {len(player_results)} players analyzed. Scroll down for the data.")
+                    st.success(f"Edge metrics updated — {len(player_results)} players analyzed.")
                 except Exception as exc:
-                    st.error(f"Sim failed: {exc}")
+                    st.error(f"Edge metrics failed: {exc}")
     else:
         st.info("Load a slate above first. Ricky needs a pool before he can work.")
 
@@ -1585,18 +1547,9 @@ def main() -> None:
         except Exception:
             st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-    # Pipeline output
-    pipeline_output = sim.pipeline_output.get(pipeline_contest)
-    if pipeline_output is not None and not pipeline_output.empty:
-        with st.expander("📊 Pipeline Lineup Ratings", expanded=False):
-            show_cols = [c for c in ["lineup_index", "projection", "total_pown", "top_x_rate",
-                                     "itm_rate", "sim_roi", "leverage",
-                                     "yakos_sim_rating", "rating_bucket"]
-                         if c in pipeline_output.columns]
-            st.dataframe(pipeline_output[show_cols], use_container_width=True, hide_index=True)
-
     # ── Score vs Actuals ────────────────────────────────────────────────
-    if pipeline_output is not None and not pipeline_output.empty and "actual_fp" in pool.columns and pool["actual_fp"].notna().any():
+    _has_pool_with_actuals = not pool.empty and "actual_fp" in pool.columns and pool["actual_fp"].notna().any()
+    if _has_pool_with_actuals:
         with st.expander("🎯 Score vs Actuals", expanded=True):
             st.caption("Lineup projections scored against real box-score results.")
             _lu_col = "lineup_index"
