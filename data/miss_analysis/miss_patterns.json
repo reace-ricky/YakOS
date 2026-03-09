@@ -1,11 +1,11 @@
 {
-  "computed_at": "2026-03-09T00:36:30.108096+00:00",
+  "computed_at": "2026-03-09T00:38:21.846445+00:00",
   "n_slates": 7,
   "n_player_slates": 1181,
   "classification": {
     "pop": 273,
-    "bust": 218,
-    "inline": 690,
+    "bust": 219,
+    "inline": 689,
     "pop_rate": 0.231,
     "bust_rate": 0.185
   },
@@ -14,8 +14,8 @@
     "lt5k": {
       "n": 650,
       "pop_rate": 0.28,
-      "bust_rate": 0.255,
-      "avg_residual": 0.3,
+      "bust_rate": 0.257,
+      "avg_residual": 0.4,
       "mae": 7.6
     },
     "5_65k": {
@@ -36,8 +36,8 @@
       "n": 97,
       "pop_rate": 0.113,
       "bust_rate": 0.041,
-      "avg_residual": -1.6,
-      "mae": 9.1
+      "avg_residual": -1.7,
+      "mae": 9.0
     },
     "10k_plus": {
       "n": 29,
@@ -253,7 +253,7 @@
   ],
   "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-09T00:36:30.108077+00:00",
+    "computed_at": "2026-03-09T00:38:21.846425+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,

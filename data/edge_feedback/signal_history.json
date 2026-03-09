@@ -1,22 +1,22 @@
 {
   "2026-03-07": {
     "slate_date": "2026-03-07",
-    "contest_type": "Cash Main",
+    "contest_type": "GPP Main",
     "n_players": 96,
     "signals": {
       "high_leverage": {
-        "n_flagged": 82,
-        "n_hit": 26,
-        "hit_rate": 0.317,
-        "avg_actual": 24.63,
-        "avg_proj": 24.25
+        "n_flagged": 83,
+        "n_hit": 27,
+        "hit_rate": 0.325,
+        "avg_actual": 24.75,
+        "avg_proj": 23.77
       },
       "low_ownership_upside": {
-        "n_flagged": 69,
-        "n_hit": 20,
-        "hit_rate": 0.29,
-        "avg_actual": 25.41,
-        "avg_proj": 25.21
+        "n_flagged": 67,
+        "n_hit": 21,
+        "hit_rate": 0.313,
+        "avg_actual": 25.22,
+        "avg_proj": 24.75
       },
       "chalk_fade": {
         "n_flagged": 0,
@@ -26,18 +26,18 @@
         "avg_proj": null
       },
       "salary_value": {
-        "n_flagged": 4,
+        "n_flagged": 5,
         "n_hit": 0,
         "hit_rate": 0.0,
-        "avg_actual": 18.25,
-        "avg_proj": 24.56
+        "avg_actual": 18.15,
+        "avg_proj": 25.8
       },
       "smash_candidate": {
-        "n_flagged": 55,
-        "n_hit": 16,
-        "hit_rate": 0.291,
-        "avg_actual": 25.7,
-        "avg_proj": 25.7
+        "n_flagged": 51,
+        "n_hit": 13,
+        "hit_rate": 0.255,
+        "avg_actual": 24.49,
+        "avg_proj": 24.78
       }
     }
   },
