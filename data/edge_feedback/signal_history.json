@@ -337,22 +337,22 @@
   },
   "2026-02-20": {
     "slate_date": "2026-02-20",
-    "contest_type": "Cash Main",
-    "n_players": 143,
+    "contest_type": "Showdown",
+    "n_players": 42,
     "signals": {
       "high_leverage": {
-        "n_flagged": 114,
-        "n_hit": 41,
-        "hit_rate": 0.36,
-        "avg_actual": 24.87,
+        "n_flagged": 40,
+        "n_hit": 14,
+        "hit_rate": 0.35,
+        "avg_actual": 22.01,
         "avg_proj": 24.74
       },
       "low_ownership_upside": {
-        "n_flagged": 106,
-        "n_hit": 32,
-        "hit_rate": 0.302,
-        "avg_actual": 24.91,
-        "avg_proj": 25.16
+        "n_flagged": 13,
+        "n_hit": 4,
+        "hit_rate": 0.308,
+        "avg_actual": 10.65,
+        "avg_proj": 14.84
       },
       "chalk_fade": {
         "n_flagged": 0,
@@ -362,18 +362,18 @@
         "avg_proj": null
       },
       "salary_value": {
-        "n_flagged": 6,
-        "n_hit": 2,
-        "hit_rate": 0.333,
-        "avg_actual": 24.17,
-        "avg_proj": 24.88
+        "n_flagged": 4,
+        "n_hit": 1,
+        "hit_rate": 0.25,
+        "avg_actual": 5.69,
+        "avg_proj": 12.27
       },
       "smash_candidate": {
-        "n_flagged": 75,
-        "n_hit": 22,
-        "hit_rate": 0.293,
-        "avg_actual": 25.07,
-        "avg_proj": 26.51
+        "n_flagged": 16,
+        "n_hit": 4,
+        "hit_rate": 0.25,
+        "avg_actual": 13.03,
+        "avg_proj": 21.53
       }
     }
   }
