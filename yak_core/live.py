@@ -392,7 +392,25 @@ def _fetch_actuals_from_box_scores(date_key: str, cfg: dict) -> pd.DataFrame:
             except (ValueError, TypeError):
                 fp = _calc_dk_nba_fp(p)
 
-            all_players.append({"player_name": str(name), "actual_fp": fp})
+            # Grab actual minutes from box score (Tank01 field: "mins")
+            mins_raw = p.get("mins") or p.get("min") or p.get("minutes") or p.get("mp")
+            try:
+                mp_actual = float(mins_raw) if mins_raw is not None else None
+            except (ValueError, TypeError):
+                # Handle "MM:SS" format
+                if mins_raw and ":" in str(mins_raw):
+                    try:
+                        parts = str(mins_raw).split(":")
+                        mp_actual = float(parts[0]) + float(parts[1]) / 60.0
+                    except (ValueError, IndexError):
+                        mp_actual = None
+                else:
+                    mp_actual = None
+
+            row = {"player_name": str(name), "actual_fp": fp}
+            if mp_actual is not None:
+                row["mp_actual"] = mp_actual
+            all_players.append(row)
 
     if not all_players:
         raise ValueError(f"No player actuals parsed from box scores for {date_key}")

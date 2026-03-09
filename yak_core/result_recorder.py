@@ -69,11 +69,20 @@ def merge_actuals_into_pool(
         return s.strip().lower().replace(".", "").replace("'", "").replace("-", " ")
 
     actuals_map = {}
+    minutes_map = {}
     for _, row in actuals_df.iterrows():
         name = str(row.get("player_name", ""))
         fp = row.get("actual_fp", 0)
         if name and fp is not None:
-            actuals_map[_norm(name)] = float(fp)
+            nk = _norm(name)
+            actuals_map[nk] = float(fp)
+            # Carry actual minutes if present
+            mp = row.get("mp_actual")
+            if mp is not None:
+                try:
+                    minutes_map[nk] = float(mp)
+                except (ValueError, TypeError):
+                    pass
 
     # Match by normalized name
     if "player_name" in merged.columns:
@@ -81,6 +90,13 @@ def merge_actuals_into_pool(
             lambda n: actuals_map.get(_norm(str(n)), None)
         )
         merged["actual_fp"] = pd.to_numeric(merged["actual_fp"], errors="coerce")
+
+        # Merge actual minutes if available
+        if minutes_map:
+            merged["mp_actual"] = merged["player_name"].apply(
+                lambda n: minutes_map.get(_norm(str(n)), None)
+            )
+            merged["mp_actual"] = pd.to_numeric(merged["mp_actual"], errors="coerce")
 
     return merged
 
