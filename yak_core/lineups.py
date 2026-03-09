@@ -303,6 +303,21 @@ def build_multiple_lineups_with_exposure(
     tier_min_players: Dict[str, int] = tier_constraints.get("tier_min_players", {})
     tier_max_players: Dict[str, int] = tier_constraints.get("tier_max_players", {})
 
+    # ── GPP-specific config (H5_ForcedDiverse formula) ──────────────
+    # These constraints are what moved us from 0 lineups above 280 to
+    # multiple 280+ lineups on the 3/8 backtest slate.  They only
+    # activate when CONTEST_TYPE == "gpp".
+    contest_type = cfg.get("CONTEST_TYPE", "gpp").lower()
+    is_gpp = contest_type == "gpp"
+
+    # GPP constraint knobs — overridable via cfg
+    gpp_max_punt_players = int(cfg.get("GPP_MAX_PUNT_PLAYERS", 1))       # max players < $4 000
+    gpp_min_mid_players  = int(cfg.get("GPP_MIN_MID_PLAYERS", 5))        # min players $4 000-$7 000
+    gpp_own_cap          = float(cfg.get("GPP_OWN_CAP", 4.8))            # max total lineup ownership
+    gpp_min_low_own      = int(cfg.get("GPP_MIN_LOW_OWN_PLAYERS", 3))    # min players below threshold
+    gpp_low_own_thresh   = float(cfg.get("GPP_LOW_OWN_THRESHOLD", 0.45)) # ownership threshold
+    gpp_force_game_stack = bool(cfg.get("GPP_FORCE_GAME_STACK", True))   # require 3+ from one game
+
     players = player_pool.to_dict("records")
     n = len(players)
     if n < DK_LINEUP_SIZE:
@@ -313,6 +328,26 @@ def build_multiple_lineups_with_exposure(
     for i, p in enumerate(players):
         p["_idx"] = i
         p["_slots"] = _eligible_slots(p.get("pos", ""))
+
+    # ── Pre-compute GPP score for each player (H5_ForcedDiverse) ────
+    # gpp_score = proj*0.30 + ceil*0.30 + (ceil-floor)*0.30
+    #           + mid_salary_bonus*5 - ownership*15
+    if is_gpp:
+        for p in players:
+            proj  = float(p.get("proj", 0))
+            ceil_ = float(p.get("ceil", p.get("proj", 0)))
+            floor_= float(p.get("floor", p.get("proj", 0) * 0.6))
+            own   = float(p.get("ownership", p.get("own_proj", 0.5)))
+            sal_k = float(p.get("salary", 5000)) / 1000.0
+            upside_gap = ceil_ - floor_
+            mid_bonus  = max(0.0, 1.0 - abs(sal_k - 5.5) / 3.0)
+            p["_gpp_score"] = (
+                proj * 0.30
+                + ceil_ * 0.30
+                + upside_gap * 0.30
+                + mid_bonus * 5.0
+                - own * 15.0
+            )
 
     appearance_count = [0] * n
     # pair_appearances[(i, j)] = number of lineups where both player i and j appear
@@ -329,33 +364,39 @@ def build_multiple_lineups_with_exposure(
             for s in DK_POS_SLOTS:
                 x[(i, s)] = pulp.LpVariable(f"x_{i}_{s}_{lu_num}", cat="Binary")
 
-        # Objective: blend projection + ownership leverage + edge scores.
-        # stack_weight / value_weight pull in Edge Analysis scores when present.
-        stack_weight = float(cfg.get("STACK_WEIGHT", 0.0))
-        value_weight = float(cfg.get("VALUE_WEIGHT", 0.0))
-        has_stack_scores = any("stack_score" in p for p in players)
-        has_value_scores = any("value_score" in p for p in players)
+        # ── Objective function ───────────────────────────────────────
+        if is_gpp:
+            # GPP: maximize H5_ForcedDiverse gpp_score
+            # (proj*0.30 + ceil*0.30 + upside_gap*0.30 + mid_bonus*5 - own*15)
+            prob += pulp.lpSum(
+                players[i]["_gpp_score"] * x[(i, s)]
+                for i in range(n)
+                for s in DK_POS_SLOTS
+            )
+        else:
+            # Cash / Showdown: blend projection + ownership leverage + edge scores.
+            stack_weight = float(cfg.get("STACK_WEIGHT", 0.0))
+            value_weight = float(cfg.get("VALUE_WEIGHT", 0.0))
+            has_stack_scores = any("stack_score" in p for p in players)
+            has_value_scores = any("value_score" in p for p in players)
 
-        def _effective_proj(p):
-            base = float(p.get("proj", 0))
-            # Ownership leverage
-            if own_weight > 0 and "leverage" in p:
-                base = (1 - own_weight) * base + own_weight * base * p.get("leverage", 0.5)
-            # Stack score bonus
-            if stack_weight > 0 and has_stack_scores:
-                ss = float(p.get("stack_score", 50.0) or 50.0) / 100.0  # normalise 0–1; None/0 → neutral
-                base = base * (1 + stack_weight * (ss - 0.5))
-            # Value score bonus
-            if value_weight > 0 and has_value_scores:
-                vs = float(p.get("value_score", 50.0) or 50.0) / 100.0  # normalise 0–1; None/0 → neutral
-                base = base * (1 + value_weight * (vs - 0.5))
-            return base
+            def _effective_proj(p):
+                base = float(p.get("proj", 0))
+                if own_weight > 0 and "leverage" in p:
+                    base = (1 - own_weight) * base + own_weight * base * p.get("leverage", 0.5)
+                if stack_weight > 0 and has_stack_scores:
+                    ss = float(p.get("stack_score", 50.0) or 50.0) / 100.0
+                    base = base * (1 + stack_weight * (ss - 0.5))
+                if value_weight > 0 and has_value_scores:
+                    vs = float(p.get("value_score", 50.0) or 50.0) / 100.0
+                    base = base * (1 + value_weight * (vs - 0.5))
+                return base
 
-        prob += pulp.lpSum(
-            _effective_proj(players[i]) * x[(i, s)]
-            for i in range(n)
-            for s in DK_POS_SLOTS
-        )
+            prob += pulp.lpSum(
+                _effective_proj(players[i]) * x[(i, s)]
+                for i in range(n)
+                for s in DK_POS_SLOTS
+            )
 
         # Exactly one player per slot
         for s in DK_POS_SLOTS:
@@ -481,6 +522,66 @@ def build_multiple_lineups_with_exposure(
             prob += pulp.lpSum(
                 x[(pi, s)] for pi in prev_indices for s in DK_POS_SLOTS
             ) <= DK_LINEUP_SIZE - _MIN_DIFF
+
+        # ── GPP-specific constraints (H5_ForcedDiverse) ──────────────
+        # Backtested on 3/8 slate: moved from 0 lineups above 280 to
+        # multiple 280+ lineups.  Best single lineup hit 302.5.
+        if is_gpp:
+            # 1. Max punt players (salary < $4000) — avoid dead-weight filler
+            _punt_idx = [i for i in range(n) if players[i].get("salary", 0) < 4000]
+            if _punt_idx:
+                prob += pulp.lpSum(
+                    x[(i, s)] for i in _punt_idx for s in DK_POS_SLOTS
+                ) <= gpp_max_punt_players
+
+            # 2. Min mid-salary players ($4000-$7000) — the smash sweet spot
+            _mid_idx = [i for i in range(n)
+                        if 4000 <= players[i].get("salary", 0) <= 7000]
+            if _mid_idx and gpp_min_mid_players > 0:
+                prob += pulp.lpSum(
+                    x[(i, s)] for i in _mid_idx for s in DK_POS_SLOTS
+                ) >= gpp_min_mid_players
+
+            # 3. Total lineup ownership cap — force diversification
+            prob += pulp.lpSum(
+                float(players[i].get("ownership", players[i].get("own_proj", 0.5)))
+                * x[(i, s)]
+                for i in range(n) for s in DK_POS_SLOTS
+            ) <= gpp_own_cap
+
+            # 4. Min low-owned players — ensure contrarian exposure
+            if gpp_min_low_own > 0:
+                _low_own_idx = [
+                    i for i in range(n)
+                    if float(players[i].get("ownership",
+                             players[i].get("own_proj", 1.0))) < gpp_low_own_thresh
+                ]
+                if _low_own_idx:
+                    prob += pulp.lpSum(
+                        x[(i, s)] for i in _low_own_idx for s in DK_POS_SLOTS
+                    ) >= gpp_min_low_own
+
+            # 5. Game stacking — correlated upside (3+ players from one game)
+            if gpp_force_game_stack:
+                _games: Dict[tuple, list] = {}
+                for i in range(n):
+                    gk = tuple(sorted([
+                        players[i].get("team", ""),
+                        players[i].get("opponent", players[i].get("opp", "")),
+                    ]))
+                    _games.setdefault(gk, []).append(i)
+                _gs_vars = {}
+                for gk, indices in _games.items():
+                    if len(indices) >= 3:
+                        gv = pulp.LpVariable(
+                            f"gs_{gk[0]}_{gk[1]}_{lu_num}", cat="Binary"
+                        )
+                        _gs_vars[gk] = gv
+                        prob += pulp.lpSum(
+                            x[(i, s)] for i in indices for s in DK_POS_SLOTS
+                        ) >= 3 * gv
+                if _gs_vars:
+                    prob += pulp.lpSum(_gs_vars.values()) >= 1
 
         prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=solver_time_limit))
         if prob.status != 1:
