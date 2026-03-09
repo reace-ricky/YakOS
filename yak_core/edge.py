@@ -340,44 +340,72 @@ def _salary_bracket_mask(salary: pd.Series, bracket: str) -> pd.Series:
     return pd.Series(False, index=salary.index)
 
 
-def _edge_label(row: pd.Series) -> str:
-    """Generate a short human-readable edge label for a player row."""
-    labels: list[str] = []
-    smash = row.get("smash_prob", 0.0)
-    bust = row.get("bust_prob", 0.0)
-    lev = row.get("leverage", 0.0)
-    is_anchor = row.get("is_anchor", False)
+def _compute_edge_labels(df: pd.DataFrame) -> pd.Series:
+    """Vectorised edge labels using pool-relative percentile cutoffs.
 
-    # Anchor tag first — these are GPP cornerstones
-    if is_anchor:
-        labels.append("🏆 GPP Anchor")
+    Only the top tier of each metric earns a tag, keeping total signal count
+    to roughly 15-25% of the pool.  This prevents the "everything is a signal"
+    problem that occurs with fixed thresholds.
+    """
+    n = len(df)
+    labels_list: list[list[str]] = [[] for _ in range(n)]
 
-    if pd.notna(smash) and smash >= 0.25:
-        labels.append("🔥 Smash")
-    elif pd.notna(smash) and smash >= 0.12:
-        labels.append("⬆ Upside")
+    smash = pd.to_numeric(df.get("smash_prob", pd.Series(0.0, index=df.index)), errors="coerce").fillna(0.0)
+    bust = pd.to_numeric(df.get("bust_prob", pd.Series(0.0, index=df.index)), errors="coerce").fillna(0.0)
+    lev = pd.to_numeric(df.get("leverage", pd.Series(0.0, index=df.index)), errors="coerce").fillna(0.0)
+    ceil_mag = pd.to_numeric(df.get("ceil_magnitude", pd.Series(0.0, index=df.index)), errors="coerce").fillna(0.0)
+    pop_score = pd.to_numeric(df.get("pop_catalyst_score", pd.Series(0.0, index=df.index)), errors="coerce").fillna(0.0)
+    is_anchor = df.get("is_anchor", pd.Series(False, index=df.index)).fillna(False).astype(bool)
 
-    # Core tag for high-ceiling studs that aren't anchors
-    ceil_mag = row.get("ceil_magnitude", 0.0)
-    if not is_anchor and pd.notna(ceil_mag) and ceil_mag >= 0.70:
-        labels.append("💎 Core")
+    # Compute pool-relative percentile cutoffs (90th for elite, 75th for notable)
+    smash_p90 = max(float(smash.quantile(0.90)), 0.35)  # Floor: at least 35%
+    smash_p75 = max(float(smash.quantile(0.75)), 0.20)  # Floor: at least 20%
+    bust_p90 = max(float(bust.quantile(0.90)), 0.35)    # Floor: at least 35%
+    lev_p85 = max(float(lev.quantile(0.85)), 3.0)       # Floor: at least 3.0
+    lev_low_p15 = min(float(lev[lev > 0].quantile(0.15)) if (lev > 0).any() else 0.5, 0.5)
+    ceil_p80 = max(float(ceil_mag.quantile(0.80)), 0.70) # Floor: at least 0.70
 
-    if pd.notna(bust) and bust >= 0.30:
-        labels.append("💀 Bust Risk")
+    for i in range(n):
+        tags: list[str] = []
 
-    if pd.notna(lev):
-        if lev >= 1.5:
-            labels.append("✅ +Leverage")
-        elif lev <= 0.5:
-            labels.append("⚠ Owned Trap")
+        # Anchor — top 8 projected (already computed upstream)
+        if is_anchor.iloc[i]:
+            tags.append("🏆 GPP Anchor")
 
-    # Pop Catalyst tag
-    pop_score = row.get("pop_catalyst_score", 0.0)
-    pop_tag = row.get("pop_catalyst_tag", "")
-    if pd.notna(pop_score) and float(pop_score) >= 0.15 and pop_tag:
-        labels.append(f"🚀 {pop_tag}")
+        # Smash — top ~10% of pool
+        s = smash.iloc[i]
+        if s >= smash_p90:
+            tags.append("🔥 Smash")
+        elif s >= smash_p75 and s >= 0.15:  # top ~25% but meaningful
+            tags.append("⬆ Upside")
 
-    return " | ".join(labels) if labels else "—"
+        # Core — high ceiling magnitude, non-anchors only
+        if not is_anchor.iloc[i] and ceil_mag.iloc[i] >= ceil_p80:
+            tags.append("💎 Core")
+
+        # Bust Risk — top ~10% bust probability
+        if bust.iloc[i] >= bust_p90:
+            tags.append("💀 Bust Risk")
+
+        # Leverage — top ~15% (relative to this pool's distribution)
+        l = lev.iloc[i]
+        if l >= lev_p85:
+            tags.append("✅ +Leverage")
+        elif 0 < l <= lev_low_p15:
+            tags.append("⚠ Owned Trap")
+
+        # Pop Catalyst — only strong signals with a specific tag
+        if pop_score.iloc[i] >= 0.25:
+            pop_tag = df.iloc[i].get("pop_catalyst_tag", "")
+            if pop_tag:
+                tags.append(f"🚀 {pop_tag}")
+
+        labels_list[i] = tags
+
+    return pd.Series(
+        [" | ".join(t) if t else "—" for t in labels_list],
+        index=df.index,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -542,8 +570,8 @@ def compute_edge_metrics(
     out["edge_score"] = edge_score.values
     out["is_anchor"] = is_anchor.values
 
-    # Generate human-readable edge labels
-    out["edge_label"] = out.apply(_edge_label, axis=1)
+    # Generate human-readable edge labels (pool-relative percentile cutoffs)
+    out["edge_label"] = _compute_edge_labels(out)
 
     # Sort by edge_score descending
     out = out.sort_values("edge_score", ascending=False).reset_index(drop=True)

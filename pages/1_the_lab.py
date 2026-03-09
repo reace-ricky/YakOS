@@ -1929,6 +1929,11 @@ def main() -> None:
         "calibration corrections, edge signal weights, and variance tuning."
     )
 
+    # Show retrain toast from previous run (after st.rerun)
+    _retrain_toast = st.session_state.pop("_retrain_toast", None)
+    if _retrain_toast:
+        st.success(_retrain_toast)
+
     try:
         from yak_core.slate_archive import archive_summary as _get_archive_summary
         from yak_core.calibration_feedback import get_calibration_summary, clear_calibration_history
@@ -1965,11 +1970,38 @@ def main() -> None:
             st.metric("Variance", f"{_var_icon} {_var_learned}/{_var_total}",
                       delta=f"{_var_status.get('n_player_slates', 0)} pts" if _var_status.get('n_player_slates', 0) else None)
         with _m5:
-            _retrain_label = "✅ Ready" if _ready else f"{_retrain_threshold - _n_archived} more"
-            st.metric("Retrain", _retrain_label)
+            # Load retrain metadata to show last train time + models
+            _retrain_meta = None
+            _retrain_meta_path = os.path.join(YAKOS_ROOT, "models", "retrain_meta.json")
+            if os.path.isfile(_retrain_meta_path):
+                try:
+                    import json as _rmjson
+                    with open(_retrain_meta_path) as _rmf:
+                        _retrain_meta = _rmjson.load(_rmf)
+                except Exception:
+                    pass
+
+            if _retrain_meta and _retrain_meta.get("models_trained"):
+                _rt_models = _retrain_meta["models_trained"]
+                _rt_count = len(_rt_models)
+                _rt_time = _retrain_meta.get("retrained_at", "")[:10]  # Just the date
+                st.metric("Retrain", f"✅ {_rt_count} models", delta=_rt_time)
+            elif _ready:
+                st.metric("Retrain", "✅ Ready")
+            else:
+                st.metric("Retrain", f"{_retrain_threshold - _n_archived} more")
 
         # Progress bar
-        st.progress(_pct_full / 100, text=f"{'🟢' if _ready else '🟡' if _pct_full >= 50 else '⚪'} {_n_archived}/{_retrain_threshold} slates — {'Ready to retrain' if _ready else 'Building'}")
+        if _retrain_meta and _retrain_meta.get("models_trained"):
+            _rt_names = {"fp": "FP", "minutes": "Minutes", "ownership": "Ownership"}
+            _rt_trained = ", ".join(_rt_names.get(m, m) for m in _retrain_meta["models_trained"])
+            _rt_skipped = ", ".join(_rt_names.get(m, m) for m in _retrain_meta.get("models_skipped", []))
+            _rt_text = f"🟢 Trained: {_rt_trained}"
+            if _rt_skipped:
+                _rt_text += f"  ·  Skipped: {_rt_skipped}"
+            st.progress(1.0, text=_rt_text)
+        else:
+            st.progress(_pct_full / 100, text=f"{'🟢' if _ready else '🟡' if _pct_full >= 50 else '⚪'} {_n_archived}/{_retrain_threshold} slates — {'Ready to retrain' if _ready else 'Building'}")
 
         # Retrain button
         if _ready:
@@ -2005,6 +2037,9 @@ def main() -> None:
                                 # Show sync status
                                 if "Models synced to GitHub" in _rt_out or "✓" in _rt_out:
                                     st.caption("✓ Models persisted to GitHub — will survive redeploys.")
+                                # Store result for toast, then rerun so metrics refresh
+                                st.session_state["_retrain_toast"] = f"Models retrained: {_trained_str}"
+                                st.rerun()
                             elif _rt_summary:
                                 st.warning("Retrain ran but no models had enough data to train.")
                                 st.code(_rt_out, language="text")
