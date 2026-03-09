@@ -1665,123 +1665,117 @@ def main() -> None:
             except Exception as _score_exc:
                 st.warning(f"Score vs Actuals failed: {_score_exc}")
 
-    # ── Signal Accuracy (player-level verdicts) ──────────────────────
-    _has_actuals = "actual_fp" in pool.columns and pool["actual_fp"].notna().any()
-    _has_sims_for_verdicts = sim.player_results is not None and not sim.player_results.empty
-    if _has_actuals and _has_sims_for_verdicts:
-        with st.expander("📐 Signal Accuracy", expanded=True):
-            st.caption("Did smash_prob / bust_prob actually pan out? Full-loop signal check.")
-            try:
-                from yak_core.sim_accuracy import score_player_predictions, summarize_prediction_accuracy  # noqa: PLC0415
-                from yak_core.display_format import standard_player_format, normalise_ownership  # noqa: PLC0415
+    # ── Sim Sandbox (calibration tool) ────────────────────────────────
+    with st.expander("🔬 Sim Sandbox", expanded=False):
+        st.caption("Run sims against archived actuals. See what's working, what's not, and apply fixes.")
+        try:
+            from yak_core.sim_sandbox import (
+                run_sandbox, get_active_knobs, save_active_knobs,
+                save_sandbox_run, get_sandbox_history,
+            )
 
-                # Build a merged pool with actuals + sim predictions
-                _vpool = pool.copy()
-                # Dedup pool by player_name — DK draftables can have multiple
-                # roster-slot rows per player (PG, SG, UTIL, etc.)
-                if "player_name" in _vpool.columns:
-                    _vpool = _vpool.drop_duplicates(subset=["player_name"], keep="first")
-                _sim_pr = sim.player_results.copy()
-                if "player_name" in _sim_pr.columns:
-                    _sim_pr = _sim_pr.drop_duplicates(subset=["player_name"], keep="first")
-                # Merge sim signals into pool (smash_prob, bust_prob, etc.)
-                _sim_merge_cols = [c for c in ["player_name", "smash_prob", "bust_prob", "leverage", "edge_score"]
-                                   if c in _sim_pr.columns]
-                if "player_name" in _sim_merge_cols and len(_sim_merge_cols) > 1:
-                    for _mc in _sim_merge_cols:
-                        if _mc != "player_name" and _mc in _vpool.columns:
-                            _vpool = _vpool.drop(columns=[_mc])
-                    _vpool = _vpool.merge(_sim_pr[_sim_merge_cols], on="player_name", how="left")
+            _sb_knobs = get_active_knobs()
+            st.markdown(
+                f"**Active Knobs:** ceiling_boost = `{_sb_knobs['ceiling_boost']}` · "
+                f"floor_dampen = `{_sb_knobs['floor_dampen']}`"
+            )
 
-                _verdicts = score_player_predictions(_vpool)
+            if st.button("Run Sandbox", key="_lab_run_sandbox"):
+                with st.spinner("Scoring sims against archived slates..."):
+                    _sb_result = run_sandbox(knobs=_sb_knobs)
 
-                if not _verdicts.empty:
-                    _summary = summarize_prediction_accuracy(_verdicts)
+                if "error" in _sb_result:
+                    st.error(_sb_result["error"])
+                else:
+                    # Save run to history
+                    save_sandbox_run(_sb_result)
+                    st.session_state["_sb_last_result"] = _sb_result
 
-                    # Summary metrics
-                    _sc1, _sc2, _sc3, _sc4 = st.columns(4)
-                    _sc1.metric("Players Scored", _summary.get("n_players", 0))
-                    _sc2.metric("MAE", f"{_summary.get('mae', 0):.1f} FP")
+            # Display last result if available
+            _sb_result = st.session_state.get("_sb_last_result")
+            if _sb_result and "error" not in _sb_result:
+                # KPI row
+                _k1, _k2, _k3, _k4, _k5 = st.columns(5)
+                _k1.metric("MAE", f"{_sb_result['avg_mae']:.1f} FP")
+                _k2.metric("Smash Prec", f"{_sb_result['avg_smash_precision']*100:.0f}%")
+                _k3.metric("Bust Prec", f"{_sb_result['avg_bust_precision']*100:.0f}%")
+                _k4.metric("Coverage", f"{_sb_result['avg_coverage']*100:.0f}%")
+                _k5.metric("Slates", _sb_result['n_slates'])
 
-                    _sp = _summary.get("smash_precision")
-                    _sc3.metric("Smash Precision", f"{_sp*100:.0f}%" if _sp is not None else "—")
+                # Top smashes + worst busts side by side
+                _sb_smashes = _sb_result.get("top_smashes", [])
+                _sb_busts = _sb_result.get("worst_busts", [])
+                if _sb_smashes or _sb_busts:
+                    _sbc1, _sbc2 = st.columns(2)
+                    with _sbc1:
+                        if _sb_smashes:
+                            st.markdown("**Top Smashes**")
+                            _sm_df = pd.DataFrame(_sb_smashes)
+                            _sm_show = [c for c in ["player", "salary", "proj", "actual", "diff", "slate"] if c in _sm_df.columns]
+                            _sm_fmt = {"salary": "${:,.0f}", "proj": "{:.1f}", "actual": "{:.1f}", "diff": "{:+.1f}"}
+                            st.dataframe(
+                                _sm_df[_sm_show].style.format({k: v for k, v in _sm_fmt.items() if k in _sm_show}, na_rep=""),
+                                use_container_width=True, hide_index=True,
+                            )
+                    with _sbc2:
+                        if _sb_busts:
+                            st.markdown("**Worst Busts**")
+                            _bu_df = pd.DataFrame(_sb_busts)
+                            _bu_show = [c for c in ["player", "salary", "proj", "actual", "diff", "slate"] if c in _bu_df.columns]
+                            _bu_fmt = {"salary": "${:,.0f}", "proj": "{:.1f}", "actual": "{:.1f}", "diff": "{:+.1f}"}
+                            st.dataframe(
+                                _bu_df[_bu_show].style.format({k: v for k, v in _bu_fmt.items() if k in _bu_show}, na_rep=""),
+                                use_container_width=True, hide_index=True,
+                            )
 
-                    _bp = _summary.get("bust_precision")
-                    _sc4.metric("Bust Precision", f"{_bp*100:.0f}%" if _bp is not None else "—")
-
-                    # Verdict breakdown bar
-                    _sr = _summary.get("smash_rate", 0)
-                    _hr = _summary.get("hit_rate", 0)
-                    _mr = _summary.get("miss_rate", 0)
-                    _br = _summary.get("bust_rate", 0)
-                    st.markdown(
-                        f"**Outcome Distribution:** "
-                        f"🟢 SMASHED {_sr*100:.0f}% · "
-                        f"🔵 HIT {_hr*100:.0f}% · "
-                        f"🟡 MISS {_mr*100:.0f}% · "
-                        f"🔴 BUSTED {_br*100:.0f}%"
+                # Breakouts
+                _sb_breakouts = _sb_result.get("breakouts", [])
+                if _sb_breakouts:
+                    st.markdown("**Breakouts** (beat ceiling or 5x+ value)")
+                    _bo_df = pd.DataFrame(_sb_breakouts)
+                    _bo_show = [c for c in ["player", "salary", "proj", "actual_fp", "ceil", "reasons", "slate"] if c in _bo_df.columns]
+                    _bo_fmt = {"salary": "${:,.0f}", "proj": "{:.1f}", "actual_fp": "{:.1f}", "ceil": "{:.1f}"}
+                    st.dataframe(
+                        _bo_df[_bo_show].style.format({k: v for k, v in _bo_fmt.items() if k in _bo_show}, na_rep=""),
+                        use_container_width=True, hide_index=True,
                     )
 
-                    # Verdict table — show key columns
-                    _v_show_cols = [c for c in ["player_name", "salary", "proj", "actual_fp",
-                                                "proj_error", "smash_prob", "bust_prob",
-                                                "verdict"]
-                                    if c in _verdicts.columns]
-                    _v_display = _verdicts[_v_show_cols].copy()
+                # Recommendations + Apply
+                _sb_rec = _sb_result.get("recommendations", {})
+                if _sb_rec:
+                    st.markdown("---")
+                    st.markdown("**Recommendations**")
+                    for _r in _sb_rec.get("reasons", []):
+                        st.markdown(f"- {_r}")
 
-                    # Colour-code verdicts
-                    _verdict_colors = {
-                        "SMASHED": "background-color: #1a3a1a; color: #6abf69;",
-                        "HIT": "background-color: #1a2a3a; color: #6a9fbf;",
-                        "MISS": "background-color: #3a3418; color: #d4a046;",
-                        "BUSTED": "background-color: #3a1a1a; color: #c27a7a;",
-                    }
-
-                    def _style_verdict(val):
-                        return _verdict_colors.get(str(val), "")
-
-                    _v_fmt = standard_player_format(_v_display)
-                    for c in ["actual_fp", "proj_error"]:
-                        if c in _v_display.columns:
-                            _v_fmt[c] = "{:.1f}"
-
-                    try:
-                        _styled_v = (
-                            _v_display.style
-                            .applymap(_style_verdict, subset=["verdict"])
-                            .format(_v_fmt, na_rep="")
+                    if _sb_rec.get("changed"):
+                        _new = _sb_rec["recommended"]
+                        st.markdown(
+                            f"Suggested: ceiling_boost = `{_new['ceiling_boost']}` · "
+                            f"floor_dampen = `{_new['floor_dampen']}`"
                         )
-                        st.dataframe(_styled_v, use_container_width=True, hide_index=True)
-                    except Exception:
-                        st.dataframe(_v_display, use_container_width=True, hide_index=True)
+                        if st.button("Apply Recommended Knobs", key="_lab_apply_sb_knobs"):
+                            save_active_knobs(_new)
+                            st.success(
+                                f"Applied: ceiling_boost={_new['ceiling_boost']}, "
+                                f"floor_dampen={_new['floor_dampen']}"
+                            )
+                    else:
+                        st.info("No knob changes recommended — current config is solid.")
 
-                    # Top hits + worst misses
-                    _top_hits = _summary.get("top_hits", [])
-                    _worst = _summary.get("worst_misses", [])
-                    if _top_hits or _worst:
-                        _th_col, _wm_col = st.columns(2)
-                        with _th_col:
-                            if _top_hits:
-                                st.markdown("**Top Smashes**")
-                                _th_df = pd.DataFrame(_top_hits)
-                                _th_fmt = {"salary": "${:,.0f}", "proj": "{:.1f}", "actual_fp": "{:.1f}", "proj_error": "{:+.1f}"}
-                                st.dataframe(
-                                    _th_df.style.format({k: v for k, v in _th_fmt.items() if k in _th_df.columns}, na_rep=""),
-                                    use_container_width=True, hide_index=True,
-                                )
-                        with _wm_col:
-                            if _worst:
-                                st.markdown("**Worst Busts**")
-                                _wm_df = pd.DataFrame(_worst)
-                                _wm_fmt = {"salary": "${:,.0f}", "proj": "{:.1f}", "actual_fp": "{:.1f}", "proj_error": "{:+.1f}"}
-                                st.dataframe(
-                                    _wm_df.style.format({k: v for k, v in _wm_fmt.items() if k in _wm_df.columns}, na_rep=""),
-                                    use_container_width=True, hide_index=True,
-                                )
-                else:
-                    st.info("Not enough scoreable players (need proj >= 5.0 and actual FP > 0).")
-            except Exception as _sig_exc:
-                st.warning(f"Signal accuracy failed: {_sig_exc}")
+                # Per-slate breakdown (collapsed)
+                _sb_per_slate = _sb_result.get("per_slate", [])
+                if _sb_per_slate:
+                    with st.expander("Per-Slate Breakdown", expanded=False):
+                        _ps_df = pd.DataFrame(_sb_per_slate)
+                        _ps_fmt = {"mae": "{:.1f}", "coverage": "{:.0%}", "smash_precision": "{:.0%}", "bust_precision": "{:.0%}"}
+                        st.dataframe(
+                            _ps_df.style.format({k: v for k, v in _ps_fmt.items() if k in _ps_df.columns}, na_rep=""),
+                            use_container_width=True, hide_index=True,
+                        )
+
+        except Exception as _sb_exc:
+            st.warning(f"Sim Sandbox unavailable: {_sb_exc}")
 
     # ── Apply Learnings (inline) ───────────────────────────────────
     if sim.player_results is not None and not sim.player_results.empty:
