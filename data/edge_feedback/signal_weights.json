@@ -1,24 +1,24 @@
 {
-  "computed_at": "2026-03-09T01:50:18.004700+00:00",
+  "computed_at": "2026-03-09T02:18:17.210213+00:00",
   "n_slates": 7,
   "signal_stats": {
     "high_leverage": {
-      "total_flagged": 263,
+      "total_flagged": 262,
       "total_hit": 63,
       "raw_hit_rate": 0.24,
-      "weighted_hit_rate": 0.149,
+      "weighted_hit_rate": 0.15,
       "n_slates_active": 4
     },
     "salary_value": {
-      "total_flagged": 30,
-      "total_hit": 10,
-      "raw_hit_rate": 0.333,
-      "weighted_hit_rate": 0.448,
+      "total_flagged": 26,
+      "total_hit": 7,
+      "raw_hit_rate": 0.269,
+      "weighted_hit_rate": 0.381,
       "n_slates_active": 4
     }
   },
   "weights": {
-    "high_leverage": 0.25,
-    "salary_value": 0.75
+    "high_leverage": 0.282,
+    "salary_value": 0.718
   }
 }

@@ -1,28 +1,28 @@
 {
-  "computed_at": "2026-03-09T01:50:18.143344+00:00",
+  "computed_at": "2026-03-09T02:18:17.385070+00:00",
   "n_slates": 9,
   "n_player_slates": 1659,
   "classification": {
-    "pop": 368,
-    "bust": 312,
-    "inline": 979,
-    "pop_rate": 0.222,
-    "bust_rate": 0.188
+    "pop": 367,
+    "bust": 311,
+    "inline": 981,
+    "pop_rate": 0.221,
+    "bust_rate": 0.187
   },
   "factor_breakdown": {},
   "bracket_breakdown": {
     "lt5k": {
       "n": 913,
       "pop_rate": 0.272,
-      "bust_rate": 0.263,
+      "bust_rate": 0.262,
       "avg_residual": 0.1,
       "mae": 7.5
     },
     "5_65k": {
       "n": 359,
-      "pop_rate": 0.206,
+      "pop_rate": 0.203,
       "bust_rate": 0.128,
-      "avg_residual": 0.0,
+      "avg_residual": -0.0,
       "mae": 8.3
     },
     "65_8k": {
@@ -43,8 +43,8 @@
       "n": 39,
       "pop_rate": 0.103,
       "bust_rate": 0.051,
-      "avg_residual": -0.7,
-      "mae": 11.0
+      "avg_residual": -0.8,
+      "mae": 10.9
     }
   },
   "top_pops": [
@@ -61,10 +61,10 @@
     {
       "player": "Kel'el Ware",
       "salary": 4900,
-      "proj": 21.8,
+      "proj": 22.6,
       "actual": 66.2,
-      "residual": 44.5,
-      "ratio": 3.04,
+      "residual": 43.6,
+      "ratio": 2.93,
       "context": [],
       "date": "2026-03-05"
     },
@@ -193,9 +193,9 @@
     {
       "player": "Ausar Thompson",
       "salary": 5700,
-      "proj": 28.7,
+      "proj": 28.5,
       "actual": 2.0,
-      "residual": -26.7,
+      "residual": -26.5,
       "ratio": 0.07,
       "context": [],
       "date": "2026-03-05"
@@ -253,7 +253,7 @@
   ],
   "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-09T01:50:18.143323+00:00",
+    "computed_at": "2026-03-09T02:18:17.385039+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
