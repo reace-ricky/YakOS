@@ -303,12 +303,10 @@ def build_multiple_lineups_with_exposure(
     tier_min_players: Dict[str, int] = tier_constraints.get("tier_min_players", {})
     tier_max_players: Dict[str, int] = tier_constraints.get("tier_max_players", {})
 
-    # ── GPP-specific config (H5_ForcedDiverse formula) ──────────────
-    # These constraints are what moved us from 0 lineups above 280 to
-    # multiple 280+ lineups on the 3/8 backtest slate.  They only
-    # activate when CONTEST_TYPE == "gpp".
+    # ── Contest-type detection ──────────────────────────────────────
     contest_type = cfg.get("CONTEST_TYPE", "gpp").lower()
     is_gpp = contest_type == "gpp"
+    is_cash = contest_type == "cash"
 
     # GPP constraint knobs — overridable via cfg
     gpp_max_punt_players = int(cfg.get("GPP_MAX_PUNT_PLAYERS", 1))       # max players < $4 000
@@ -329,10 +327,11 @@ def build_multiple_lineups_with_exposure(
         p["_idx"] = i
         p["_slots"] = _eligible_slots(p.get("pos", ""))
 
-    # ── Pre-compute GPP score for each player (H5_ForcedDiverse) ────
-    # gpp_score = proj*0.30 + ceil*0.30 + (ceil-floor)*0.30
-    #           + mid_salary_bonus*5 - ownership*15
+    # ── Pre-compute per-player scores by contest type ──────────────
     if is_gpp:
+        # H5_ForcedDiverse GPP formula:
+        # gpp_score = proj*0.30 + ceil*0.30 + upside_gap*0.30
+        #           + mid_salary_bonus*5 - ownership*15
         for p in players:
             proj  = float(p.get("proj", 0))
             ceil_ = float(p.get("ceil", p.get("proj", 0)))
@@ -348,6 +347,15 @@ def build_multiple_lineups_with_exposure(
                 + mid_bonus * 5.0
                 - own * 15.0
             )
+    elif is_cash:
+        # Cash formula (blueprint): cash_score = floor*w1 + proj*w2
+        # Floor is king — consistency beats upside in 50/50 & double-ups.
+        cash_floor_w = float(cfg.get("CASH_FLOOR_WEIGHT", 0.6))
+        cash_proj_w  = float(cfg.get("CASH_PROJ_WEIGHT", 0.4))
+        for p in players:
+            proj_  = float(p.get("proj", 0))
+            floor_ = float(p.get("floor", proj_ * 0.6))
+            p["_cash_score"] = floor_ * cash_floor_w + proj_ * cash_proj_w
 
     appearance_count = [0] * n
     # pair_appearances[(i, j)] = number of lineups where both player i and j appear
@@ -367,14 +375,20 @@ def build_multiple_lineups_with_exposure(
         # ── Objective function ───────────────────────────────────────
         if is_gpp:
             # GPP: maximize H5_ForcedDiverse gpp_score
-            # (proj*0.30 + ceil*0.30 + upside_gap*0.30 + mid_bonus*5 - own*15)
             prob += pulp.lpSum(
                 players[i]["_gpp_score"] * x[(i, s)]
                 for i in range(n)
                 for s in DK_POS_SLOTS
             )
+        elif is_cash:
+            # Cash: maximize floor-weighted score (consistency is king)
+            prob += pulp.lpSum(
+                players[i]["_cash_score"] * x[(i, s)]
+                for i in range(n)
+                for s in DK_POS_SLOTS
+            )
         else:
-            # Cash / Showdown: blend projection + ownership leverage + edge scores.
+            # Fallback: blend projection + ownership leverage + edge scores.
             stack_weight = float(cfg.get("STACK_WEIGHT", 0.0))
             value_weight = float(cfg.get("VALUE_WEIGHT", 0.0))
             has_stack_scores = any("stack_score" in p for p in players)
@@ -935,8 +949,34 @@ def build_showdown_lineups(
         # Binary vars: y[i] = 1 if player i (CPT or FLEX entry) is selected
         y = {i: pulp.LpVariable(f"y_{i}_{lu_num}", cat="Binary") for i in range(n)}
 
-        # Objective: maximise total projected points
-        prob += pulp.lpSum(players[i]["proj"] * y[i] for i in range(n))
+        # Objective: maximise total projected points with captain leverage
+        # Captain selection is biased toward low-owned, high-ceiling players.
+        # sd_score for CPT = proj*1.5 + ceil_bonus - own_penalty
+        # sd_score for FLEX = proj (standard)
+        sd_own_penalty = float(cfg.get("SD_CAPTAIN_OWN_PENALTY", 10.0))
+        sd_ceil_bonus  = float(cfg.get("SD_CAPTAIN_CEIL_BONUS", 0.2))
+
+        # Detect ownership scale: if max > 1.0, data is in percentage form
+        _max_own = max(
+            float(p.get("ownership", p.get("own_proj", 0))) for p in players
+        ) if players else 1.0
+        _own_divisor = 100.0 if _max_own > 1.0 else 1.0  # normalize to 0-1
+
+        sd_obj_coeffs = []
+        for i in range(n):
+            p = players[i]
+            base_proj = float(p.get("proj", 0))
+            if i < m:  # CPT variant
+                own = float(p.get("ownership", p.get("own_proj", 0.5))) / _own_divisor
+                ceil_ = float(p.get("ceil", base_proj / DK_SHOWDOWN_CAPTAIN_MULTIPLIER))
+                # Captain obj = proj (already 1.5x) + ceil_bonus*ceil - own_penalty*own
+                sd_obj_coeffs.append(
+                    base_proj + sd_ceil_bonus * ceil_ - sd_own_penalty * own
+                )
+            else:  # FLEX variant
+                sd_obj_coeffs.append(base_proj)
+
+        prob += pulp.lpSum(sd_obj_coeffs[i] * y[i] for i in range(n))
 
         # Exactly 1 CPT (from CPT variants, indices 0..m-1)
         prob += pulp.lpSum(y[i] for i in range(m)) == 1

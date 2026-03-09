@@ -85,6 +85,14 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "GPP_MIN_LOW_OWN_PLAYERS": 3,   # min players below GPP_LOW_OWN_THRESHOLD
     "GPP_LOW_OWN_THRESHOLD": 0.45,  # ownership threshold for "low-owned"
     "GPP_FORCE_GAME_STACK": True,   # require 3+ players from one game
+    # Cash-specific knobs (floor-weighted scoring)
+    # Only active when CONTEST_TYPE == "cash"
+    "CASH_FLOOR_WEIGHT": 0.6,        # weight on floor in cash_score
+    "CASH_PROJ_WEIGHT": 0.4,         # weight on proj in cash_score
+    # Showdown-specific knobs (captain leverage)
+    # Only active when using build_showdown_lineups
+    "SD_CAPTAIN_OWN_PENALTY": 10.0,  # penalize high-owned captains
+    "SD_CAPTAIN_CEIL_BONUS": 0.2,    # bonus weight on ceiling for captain selection
 }
 
 
