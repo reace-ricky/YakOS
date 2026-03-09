@@ -21,7 +21,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
@@ -54,16 +54,28 @@ def load_archive() -> pd.DataFrame:
 def _save_json_model(model_name: str, features: list, coefficients: list,
                      intercept: float, scaler_mean: list, scaler_scale: list,
                      imputer_values: list, metadata: dict) -> str:
-    """Save model as portable JSON (no pickle dependency)."""
+    """Save model as portable JSON matching the model_loader.py schema.
+
+    The loader expects nested keys:
+        model["features"], model["imputer"]["fill_values"],
+        model["scaler"]["mean"], model["scaler"]["scale"],
+        model["ridge"]["coef"], model["ridge"]["intercept"]
+    """
     obj = {
         "model_name": model_name,
         "features": features,
-        "coefficients": [round(float(c), 6) for c in coefficients],
-        "intercept": round(float(intercept), 6),
-        "scaler_mean": [round(float(m), 6) for m in scaler_mean],
-        "scaler_scale": [round(float(s), 6) for s in scaler_scale],
-        "imputer_values": [round(float(v), 6) for v in imputer_values],
-        "trained_at": datetime.utcnow().isoformat(),
+        "imputer": {
+            "fill_values": [round(float(v), 6) for v in imputer_values],
+        },
+        "scaler": {
+            "mean": [round(float(m), 6) for m in scaler_mean],
+            "scale": [round(float(s), 6) for s in scaler_scale],
+        },
+        "ridge": {
+            "coef": [round(float(c), 6) for c in coefficients],
+            "intercept": round(float(intercept), 6),
+        },
+        "trained_at": datetime.now(timezone.utc).isoformat(),
         **metadata,
     }
     path = os.path.join(MODELS_DIR, f"{model_name}.json")
@@ -333,7 +345,7 @@ def main():
 
     # Save retrain metadata
     meta = {
-        "retrained_at": datetime.utcnow().isoformat(),
+        "retrained_at": datetime.now(timezone.utc).isoformat(),
         "n_slates": n_dates,
         "n_rows": len(archive),
         "models_trained": trained,
@@ -343,6 +355,44 @@ def main():
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
     print(f"\nMetadata → {meta_path}")
+
+    # ── Sync trained model files to GitHub ─────────────────────────────
+    # Without this, models are lost on Streamlit Cloud redeploy / reboot.
+    if trained:
+        _sync_files = []
+        for model_name in trained:
+            _json_name = {
+                "fp": "yakos_fp_model.json",
+                "minutes": "yakos_minutes_model.json",
+                "ownership": "ownership_model.json",
+            }.get(model_name)
+            if _json_name and os.path.isfile(os.path.join(MODELS_DIR, _json_name)):
+                _sync_files.append(f"models/{_json_name}")
+        # Always sync the metadata
+        _sync_files.append("models/retrain_meta.json")
+
+        try:
+            from yak_core.github_persistence import sync_feedback_to_github
+            result = sync_feedback_to_github(
+                files=_sync_files,
+                commit_message=f"Retrain models: {', '.join(trained)} ({n_dates} slates, {len(archive)} rows)",
+            )
+            if result.get("status") == "ok":
+                print(f"\n✓ Models synced to GitHub ({result['sha'][:12]})")
+            else:
+                print(f"\n⚠ GitHub sync: {result.get('reason', 'unknown')}")
+        except Exception as _sync_exc:
+            print(f"\n⚠ GitHub sync error: {_sync_exc}")
+
+    # Output structured JSON summary (consumed by the Lab UI)
+    _summary = json.dumps({
+        "status": "ok" if trained else "no_models_trained",
+        "trained": trained,
+        "skipped": skipped,
+        "n_slates": n_dates,
+        "n_rows": len(archive),
+    })
+    print(f"\n__RETRAIN_RESULT__={_summary}")
 
 
 if __name__ == "__main__":

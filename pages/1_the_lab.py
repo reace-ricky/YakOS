@@ -1979,13 +1979,43 @@ def main() -> None:
                         import subprocess
                         _retrain_result = subprocess.run(
                             [sys.executable, os.path.join(YAKOS_ROOT, "scripts", "retrain_models.py"), "--force"],
-                            capture_output=True, text=True, timeout=120,
+                            capture_output=True, text=True, timeout=180,
                         )
+                        _rt_out = _retrain_result.stdout or ""
                         if _retrain_result.returncode == 0:
-                            st.success("Models retrained successfully.")
+                            # Parse structured result
+                            import json as _rt_json
+                            _rt_summary = None
+                            for _rt_line in _rt_out.splitlines():
+                                if _rt_line.strip().startswith("__RETRAIN_RESULT__="):
+                                    try:
+                                        _rt_summary = _rt_json.loads(_rt_line.strip().split("=", 1)[1])
+                                    except Exception:
+                                        pass
+
+                            if _rt_summary and _rt_summary.get("trained"):
+                                _trained_list = _rt_summary["trained"]
+                                _skipped_list = _rt_summary.get("skipped", [])
+                                _model_labels = {"fp": "Fantasy Points", "minutes": "Minutes", "ownership": "Ownership"}
+                                _trained_str = ", ".join(_model_labels.get(m, m) for m in _trained_list)
+                                st.success(f"Models retrained: **{_trained_str}** ({_rt_summary.get('n_slates', '?')} slates, {_rt_summary.get('n_rows', '?')} rows)")
+                                if _skipped_list:
+                                    _skipped_str = ", ".join(_model_labels.get(m, m) for m in _skipped_list)
+                                    st.info(f"Skipped (insufficient data): {_skipped_str}")
+                                # Show sync status
+                                if "Models synced to GitHub" in _rt_out or "✓" in _rt_out:
+                                    st.caption("✓ Models persisted to GitHub — will survive redeploys.")
+                            elif _rt_summary:
+                                st.warning("Retrain ran but no models had enough data to train.")
+                                st.code(_rt_out, language="text")
+                            else:
+                                st.success("Retrain completed.")
+                                st.code(_rt_out, language="text")
                         else:
                             st.error("Retrain failed.")
-                            st.code(_retrain_result.stderr or _retrain_result.stdout, language="text")
+                            st.code(_retrain_result.stderr or _rt_out, language="text")
+                    except subprocess.TimeoutExpired:
+                        st.error("Retrain timed out (3 min limit). Try again.")
                     except Exception as _rt_exc:
                         st.error(f"Retrain error: {_rt_exc}")
 
