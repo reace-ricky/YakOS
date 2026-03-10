@@ -278,7 +278,7 @@ def compute_stack_scores(pool_df: pd.DataFrame, top_n: int = 5) -> pd.DataFrame:
 
     df = pool_df.copy()
     df["proj"] = pd.to_numeric(df["proj"], errors="coerce").fillna(0)
-    df["salary"] = pd.to_numeric(df.get("salary", 0), errors="coerce").fillna(0) if "salary" in df.columns else 0
+    df["salary"] = pd.to_numeric(df["salary"], errors="coerce").fillna(0) if "salary" in df.columns else pd.Series(0, index=df.index)
 
     has_ceil = "ceil" in df.columns
     has_own = "ownership" in df.columns
@@ -903,7 +903,7 @@ def compute_game_environment_cards(pool_df: pd.DataFrame) -> list:
         return []
 
     df = pool_df.copy()
-    df["proj"] = pd.to_numeric(df.get("proj", 0), errors="coerce").fillna(0)
+    df["proj"] = pd.to_numeric(df["proj"], errors="coerce").fillna(0) if "proj" in df.columns else pd.Series(0, index=df.index)
 
     has_vegas = "vegas_total" in df.columns
     has_spread = "spread" in df.columns
@@ -1394,18 +1394,23 @@ def compute_pga_breakout_signals(pool_df: pd.DataFrame) -> pd.DataFrame:
 
     df = pool_df.copy()
 
-    # Parse key columns
-    proj = pd.to_numeric(df.get("proj", 0), errors="coerce").fillna(0)
-    salary = pd.to_numeric(df.get("salary", 0), errors="coerce").fillna(0)
-    own = pd.to_numeric(df.get("ownership", 5), errors="coerce").fillna(5)
-    sg_total = pd.to_numeric(df.get("sg_total", 0), errors="coerce").fillna(0)
-    sg_app = pd.to_numeric(df.get("sg_app", 0), errors="coerce").fillna(0)
-    sg_ott = pd.to_numeric(df.get("sg_ott", 0), errors="coerce").fillna(0)
-    sg_putt = pd.to_numeric(df.get("sg_putt", 0), errors="coerce").fillna(0)
-    course_fit = pd.to_numeric(df.get("course_fit", 0), errors="coerce").fillna(0)
-    approach_fit = pd.to_numeric(df.get("approach_fit", 0), errors="coerce").fillna(0)
-    win_prob = pd.to_numeric(df.get("win_prob", 0), errors="coerce").fillna(0)
-    make_cut = pd.to_numeric(df.get("make_cut_prob", 0), errors="coerce").fillna(0)
+    # Parse key columns — use pd.Series(0, ...) fallback for missing cols
+    def _col(name, default=0):
+        if name in df.columns:
+            return pd.to_numeric(df[name], errors="coerce").fillna(default)
+        return pd.Series(default, index=df.index)
+
+    proj = _col("proj")
+    salary = _col("salary")
+    own = _col("ownership", 5)
+    sg_total = _col("sg_total")
+    sg_app = _col("sg_app")
+    sg_ott = _col("sg_ott")
+    sg_putt = _col("sg_putt")
+    course_fit = _col("course_fit")
+    approach_fit = _col("approach_fit")
+    win_prob = _col("win_prob")
+    make_cut = _col("make_cut_prob")
     value = proj / salary.clip(lower=1) * 1000
 
     # Percentile thresholds (pool-relative)

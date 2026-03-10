@@ -348,13 +348,15 @@ def _render_tab_analysis(slate, edge, lu_state, sim_state) -> None:
 
     # ── Classify players into 4 buckets ───────────────────────────────
     sdf = signals_df.copy()
-    _sal = pd.to_numeric(sdf.get("salary", 0), errors="coerce").fillna(0)
-    _proj = pd.to_numeric(sdf.get("proj", 0), errors="coerce").fillna(0)
+    def _safe_col(frame, name, default=0):
+        if name in frame.columns:
+            return pd.to_numeric(frame[name], errors="coerce").fillna(default)
+        return pd.Series(default, index=frame.index)
+    _sal = _safe_col(sdf, "salary")
+    _proj = _safe_col(sdf, "proj")
     _own_col = "ownership" if "ownership" in sdf.columns else "own_pct"
-    _own = normalise_ownership(
-        pd.to_numeric(sdf.get(_own_col, 0), errors="coerce").fillna(0)
-    )
-    _edge = pd.to_numeric(sdf.get("edge_composite", 0), errors="coerce").fillna(0)
+    _own = normalise_ownership(_safe_col(sdf, _own_col))
+    _edge = _safe_col(sdf, "edge_composite")
     _val = np.where(_sal > 0, _proj / (_sal / 1000), 0)
     sdf["_sal"] = _sal
     sdf["_proj"] = _proj
@@ -474,15 +476,17 @@ def _render_tab_analysis_pga(slate, lu_state, sim_state) -> None:
 
     # ── Classify PGA players into 4 buckets ───────────────────────────
     sdf = signals_df.copy()
-    _sal = pd.to_numeric(sdf.get("salary", 0), errors="coerce").fillna(0)
-    _proj = pd.to_numeric(sdf.get("proj", 0), errors="coerce").fillna(0)
+    def _safe_col_pga(frame, name, default=0):
+        if name in frame.columns:
+            return pd.to_numeric(frame[name], errors="coerce").fillna(default)
+        return pd.Series(default, index=frame.index)
+    _sal = _safe_col_pga(sdf, "salary")
+    _proj = _safe_col_pga(sdf, "proj")
     _own_col = "ownership" if "ownership" in sdf.columns else "own_pct"
-    _own = normalise_ownership(
-        pd.to_numeric(sdf.get(_own_col, 0), errors="coerce").fillna(0)
-    )
+    _own = normalise_ownership(_safe_col_pga(sdf, _own_col))
     # Prefer PGA-specific edge composite, fall back to generic
     _edge_col = "pga_edge_composite" if "pga_edge_composite" in sdf.columns else "edge_composite"
-    _edge = pd.to_numeric(sdf.get(_edge_col, 0), errors="coerce").fillna(0)
+    _edge = _safe_col_pga(sdf, _edge_col)
     _val = np.where(_sal > 0, _proj / (_sal / 1000), 0)
     sdf["_sal"] = _sal
     sdf["_proj"] = _proj
@@ -628,12 +632,17 @@ def _build_pool_display(
             df = df.merge(_sub, on="player_name", how="left")
 
     # Compute Value column
-    _sal = pd.to_numeric(df.get("salary", 0), errors="coerce").fillna(0)
-    _proj = pd.to_numeric(df.get("proj", 0), errors="coerce").fillna(0)
+    def _safe_col_opt(frame, name, default=0):
+        if name in frame.columns:
+            return pd.to_numeric(frame[name], errors="coerce").fillna(default)
+        return pd.Series(default, index=frame.index)
+    _sal = _safe_col_opt(df, "salary")
+    _proj = _safe_col_opt(df, "proj")
     df["value"] = np.where(_sal > 0, _proj / (_sal / 1000.0), 0.0)
 
     # Normalise ownership display
-    _own = pd.to_numeric(df.get("ownership", df.get("own_pct", 0)), errors="coerce").fillna(0)
+    _own_col_opt = "ownership" if "ownership" in df.columns else "own_pct"
+    _own = _safe_col_opt(df, _own_col_opt)
     df["own_display"] = _own
 
     # Add Lock/Exclude boolean columns
