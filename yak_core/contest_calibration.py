@@ -264,6 +264,16 @@ def save_contest_result(
     with open(_HISTORY_FILE, "w") as f:
         json.dump(history, f, indent=2)
 
+    # Persist to GitHub so data survives Streamlit Cloud restarts
+    try:
+        from .github_persistence import sync_feedback_async
+        sync_feedback_async(
+            files=["data/contest_results/history.json"],
+            commit_message=f"Auto-sync contest result: {result.slate_date} {result.contest_type}",
+        )
+    except Exception:
+        pass  # non-fatal — data is still on disk
+
 
 def _load_history() -> Dict[str, Any]:
     if os.path.isfile(_HISTORY_FILE):

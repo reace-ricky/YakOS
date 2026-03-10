@@ -41,6 +41,7 @@ _FEEDBACK_FILES = [
     "data/calibration_feedback/correction_factors.json",
     "data/edge_feedback/signal_history.json",
     "data/edge_feedback/signal_weights.json",
+    "data/contest_results/history.json",
 ]
 
 # Binary file extensions that need base64 encoding directly from bytes
