@@ -1648,6 +1648,22 @@ def main() -> None:
             _sb_result = st.session_state.get("_sb_last_result")
             _sb_prev = st.session_state.get("_sb_prev_result")
             if _sb_result and "error" not in _sb_result:
+                # Overall slate date range header
+                _sb_slates = [s["slate"] for s in _sb_result.get("per_slate", [])]
+                if _sb_slates:
+                    import re as _re
+                    _date_parts = []
+                    for _sl in _sb_slates:
+                        _m = _re.search(r"(\d{4}-\d{2}-\d{2})", _sl)
+                        if _m:
+                            _date_parts.append(_m.group(1))
+                    if _date_parts:
+                        _date_parts.sort()
+                        if _date_parts[0] == _date_parts[-1]:
+                            st.caption(f"Slate: {_date_parts[0]}  ·  {len(_sb_slates)} slate(s) scored")
+                        else:
+                            st.caption(f"Slates: {_date_parts[0]} → {_date_parts[-1]}  ·  {len(_sb_slates)} slates scored")
+
                 # KPI row with deltas from previous run
                 _k1, _k2, _k3, _k4, _k5 = st.columns(5)
 
@@ -1696,7 +1712,7 @@ def main() -> None:
                         if _sb_smashes:
                             st.markdown("**Top Smashes**")
                             _sm_df = pd.DataFrame(_sb_smashes)
-                            _sm_show = [c for c in ["player", "salary", "proj", "actual", "diff", "slate"] if c in _sm_df.columns]
+                            _sm_show = [c for c in ["player", "salary", "proj", "actual", "diff"] if c in _sm_df.columns]
                             _sm_fmt = {"salary": "${:,.0f}", "proj": "{:.1f}", "actual": "{:.1f}", "diff": "{:+.1f}"}
                             st.dataframe(
                                 _sm_df[_sm_show].style.format({k: v for k, v in _sm_fmt.items() if k in _sm_show}, na_rep=""),
@@ -1706,7 +1722,7 @@ def main() -> None:
                         if _sb_busts:
                             st.markdown("**Worst Busts**")
                             _bu_df = pd.DataFrame(_sb_busts)
-                            _bu_show = [c for c in ["player", "salary", "proj", "actual", "diff", "slate"] if c in _bu_df.columns]
+                            _bu_show = [c for c in ["player", "salary", "proj", "actual", "diff"] if c in _bu_df.columns]
                             _bu_fmt = {"salary": "${:,.0f}", "proj": "{:.1f}", "actual": "{:.1f}", "diff": "{:+.1f}"}
                             st.dataframe(
                                 _bu_df[_bu_show].style.format({k: v for k, v in _bu_fmt.items() if k in _bu_show}, na_rep=""),
@@ -1718,7 +1734,7 @@ def main() -> None:
                 if _sb_breakouts:
                     st.markdown("**Breakouts** (beat ceiling or 5x+ value)")
                     _bo_df = pd.DataFrame(_sb_breakouts)
-                    _bo_show = [c for c in ["player", "salary", "proj", "actual_fp", "ceil", "reasons", "slate"] if c in _bo_df.columns]
+                    _bo_show = [c for c in ["player", "salary", "proj", "actual_fp", "ceil", "reasons"] if c in _bo_df.columns]
                     _bo_fmt = {"salary": "${:,.0f}", "proj": "{:.1f}", "actual_fp": "{:.1f}", "ceil": "{:.1f}"}
                     st.dataframe(
                         _bo_df[_bo_show].style.format({k: v for k, v in _bo_fmt.items() if k in _bo_show}, na_rep=""),

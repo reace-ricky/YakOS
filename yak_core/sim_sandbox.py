@@ -433,7 +433,26 @@ def run_sandbox(
 # ── Recommendation Engine ──────────────────────────────────────────
 
 def _generate_recommendations(agg: Dict[str, Any]) -> Dict[str, Any]:
-    """Analyze results and recommend knob adjustments."""
+    """Analyze results and recommend knob adjustments.
+
+    Knob triggers (independent — each fires on its own):
+
+    ceiling_boost:
+      - smash_prec < 15%  → big bump (+0.12)
+      - smash_prec < 25%  → nudge  (+0.06)
+      - smash_prec > 35%  → trim   (-0.05)  (over-predicting upside)
+      - upside_acc < 50%  → bump   (+0.10)
+      - upside_acc < 65%  → nudge  (+0.05)
+
+    floor_dampen:
+      - bust_prec < 20%   → bump   (+0.12)
+      - bust_prec < 35%   → nudge  (+0.06)
+      - bust_prec > 50%   → trim   (-0.05)
+      - downside_acc < 50% → bump  (+0.10)
+      - downside_acc < 65% → nudge (+0.05)
+
+    Multiple reasons can fire. The largest applicable bump wins per knob.
+    """
     current = agg["knobs"]
     cb = current.get("ceiling_boost", 1.0)
     fd = current.get("floor_dampen", 1.0)
@@ -444,43 +463,71 @@ def _generate_recommendations(agg: Dict[str, Any]) -> Dict[str, Any]:
     smash_prec = agg.get("avg_smash_precision", 0)
     bust_prec = agg.get("avg_bust_precision", 0)
 
-    new_cb = cb
-    new_fd = fd
+    cb_delta = 0.0
+    fd_delta = 0.0
     reasons = []
 
-    # Upside tuning — driven by both upside accuracy and smash precision
+    # ── Ceiling boost: smash precision is the primary signal ──────────
+    if smash_prec < 0.15:
+        _d = 0.12
+        cb_delta = max(cb_delta, _d)
+        reasons.append(f"Smash precision {smash_prec:.0%} is very low — bump ceiling_boost +{_d}")
+    elif smash_prec < 0.25:
+        _d = 0.06
+        cb_delta = max(cb_delta, _d)
+        reasons.append(f"Smash precision {smash_prec:.0%} below target 25% — nudge ceiling_boost +{_d}")
+    elif smash_prec > 0.35:
+        _d = -0.05
+        cb_delta = min(cb_delta, _d)
+        reasons.append(f"Smash precision {smash_prec:.0%} is high — trim ceiling_boost {_d}")
+
+    # Upside accuracy as secondary signal
     if upside_acc < 0.50:
-        bump = 0.15
-        new_cb = round(cb + bump, 3)
-        reasons.append(f"Upside accuracy {upside_acc:.0%} is low — bump ceiling_boost +{bump} to {new_cb}")
+        _d = 0.10
+        if _d > cb_delta:
+            cb_delta = _d
+        reasons.append(f"Upside accuracy {upside_acc:.0%} is low — ceiling_boost +{_d}")
     elif upside_acc < 0.65:
-        bump = 0.08
-        new_cb = round(cb + bump, 3)
-        reasons.append(f"Upside accuracy {upside_acc:.0%} could improve — nudge ceiling_boost +{bump} to {new_cb}")
-    elif upside_acc > 0.85 and smash_prec > 0.30:
-        bump = -0.05
-        new_cb = round(cb + bump, 3)
-        reasons.append(f"Upside accuracy {upside_acc:.0%} + smash precision {smash_prec:.0%} are strong — trim ceiling_boost {bump} to {new_cb}")
+        _d = 0.05
+        if _d > cb_delta:
+            cb_delta = _d
+        reasons.append(f"Upside accuracy {upside_acc:.0%} could improve — ceiling_boost +{_d}")
 
-    # Downside tuning
+    # ── Floor dampen: bust precision is the primary signal ────────────
+    if bust_prec < 0.20:
+        _d = 0.12
+        fd_delta = max(fd_delta, _d)
+        reasons.append(f"Bust precision {bust_prec:.0%} is very low — bump floor_dampen +{_d}")
+    elif bust_prec < 0.35:
+        _d = 0.06
+        fd_delta = max(fd_delta, _d)
+        reasons.append(f"Bust precision {bust_prec:.0%} below target 35% — nudge floor_dampen +{_d}")
+    elif bust_prec > 0.50:
+        _d = -0.05
+        fd_delta = min(fd_delta, _d)
+        reasons.append(f"Bust precision {bust_prec:.0%} is high — trim floor_dampen {_d}")
+
+    # Downside accuracy as secondary signal
     if downside_acc < 0.50:
-        bump = 0.15
-        new_fd = round(fd + bump, 3)
-        reasons.append(f"Downside accuracy {downside_acc:.0%} is low — bump floor_dampen +{bump} to {new_fd}")
+        _d = 0.10
+        if _d > fd_delta:
+            fd_delta = _d
+        reasons.append(f"Downside accuracy {downside_acc:.0%} is low — floor_dampen +{_d}")
     elif downside_acc < 0.65:
-        bump = 0.08
-        new_fd = round(fd + bump, 3)
-        reasons.append(f"Downside accuracy {downside_acc:.0%} could improve — nudge floor_dampen +{bump} to {new_fd}")
-    elif downside_acc > 0.85 and bust_prec > 0.30:
-        bump = -0.05
-        new_fd = round(fd + bump, 3)
-        reasons.append(f"Downside accuracy {downside_acc:.0%} + bust precision {bust_prec:.0%} are strong — trim floor_dampen {bump} to {new_fd}")
+        _d = 0.05
+        if _d > fd_delta:
+            fd_delta = _d
+        reasons.append(f"Downside accuracy {downside_acc:.0%} could improve — floor_dampen +{_d}")
 
-    # Coverage check
+    # ── Coverage check (advisory only, no knob change) ───────────────
     if coverage > 0.90:
         reasons.append(f"Coverage {coverage:.0%} is very high — sims may be too conservative")
     elif coverage < 0.60:
         reasons.append(f"Coverage {coverage:.0%} is low — sims may be too aggressive")
+
+    # Apply deltas
+    new_cb = round(cb + cb_delta, 3)
+    new_fd = round(fd + fd_delta, 3)
 
     # Guard rails
     new_cb = round(max(0.5, min(2.0, new_cb)), 3)
