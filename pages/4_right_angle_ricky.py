@@ -229,37 +229,48 @@ def _render_play_card(
       'value'       -> "$4,400 | 5.95 pts/$1K"
       'proj_val'    -> "27.6 pts | 4.68 val"
     """
+    # Badge text color — dark for bright backgrounds, white for dark ones
+    _badge_text = {"#4ade80": "#000", "#f7931e": "#000"}
+    badge_fg = _badge_text.get(color, "#fff")
+
     rows_html = ""
-    for _, r in players.iterrows():
-        name = r.get("player_name", "")
-        sal = float(r.get("salary", 0) or 0)
-        proj = float(r.get("proj", 0) or 0)
-        val = proj / (sal / 1000) if sal > 0 else 0
-
-        if stat_format == "value":
-            stat_str = f"${sal:,.0f} | {val:.2f} pts/$1K"
-        elif stat_format == "proj_val":
-            stat_str = f"{proj:.1f} pts | {val:.2f} val"
-        else:
-            stat_str = f"{proj:.1f} pts | ${sal:,.0f}"
-
-        rows_html += (
-            f"<div style='display:flex;justify-content:space-between;"
-            f"align-items:center;padding:6px 0;"
-            f"border-bottom:1px solid rgba(255,255,255,0.1);'>"
-            f"<div>"
-            f"<span style='font-weight:600;font-size:13px;'>{name}</span>"
-            f"<span style='display:inline-block;padding:2px 6px;border-radius:4px;"
-            f"font-size:9px;font-weight:bold;margin-left:6px;"
-            f"background:{color};color:#fff;'>{badge_label}</span>"
-            f"</div>"
-            f"<div style='text-align:right;font-size:12px;'>{stat_str}</div>"
-            f"</div>"
+    if players.empty:
+        rows_html = (
+            "<div style='padding:12px 0;font-size:12px;color:rgba(255,255,255,0.4);'>"
+            "No players match this category for the current slate.</div>"
         )
+    else:
+        for _, r in players.iterrows():
+            name = r.get("player_name", "")
+            sal = float(r.get("salary", 0) or 0)
+            proj = float(r.get("proj", 0) or 0)
+            val = proj / (sal / 1000) if sal > 0 else 0
+
+            if stat_format == "value":
+                stat_str = f"${sal:,.0f} | {val:.2f} pts/$1K"
+            elif stat_format == "proj_val":
+                stat_str = f"{proj:.1f} pts | {val:.2f} val"
+            else:
+                stat_str = f"{proj:.1f} pts | ${sal:,.0f}"
+
+            rows_html += (
+                f"<div style='display:flex;justify-content:space-between;"
+                f"align-items:center;padding:6px 0;"
+                f"border-bottom:1px solid rgba(255,255,255,0.08);'>"
+                f"<div>"
+                f"<span style='font-weight:600;font-size:13px;'>{name}</span>"
+                f"<span style='display:inline-block;padding:2px 6px;border-radius:4px;"
+                f"font-size:9px;font-weight:bold;margin-left:6px;"
+                f"background:{color};color:{badge_fg};'>{badge_label}</span>"
+                f"</div>"
+                f"<div style='text-align:right;font-size:12px;color:rgba(255,255,255,0.85);'>"
+                f"{stat_str}</div>"
+                f"</div>"
+            )
 
     html = (
-        f"<div style='background:rgba(255,255,255,0.07);border-radius:10px;"
-        f"padding:12px;border-left:3px solid {color};'>"
+        f"<div style='background:rgba(255,255,255,0.06);border-radius:10px;"
+        f"padding:12px;border-left:3px solid {color};margin-bottom:4px;'>"
         f"<h3 style='font-size:14px;margin-bottom:10px;color:{color};'>"
         f"{title}</h3>"
         f"{rows_html}"
@@ -325,9 +336,16 @@ def _render_tab_analysis(slate, edge, lu_state, sim_state) -> None:
     value = _val_pool.nlargest(5, "_val")
     _used.update(value["player_name"].tolist())
 
-    # Fades: high ownership (>15%), low edge, not already used
-    _fade_pool = sdf[(sdf["_own"] >= 15) & (~sdf["player_name"].isin(_used))]
-    fades = _fade_pool.nsmallest(5, "_edge")
+    # Fades: overvalued players — high ownership or high salary but weak edge
+    # Try high-own first; if too few, fall back to high-salary + low-edge
+    _fade_pool = sdf[~sdf["player_name"].isin(_used)].copy()
+    _fade_high_own = _fade_pool[_fade_pool["_own"] >= 10]
+    if len(_fade_high_own) >= 3:
+        fades = _fade_high_own.nsmallest(5, "_edge")
+    else:
+        # Fallback: expensive players ($5K+) with weakest edge signal
+        _fade_sal = _fade_pool[_fade_pool["_sal"] >= 5000]
+        fades = _fade_sal.nsmallest(5, "_edge") if not _fade_sal.empty else _fade_pool.nsmallest(5, "_edge")
 
     # ── 4-box layout (2x2) ────────────────────────────────────────────
     row1_c1, row1_c2 = st.columns(2)
@@ -366,16 +384,20 @@ def _render_tab_analysis(slate, edge, lu_state, sim_state) -> None:
 
     if _lineup_data:
         st.divider()
-        for contest_label, short, lu_rows, sim_metrics, bb_row in _lineup_data:
-            st.markdown(f"**Top {short} Lineup**")
-            render_premium_lineup_card(
-                lineup_rows=lu_rows,
-                sim_metrics=sim_metrics,
-                lineup_label=f"#1 {short}",
-                salary_cap=slate.salary_cap,
-                boom_bust_row=bb_row,
-                compact=True,
-            )
+        # Render lineups 2 per row to reduce dead space
+        for i in range(0, len(_lineup_data), 2):
+            chunk = _lineup_data[i:i + 2]
+            cols = st.columns(len(chunk))
+            for col, (contest_label, short, lu_rows, sim_metrics, bb_row) in zip(cols, chunk):
+                with col:
+                    render_premium_lineup_card(
+                        lineup_rows=lu_rows,
+                        sim_metrics=sim_metrics,
+                        lineup_label=f"Top {short}",
+                        salary_cap=slate.salary_cap,
+                        boom_bust_row=bb_row,
+                        compact=True,
+                    )
 
 
 # ---------------------------------------------------------------------------
@@ -383,7 +405,8 @@ def _render_tab_analysis(slate, edge, lu_state, sim_state) -> None:
 # ---------------------------------------------------------------------------
 
 def _render_tab_analysis_pga(slate, lu_state, sim_state) -> None:
-    """Tab 1 for PGA: breakout signals + slate overview from DataGolf data."""
+    """Tab 1 for PGA: 2x2 dashboard boxes (Core/Leverage/Value/Fade)
+    matching the NBA Edge Analysis layout, then top PGA GPP lineup."""
     has_pool = slate.player_pool is not None and not slate.player_pool.empty
     if not has_pool:
         st.info("No PGA slate loaded yet. Load a PGA pool in The Lab first.")
@@ -407,35 +430,75 @@ def _render_tab_analysis_pga(slate, lu_state, sim_state) -> None:
 
     st.divider()
 
-    # Top edges table
-    top_edges = signals_df[signals_df["pga_edge_composite"] > 0].head(12)
-    if not top_edges.empty:
-        st.markdown("**Top PGA Edges**")
-        display_df = pd.DataFrame()
-        display_df["Player"] = top_edges["player_name"].values
-        display_df["Salary"] = top_edges["salary"].values if "salary" in top_edges.columns else 0
-        display_df["Proj"] = top_edges["proj"].values if "proj" in top_edges.columns else 0
-        if "sg_total" in top_edges.columns:
-            display_df["SG Total"] = top_edges["sg_total"].values
-        if "course_fit" in top_edges.columns:
-            display_df["Course Fit"] = top_edges["course_fit"].values
-        own_col = "ownership" if "ownership" in top_edges.columns else "own_pct"
-        if own_col in top_edges.columns:
-            display_df["Own%"] = normalise_ownership(pd.Series(top_edges[own_col].values)).values
-        display_df["Edge"] = (top_edges["pga_edge_composite"].values * 100).round(0).astype(int)
-        display_df["Signals"] = top_edges["pga_signal_badges"].values
+    # ── Classify PGA players into 4 buckets ───────────────────────────
+    sdf = signals_df.copy()
+    _sal = pd.to_numeric(sdf.get("salary", 0), errors="coerce").fillna(0)
+    _proj = pd.to_numeric(sdf.get("proj", 0), errors="coerce").fillna(0)
+    _own_col = "ownership" if "ownership" in sdf.columns else "own_pct"
+    _own = normalise_ownership(
+        pd.to_numeric(sdf.get(_own_col, 0), errors="coerce").fillna(0)
+    )
+    # Prefer PGA-specific edge composite, fall back to generic
+    _edge_col = "pga_edge_composite" if "pga_edge_composite" in sdf.columns else "edge_composite"
+    _edge = pd.to_numeric(sdf.get(_edge_col, 0), errors="coerce").fillna(0)
+    _val = np.where(_sal > 0, _proj / (_sal / 1000), 0)
+    sdf["_sal"] = _sal
+    sdf["_proj"] = _proj
+    sdf["_own"] = _own
+    sdf["_edge"] = _edge
+    sdf["_val"] = _val
 
-        _fmt = standard_player_format(display_df)
-        if "SG Total" in display_df.columns:
-            _fmt["SG Total"] = "{:+.2f}"
-        if "Course Fit" in display_df.columns:
-            _fmt["Course Fit"] = "{:+.2f}"
-        st.dataframe(
-            display_df.style.format(_fmt, na_rep=""),
-            use_container_width=True, hide_index=True,
+    # Core (Chalk): top projected players, $8K+ salary
+    core = sdf[sdf["_sal"] >= 8000].nlargest(5, "_proj")
+    _used = set(core["player_name"].tolist())
+
+    # Leverage (GPP Gold): best edge, low ownership (<15%), not in core
+    _lev_pool = sdf[(sdf["_own"] < 15) & (~sdf["player_name"].isin(_used))]
+    leverage = _lev_pool.nlargest(5, "_edge")
+    _used.update(leverage["player_name"].tolist())
+
+    # Value (Salary Savers): best pts/$1K, under $7.5K, not already used
+    _val_pool = sdf[(sdf["_sal"] < 7500) & (sdf["_sal"] > 0) & (~sdf["player_name"].isin(_used))]
+    value = _val_pool.nlargest(5, "_val")
+    _used.update(value["player_name"].tolist())
+
+    # Fades: high ownership but weak edge; fall back to high-salary + low-edge
+    _fade_pool = sdf[~sdf["player_name"].isin(_used)].copy()
+    _fade_high_own = _fade_pool[_fade_pool["_own"] >= 10]
+    if len(_fade_high_own) >= 3:
+        fades = _fade_high_own.nsmallest(5, "_edge")
+    else:
+        _fade_sal = _fade_pool[_fade_pool["_sal"] >= 7000]
+        fades = _fade_sal.nsmallest(5, "_edge") if not _fade_sal.empty else _fade_pool.nsmallest(5, "_edge")
+
+    # ── 4-box layout (2x2) ────────────────────────────────────────────
+    row1_c1, row1_c2 = st.columns(2)
+    with row1_c1:
+        _render_play_card(
+            "CORE PLAYS (Chalk)", core, _CARD_COLORS["core"],
+            "CHALK", stat_format="proj_salary",
+        )
+    with row1_c2:
+        _render_play_card(
+            "LEVERAGE PLAYS (GPP Gold)", leverage, _CARD_COLORS["leverage"],
+            "UNDEROWNED", stat_format="proj_val",
         )
 
-    # Top PGA GPP lineup from Build & Publish
+    st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
+
+    row2_c1, row2_c2 = st.columns(2)
+    with row2_c1:
+        _render_play_card(
+            "VALUE PLAYS (Salary Savers)", value, _CARD_COLORS["value"],
+            "VALUE", stat_format="value",
+        )
+    with row2_c2:
+        _render_play_card(
+            "FADE CANDIDATES", fades, _CARD_COLORS["fade"],
+            "FADE", stat_format="proj_salary",
+        )
+
+    # ── Top PGA GPP lineup from Build & Publish ───────────────────────
     lu_rows, sim_metrics, bb_row = _get_best_lineup(lu_state, sim_state, "PGA GPP")
     if lu_rows is not None and not lu_rows.empty:
         st.divider()
