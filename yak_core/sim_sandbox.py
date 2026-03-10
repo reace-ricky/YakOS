@@ -168,32 +168,61 @@ def _compute_verdicts(
 
 
 def _smash_precision(verdicts: List[Dict[str, Any]], sim_p90: np.ndarray, actual: np.ndarray) -> float:
-    """Of players whose sim p90 suggested upside (top quartile), how many actually smashed?"""
+    """Of players whose sim p90 predicted upside, how many actually smashed?
+
+    "Predicted smash" = sim p90 exceeds the player's ceiling.  This is an
+    absolute threshold so that ceiling_boost directly controls who enters
+    the predicted set — higher boost → more p90s exceed ceiling → the
+    prediction set changes, and precision becomes knob-sensitive.
+
+    Falls back to top-quartile ranking when no player's p90 clears their
+    ceiling (possible at very low ceiling_boost values).
+    """
     if len(verdicts) == 0:
         return 0.0
-    # "Predicted smash" = sim p90 was in top 25% of all sim p90s
-    threshold = np.percentile(sim_p90, 75)
-    predicted_smash = sim_p90 >= threshold
-    n_predicted = predicted_smash.sum()
+
+    ceils = np.array([v["ceil"] for v in verdicts])
+    predicted_smash = sim_p90 >= ceils
+    n_predicted = int(predicted_smash.sum())
+
+    # Fallback: if no p90 beats any ceiling, use top-quartile ranking so
+    # the metric isn't always 0% at conservative settings.
+    if n_predicted == 0:
+        threshold = np.percentile(sim_p90, 75)
+        predicted_smash = sim_p90 >= threshold
+        n_predicted = int(predicted_smash.sum())
     if n_predicted == 0:
         return 0.0
-    # Of those predicted, how many actually smashed (beat ceiling)?
+
     actually_smashed = np.array([v["verdict"] == "SMASHED" for v in verdicts])
-    correct = (predicted_smash & actually_smashed).sum()
+    correct = int((predicted_smash & actually_smashed).sum())
     return float(correct / n_predicted)
 
 
 def _bust_precision(verdicts: List[Dict[str, Any]], sim_p10: np.ndarray, actual: np.ndarray) -> float:
-    """Of players whose sim p10 suggested downside (bottom quartile), how many actually busted?"""
+    """Of players whose sim p10 predicted downside, how many actually busted?
+
+    "Predicted bust" = sim p10 falls below the player's floor.  Same
+    absolute-threshold logic as _smash_precision so floor_dampen controls
+    who enters the prediction set.
+    """
     if len(verdicts) == 0:
         return 0.0
-    threshold = np.percentile(sim_p10, 25)
-    predicted_bust = sim_p10 <= threshold
-    n_predicted = predicted_bust.sum()
+
+    floors = np.array([v["floor"] for v in verdicts])
+    predicted_bust = sim_p10 <= floors
+    n_predicted = int(predicted_bust.sum())
+
+    # Fallback: bottom-quartile ranking if no p10 breaches any floor.
+    if n_predicted == 0:
+        threshold = np.percentile(sim_p10, 25)
+        predicted_bust = sim_p10 <= threshold
+        n_predicted = int(predicted_bust.sum())
     if n_predicted == 0:
         return 0.0
+
     actually_busted = np.array([v["verdict"] == "BUSTED" for v in verdicts])
-    correct = (predicted_bust & actually_busted).sum()
+    correct = int((predicted_bust & actually_busted).sum())
     return float(correct / n_predicted)
 
 
