@@ -1,5 +1,5 @@
 {
-  "computed_at": "2026-03-10T02:37:23.757824+00:00",
+  "computed_at": "2026-03-10T02:44:43.493515+00:00",
   "n_slates": 14,
   "n_player_slates": 2411,
   "classification": {
@@ -30,7 +30,7 @@
       "pop_rate": 0.149,
       "bust_rate": 0.084,
       "avg_residual": -0.1,
-      "mae": 8.5
+      "mae": 8.6
     },
     "8_10k": {
       "n": 205,
@@ -121,10 +121,10 @@
     {
       "player": "OG Anunoby",
       "salary": 6600,
-      "proj": 30.9,
+      "proj": 31.6,
       "actual": 65.2,
-      "residual": 34.3,
-      "ratio": 2.11,
+      "residual": 33.7,
+      "ratio": 2.07,
       "context": [],
       "date": "2026-03-06"
     },
@@ -253,7 +253,7 @@
   ],
   "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-10T02:37:23.757804+00:00",
+    "computed_at": "2026-03-10T02:44:43.493494+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
