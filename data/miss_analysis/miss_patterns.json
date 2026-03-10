@@ -1,50 +1,50 @@
 {
-  "computed_at": "2026-03-10T04:25:11.129085+00:00",
+  "computed_at": "2026-03-10T04:36:07.559578+00:00",
   "n_slates": 16,
-  "n_player_slates": 2559,
+  "n_player_slates": 2659,
   "classification": {
-    "pop": 578,
-    "bust": 474,
-    "inline": 1507,
-    "pop_rate": 0.226,
+    "pop": 603,
+    "bust": 493,
+    "inline": 1563,
+    "pop_rate": 0.227,
     "bust_rate": 0.185
   },
   "factor_breakdown": {},
   "bracket_breakdown": {
     "lt5k": {
-      "n": 1418,
+      "n": 1481,
       "pop_rate": 0.265,
-      "bust_rate": 0.252,
+      "bust_rate": 0.251,
       "avg_residual": 0.3,
       "mae": 7.2
     },
     "5_65k": {
-      "n": 549,
-      "pop_rate": 0.222,
-      "bust_rate": 0.135,
-      "avg_residual": 0.7,
+      "n": 571,
+      "pop_rate": 0.224,
+      "bust_rate": 0.137,
+      "avg_residual": 0.8,
       "mae": 8.7
     },
     "65_8k": {
-      "n": 308,
-      "pop_rate": 0.162,
-      "bust_rate": 0.084,
-      "avg_residual": 0.0,
+      "n": 313,
+      "pop_rate": 0.166,
+      "bust_rate": 0.083,
+      "avg_residual": 0.1,
       "mae": 8.6
     },
     "8_10k": {
-      "n": 216,
-      "pop_rate": 0.102,
-      "bust_rate": 0.06,
+      "n": 224,
+      "pop_rate": 0.098,
+      "bust_rate": 0.062,
       "avg_residual": -1.2,
       "mae": 8.8
     },
     "10k_plus": {
-      "n": 68,
-      "pop_rate": 0.118,
-      "bust_rate": 0.059,
-      "avg_residual": -0.1,
-      "mae": 10.4
+      "n": 70,
+      "pop_rate": 0.129,
+      "bust_rate": 0.057,
+      "avg_residual": 0.4,
+      "mae": 10.5
     }
   },
   "top_pops": [
@@ -253,7 +253,7 @@
   ],
   "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-10T04:25:11.129055+00:00",
+    "computed_at": "2026-03-10T04:36:07.559540+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,

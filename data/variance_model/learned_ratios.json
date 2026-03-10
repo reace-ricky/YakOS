@@ -1,69 +1,69 @@
 {
-  "computed_at": "2026-03-10T04:25:10.866670+00:00",
+  "computed_at": "2026-03-10T04:36:07.277241+00:00",
   "n_slates": 16,
-  "n_player_slates": 2567,
+  "n_player_slates": 2667,
   "ratios": {
-    "lt5k": 0.6028,
-    "5_65k": 0.4395,
-    "65_8k": 0.3372,
-    "8_10k": 0.2708,
-    "10k_plus": 0.2747
+    "lt5k": 0.6031,
+    "5_65k": 0.4414,
+    "65_8k": 0.3373,
+    "8_10k": 0.2701,
+    "10k_plus": 0.2774
   },
   "brackets": {
     "lt5k": {
-      "n": 1426,
-      "learned_ratio": 0.6028,
-      "clamped_ratio": 0.6028,
+      "n": 1489,
+      "learned_ratio": 0.6031,
+      "clamped_ratio": 0.6031,
       "static_ratio": 1.04,
       "delta_pct": -42.0,
       "using": "learned",
-      "value": 0.6028,
-      "mean_proj": 15.1,
-      "residual_std": 9.1
+      "value": 0.6031,
+      "mean_proj": 15.2,
+      "residual_std": 9.2
     },
     "5_65k": {
-      "n": 549,
-      "learned_ratio": 0.4395,
-      "clamped_ratio": 0.4395,
+      "n": 571,
+      "learned_ratio": 0.4414,
+      "clamped_ratio": 0.4414,
       "static_ratio": 0.64,
-      "delta_pct": -31.3,
+      "delta_pct": -31.0,
       "using": "learned",
-      "value": 0.4395,
+      "value": 0.4414,
       "mean_proj": 25.0,
       "residual_std": 11.0
     },
     "65_8k": {
-      "n": 308,
-      "learned_ratio": 0.3372,
-      "clamped_ratio": 0.3372,
+      "n": 313,
+      "learned_ratio": 0.3373,
+      "clamped_ratio": 0.3373,
       "static_ratio": 0.44,
-      "delta_pct": -23.4,
+      "delta_pct": -23.3,
       "using": "learned",
-      "value": 0.3372,
+      "value": 0.3373,
       "mean_proj": 32.5,
       "residual_std": 11.0
     },
     "8_10k": {
-      "n": 216,
-      "learned_ratio": 0.2708,
-      "clamped_ratio": 0.2708,
+      "n": 224,
+      "learned_ratio": 0.2701,
+      "clamped_ratio": 0.2701,
       "static_ratio": 0.35,
-      "delta_pct": -22.6,
+      "delta_pct": -22.8,
       "using": "learned",
-      "value": 0.2708,
-      "mean_proj": 39.9,
+      "value": 0.2701,
+      "mean_proj": 40.0,
       "residual_std": 10.8
     },
     "10k_plus": {
-      "n": 68,
-      "learned_ratio": 0.2747,
-      "clamped_ratio": 0.2747,
+      "n": 70,
+      "learned_ratio": 0.2774,
+      "clamped_ratio": 0.2774,
       "static_ratio": 0.3,
-      "delta_pct": -8.4,
+      "delta_pct": -7.5,
       "using": "learned",
-      "value": 0.2747,
-      "mean_proj": 47.2,
-      "residual_std": 13.0
+      "value": 0.2774,
+      "mean_proj": 47.4,
+      "residual_std": 13.2
     }
   }
 }
