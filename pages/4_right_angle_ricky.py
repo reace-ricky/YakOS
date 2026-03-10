@@ -203,18 +203,76 @@ def _get_best_lineup(lu_state, sim_state, contest_label: str) -> tuple:
 # TAB 1 — RICKY'S EDGE ANALYSIS (Dashboard-style)
 # ===========================================================================
 
-def _render_tab_analysis(slate, edge, lu_state, sim_state) -> None:
-    """Tab 1: Dashboard-style edge analysis — core/leverage/value/fade +
-    top GPP/Cash/Showdown lineups from Build & Publish."""
+# ---------------------------------------------------------------------------
+# HTML card renderer for the 4-box dashboard layout
+# ---------------------------------------------------------------------------
 
-    has_edge = bool(edge.edge_analysis_by_contest)
-    has_lineups = any(
-        (lu_state.lineups.get(c) is not None and not lu_state.lineups[c].empty)
-        or c in lu_state.published_sets
-        for c in _CONTEST_ORDER
+_CARD_COLORS = {
+    "core": "#f7931e",       # orange
+    "leverage": "#a855f7",   # purple
+    "value": "#4ade80",      # green
+    "fade": "#ef4444",       # red
+}
+
+
+def _render_play_card(
+    title: str,
+    players: pd.DataFrame,
+    color: str,
+    badge_label: str,
+    stat_format: str = "proj_salary",
+) -> None:
+    """Render a dashboard-style play card as HTML inside a Streamlit container.
+
+    stat_format:
+      'proj_salary' -> "48.9 pts | $9,400"
+      'value'       -> "$4,400 | 5.95 pts/$1K"
+      'proj_val'    -> "27.6 pts | 4.68 val"
+    """
+    rows_html = ""
+    for _, r in players.iterrows():
+        name = r.get("player_name", "")
+        sal = float(r.get("salary", 0) or 0)
+        proj = float(r.get("proj", 0) or 0)
+        val = proj / (sal / 1000) if sal > 0 else 0
+
+        if stat_format == "value":
+            stat_str = f"${sal:,.0f} | {val:.2f} pts/$1K"
+        elif stat_format == "proj_val":
+            stat_str = f"{proj:.1f} pts | {val:.2f} val"
+        else:
+            stat_str = f"{proj:.1f} pts | ${sal:,.0f}"
+
+        rows_html += (
+            f"<div style='display:flex;justify-content:space-between;"
+            f"align-items:center;padding:6px 0;"
+            f"border-bottom:1px solid rgba(255,255,255,0.1);'>"
+            f"<div>"
+            f"<span style='font-weight:600;font-size:13px;'>{name}</span>"
+            f"<span style='display:inline-block;padding:2px 6px;border-radius:4px;"
+            f"font-size:9px;font-weight:bold;margin-left:6px;"
+            f"background:{color};color:#fff;'>{badge_label}</span>"
+            f"</div>"
+            f"<div style='text-align:right;font-size:12px;'>{stat_str}</div>"
+            f"</div>"
+        )
+
+    html = (
+        f"<div style='background:rgba(255,255,255,0.07);border-radius:10px;"
+        f"padding:12px;border-left:3px solid {color};'>"
+        f"<h3 style='font-size:14px;margin-bottom:10px;color:{color};'>"
+        f"{title}</h3>"
+        f"{rows_html}"
+        f"</div>"
     )
-    has_pool = slate.player_pool is not None and not slate.player_pool.empty
+    st.markdown(html, unsafe_allow_html=True)
 
+
+def _render_tab_analysis(slate, edge, lu_state, sim_state) -> None:
+    """Tab 1: Dashboard-style — 4 play-type boxes (2x2) then
+    top GPP/Cash/Showdown lineups as rows."""
+
+    has_pool = slate.player_pool is not None and not slate.player_pool.empty
     if not has_pool:
         st.info("No player pool available. Load a slate in The Lab first.")
         return
@@ -224,11 +282,12 @@ def _render_tab_analysis(slate, edge, lu_state, sim_state) -> None:
     if not _analysis["pool"].empty:
         pool = _analysis["pool"]
 
-    # ── Slate overview bullets ────────────────────────────────────────
+    # ── Compute signals ───────────────────────────────────────────────
     signals_df = compute_ricky_signals(pool)
     contest_type = slate.contest_name or "GPP"
     overview = generate_slate_overview(pool, signals_df, contest_type=contest_type)
 
+    # Slate overview bullets + recommendation
     for bullet in overview["bullets"]:
         st.markdown(f"- {bullet}")
     if overview["recommendation"]:
@@ -236,52 +295,68 @@ def _render_tab_analysis(slate, edge, lu_state, sim_state) -> None:
 
     st.divider()
 
-    # ── Top Edges table ───────────────────────────────────────────────
-    top_edges = signals_df[signals_df["edge_composite"] > 0].head(10)
-    if not top_edges.empty:
-        st.markdown("**Top Edges**")
-        display_df = pd.DataFrame()
-        display_df["Player"] = top_edges["player_name"].values
-        if "pos" in top_edges.columns:
-            display_df["Pos"] = top_edges["pos"].values
-        if "team" in top_edges.columns:
-            display_df["Team"] = top_edges["team"].values
-        display_df["Salary"] = top_edges["salary"].values if "salary" in top_edges.columns else 0
-        display_df["Proj"] = top_edges["proj"].values if "proj" in top_edges.columns else 0
-        own_col = "ownership" if "ownership" in top_edges.columns else "own_pct"
-        if own_col in top_edges.columns:
-            display_df["Own%"] = normalise_ownership(pd.Series(top_edges[own_col].values)).values
-        display_df["Edge"] = (top_edges["edge_composite"].values * 100).round(0).astype(int)
-        display_df["Signals"] = top_edges["signal_badges"].values
+    # ── Classify players into 4 buckets ───────────────────────────────
+    sdf = signals_df.copy()
+    _sal = pd.to_numeric(sdf.get("salary", 0), errors="coerce").fillna(0)
+    _proj = pd.to_numeric(sdf.get("proj", 0), errors="coerce").fillna(0)
+    _own_col = "ownership" if "ownership" in sdf.columns else "own_pct"
+    _own = normalise_ownership(
+        pd.to_numeric(sdf.get(_own_col, 0), errors="coerce").fillna(0)
+    )
+    _edge = pd.to_numeric(sdf.get("edge_composite", 0), errors="coerce").fillna(0)
+    _val = np.where(_sal > 0, _proj / (_sal / 1000), 0)
+    sdf["_sal"] = _sal
+    sdf["_proj"] = _proj
+    sdf["_own"] = _own
+    sdf["_edge"] = _edge
+    sdf["_val"] = _val
 
-        if "pop_catalyst_tag" in top_edges.columns:
-            pop_tags = top_edges["pop_catalyst_tag"].values
-            if any(bool(t) for t in pop_tags):
-                display_df["Catalyst"] = [f"\U0001f680 {t}" if t else "" for t in pop_tags]
+    # Core (Chalk): top projected players, $7K+ salary
+    core = sdf[sdf["_sal"] >= 7000].nlargest(5, "_proj")
+    _used = set(core["player_name"].tolist())
 
-        _fmt = standard_player_format(display_df)
-        st.dataframe(
-            display_df.style.format(_fmt, na_rep=""),
-            use_container_width=True, hide_index=True,
+    # Leverage (GPP Gold): best edge, low ownership (<15%), not in core
+    _lev_pool = sdf[(sdf["_own"] < 15) & (~sdf["player_name"].isin(_used))]
+    leverage = _lev_pool.nlargest(5, "_edge")
+    _used.update(leverage["player_name"].tolist())
+
+    # Value (Salary Savers): best pts/$1K, under $6.5K, not already used
+    _val_pool = sdf[(sdf["_sal"] < 6500) & (sdf["_sal"] > 0) & (~sdf["player_name"].isin(_used))]
+    value = _val_pool.nlargest(5, "_val")
+    _used.update(value["player_name"].tolist())
+
+    # Fades: high ownership (>15%), low edge, not already used
+    _fade_pool = sdf[(sdf["_own"] >= 15) & (~sdf["player_name"].isin(_used))]
+    fades = _fade_pool.nsmallest(5, "_edge")
+
+    # ── 4-box layout (2x2) ────────────────────────────────────────────
+    row1_c1, row1_c2 = st.columns(2)
+    with row1_c1:
+        _render_play_card(
+            "CORE PLAYS (Chalk)", core, _CARD_COLORS["core"],
+            "CHALK", stat_format="proj_salary",
+        )
+    with row1_c2:
+        _render_play_card(
+            "LEVERAGE PLAYS (GPP Gold)", leverage, _CARD_COLORS["leverage"],
+            "UNDEROWNED", stat_format="proj_val",
         )
 
-    # ── Published edge writeups per contest (if available) ────────────
-    if has_edge:
-        st.divider()
-        contests_shown = [
-            c for c in _CONTEST_ORDER
-            if c in edge.edge_analysis_by_contest
-        ]
-        for contest_label in contests_shown:
-            short = _LABEL_SHORT.get(contest_label, contest_label)
-            payload = edge.edge_analysis_by_contest[contest_label]
-            summary = payload.get("edge_summary", "")
-            if summary:
-                with st.expander(f"{short} Edge Notes", expanded=False):
-                    st.markdown(summary)
+    st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
+
+    row2_c1, row2_c2 = st.columns(2)
+    with row2_c1:
+        _render_play_card(
+            "VALUE PLAYS (Salary Savers)", value, _CARD_COLORS["value"],
+            "VALUE", stat_format="value",
+        )
+    with row2_c2:
+        _render_play_card(
+            "FADE CANDIDATES", fades, _CARD_COLORS["fade"],
+            "FADE", stat_format="proj_salary",
+        )
 
     # ── Top lineups from Build & Publish (GPP / Cash / Showdown) ──────
-    # Collect which contests have lineups
     _lineup_data = []
     for contest_label in _CONTEST_ORDER:
         lu_rows, sim_metrics, bb_row = _get_best_lineup(lu_state, sim_state, contest_label)
@@ -291,19 +366,16 @@ def _render_tab_analysis(slate, edge, lu_state, sim_state) -> None:
 
     if _lineup_data:
         st.divider()
-        # Render side-by-side in columns (FantasyPros-style)
-        cols = st.columns(len(_lineup_data))
-        for col, (contest_label, short, lu_rows, sim_metrics, bb_row) in zip(cols, _lineup_data):
-            with col:
-                st.markdown(f"**Top {short} Lineup**")
-                render_premium_lineup_card(
-                    lineup_rows=lu_rows,
-                    sim_metrics=sim_metrics,
-                    lineup_label=f"#1 {short}",
-                    salary_cap=slate.salary_cap,
-                    boom_bust_row=bb_row,
-                    compact=True,
-                )
+        for contest_label, short, lu_rows, sim_metrics, bb_row in _lineup_data:
+            st.markdown(f"**Top {short} Lineup**")
+            render_premium_lineup_card(
+                lineup_rows=lu_rows,
+                sim_metrics=sim_metrics,
+                lineup_label=f"#1 {short}",
+                salary_cap=slate.salary_cap,
+                boom_bust_row=bb_row,
+                compact=True,
+            )
 
 
 # ---------------------------------------------------------------------------
