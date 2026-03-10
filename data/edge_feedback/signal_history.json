@@ -316,22 +316,22 @@
   },
   "2026-03-09": {
     "slate_date": "2026-03-09",
-    "contest_type": "Cash Main",
+    "contest_type": "GPP Main",
     "n_players": 100,
     "signals": {
       "high_leverage": {
-        "n_flagged": 81,
-        "n_hit": 37,
-        "hit_rate": 0.457,
-        "avg_actual": 25.02,
-        "avg_proj": 24.3
+        "n_flagged": 80,
+        "n_hit": 36,
+        "hit_rate": 0.45,
+        "avg_actual": 25.29,
+        "avg_proj": 24.31
       },
       "salary_value": {
         "n_flagged": 6,
         "n_hit": 5,
         "hit_rate": 0.833,
         "avg_actual": 26.46,
-        "avg_proj": 24.32
+        "avg_proj": 23.92
       }
     }
   }

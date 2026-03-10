@@ -1,12 +1,12 @@
 {
-  "computed_at": "2026-03-10T04:44:23.589603+00:00",
+  "computed_at": "2026-03-10T07:02:17.819228+00:00",
   "n_slates": 14,
   "signal_stats": {
     "high_leverage": {
-      "total_flagged": 972,
-      "total_hit": 319,
-      "raw_hit_rate": 0.328,
-      "weighted_hit_rate": 0.33,
+      "total_flagged": 971,
+      "total_hit": 318,
+      "raw_hit_rate": 0.327,
+      "weighted_hit_rate": 0.329,
       "n_slates_active": 12
     },
     "salary_value": {
@@ -18,7 +18,7 @@
     }
   },
   "weights": {
-    "high_leverage": 0.513,
-    "salary_value": 0.487
+    "high_leverage": 0.512,
+    "salary_value": 0.488
   }
 }
