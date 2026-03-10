@@ -3,8 +3,11 @@
 Adds confidence scores, tags, and optional sim-based metrics to
 optimized lineups.
 """
-import pandas as pd
+import os
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
 
 
 def _calibration_confidence(lineup_grp: pd.DataFrame) -> float:
@@ -1033,6 +1036,49 @@ _SALARY_CHEAP = 5000       # < $5K = cheap
 _SALARY_MID_UPPER = 7500   # $5K-$7.5K = mid-range
 # >= $7.5K = studs
 
+# Default breakout signal weights (tuned by feedback loop)
+_BREAKOUT_WEIGHTS_FILE = os.path.join(
+    str(Path(__file__).resolve().parent.parent), "data", "breakout_weights.json"
+)
+
+DEFAULT_BREAKOUT_WEIGHTS: dict[str, float] = {
+    "minutes_surge": 0.30,
+    "salary_value": 0.20,
+    "usage_bump": 0.20,
+    "matchup_dvp": 0.15,
+    "volatility": 0.15,
+}
+
+
+def _load_breakout_weights() -> dict[str, float]:
+    """Load breakout weights from disk or return defaults."""
+    if os.path.isfile(_BREAKOUT_WEIGHTS_FILE):
+        try:
+            import json as _json
+            with open(_BREAKOUT_WEIGHTS_FILE) as f:
+                data = _json.load(f)
+            w = {k: float(data.get(k, v)) for k, v in DEFAULT_BREAKOUT_WEIGHTS.items()}
+            # Normalise so they sum to 1
+            total = sum(w.values())
+            if total > 0:
+                w = {k: round(v / total, 4) for k, v in w.items()}
+            return w
+        except Exception:
+            pass
+    return dict(DEFAULT_BREAKOUT_WEIGHTS)
+
+
+def save_breakout_weights(weights: dict[str, float]) -> None:
+    """Persist tuned breakout weights to disk."""
+    import json as _json
+    Path(_BREAKOUT_WEIGHTS_FILE).parent.mkdir(parents=True, exist_ok=True)
+    # Normalise
+    total = sum(weights.values())
+    if total > 0:
+        weights = {k: round(v / total, 4) for k, v in weights.items()}
+    with open(_BREAKOUT_WEIGHTS_FILE, "w") as f:
+        _json.dump(weights, f, indent=2)
+
 
 def compute_breakout_candidates(
     pool_df: pd.DataFrame,
@@ -1180,12 +1226,14 @@ def compute_breakout_candidates(
     n_dvp = _norm(df["_matchup"])
     n_vol = _norm(df["_vol"])
 
+    # Load weights (from feedback loop or defaults)
+    _w = _load_breakout_weights()
     df["breakout_score"] = (
-        0.30 * n_min
-        + 0.20 * n_val
-        + 0.20 * n_use
-        + 0.15 * n_dvp
-        + 0.15 * n_vol
+        _w["minutes_surge"] * n_min
+        + _w["salary_value"] * n_val
+        + _w["usage_bump"] * n_use
+        + _w["matchup_dvp"] * n_dvp
+        + _w["volatility"] * n_vol
     ).mul(100).round(1)
 
     # ── Human-readable signals ────────────────────────────────────────

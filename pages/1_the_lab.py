@@ -1547,6 +1547,12 @@ def main() -> None:
             _sb_result = st.session_state.get("_sb_last_result")
             _sb_prev = st.session_state.get("_sb_prev_result")
             if _sb_result and "error" not in _sb_result:
+                # Slate summary line (replaces per-row slate columns)
+                _sb_slates = _sb_result.get("per_slate", [])
+                if _sb_slates:
+                    _slate_names = [s.get("slate", "") for s in _sb_slates]
+                    st.caption(f"Scored across {len(_slate_names)} slate(s): {', '.join(_slate_names)}")
+
                 # KPI row with deltas from previous run
                 _k1, _k2, _k3, _k4, _k5 = st.columns(5)
 
@@ -1595,7 +1601,7 @@ def main() -> None:
                         if _sb_smashes:
                             st.markdown("**Top Smashes**")
                             _sm_df = pd.DataFrame(_sb_smashes)
-                            _sm_show = [c for c in ["player", "salary", "proj", "actual", "diff", "slate"] if c in _sm_df.columns]
+                            _sm_show = [c for c in ["player", "salary", "proj", "actual", "diff"] if c in _sm_df.columns]
                             _sm_fmt = {"salary": "${:,.0f}", "proj": "{:.1f}", "actual": "{:.1f}", "diff": "{:+.1f}"}
                             st.dataframe(
                                 _sm_df[_sm_show].style.format({k: v for k, v in _sm_fmt.items() if k in _sm_show}, na_rep=""),
@@ -1605,7 +1611,7 @@ def main() -> None:
                         if _sb_busts:
                             st.markdown("**Worst Busts**")
                             _bu_df = pd.DataFrame(_sb_busts)
-                            _bu_show = [c for c in ["player", "salary", "proj", "actual", "diff", "slate"] if c in _bu_df.columns]
+                            _bu_show = [c for c in ["player", "salary", "proj", "actual", "diff"] if c in _bu_df.columns]
                             _bu_fmt = {"salary": "${:,.0f}", "proj": "{:.1f}", "actual": "{:.1f}", "diff": "{:+.1f}"}
                             st.dataframe(
                                 _bu_df[_bu_show].style.format({k: v for k, v in _bu_fmt.items() if k in _bu_show}, na_rep=""),
@@ -1617,7 +1623,7 @@ def main() -> None:
                 if _sb_breakouts:
                     st.markdown("**Breakouts** (beat ceiling or 5x+ value)")
                     _bo_df = pd.DataFrame(_sb_breakouts)
-                    _bo_show = [c for c in ["player", "salary", "proj", "actual_fp", "ceil", "reasons", "slate"] if c in _bo_df.columns]
+                    _bo_show = [c for c in ["player", "salary", "proj", "actual_fp", "ceil", "reasons"] if c in _bo_df.columns]
                     _bo_fmt = {"salary": "${:,.0f}", "proj": "{:.1f}", "actual_fp": "{:.1f}", "ceil": "{:.1f}"}
                     st.dataframe(
                         _bo_df[_bo_show].style.format({k: v for k, v in _bo_fmt.items() if k in _bo_show}, na_rep=""),
@@ -1646,6 +1652,46 @@ def main() -> None:
                             )
                     else:
                         st.info("No knob changes recommended — current config is solid.")
+
+                # Breakout feedback loop — learn weights from sandbox results
+                _sb_breakouts_list = _sb_result.get("breakouts", [])
+                if _sb_breakouts_list:
+                    st.markdown("---")
+                    st.markdown("**Breakout Model Feedback**")
+                    st.caption(
+                        "Use sandbox breakout findings to tune the breakout detection model. "
+                        "Signals that fired for actual breakouts get boosted."
+                    )
+                    if st.button("Learn from Breakouts", key="_lab_learn_breakouts"):
+                        try:
+                            from yak_core.sim_sandbox import learn_breakout_weights_from_sandbox
+                            from yak_core.right_angle import save_breakout_weights
+                            _learn = learn_breakout_weights_from_sandbox(_sb_result)
+                            st.session_state["_sb_learn_result"] = _learn
+                            if _learn.get("changed"):
+                                save_breakout_weights(_learn["new_weights"])
+                                st.success(f"Breakout weights updated from {_learn['n_breakouts']} breakouts.")
+                            else:
+                                st.info(_learn.get("reason", "No weight changes needed."))
+                        except Exception as _le:
+                            st.error(f"Breakout learning failed: {_le}")
+
+                    _learn_result = st.session_state.get("_sb_learn_result")
+                    if _learn_result:
+                        _old_w = _learn_result.get("old_weights", {})
+                        _new_w = _learn_result.get("new_weights", {})
+                        _adjs = _learn_result.get("adjustments", {})
+                        if _old_w and _new_w:
+                            _w_rows = []
+                            for _sig in _old_w:
+                                _w_rows.append({
+                                    "Signal": _sig,
+                                    "Old": f"{_old_w[_sig]:.2%}",
+                                    "New": f"{_new_w[_sig]:.2%}",
+                                    "Reason": _adjs.get(_sig, ""),
+                                })
+                            st.dataframe(pd.DataFrame(_w_rows), use_container_width=True, hide_index=True)
+                        st.caption(_learn_result.get("reason", ""))
 
                 # Per-slate breakdown (collapsed)
                 _sb_per_slate = _sb_result.get("per_slate", [])

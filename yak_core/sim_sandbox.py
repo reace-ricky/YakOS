@@ -433,7 +433,16 @@ def run_sandbox(
 # ── Recommendation Engine ──────────────────────────────────────────
 
 def _generate_recommendations(agg: Dict[str, Any]) -> Dict[str, Any]:
-    """Analyze results and recommend knob adjustments."""
+    """Analyze results and recommend knob adjustments.
+
+    The primary goal is IMPROVING SMASH PRECISION (identifying breakout
+    players).  Smash precision is the #1 signal — if we can't predict
+    who will smash, we can't win GPPs.  Targets:
+      - Smash precision: 25%+  (currently ~10% is terrible)
+      - Bust precision:  40%+
+      - MAE:             < 6 FP
+      - Coverage:        80%+
+    """
     current = agg["knobs"]
     cb = current.get("ceiling_boost", 1.0)
     fd = current.get("floor_dampen", 1.0)
@@ -443,48 +452,91 @@ def _generate_recommendations(agg: Dict[str, Any]) -> Dict[str, Any]:
     coverage = agg.get("avg_coverage", 0)
     smash_prec = agg.get("avg_smash_precision", 0)
     bust_prec = agg.get("avg_bust_precision", 0)
+    mae = agg.get("avg_mae", 10)
 
     new_cb = cb
     new_fd = fd
     reasons = []
 
-    # Upside tuning — driven by both upside accuracy and smash precision
-    if upside_acc < 0.50:
-        bump = 0.15
+    # ── SMASH PRECISION is the primary driver ──────────────────────
+    # This is the whole point: if smash prec is bad, we MUST adjust.
+    if smash_prec < 0.15:
+        # Terrible — we're basically guessing. Aggressive ceiling boost.
+        bump = 0.20
         new_cb = round(cb + bump, 3)
-        reasons.append(f"Upside accuracy {upside_acc:.0%} is low — bump ceiling_boost +{bump} to {new_cb}")
-    elif upside_acc < 0.65:
-        bump = 0.08
+        reasons.append(
+            f"Smash precision {smash_prec:.0%} is way below target (25%) "
+            f"— aggressively boost ceiling_boost +{bump} to {new_cb}"
+        )
+    elif smash_prec < 0.20:
+        bump = 0.12
         new_cb = round(cb + bump, 3)
-        reasons.append(f"Upside accuracy {upside_acc:.0%} could improve — nudge ceiling_boost +{bump} to {new_cb}")
-    elif upside_acc > 0.85 and smash_prec > 0.30:
-        bump = -0.05
+        reasons.append(
+            f"Smash precision {smash_prec:.0%} still below target (25%) "
+            f"— bump ceiling_boost +{bump} to {new_cb}"
+        )
+    elif smash_prec < 0.25:
+        bump = 0.06
         new_cb = round(cb + bump, 3)
-        reasons.append(f"Upside accuracy {upside_acc:.0%} + smash precision {smash_prec:.0%} are strong — trim ceiling_boost {bump} to {new_cb}")
+        reasons.append(
+            f"Smash precision {smash_prec:.0%} getting closer to target (25%) "
+            f"— nudge ceiling_boost +{bump} to {new_cb}"
+        )
+    elif smash_prec >= 0.30 and upside_acc > 0.80:
+        # Strong — we can afford to trim slightly
+        bump = -0.03
+        new_cb = round(cb + bump, 3)
+        reasons.append(
+            f"Smash precision {smash_prec:.0%} is strong — trim ceiling_boost {bump} to {new_cb}"
+        )
 
-    # Downside tuning
-    if downside_acc < 0.50:
+    # ── Upside accuracy as secondary signal ────────────────────────
+    if upside_acc < 0.50 and smash_prec >= 0.15:
+        # Only recommend if smash prec hasn't already triggered a bigger bump
+        extra = 0.08
+        new_cb = round(new_cb + extra, 3)
+        reasons.append(
+            f"Upside accuracy {upside_acc:.0%} is also low — additional ceiling_boost +{extra} to {new_cb}"
+        )
+
+    # ── BUST PRECISION ─────────────────────────────────────────────
+    if bust_prec < 0.25:
         bump = 0.15
         new_fd = round(fd + bump, 3)
-        reasons.append(f"Downside accuracy {downside_acc:.0%} is low — bump floor_dampen +{bump} to {new_fd}")
-    elif downside_acc < 0.65:
+        reasons.append(
+            f"Bust precision {bust_prec:.0%} below target (40%) "
+            f"— bump floor_dampen +{bump} to {new_fd}"
+        )
+    elif bust_prec < 0.35:
         bump = 0.08
         new_fd = round(fd + bump, 3)
-        reasons.append(f"Downside accuracy {downside_acc:.0%} could improve — nudge floor_dampen +{bump} to {new_fd}")
-    elif downside_acc > 0.85 and bust_prec > 0.30:
-        bump = -0.05
+        reasons.append(
+            f"Bust precision {bust_prec:.0%} needs improvement (target: 40%) "
+            f"— nudge floor_dampen +{bump} to {new_fd}"
+        )
+    elif bust_prec >= 0.45 and downside_acc > 0.80:
+        bump = -0.03
         new_fd = round(fd + bump, 3)
-        reasons.append(f"Downside accuracy {downside_acc:.0%} + bust precision {bust_prec:.0%} are strong — trim floor_dampen {bump} to {new_fd}")
+        reasons.append(
+            f"Bust precision {bust_prec:.0%} is strong — trim floor_dampen {bump} to {new_fd}"
+        )
 
-    # Coverage check
-    if coverage > 0.90:
-        reasons.append(f"Coverage {coverage:.0%} is very high — sims may be too conservative")
-    elif coverage < 0.60:
-        reasons.append(f"Coverage {coverage:.0%} is low — sims may be too aggressive")
+    # ── Coverage check ─────────────────────────────────────────────
+    if coverage > 0.92:
+        reasons.append(
+            f"Coverage {coverage:.0%} is very high — sims may be too conservative "
+            f"(wider range catches everything but dilutes signal)"
+        )
+    elif coverage < 0.55:
+        reasons.append(f"Coverage {coverage:.0%} is low — sims may be too narrow")
+
+    # ── MAE check ──────────────────────────────────────────────────
+    if mae > 8.0:
+        reasons.append(f"MAE {mae:.1f} FP is high (target: <6) — projections need work")
 
     # Guard rails
-    new_cb = round(max(0.5, min(2.0, new_cb)), 3)
-    new_fd = round(max(0.5, min(2.0, new_fd)), 3)
+    new_cb = round(max(0.5, min(2.5, new_cb)), 3)
+    new_fd = round(max(0.5, min(2.5, new_fd)), 3)
 
     changed = (abs(new_cb - cb) > 0.001) or (abs(new_fd - fd) > 0.001)
 
@@ -537,3 +589,193 @@ def _load_history() -> List[Dict[str, Any]]:
 def get_sandbox_history() -> List[Dict[str, Any]]:
     """Return all saved sandbox runs for trend display."""
     return _load_history()
+
+
+# ── Breakout Feedback Loop ─────────────────────────────────────────
+
+def learn_breakout_weights_from_sandbox(
+    sandbox_result: Dict[str, Any],
+    learning_rate: float = 0.10,
+) -> Dict[str, Any]:
+    """Analyze sandbox breakout results and tune breakout model weights.
+
+    The idea: for each breakout player the sandbox found (who beat their
+    ceiling), we check which of the 5 breakout signals were strongest for
+    that player across the archived slate.  Signals that were high for
+    actual breakouts get weight bumped up; signals that were high for
+    NON-breakouts get penalised.
+
+    This closes the loop: sandbox detects breakouts retrospectively,
+    then feeds that knowledge back into the forward-looking breakout
+    model so it does better next time.
+
+    Parameters
+    ----------
+    sandbox_result : dict
+        Output of ``run_sandbox()``.
+    learning_rate : float
+        How aggressively to shift weights (0.05 = conservative, 0.15 = aggressive).
+
+    Returns
+    -------
+    dict with keys:
+        "old_weights", "new_weights", "adjustments", "n_breakouts", "changed"
+    """
+    from yak_core.right_angle import (
+        _load_breakout_weights, save_breakout_weights, DEFAULT_BREAKOUT_WEIGHTS,
+    )
+
+    old_w = _load_breakout_weights()
+    breakouts = sandbox_result.get("breakouts", [])
+
+    if not breakouts:
+        return {
+            "old_weights": old_w,
+            "new_weights": old_w,
+            "adjustments": {},
+            "n_breakouts": 0,
+            "changed": False,
+            "reason": "No breakouts found in sandbox results to learn from.",
+        }
+
+    # Load all archived slates to get the signal values for breakout players
+    archive_dir = os.path.join(YAKOS_ROOT, "data", "slate_archive")
+    if not os.path.isdir(archive_dir):
+        return {
+            "old_weights": old_w,
+            "new_weights": old_w,
+            "adjustments": {},
+            "n_breakouts": len(breakouts),
+            "changed": False,
+            "reason": "No slate archive — can't analyze signal values.",
+        }
+
+    # Collect all archived player data with signal columns
+    all_players = []
+    for pq in sorted(os.listdir(archive_dir)):
+        if not pq.endswith(".parquet"):
+            continue
+        try:
+            df = pd.read_parquet(os.path.join(archive_dir, pq))
+            if "player_name" not in df.columns:
+                continue
+            all_players.append(df)
+        except Exception:
+            continue
+
+    if not all_players:
+        return {
+            "old_weights": old_w,
+            "new_weights": old_w,
+            "adjustments": {},
+            "n_breakouts": len(breakouts),
+            "changed": False,
+            "reason": "Could not load archived slate data.",
+        }
+
+    pool = pd.concat(all_players, ignore_index=True)
+
+    # Compute breakout signals for the full archived pool
+    from yak_core.right_angle import compute_breakout_candidates
+    bo_df = compute_breakout_candidates(pool, top_n=len(pool))
+
+    if bo_df.empty or "breakout_score" not in bo_df.columns:
+        return {
+            "old_weights": old_w,
+            "new_weights": old_w,
+            "adjustments": {},
+            "n_breakouts": len(breakouts),
+            "changed": False,
+            "reason": "Could not compute breakout signals for archived players.",
+        }
+
+    # Tag which players actually broke out
+    breakout_names = {b["player"] for b in breakouts}
+    bo_df["_actually_broke_out"] = bo_df["player_name"].isin(breakout_names)
+
+    actual_bo = bo_df[bo_df["_actually_broke_out"]]
+    non_bo = bo_df[~bo_df["_actually_broke_out"]]
+
+    if actual_bo.empty:
+        return {
+            "old_weights": old_w,
+            "new_weights": old_w,
+            "adjustments": {},
+            "n_breakouts": len(breakouts),
+            "changed": False,
+            "reason": "Breakout players not found in computed signals.",
+        }
+
+    # For each player, the breakout_signals string tells us which signals fired.
+    # But we need the raw signal contributions.  Since we can't easily get those
+    # from the output, we use a heuristic: check what the breakout score was for
+    # actual breakouts vs non-breakouts.  If actual breakouts had LOW breakout
+    # scores, our model needs more weight on whatever made them special.
+
+    # Average breakout score for actual breakouts vs everyone else
+    avg_bo_score = float(actual_bo["breakout_score"].mean())
+    avg_all_score = float(bo_df["breakout_score"].mean())
+
+    # Parse which signals appear in breakout_signals for actual breakouts
+    signal_map = {
+        "Mins": "minutes_surge",
+        "Underpriced": "salary_value",
+        "Trending": "usage_bump",
+        "Matchup": "matchup_dvp",
+        "Volatile": "volatility",
+    }
+
+    signal_hits = {s: 0 for s in DEFAULT_BREAKOUT_WEIGHTS}
+    signal_total = 0
+    for _, row in actual_bo.iterrows():
+        sigs = str(row.get("breakout_signals", ""))
+        for keyword, signal_name in signal_map.items():
+            if keyword in sigs:
+                signal_hits[signal_name] += 1
+        signal_total += 1
+
+    # Compute adjustments: signals that appeared often for breakouts get boosted
+    adjustments = {}
+    new_w = dict(old_w)
+
+    if signal_total > 0:
+        for signal_name, count in signal_hits.items():
+            hit_rate = count / signal_total
+            # If this signal appears for >40% of breakouts, boost it
+            if hit_rate > 0.4:
+                adj = learning_rate * hit_rate
+                new_w[signal_name] = round(old_w[signal_name] + adj, 4)
+                adjustments[signal_name] = f"+{adj:.4f} (fired for {hit_rate:.0%} of breakouts)"
+            # If it appears for <10% of breakouts, it's not helping
+            elif hit_rate < 0.1 and old_w[signal_name] > 0.10:
+                adj = -learning_rate * 0.3
+                new_w[signal_name] = round(max(0.05, old_w[signal_name] + adj), 4)
+                adjustments[signal_name] = f"{adj:.4f} (only fired for {hit_rate:.0%} of breakouts)"
+
+    # If breakouts had low scores overall, boost all weights slightly
+    # (the model isn't finding them at all)
+    if avg_bo_score < avg_all_score * 1.2:
+        for s in new_w:
+            if s not in adjustments:
+                adjustments[s] = "(breakouts scored below average — model needs recalibration)"
+
+    # Normalise
+    total = sum(new_w.values())
+    if total > 0:
+        new_w = {k: round(v / total, 4) for k, v in new_w.items()}
+
+    changed = any(abs(new_w[k] - old_w[k]) > 0.001 for k in new_w)
+
+    return {
+        "old_weights": old_w,
+        "new_weights": new_w,
+        "adjustments": adjustments,
+        "n_breakouts": len(breakouts),
+        "avg_breakout_score": round(avg_bo_score, 1),
+        "avg_all_score": round(avg_all_score, 1),
+        "changed": changed,
+        "reason": (
+            f"Analyzed {len(breakouts)} breakouts. "
+            f"Avg breakout score: {avg_bo_score:.1f} vs pool avg: {avg_all_score:.1f}."
+        ),
+    }
