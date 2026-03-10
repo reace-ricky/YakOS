@@ -1,50 +1,50 @@
 {
-  "computed_at": "2026-03-10T00:22:54.023867+00:00",
+  "computed_at": "2026-03-10T00:53:17.248904+00:00",
   "n_slates": 14,
-  "n_player_slates": 2189,
+  "n_player_slates": 2295,
   "classification": {
-    "pop": 490,
-    "bust": 403,
-    "inline": 1296,
-    "pop_rate": 0.224,
+    "pop": 516,
+    "bust": 423,
+    "inline": 1356,
+    "pop_rate": 0.225,
     "bust_rate": 0.184
   },
   "factor_breakdown": {},
   "bracket_breakdown": {
     "lt5k": {
-      "n": 1215,
+      "n": 1274,
       "pop_rate": 0.27,
       "bust_rate": 0.252,
       "avg_residual": 0.2,
-      "mae": 7.3
+      "mae": 7.2
     },
     "5_65k": {
-      "n": 473,
-      "pop_rate": 0.216,
-      "bust_rate": 0.133,
+      "n": 494,
+      "pop_rate": 0.219,
+      "bust_rate": 0.136,
       "avg_residual": 0.6,
-      "mae": 8.6
-    },
-    "65_8k": {
-      "n": 263,
-      "pop_rate": 0.137,
-      "bust_rate": 0.087,
-      "avg_residual": -0.3,
       "mae": 8.7
     },
+    "65_8k": {
+      "n": 280,
+      "pop_rate": 0.139,
+      "bust_rate": 0.082,
+      "avg_residual": -0.2,
+      "mae": 8.5
+    },
     "8_10k": {
-      "n": 185,
-      "pop_rate": 0.097,
-      "bust_rate": 0.049,
+      "n": 193,
+      "pop_rate": 0.098,
+      "bust_rate": 0.052,
       "avg_residual": -1.5,
-      "mae": 9.0
+      "mae": 8.9
     },
     "10k_plus": {
-      "n": 53,
-      "pop_rate": 0.113,
-      "bust_rate": 0.038,
-      "avg_residual": 0.8,
-      "mae": 10.6
+      "n": 54,
+      "pop_rate": 0.111,
+      "bust_rate": 0.037,
+      "avg_residual": 0.9,
+      "mae": 10.5
     }
   },
   "top_pops": [
@@ -129,6 +129,16 @@
       "date": "2026-03-06"
     },
     {
+      "player": "Maxime Raynaud",
+      "salary": 6300,
+      "proj": 21.6,
+      "actual": 53.8,
+      "residual": 32.2,
+      "ratio": 2.49,
+      "context": [],
+      "date": "2026-03-08"
+    },
+    {
       "player": "Jalen Duren",
       "salary": 7900,
       "proj": 37.6,
@@ -137,16 +147,6 @@
       "ratio": 1.85,
       "context": [],
       "date": "2026-02-27"
-    },
-    {
-      "player": "Daniel Gafford",
-      "salary": 5100,
-      "proj": 21.3,
-      "actual": 52.5,
-      "residual": 31.2,
-      "ratio": 2.46,
-      "context": [],
-      "date": "2026-02-05"
     }
   ],
   "top_busts": [
@@ -231,6 +231,16 @@
       "date": "2026-02-20"
     },
     {
+      "player": "Myles Turner",
+      "salary": 5500,
+      "proj": 30.1,
+      "actual": 5.5,
+      "residual": -24.6,
+      "ratio": 0.18,
+      "context": [],
+      "date": "2026-03-08"
+    },
+    {
       "player": "Derik Queen",
       "salary": 6000,
       "proj": 26.5,
@@ -239,21 +249,11 @@
       "ratio": 0.14,
       "context": [],
       "date": "2026-03-06"
-    },
-    {
-      "player": "Jaylon Tyson",
-      "salary": 5500,
-      "proj": 27.7,
-      "actual": 5.2,
-      "residual": -22.5,
-      "ratio": 0.19,
-      "context": [],
-      "date": "2026-02-20"
     }
   ],
   "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-10T00:22:54.023843+00:00",
+    "computed_at": "2026-03-10T00:53:17.248885+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
