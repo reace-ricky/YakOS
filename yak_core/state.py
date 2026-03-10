@@ -19,10 +19,23 @@ Usage
 """
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
+
+# Path to published lineups JSON (survives cold starts via github_persistence)
+try:
+    from yak_core.config import YAKOS_ROOT as _YAKOS_ROOT
+except Exception:
+    _YAKOS_ROOT = Path(__file__).resolve().parent.parent
+
+_PUBLISHED_JSON = Path(_YAKOS_ROOT) / "data" / "published_lineups" / "published.json"
 
 # ---------------------------------------------------------------------------
 # Type alias used by RickyEdgeState helper methods
@@ -270,7 +283,11 @@ class LineupSetState:
         self.build_configs[contest_label] = config
 
     def publish(self, contest_label: str, ts: str) -> None:
-        """Publish lineups for a contest type to Edge Share."""
+        """Publish lineups for a contest type to Edge Share.
+
+        Also persists to ``data/published_lineups/published.json`` so the
+        published lineups survive Streamlit Cloud cold starts.
+        """
         df = self.lineups.get(contest_label)
         if df is not None:
             self.published_sets[contest_label] = {
@@ -291,10 +308,71 @@ class LineupSetState:
                 ),
             }
             self.snapshot_times[contest_label] = ts
+            # Persist to disk + trigger GitHub sync
+            self._save_published_to_disk()
 
     def get_published_labels(self) -> List[str]:
         """Return list of contest labels that have published lineups."""
         return list(self.published_sets.keys())
+
+    # ------------------------------------------------------------------
+    # Persistence helpers
+    # ------------------------------------------------------------------
+
+    def _save_published_to_disk(self) -> None:
+        """Serialize published_sets to JSON on disk, then trigger GitHub sync."""
+        try:
+            payload: Dict[str, Any] = {}
+            for label, pub in self.published_sets.items():
+                entry: Dict[str, Any] = {
+                    "published_at": pub.get("published_at", ""),
+                    "config": pub.get("config", {}),
+                }
+                lu_df = pub.get("lineups_df")
+                if lu_df is not None and isinstance(lu_df, pd.DataFrame) and not lu_df.empty:
+                    entry["lineups"] = lu_df.to_dict(orient="records")
+                else:
+                    entry["lineups"] = []
+                payload[label] = entry
+
+            _PUBLISHED_JSON.parent.mkdir(parents=True, exist_ok=True)
+            _PUBLISHED_JSON.write_text(json.dumps(payload, indent=2, default=str))
+            logger.info("Published lineups saved to %s", _PUBLISHED_JSON)
+
+            # Trigger GitHub persistence sync (fire-and-forget)
+            try:
+                from yak_core.github_persistence import sync_feedback_to_github  # noqa: PLC0415
+                sync_feedback_to_github(files=[str(_PUBLISHED_JSON.relative_to(Path(_YAKOS_ROOT)))])
+            except Exception as exc:
+                logger.warning("GitHub sync after publish failed: %s", exc)
+        except Exception as exc:
+            logger.error("Failed to save published lineups: %s", exc)
+
+    @classmethod
+    def _load_published_from_disk(cls) -> Dict[str, Dict[str, Any]]:
+        """Load published lineups from JSON on disk (cold-start hydration)."""
+        if not _PUBLISHED_JSON.exists():
+            return {}
+        try:
+            raw = json.loads(_PUBLISHED_JSON.read_text())
+            if not isinstance(raw, dict):
+                return {}
+            result: Dict[str, Dict[str, Any]] = {}
+            for label, entry in raw.items():
+                lineups_records = entry.get("lineups", [])
+                lu_df = pd.DataFrame(lineups_records) if lineups_records else pd.DataFrame()
+                result[label] = {
+                    "lineups_df": lu_df,
+                    "config": entry.get("config", {}),
+                    "published_at": entry.get("published_at", ""),
+                    "boom_bust_df": None,
+                    "exposure_df": None,
+                }
+            logger.info("Loaded published lineups from disk: %s", list(result.keys()))
+            return result
+        except Exception as exc:
+            logger.error("Failed to load published lineups: %s", exc)
+            return {}
 
     def set_boom_bust(self, contest_label: str, rankings_df: pd.DataFrame) -> None:
         """Store boom/bust rankings for a contest type."""
@@ -444,10 +522,24 @@ def set_edge_state(state: RickyEdgeState) -> None:
 
 
 def get_lineup_state() -> LineupSetState:
-    """Return the current LineupSetState from session_state, creating if absent."""
+    """Return the current LineupSetState from session_state, creating if absent.
+
+    On first access (cold start), hydrates published_sets from
+    ``data/published_lineups/published.json`` so published lineups
+    persist across Streamlit Cloud restarts.
+    """
     ss = _ss()
     if _KEY_LINEUP not in ss:
-        ss[_KEY_LINEUP] = LineupSetState()
+        state = LineupSetState()
+        # Hydrate published lineups from disk on cold start
+        try:
+            disk_pub = LineupSetState._load_published_from_disk()
+            if disk_pub:
+                state.published_sets = disk_pub
+                logger.info("Hydrated %d published contest(s) from disk", len(disk_pub))
+        except Exception as exc:
+            logger.warning("Could not hydrate published lineups: %s", exc)
+        ss[_KEY_LINEUP] = state
     return ss[_KEY_LINEUP]
 
 

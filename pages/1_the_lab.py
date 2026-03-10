@@ -2,21 +2,18 @@
 
 Responsibilities
 ----------------
-- **Slate Loading** (formerly Slate Hub): Date + Sport picker, Contest Type,
-  Fetch Available Slates, Load Player Pool, Game Filter, Publish Slate.
-- **Simulations + Learnings**: Run sims, view player-level smash/bust/leverage,
-  apply sim learnings — all in one section.
-- **Edge Analysis**: Ownership edge, value plays, stacking labels.
-- **Calibration**: Bucketed table, historical pipeline, rating weight tester,
-  calibration profiles.
-- **RCI**: Ricky Confidence Index gauges per contest type.
-- **Contest-type Gauges**: Score-based gauges driven by sim smash probability.
-- **Ricky Edge Check Gate**: Read-only gate status.
+- **Slate Loading**: Date + Sport picker, Contest Type, Fetch Available Slates,
+  Load Player Pool, Game Filter, Publish Slate.
+- **Edge Metrics**: Re-run edge metrics (full analysis on Right Angle Ricky).
+- **Sim Sandbox**: Calibration tool for scoring against archived slates.
+- **Contest Results & Calibration**: Manual contest result input, hit-rate tracking.
+
+Note: Edge Analysis display (leverage plays, value plays, stacks) has been
+moved to the Right Angle Ricky page for public-facing presentation.
 
 UI AUTOMATION (v2):
 - Slates auto-fetch when date/sport/contest changes — no manual button.
-- Player pool + sims load on button click (Load Pool & Run Sims).
-- Sims are MANUAL — user clicks Run Sims when ready.
+- Player pool loads on button click.
 - Expanders replaced with inline sections where possible.
 - Flow: Pick date+sport+contest → pick slate → pool loads → user runs sims.
 
@@ -47,7 +44,6 @@ from yak_core.state import (  # noqa: E402
     get_lineup_state,
 )
 from yak_core.sims import (  # noqa: E402
-    prepare_sims_table,
     compute_sim_eligible,
     _INELIGIBLE_STATUSES,
 )
@@ -68,11 +64,6 @@ from yak_core.config import (  # noqa: E402
     DK_SHOWDOWN_LINEUP_SIZE,
     build_slate_options,
 )
-from yak_core.right_angle import (  # noqa: E402
-    compute_stack_scores,
-    compute_value_scores,
-)
-
 from yak_core.dk_ingest import (  # noqa: E402
     fetch_dk_draftables,
     DK_GAME_TYPE_LABELS,
@@ -531,83 +522,7 @@ _LAYER_ALL = ["Base", "Calibration", "Edge", "Sims"]
 _STATUS_COLORS = {"green": "#6abf69", "orange": "#d4a046", "red": "#c27a7a"}
 
 
-def _color_smash(val: float) -> str:
-    if val >= 0.25:
-        return "background-color: #1a472a; color: #90ee90"
-    if val >= 0.10:
-        return "background-color: #2d5a27; color: #c8f0c0"
-    return ""
-
-
-def _color_bust(val: float) -> str:
-    if val >= 0.30:
-        return "background-color: #6b1a1a; color: #f08080"
-    if val >= 0.15:
-        return "background-color: #4a1a1a; color: #f0c0c0"
-    return ""
-
-
-def _make_real_lineups_df(pool: pd.DataFrame, n_lineups: int = 5) -> pd.DataFrame:
-    slots = ["PG", "SG", "SF", "PF", "C", "G", "F", "UTIL"]
-    rows = []
-    available = pool.dropna(subset=["player_name"]).head(n_lineups * 8)
-    for lu_idx in range(min(n_lineups, max(1, len(available) // 8))):
-        chunk = available.iloc[lu_idx * 8: (lu_idx + 1) * 8]
-        for i, (_, prow) in enumerate(chunk.iterrows()):
-            rows.append({
-                "lineup_index": lu_idx,
-                "slot": slots[i % len(slots)],
-                "player_name": prow.get("player_name", ""),
-                "team": prow.get("team", ""),
-                "pos": prow.get("pos", ""),
-                "salary": prow.get("salary", 0),
-                "proj": prow.get("proj", 0),
-                "ownership": prow.get("ownership", 0),
-            })
-    return pd.DataFrame(rows)
-
-
-def _build_player_level_sim_results(pool: pd.DataFrame, variance: float) -> pd.DataFrame:
-    """Build player-level sim results using the authoritative edge model.
-
-    Delegates to ``compute_edge_metrics`` so that smash_prob, bust_prob,
-    and leverage are computed identically on every page.
-    """
-    from yak_core.edge import compute_edge_metrics  # noqa: PLC0415
-    from yak_core.display_format import normalise_ownership  # noqa: PLC0415
-
-    if pool.empty:
-        return pd.DataFrame()
-    df = pool.copy()
-
-    if "sim_eligible" in df.columns:
-        df = df[df["sim_eligible"].astype(bool)].reset_index(drop=True)
-    if "mp_actual" in df.columns:
-        mp = pd.to_numeric(df["mp_actual"], errors="coerce").fillna(0)
-        df = df[mp > 0].reset_index(drop=True)
-    if df.empty:
-        return pd.DataFrame()
-
-    # Normalise ownership to 0-100 before edge computation
-    if "ownership" in df.columns:
-        df["ownership"] = normalise_ownership(df["ownership"])
-
-    edge_df = compute_edge_metrics(df, variance=variance)
-
-    # Select the columns the sims table needs
-    keep_cols = ["player_name", "pos", "team", "salary", "proj", "proj_minutes", "floor",
-                 "ceil", "own_pct", "smash_prob", "bust_prob", "leverage"]
-    keep_cols = [c for c in keep_cols if c in edge_df.columns]
-    result = edge_df[keep_cols].copy()
-
-    # Sort by leverage descending (matching original behaviour)
-    if "leverage" in result.columns:
-        result = result.sort_values("leverage", ascending=False, na_position="last")
-
-    return result.reset_index(drop=True)
-
-
-# (_gauge_score removed — Contest-type Gauges consolidated into RCI)
+# (Sim display helpers and edge analysis section moved to Right Angle Ricky page)
 
 
 # ---------------------------------------------------------------------------
@@ -1499,50 +1414,34 @@ def main() -> None:
         if st.button("🔄 Re-run Edge Metrics", key="_lab_run_sims"):
             with st.spinner("Recomputing edge metrics…"):
                 try:
-                    player_results = _build_player_level_sim_results(pool, sim.variance)
-                    sim.player_results = player_results
+                    from yak_core.display_format import normalise_ownership  # noqa: PLC0415
+                    _epool = pool.copy()
+                    if "ownership" in _epool.columns:
+                        _epool["ownership"] = normalise_ownership(_epool["ownership"])
 
                     _edge_df = compute_edge_metrics(
-                        pool,
+                        _epool,
                         calibration_state=slate.calibration_state,
                         variance=sim.variance,
                     )
 
+                    # Store edge results for downstream pages
                     slate.edge_df = _edge_df
+                    sim.player_results = _edge_df  # Ricky page reads this
                     if "Edge" not in slate.active_layers:
                         slate.active_layers.append("Edge")
                     set_slate_state(slate)
                     set_sim_state(sim)
-                    st.success(f"Edge metrics updated — {len(player_results)} players analyzed.")
+                    st.success(f"Edge metrics updated — {len(_edge_df)} players analyzed.")
                 except Exception as exc:
                     st.error(f"Edge metrics failed: {exc}")
     else:
         st.info("Load a slate above first. Ricky needs a pool before he can work.")
 
-    # Sim results display
+    # Quick summary (full edge analysis is on Right Angle Ricky's page)
     if sim.player_results is not None and not sim.player_results.empty:
-        st.caption("Player-level smash / bust / leverage (sorted by leverage)")
-        display_df = prepare_sims_table(sim.player_results)
-
-        from yak_core.display_format import standard_player_format  # noqa: PLC0415
-        _std_fmt = standard_player_format(display_df)
-
-        def _style_row(row: pd.Series) -> list:
-            styles = [""] * len(row)
-            cols = list(row.index)
-            if "smash_prob" in cols:
-                idx = cols.index("smash_prob")
-                styles[idx] = _color_smash(float(row["smash_prob"]))
-            if "bust_prob" in cols:
-                idx = cols.index("bust_prob")
-                styles[idx] = _color_bust(float(row["bust_prob"]))
-            return styles
-
-        try:
-            styled = display_df.style.apply(_style_row, axis=1).format(_std_fmt, na_rep="")
-            st.dataframe(styled, use_container_width=True, hide_index=True)
-        except Exception:
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
+        _n = len(sim.player_results)
+        st.caption(f"Edge metrics computed for {_n} players. See **Right Angle Ricky** for full analysis.")
 
     # ── Score vs Actuals ────────────────────────────────────────────────
     _has_pool_with_actuals = not pool.empty and "actual_fp" in pool.columns and pool["actual_fp"].notna().any()
@@ -1764,80 +1663,10 @@ def main() -> None:
 
     st.divider()
 
-    # =====================================================================
-    # SECTION 3: EDGE ANALYSIS
-    # =====================================================================
-    st.subheader("📊 Edge Analysis")
-
-    if not pool.empty and sim.player_results is not None and not sim.player_results.empty:
-        pr = sim.player_results.copy()
-
-        from yak_core.display_format import standard_player_format  # noqa: PLC0415
-
-        # Rename ownership → own_pct for consistent display
-        if "ownership" in pr.columns and "own_pct" not in pr.columns:
-            pr = pr.rename(columns={"ownership": "own_pct"})
-
-        pos_edge = pr[pr["leverage"] > 1.2].nlargest(5, "leverage")
-        neg_edge = pr[pr["leverage"] < 0.7].nsmallest(5, "leverage")
-
-        ea_col1, ea_col2 = st.columns(2)
-        with ea_col1:
-            st.markdown("**Positive Leverage** — high smash, low owned")
-            if not pos_edge.empty:
-                _pe = pos_edge[[c for c in ["player_name", "salary", "proj_minutes", "own_pct", "smash_prob", "leverage"] if c in pos_edge.columns]].copy()
-                _pe_fmt = standard_player_format(_pe)
-                st.dataframe(_pe.style.format(_pe_fmt, na_rep=""), use_container_width=True, hide_index=True)
-            else:
-                st.caption("No high-leverage plays found.")
-
-        with ea_col2:
-            st.markdown("**Negative Leverage** — bust risk, over-owned")
-            if not neg_edge.empty:
-                _ne = neg_edge[[c for c in ["player_name", "salary", "proj_minutes", "own_pct", "bust_prob", "leverage"] if c in neg_edge.columns]].copy()
-                _ne_fmt = standard_player_format(_ne)
-                st.dataframe(_ne.style.format(_ne_fmt, na_rep=""), use_container_width=True, hide_index=True)
-            else:
-                st.caption("No over-owned bust risks found.")
-
-        with st.expander("💰 Value Plays & Stacks", expanded=False):
-            _MIN_VALUE_SALARY = 4000
-            st.markdown(f"**Value Plays** (salary ≥ ${_MIN_VALUE_SALARY:,})")
-            try:
-                val_scores = compute_value_scores(pool)
-                if not val_scores.empty:
-                    if "salary" in val_scores.columns:
-                        val_scores = val_scores[
-                            pd.to_numeric(val_scores["salary"], errors="coerce").fillna(0) >= _MIN_VALUE_SALARY
-                        ]
-                    top_val = val_scores.nlargest(5, "value_score") if "value_score" in val_scores.columns else val_scores.head(5)
-                    show_cols = [c for c in ["player_name", "team", "salary", "proj", "value_score"] if c in top_val.columns]
-                    _vd = top_val[show_cols].copy()
-                    if "value_score" in _vd.columns:
-                        _vd["value_score"] = _vd["value_score"].round(2)
-                    if "proj" in _vd.columns:
-                        _vd["proj"] = _vd["proj"].round(1)
-                    st.dataframe(_vd, use_container_width=True, hide_index=True)
-                else:
-                    st.caption("No value scores available.")
-            except Exception as exc:
-                st.caption(f"Value scores unavailable: {exc}")
-
-            st.markdown("**Top Stacks**")
-            try:
-                stack_scores = compute_stack_scores(pool)
-                if not stack_scores.empty:
-                    show_cols = [c for c in ["team", "stack_score"] if c in stack_scores.columns]
-                    st.dataframe(stack_scores[show_cols].head(6), use_container_width=True, hide_index=True)
-            except Exception as exc:
-                st.caption(f"Stack scores unavailable: {exc}")
-    elif not pool.empty:
-        st.info("Run sims first to populate edge analysis.")
-
-    st.divider()
+    # (Section 3 — Edge Analysis — moved to Right Angle Ricky page)
 
     # =====================================================================
-    # SECTION 4: CONTEST RESULTS & CALIBRATION (Blueprint Layer 4)
+    # SECTION 3: CONTEST RESULTS & CALIBRATION (Blueprint Layer 4)
     # =====================================================================
     st.subheader("🎯 Contest Results")
     st.caption(
