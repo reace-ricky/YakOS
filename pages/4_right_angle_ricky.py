@@ -108,6 +108,43 @@ def _ricky_quote() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Admin pin gate
+# ---------------------------------------------------------------------------
+
+_ADMIN_PIN = st.secrets.get("ADMIN_PIN", "2018")
+
+
+def _render_admin_clear(key_suffix: str, slate, lu_state, sim_state) -> None:
+    """Pin-protected clear button. Only shows the wipe action after correct pin."""
+    with st.expander("\u2699\ufe0f Admin", expanded=False):
+        pin = st.text_input(
+            "Enter PIN to clear", type="password",
+            key=f"_rar_pin_{key_suffix}", max_chars=4,
+        )
+        if pin and pin == _ADMIN_PIN:
+            if st.button(
+                "\U0001f5d1\ufe0f Clear All Published Data",
+                key=f"_rar_clear_pub_{key_suffix}",
+                type="secondary",
+            ):
+                from yak_core.lineup_store import clear_published
+                from yak_core.state import set_slate_state, set_edge_state
+                clear_published()
+                lu_state.published_sets.clear()
+                set_lineup_state(lu_state)
+                slate.published = False
+                slate.player_pool = None
+                set_slate_state(slate)
+                edge_obj = get_edge_state()
+                edge_obj.ricky_edge_check = False
+                edge_obj.edge_analysis_by_contest.clear()
+                set_edge_state(edge_obj)
+                st.rerun()
+        elif pin:
+            st.error("Wrong PIN.")
+
+
+# ---------------------------------------------------------------------------
 # Shared UI helpers
 # ---------------------------------------------------------------------------
 
@@ -402,21 +439,7 @@ def _render_tab_analysis(slate, edge, lu_state, sim_state) -> None:
                         compact=True,
                     )
 
-        if st.button("\U0001f5d1\ufe0f Clear All Published Data", key="_rar_clear_pub_nba"):
-            from yak_core.lineup_store import clear_published
-            from yak_core.state import set_slate_state, set_edge_state
-            clear_published()  # wipes all files on disk
-            lu_state.published_sets.clear()
-            set_lineup_state(lu_state)
-            # Reset slate + edge so fresh sessions start clean
-            slate.published = False
-            slate.player_pool = None
-            set_slate_state(slate)
-            edge_obj = get_edge_state()
-            edge_obj.ricky_edge_check = False
-            edge_obj.edge_analysis_by_contest.clear()
-            set_edge_state(edge_obj)
-            st.rerun()
+        _render_admin_clear("nba", slate, lu_state, sim_state)
 
 
 # ---------------------------------------------------------------------------
@@ -541,20 +564,7 @@ def _render_tab_analysis_pga(slate, lu_state, sim_state) -> None:
                         compact=True,
                     )
 
-        if st.button("\U0001f5d1\ufe0f Clear All Published Data", key="_rar_clear_pub_pga"):
-            from yak_core.lineup_store import clear_published
-            from yak_core.state import set_slate_state, set_edge_state
-            clear_published()
-            lu_state.published_sets.clear()
-            set_lineup_state(lu_state)
-            slate.published = False
-            slate.player_pool = None
-            set_slate_state(slate)
-            edge_obj = get_edge_state()
-            edge_obj.ricky_edge_check = False
-            edge_obj.edge_analysis_by_contest.clear()
-            set_edge_state(edge_obj)
-            st.rerun()
+        _render_admin_clear("pga", slate, lu_state, sim_state)
 
 
 # ===========================================================================
