@@ -1944,6 +1944,138 @@ def main() -> None:
                 else:
                     st.warning("Need at least a date and cash line to save.")
 
+        # ── Bulk Entry ───────────────────────────────────────────────
+        with st.expander("⚡ Bulk Entry (enter multiple dates at once)", expanded=False):
+            import glob as _be_glob
+
+            # Find all GPP archive dates
+            _be_pattern = os.path.join(YAKOS_ROOT, "data", "slate_archive", "*_gpp_*.parquet")
+            _be_archives = sorted(_be_glob.glob(_be_pattern))
+            _be_dates = sorted(set(
+                os.path.basename(f).split("_gpp")[0] for f in _be_archives
+            ))
+
+            # Filter out dates that already have results
+            _be_existing = _load_history() if '_load_history' in dir() else {}
+            try:
+                _be_existing = {}
+                _be_hist_path = os.path.join(YAKOS_ROOT, "data", "contest_results", "history.json")
+                if os.path.isfile(_be_hist_path):
+                    import json as _be_json
+                    with open(_be_hist_path) as _f:
+                        _be_existing = _be_json.load(_f)
+            except Exception:
+                pass
+
+            _be_done = {v.get("slate_date") for v in _be_existing.values()
+                        if v.get("contest_type") == "gpp" and v.get("scores")}
+            _be_pending = [d for d in _be_dates if d not in _be_done]
+
+            if not _be_pending:
+                st.success("All archived GPP dates have contest results entered.")
+            else:
+                st.caption(
+                    f"{len(_be_pending)} GPP date(s) need contest bands. "
+                    "Fill in what you have, leave zeros for dates you'll skip."
+                )
+                _be_df = pd.DataFrame({
+                    "Date": _be_pending,
+                    "Cash Line": [0.0] * len(_be_pending),
+                    "Winning Score": [0.0] * len(_be_pending),
+                    "Entries": [0] * len(_be_pending),
+                })
+                _be_edited = st.data_editor(
+                    _be_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    disabled=["Date"],
+                    key="_be_table",
+                    column_config={
+                        "Date": st.column_config.TextColumn("Date", width="small"),
+                        "Cash Line": st.column_config.NumberColumn("Cash Line", min_value=0.0, step=5.0, format="%.1f"),
+                        "Winning Score": st.column_config.NumberColumn("Winning Score", min_value=0.0, step=5.0, format="%.1f"),
+                        "Entries": st.column_config.NumberColumn("Entries", min_value=0, step=100),
+                    },
+                )
+
+                if st.button("Save & Score All", key="_be_save", type="primary"):
+                    _be_saved = 0
+                    _be_msgs = []
+                    for _, row in _be_edited.iterrows():
+                        _be_d = str(row["Date"]).strip()
+                        _be_cl = float(row["Cash Line"])
+                        if _be_cl <= 0:
+                            continue  # skip rows with no cash line
+
+                        _be_bands = ContestResult(
+                            slate_date=_be_d,
+                            contest_type="gpp",
+                            cash_line=_be_cl,
+                            winning_score=float(row["Winning Score"]),
+                            num_entries=int(row["Entries"]),
+                        )
+
+                        # Auto-build lineups & score
+                        _be_scores = None
+                        _be_diag = None
+                        try:
+                            from yak_core.lineups import (
+                                build_player_pool as _be_bpp,
+                                build_multiple_lineups_with_exposure as _be_bml,
+                            )
+                            from yak_core.config import merge_config as _be_mc
+
+                            _be_pq = os.path.join(
+                                YAKOS_ROOT, "data", "slate_archive",
+                                f"{_be_d}_gpp_main.parquet",
+                            )
+                            if os.path.isfile(_be_pq):
+                                _be_raw = pd.read_parquet(_be_pq)
+                                _be_cfg = _be_mc({
+                                    "SLATE_DATE": _be_d,
+                                    "CONTEST_TYPE": "gpp",
+                                    "NUM_LINEUPS": 20,
+                                    "MAX_EXPOSURE": 0.6,
+                                    "PROJ_SOURCE": "parquet",
+                                })
+                                _be_pool = _be_bpp(_be_raw, _be_cfg)
+                                for _cc in ["ceil", "floor", "ownership", "own_proj", "actual_fp", "leverage"]:
+                                    if _cc in _be_raw.columns and _cc not in _be_pool.columns:
+                                        _be_pool = _be_pool.merge(
+                                            _be_raw[["player_name", _cc]].drop_duplicates("player_name"),
+                                            on="player_name", how="left",
+                                        )
+                                _be_lu, _ = _be_bml(_be_pool, _be_cfg)
+                                if not _be_lu.empty and "actual_fp" in _be_raw.columns:
+                                    _am = _be_raw.set_index("player_name")["actual_fp"].to_dict()
+                                    _be_lu = _be_lu.copy()
+                                    _be_lu["actual_fp"] = _be_lu["player_name"].map(_am).fillna(0)
+                                    _lu_acts = _be_lu.groupby("lineup_index")["actual_fp"].sum().tolist()
+                                    _be_scores = score_vs_bands(_lu_acts, _be_bands)
+                                    _be_diag = diagnose_miss(_be_lu, _be_pool, _be_bands)
+                        except Exception:
+                            pass
+
+                        save_contest_result(_be_bands, scores=_be_scores, diagnoses=_be_diag)
+                        _be_saved += 1
+
+                        if _be_scores:
+                            _be_msgs.append(
+                                f"{_be_d}: Cash {_be_scores['cash_rate']*100:.0f}% "
+                                f"({_be_scores['cashed']}/{_be_scores['n_lineups']}) "
+                                f"Best={_be_scores['best']}"
+                            )
+                        else:
+                            _be_msgs.append(f"{_be_d}: Bands saved (no actuals to score)")
+
+                    if _be_saved:
+                        st.success(f"Saved {_be_saved} date(s):")
+                        for m in _be_msgs:
+                            st.write(m)
+                        st.rerun()
+                    else:
+                        st.warning("No rows had a cash line > 0.")
+
         # ── Hit Rate Summary ──────────────────────────────────────────
         _hr = get_hit_rate_summary()
         if _hr.get("n_slates", 0) > 0:
