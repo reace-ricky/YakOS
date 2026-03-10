@@ -1,23 +1,23 @@
 {
-  "computed_at": "2026-03-10T00:03:44.381618+00:00",
+  "computed_at": "2026-03-10T00:13:14.274830+00:00",
   "n_slates": 12,
   "n_player_slates": 2007,
   "ratios": {
-    "lt5k": 0.599,
+    "lt5k": 0.5991,
     "5_65k": 0.4222,
-    "65_8k": 0.3315,
-    "8_10k": 0.2668,
+    "65_8k": 0.3313,
+    "8_10k": 0.2672,
     "10k_plus": 0.2745
   },
   "brackets": {
     "lt5k": {
       "n": 1112,
-      "learned_ratio": 0.599,
-      "clamped_ratio": 0.599,
+      "learned_ratio": 0.5991,
+      "clamped_ratio": 0.5991,
       "static_ratio": 1.04,
       "delta_pct": -42.4,
       "using": "learned",
-      "value": 0.599,
+      "value": 0.5991,
       "mean_proj": 15.4,
       "residual_std": 9.2
     },
@@ -34,25 +34,25 @@
     },
     "65_8k": {
       "n": 248,
-      "learned_ratio": 0.3315,
-      "clamped_ratio": 0.3315,
+      "learned_ratio": 0.3313,
+      "clamped_ratio": 0.3313,
       "static_ratio": 0.44,
       "delta_pct": -24.7,
       "using": "learned",
-      "value": 0.3315,
+      "value": 0.3313,
       "mean_proj": 32.9,
       "residual_std": 10.9
     },
     "8_10k": {
       "n": 170,
-      "learned_ratio": 0.2668,
-      "clamped_ratio": 0.2668,
+      "learned_ratio": 0.2672,
+      "clamped_ratio": 0.2672,
       "static_ratio": 0.35,
-      "delta_pct": -23.8,
+      "delta_pct": -23.6,
       "using": "learned",
-      "value": 0.2668,
+      "value": 0.2672,
       "mean_proj": 40.6,
-      "residual_std": 10.8
+      "residual_std": 10.9
     },
     "10k_plus": {
       "n": 48,
