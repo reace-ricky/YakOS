@@ -215,18 +215,18 @@
     "n_players": 115,
     "signals": {
       "high_leverage": {
-        "n_flagged": 94,
+        "n_flagged": 95,
         "n_hit": 41,
-        "hit_rate": 0.436,
-        "avg_actual": 26.46,
-        "avg_proj": 25.63
+        "hit_rate": 0.432,
+        "avg_actual": 26.26,
+        "avg_proj": 25.81
       },
       "salary_value": {
-        "n_flagged": 5,
-        "n_hit": 1,
-        "hit_rate": 0.2,
-        "avg_actual": 24.15,
-        "avg_proj": 30.63
+        "n_flagged": 6,
+        "n_hit": 2,
+        "hit_rate": 0.333,
+        "avg_actual": 22.92,
+        "avg_proj": 24.52
       }
     }
   },

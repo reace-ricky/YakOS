@@ -1,21 +1,21 @@
 {
-  "computed_at": "2026-03-10T15:51:28.477418+00:00",
+  "computed_at": "2026-03-10T15:57:57.057382+00:00",
   "n_slates": 17,
   "n_player_slates": 2790,
   "classification": {
-    "pop": 617,
+    "pop": 613,
     "bust": 526,
-    "inline": 1647,
-    "pop_rate": 0.221,
+    "inline": 1651,
+    "pop_rate": 0.22,
     "bust_rate": 0.189
   },
   "factor_breakdown": {},
   "bracket_breakdown": {
     "lt5k": {
       "n": 1562,
-      "pop_rate": 0.261,
+      "pop_rate": 0.259,
       "bust_rate": 0.254,
-      "avg_residual": 0.2,
+      "avg_residual": 0.1,
       "mae": 7.2
     },
     "5_65k": {
@@ -29,7 +29,7 @@
       "n": 328,
       "pop_rate": 0.152,
       "bust_rate": 0.088,
-      "avg_residual": 0.1,
+      "avg_residual": 0.0,
       "mae": 8.6
     },
     "8_10k": {
@@ -111,10 +111,10 @@
     {
       "player": "Jalen Suggs",
       "salary": 6000,
-      "proj": 27.4,
+      "proj": 28.0,
       "actual": 63.2,
-      "residual": 35.9,
-      "ratio": 2.31,
+      "residual": 35.3,
+      "ratio": 2.26,
       "context": [],
       "date": "2026-02-05"
     },
@@ -153,9 +153,9 @@
     {
       "player": "Jalen Duren",
       "salary": 7700,
-      "proj": 37.2,
+      "proj": 38.1,
       "actual": 5.8,
-      "residual": -31.5,
+      "residual": -32.3,
       "ratio": 0.15,
       "context": [],
       "date": "2026-02-05"
@@ -253,7 +253,7 @@
   ],
   "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-10T15:51:28.477388+00:00",
+    "computed_at": "2026-03-10T15:57:57.057357+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
