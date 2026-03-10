@@ -1,49 +1,49 @@
 {
-  "computed_at": "2026-03-10T01:01:19.607407+00:00",
+  "computed_at": "2026-03-10T01:06:55.902352+00:00",
   "n_slates": 14,
-  "n_player_slates": 2294,
+  "n_player_slates": 2372,
   "classification": {
-    "pop": 518,
-    "bust": 423,
-    "inline": 1353,
-    "pop_rate": 0.226,
-    "bust_rate": 0.184
+    "pop": 533,
+    "bust": 438,
+    "inline": 1401,
+    "pop_rate": 0.225,
+    "bust_rate": 0.185
   },
   "factor_breakdown": {},
   "bracket_breakdown": {
     "lt5k": {
-      "n": 1273,
-      "pop_rate": 0.27,
+      "n": 1316,
+      "pop_rate": 0.267,
       "bust_rate": 0.252,
       "avg_residual": 0.2,
       "mae": 7.2
     },
     "5_65k": {
-      "n": 494,
-      "pop_rate": 0.221,
-      "bust_rate": 0.136,
+      "n": 512,
+      "pop_rate": 0.219,
+      "bust_rate": 0.135,
       "avg_residual": 0.7,
       "mae": 8.7
     },
     "65_8k": {
-      "n": 280,
-      "pop_rate": 0.143,
-      "bust_rate": 0.082,
+      "n": 289,
+      "pop_rate": 0.149,
+      "bust_rate": 0.087,
       "avg_residual": -0.1,
-      "mae": 8.5
+      "mae": 8.6
     },
     "8_10k": {
-      "n": 193,
-      "pop_rate": 0.098,
-      "bust_rate": 0.052,
+      "n": 199,
+      "pop_rate": 0.101,
+      "bust_rate": 0.055,
       "avg_residual": -1.4,
-      "mae": 9.0
+      "mae": 8.9
     },
     "10k_plus": {
-      "n": 54,
-      "pop_rate": 0.111,
-      "bust_rate": 0.037,
-      "avg_residual": 0.9,
+      "n": 56,
+      "pop_rate": 0.107,
+      "bust_rate": 0.036,
+      "avg_residual": 0.5,
       "mae": 10.5
     }
   },
@@ -85,6 +85,16 @@
       "actual": 63.8,
       "residual": 40.2,
       "ratio": 2.7,
+      "context": [],
+      "date": "2026-03-02"
+    },
+    {
+      "player": "Reed Sheppard",
+      "salary": 5700,
+      "proj": 23.8,
+      "actual": 63.8,
+      "residual": 40.0,
+      "ratio": 2.68,
       "context": [],
       "date": "2026-03-02"
     },
@@ -137,16 +147,6 @@
       "ratio": 2.49,
       "context": [],
       "date": "2026-03-08"
-    },
-    {
-      "player": "Jalen Duren",
-      "salary": 7900,
-      "proj": 37.6,
-      "actual": 69.5,
-      "residual": 31.9,
-      "ratio": 1.85,
-      "context": [],
-      "date": "2026-02-27"
     }
   ],
   "top_busts": [
@@ -253,7 +253,7 @@
   ],
   "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-10T01:01:19.607386+00:00",
+    "computed_at": "2026-03-10T01:06:55.902324+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
