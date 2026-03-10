@@ -1762,69 +1762,6 @@ def main() -> None:
         except Exception as _sb_exc:
             st.warning(f"Sim Sandbox unavailable: {_sb_exc}")
 
-    # ── Apply Learnings (inline) ───────────────────────────────────
-    if sim.player_results is not None and not sim.player_results.empty:
-        with st.expander("⚡ Apply Sim Learnings", expanded=False):
-            st.caption(
-                "Applies a non-destructive Sim Learnings layer (capped at ±15%). "
-                "Does NOT overwrite base projections."
-            )
-            _BOOST_CAP = 0.15
-            _BUST_REDUCTION = 0.08
-
-            col_bt, col_bust = st.columns(2)
-            with col_bt:
-                boost_threshold = st.slider(
-                    "Smash threshold for positive boost",
-                    min_value=0.10, max_value=0.50, step=0.01, value=0.20,
-                    key="_lab_boost_threshold",
-                )
-            with col_bust:
-                bust_threshold = st.slider(
-                    "Bust threshold for reduction",
-                    min_value=0.20, max_value=0.60, step=0.01, value=0.30,
-                    key="_lab_bust_threshold",
-                )
-
-            col_apply, col_clear = st.columns(2)
-            with col_apply:
-                if st.button("⚡ Apply Learnings", key="_lab_apply_learnings"):
-                    with st.spinner("Writing Sim Learnings layer…"):
-                        pr = sim.player_results.copy()
-                        applied = 0
-                        for _, row in pr.iterrows():
-                            pname = row.get("player_name", "")
-                            smash = float(row.get("smash_prob", 0) or 0)
-                            bust = float(row.get("bust_prob", 0) or 0)
-                            if smash >= boost_threshold:
-                                boost = min(_BOOST_CAP, smash * 0.5)
-                                sim.apply_learning(pname, boost, f"smash_prob={smash:.2f}")
-                                applied += 1
-                            elif bust >= bust_threshold:
-                                reduction = -min(_BUST_REDUCTION, bust * 0.25)
-                                sim.apply_learning(pname, reduction, f"bust_prob={bust:.2f}")
-                                applied += 1
-                        if "Sims" not in slate.active_layers:
-                            slate.active_layers.append("Sims")
-                            set_slate_state(slate)
-                        set_sim_state(sim)
-                        st.success(f"Applied learnings for {applied} players. Layer 'Sims' activated.")
-            with col_clear:
-                if sim.sim_learnings and st.button("🗑️ Clear Learnings", key="_lab_clear_learnings"):
-                    sim.clear_learnings()
-                    if "Sims" in slate.active_layers:
-                        slate.active_layers.remove("Sims")
-                        set_slate_state(slate)
-                    set_sim_state(sim)
-                    st.info("Sim Learnings cleared.")
-
-            if sim.sim_learnings:
-                rows = [
-                    {"Player": p, "Boost": f"{v['boost']:+.1%}", "Reason": v.get("reason", "")}
-                    for p, v in sim.sim_learnings.items()
-                ]
-                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-
     st.divider()
 
     # =====================================================================
