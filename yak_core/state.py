@@ -424,29 +424,71 @@ def _ss():
 
 
 def get_slate_state() -> SlateState:
-    """Return the current SlateState from session_state, creating if absent."""
+    """Return the current SlateState from session_state, creating if absent.
+
+    On a fresh session, restores any previously persisted slate from disk
+    so Right Angle Ricky works without going through The Lab.
+    """
     ss = _ss()
     if _KEY_SLATE not in ss:
         ss[_KEY_SLATE] = SlateState()
-    return ss[_KEY_SLATE]
+    state: SlateState = ss[_KEY_SLATE]
+    # Restore persisted slate on fresh session
+    if state.player_pool is None or (hasattr(state.player_pool, 'empty') and state.player_pool.empty):
+        try:
+            from yak_core.lineup_store import load_slate
+            load_slate(state)
+        except Exception:
+            pass
+    return state
 
 
 def set_slate_state(state: SlateState) -> None:
-    """Write a SlateState back to session_state."""
+    """Write a SlateState back to session_state.
+
+    If the slate is published, also persists to disk so other sessions
+    (e.g. your nephew opening Right Angle Ricky) pick it up.
+    """
     _ss()[_KEY_SLATE] = state
+    if state.published:
+        try:
+            from yak_core.lineup_store import save_slate
+            save_slate(state)
+        except Exception:
+            pass
 
 
 def get_edge_state() -> RickyEdgeState:
-    """Return the current RickyEdgeState from session_state, creating if absent."""
+    """Return the current RickyEdgeState from session_state, creating if absent.
+
+    On a fresh session, restores persisted edge state from disk.
+    """
     ss = _ss()
     if _KEY_EDGE not in ss:
         ss[_KEY_EDGE] = RickyEdgeState()
-    return ss[_KEY_EDGE]
+    state: RickyEdgeState = ss[_KEY_EDGE]
+    # Restore from disk if session is fresh (no edge data)
+    if not state.edge_analysis_by_contest and not state.ricky_edge_check:
+        try:
+            from yak_core.lineup_store import load_edge
+            load_edge(state)
+        except Exception:
+            pass
+    return state
 
 
 def set_edge_state(state: RickyEdgeState) -> None:
-    """Write a RickyEdgeState back to session_state."""
+    """Write a RickyEdgeState back to session_state.
+
+    If the edge check is approved, also persists to disk.
+    """
     _ss()[_KEY_EDGE] = state
+    if state.ricky_edge_check:
+        try:
+            from yak_core.lineup_store import save_edge
+            save_edge(state)
+        except Exception:
+            pass
 
 
 def get_lineup_state() -> LineupSetState:

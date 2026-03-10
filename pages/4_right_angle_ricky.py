@@ -402,11 +402,20 @@ def _render_tab_analysis(slate, edge, lu_state, sim_state) -> None:
                         compact=True,
                     )
 
-        if st.button("\U0001f5d1\ufe0f Clear Published Lineups", key="_rar_clear_pub_nba"):
+        if st.button("\U0001f5d1\ufe0f Clear All Published Data", key="_rar_clear_pub_nba"):
             from yak_core.lineup_store import clear_published
-            clear_published()
+            from yak_core.state import set_slate_state, set_edge_state
+            clear_published()  # wipes all files on disk
             lu_state.published_sets.clear()
             set_lineup_state(lu_state)
+            # Reset slate + edge so fresh sessions start clean
+            slate.published = False
+            slate.player_pool = None
+            set_slate_state(slate)
+            edge_obj = get_edge_state()
+            edge_obj.ricky_edge_check = False
+            edge_obj.edge_analysis_by_contest.clear()
+            set_edge_state(edge_obj)
             st.rerun()
 
 
@@ -532,11 +541,19 @@ def _render_tab_analysis_pga(slate, lu_state, sim_state) -> None:
                         compact=True,
                     )
 
-        if st.button("\U0001f5d1\ufe0f Clear Published Lineups", key="_rar_clear_pub_pga"):
+        if st.button("\U0001f5d1\ufe0f Clear All Published Data", key="_rar_clear_pub_pga"):
             from yak_core.lineup_store import clear_published
+            from yak_core.state import set_slate_state, set_edge_state
             clear_published()
             lu_state.published_sets.clear()
             set_lineup_state(lu_state)
+            slate.published = False
+            slate.player_pool = None
+            set_slate_state(slate)
+            edge_obj = get_edge_state()
+            edge_obj.ricky_edge_check = False
+            edge_obj.edge_analysis_by_contest.clear()
+            set_edge_state(edge_obj)
             st.rerun()
 
 
