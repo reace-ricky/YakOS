@@ -281,24 +281,29 @@ def _render_tab_analysis(slate, edge, lu_state, sim_state) -> None:
                     st.markdown(summary)
 
     # ── Top lineups from Build & Publish (GPP / Cash / Showdown) ──────
-    _lineup_contests = [c for c in _CONTEST_ORDER]
-    _any_lineup = False
-    for contest_label in _lineup_contests:
+    # Collect which contests have lineups
+    _lineup_data = []
+    for contest_label in _CONTEST_ORDER:
         lu_rows, sim_metrics, bb_row = _get_best_lineup(lu_state, sim_state, contest_label)
         if lu_rows is not None and not lu_rows.empty:
-            if not _any_lineup:
-                st.divider()
-                _any_lineup = True
             short = _LABEL_SHORT.get(contest_label, contest_label)
-            st.markdown(f"**Top {short} Lineup**")
-            render_premium_lineup_card(
-                lineup_rows=lu_rows,
-                sim_metrics=sim_metrics,
-                lineup_label=f"#1 {short}",
-                salary_cap=slate.salary_cap,
-                boom_bust_row=bb_row,
-                compact=True,
-            )
+            _lineup_data.append((contest_label, short, lu_rows, sim_metrics, bb_row))
+
+    if _lineup_data:
+        st.divider()
+        # Render side-by-side in columns (FantasyPros-style)
+        cols = st.columns(len(_lineup_data))
+        for col, (contest_label, short, lu_rows, sim_metrics, bb_row) in zip(cols, _lineup_data):
+            with col:
+                st.markdown(f"**Top {short} Lineup**")
+                render_premium_lineup_card(
+                    lineup_rows=lu_rows,
+                    sim_metrics=sim_metrics,
+                    lineup_label=f"#1 {short}",
+                    salary_cap=slate.salary_cap,
+                    boom_bust_row=bb_row,
+                    compact=True,
+                )
 
 
 # ---------------------------------------------------------------------------
