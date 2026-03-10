@@ -1,50 +1,50 @@
 {
-  "computed_at": "2026-03-09T23:59:06.390364+00:00",
-  "n_slates": 11,
-  "n_player_slates": 1881,
+  "computed_at": "2026-03-10T00:03:44.546372+00:00",
+  "n_slates": 12,
+  "n_player_slates": 2005,
   "classification": {
-    "pop": 421,
-    "bust": 348,
-    "inline": 1112,
-    "pop_rate": 0.224,
+    "pop": 443,
+    "bust": 371,
+    "inline": 1191,
+    "pop_rate": 0.221,
     "bust_rate": 0.185
   },
   "factor_breakdown": {},
   "bracket_breakdown": {
     "lt5k": {
-      "n": 1039,
-      "pop_rate": 0.275,
-      "bust_rate": 0.256,
+      "n": 1110,
+      "pop_rate": 0.271,
+      "bust_rate": 0.257,
       "avg_residual": 0.2,
-      "mae": 7.4
+      "mae": 7.3
     },
     "5_65k": {
-      "n": 402,
-      "pop_rate": 0.211,
-      "bust_rate": 0.129,
+      "n": 429,
+      "pop_rate": 0.212,
+      "bust_rate": 0.128,
       "avg_residual": 0.6,
-      "mae": 8.5
+      "mae": 8.6
     },
     "65_8k": {
-      "n": 235,
-      "pop_rate": 0.128,
+      "n": 248,
+      "pop_rate": 0.125,
       "bust_rate": 0.085,
-      "avg_residual": -0.4,
+      "avg_residual": -0.5,
       "mae": 8.6
     },
     "8_10k": {
-      "n": 162,
-      "pop_rate": 0.093,
-      "bust_rate": 0.049,
-      "avg_residual": -1.8,
-      "mae": 9.2
+      "n": 170,
+      "pop_rate": 0.088,
+      "bust_rate": 0.047,
+      "avg_residual": -1.9,
+      "mae": 9.0
     },
     "10k_plus": {
-      "n": 43,
-      "pop_rate": 0.116,
-      "bust_rate": 0.047,
-      "avg_residual": 0.7,
-      "mae": 10.9
+      "n": 48,
+      "pop_rate": 0.104,
+      "bust_rate": 0.042,
+      "avg_residual": 0.8,
+      "mae": 10.7
     }
   },
   "top_pops": [
@@ -77,6 +77,16 @@
       "ratio": 2.91,
       "context": [],
       "date": "2026-03-05"
+    },
+    {
+      "player": "Neemias Queta",
+      "salary": 5100,
+      "proj": 27.3,
+      "actual": 63.2,
+      "residual": 36.0,
+      "ratio": 2.32,
+      "context": [],
+      "date": "2026-03-01"
     },
     {
       "player": "Jalen Suggs",
@@ -137,16 +147,6 @@
       "ratio": 2.29,
       "context": [],
       "date": "2026-03-08"
-    },
-    {
-      "player": "Jock Landale",
-      "salary": 6100,
-      "proj": 29.2,
-      "actual": 57.2,
-      "residual": 28.1,
-      "ratio": 1.96,
-      "context": [],
-      "date": "2026-02-05"
     }
   ],
   "top_busts": [
@@ -253,7 +253,7 @@
   ],
   "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-09T23:59:06.390338+00:00",
+    "computed_at": "2026-03-10T00:03:44.546351+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
