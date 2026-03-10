@@ -686,7 +686,8 @@ def _load_pga_pool(
         slate.roster_slots = DK_PGA_POS_SLOTS
         slate.salary_cap = DK_PGA_SALARY_CAP
         slate.player_pool = pool
-        slate.published = False
+        slate.published = True
+        slate.published_at = datetime.now(timezone.utc).isoformat()
         set_slate_state(slate)
 
         # Cache in session state
