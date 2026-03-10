@@ -216,17 +216,30 @@ class DataGolfClient:
     def get_historical_dfs_points(
         self,
         event_id: int,
+        year: int,
+        tour: str = "pga",
         site: str = "draftkings",
     ) -> pd.DataFrame:
         """Historical DFS salaries, ownership, actual FP.
 
         Requires premium subscription.  Returns empty DataFrame with
         warning if access denied.
+
+        Parameters
+        ----------
+        event_id : int
+            DataGolf event ID.
+        year : int
+            Calendar year of the event.
+        tour : str
+            Tour ("pga", "euro", "kft", "alt").
+        site : str
+            DFS site ("draftkings", "fanduel").
         """
         try:
             data = self._get(
                 "/historical-dfs-data/points",
-                {"site": site, "event_id": event_id},
+                {"site": site, "event_id": event_id, "year": year, "tour": tour},
             )
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == 403:
@@ -234,6 +247,47 @@ class DataGolfClient:
                 return pd.DataFrame()
             raise
         records = data.get("dfs_points", data.get("players", []))
+        return self._to_df(records)
+
+    def get_historical_pre_tournament(
+        self,
+        event_id: int,
+        year: int,
+        tour: str = "pga",
+    ) -> pd.DataFrame:
+        """Historical pre-tournament predictions (win/cut/top-N probs).
+
+        Parameters
+        ----------
+        event_id : int
+            DataGolf event ID.
+        year : int
+            Calendar year of the event.
+        tour : str
+            Tour ("pga", "euro", "kft", "alt").
+
+        Returns
+        -------
+        DataFrame with columns including:
+            dg_id, player_name, win_prob, top_5, top_10, top_20, make_cut,
+            baseline_pred (predicted SG), etc.
+        """
+        try:
+            data = self._get(
+                "/preds/pre-tournament",
+                {"event_id": event_id, "year": year, "tour": tour},
+            )
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code in (403, 404):
+                print(f"[datagolf] Historical pre-tournament data unavailable for event {event_id}/{year}")
+                return pd.DataFrame()
+            raise
+        # Response has a "baseline" or "baseline_history" key with the player list
+        records = data.get("baseline_history", data.get("baseline", []))
+        if not records:
+            # Try top-level if it's a flat list
+            if isinstance(data, list):
+                records = data
         return self._to_df(records)
 
 
