@@ -72,10 +72,12 @@ from yak_core.edge import compute_edge_metrics  # noqa: E402
 
 _CONTEST_ORDER = [UI_CONTEST_MAP[k] for k in UI_CONTEST_LABELS]
 _LABEL_SHORT = {v: k for k, v in UI_CONTEST_MAP.items()}
+_LABEL_SHORT.update({v: k for k, v in PGA_UI_CONTEST_MAP.items()})
 
 _CONTEST_TO_BUILD_MODE = {
     "GPP Main": "ceiling", "GPP Early": "ceiling", "GPP Late": "ceiling",
-    "Cash Main": "floor", "Showdown": "ceiling", "PGA GPP": "ceiling",
+    "Cash Main": "floor", "Showdown": "ceiling",
+    "PGA GPP": "ceiling", "PGA Cash": "floor", "PGA Showdown": "ceiling",
 }
 _BUILD_MODE_PROJ_COL = {"floor": "floor", "median": "proj", "ceiling": "proj"}
 
@@ -815,7 +817,8 @@ def _render_tab_optimizer(slate) -> None:
 
     _contest_type_map = {
         "GPP Main": "gpp", "GPP Early": "gpp", "GPP Late": "gpp",
-        "Cash Main": "cash", "Showdown": "showdown", "PGA GPP": "gpp",
+        "Cash Main": "cash", "Showdown": "showdown",
+        "PGA GPP": "gpp", "PGA Cash": "cash", "PGA Showdown": "gpp",
     }
 
     build_mode = _CONTEST_TO_BUILD_MODE.get(contest_label, "ceiling")

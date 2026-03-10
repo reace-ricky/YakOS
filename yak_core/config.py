@@ -303,11 +303,12 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
 }
 
 # ----- PGA contest presets -----
-# PGA DFS is simpler: GPP only (no cash/showdown on DK for golf).
+# PGA DFS: GPP (full 4-day tournament), Cash (double-ups / 50-50s),
+# Showdown (single-round captain mode — 1 CPT + 5 FLEX).
 # 6 golfers, no positions, no stacking.
 PGA_CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
     "PGA GPP": {
-        "description": "PGA tournament GPP — 6 golfers, max upside",
+        "description": "PGA tournament GPP — 6 golfers, max upside (4-day)",
         "slate_type": "Classic",
         "archetype": "Ceiling Hunter",
         "internal_contest": "MME",
@@ -316,8 +317,11 @@ PGA_CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "correlation_mode": None,   # No team stacking in PGA
         "lineup_size": DK_PGA_LINEUP_SIZE,
         "num_lineups": 20,
+        "default_lineups": 20,
         "salary_cap": DK_PGA_SALARY_CAP,
+        "min_salary": 46000,
         "min_salary_used": 46000,
+        "default_max_exposure": 0.60,
         "max_exposure": 0.60,
         "pos_slots": DK_PGA_POS_SLOTS,
         "pos_caps": {},
@@ -338,6 +342,66 @@ PGA_CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         # Ownership sim contest type
         "ownership_contest_type": "gpp",
     },
+    "PGA Cash": {
+        "description": "PGA cash / double-up — 6 golfers, safe floor (4-day)",
+        "slate_type": "Classic",
+        "archetype": "Balanced",
+        "internal_contest": "CASH",
+        "projection_style": "floor",
+        "volatility": "low",
+        "correlation_mode": None,
+        "lineup_size": DK_PGA_LINEUP_SIZE,
+        "num_lineups": 5,
+        "default_lineups": 5,
+        "salary_cap": DK_PGA_SALARY_CAP,
+        "min_salary": 47000,
+        "min_salary_used": 47000,
+        "default_max_exposure": 0.80,
+        "max_exposure": 0.80,
+        "pos_slots": DK_PGA_POS_SLOTS,
+        "pos_caps": {},
+        "own_weight": 0.05,
+        "own_cap": 10.0,
+        "min_low_own_players": 0,
+        "low_own_threshold": 0.50,
+        "min_mid_salary_players": 3,
+        "max_punt_players": 0,
+        "force_game_stack": False,
+        "not_with_auto": False,
+        "max_per_team": None,
+        "exposure_rules": False,
+        "ownership_contest_type": "cash",
+    },
+    "PGA Showdown": {
+        "description": "PGA single-round Showdown — 6 golfers, one round only",
+        "slate_type": "Classic",
+        "archetype": "Ceiling Hunter",
+        "internal_contest": "SD",
+        "projection_style": "ceil",
+        "volatility": "high",
+        "correlation_mode": None,
+        "lineup_size": DK_PGA_LINEUP_SIZE,
+        "num_lineups": 20,
+        "default_lineups": 20,
+        "salary_cap": DK_PGA_SALARY_CAP,
+        "min_salary": 46000,
+        "min_salary_used": 46000,
+        "default_max_exposure": 0.50,
+        "max_exposure": 0.50,
+        "pos_slots": DK_PGA_POS_SLOTS,
+        "pos_caps": {},
+        "own_weight": 0.30,
+        "own_cap": 5.0,
+        "min_low_own_players": 1,
+        "low_own_threshold": 0.35,
+        "min_mid_salary_players": 2,
+        "max_punt_players": 1,
+        "force_game_stack": False,
+        "not_with_auto": False,
+        "max_per_team": None,
+        "exposure_rules": False,
+        "ownership_contest_type": "gpp",
+    },
 }
 
 # Merge PGA presets into the main dict
@@ -355,10 +419,12 @@ UI_CONTEST_MAP: Dict[str, str] = {
     "Showdown": "Showdown",
 }
 
-# PGA contest UI — simpler, GPP only
-PGA_UI_CONTEST_LABELS: List[str] = ["GPP"]
+# PGA contest UI — GPP (4-day), Cash (4-day), Showdown (daily single-round)
+PGA_UI_CONTEST_LABELS: List[str] = ["GPP", "Cash", "Showdown"]
 PGA_UI_CONTEST_MAP: Dict[str, str] = {
     "GPP": "PGA GPP",
+    "Cash": "PGA Cash",
+    "Showdown": "PGA Showdown",
 }
 
 # Short archetype labels for each contest preset label.
@@ -369,6 +435,8 @@ CONTEST_PRESET_ARCH_LABELS: Dict[str, str] = {
     "Showdown": "SD",
     "Cash Main": "CASH",
     "PGA GPP": "PGA",
+    "PGA Cash": "PGA-C",
+    "PGA Showdown": "PGA-SD",
 }
 
 # ============================================================

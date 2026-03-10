@@ -160,10 +160,10 @@ def _build_lineups(
             pool["player_id"] = pool["dk_player_id"]
     try:
         # Map UI contest label → CONTEST_TYPE for the optimizer
-        # GPP Main/Early/Late → "gpp", Cash Main → "cash", Showdown → "showdown"
         _contest_type_map = {
             "GPP Main": "gpp", "GPP Early": "gpp", "GPP Late": "gpp",
             "Cash Main": "cash", "Showdown": "showdown",
+            "PGA GPP": "gpp", "PGA Cash": "cash", "PGA Showdown": "gpp",
         }
         cfg = {
             "NUM_LINEUPS": num_lineups,
