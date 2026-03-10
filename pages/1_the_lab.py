@@ -44,6 +44,7 @@ from yak_core.state import (  # noqa: E402
     get_slate_state, set_slate_state,
     get_edge_state, set_edge_state,
     get_sim_state, set_sim_state,
+    get_lineup_state,
 )
 from yak_core.sims import (  # noqa: E402
     prepare_sims_table,
@@ -1932,14 +1933,7 @@ def main() -> None:
                 _cr_cash = st.number_input("Cash Line", min_value=0.0, step=5.0, key="_cr_cash")
                 _cr_entries = st.number_input("# Entries", min_value=0, step=100, key="_cr_entries")
 
-            _cr_c3, _cr_c4, _cr_c5 = st.columns(3)
-            with _cr_c3:
-                _cr_top15 = st.number_input("Top 15% Score", min_value=0.0, step=5.0, key="_cr_top15")
-            with _cr_c4:
-                _cr_top1 = st.number_input("Top 1% Score", min_value=0.0, step=5.0, key="_cr_top1")
-            with _cr_c5:
-                _cr_winner = st.number_input("Winning Score", min_value=0.0, step=5.0, key="_cr_winner")
-
+            _cr_winner = st.number_input("Winning Score", min_value=0.0, step=5.0, key="_cr_winner")
             _cr_notes = st.text_input("Notes (optional)", key="_cr_notes")
 
             if st.button("Save & Score", key="_cr_save", type="primary"):
@@ -1948,8 +1942,6 @@ def main() -> None:
                         slate_date=_cr_date,
                         contest_type=_cr_type,
                         cash_line=_cr_cash,
-                        top_15_score=_cr_top15,
-                        top_1_score=_cr_top1,
                         winning_score=_cr_winner,
                         num_entries=int(_cr_entries),
                         notes=_cr_notes,
@@ -1982,11 +1974,8 @@ def main() -> None:
                             f"Cash rate: {scores['cash_rate']*100:.0f}% "
                             f"({scores['cashed']}/{scores['n_lineups']})"
                         )
-                        if scores.get("top_15"):
-                            st.caption(
-                                f"Top 15%: {scores['top_15']}/{scores['n_lineups']} · "
-                                f"Top 1%: {scores['top_1']}/{scores['n_lineups']}"
-                            )
+                        if scores.get("won"):
+                            st.caption(f"Winner-level lineups: {scores['won']}/{scores['n_lineups']}")
                     else:
                         st.success(f"Saved {_cr_date} {_cr_type.upper()} bands (no lineups to score yet).")
                 else:
@@ -1995,25 +1984,15 @@ def main() -> None:
         # ── Hit Rate Summary ──────────────────────────────────────────
         _hr = get_hit_rate_summary()
         if _hr.get("n_slates", 0) > 0:
-            _hr_c1, _hr_c2, _hr_c3, _hr_c4 = st.columns(4)
+            _hr_c1, _hr_c2 = st.columns(2)
             _targets = _hr.get("targets", {})
             with _hr_c1:
                 st.metric("Slates Tracked", _hr["n_slates"])
             with _hr_c2:
                 _cr_val = _hr.get("avg_cash_rate", 0)
                 _cr_target = _targets.get("cash_rate", 0.7)
-                _cr_delta = f"target: {_cr_target*100:.0f}%"
-                st.metric("Cash Rate", f"{_cr_val*100:.0f}%", delta=_cr_delta,
-                          delta_color="off")
-            with _hr_c3:
-                _t15_val = _hr.get("avg_top_15_rate", 0)
-                st.metric("GPP Top 15%", f"{_t15_val*100:.0f}%",
-                          delta=f"target: {_targets.get('top_15_rate', 0.2)*100:.0f}%",
-                          delta_color="off")
-            with _hr_c4:
-                _t1_val = _hr.get("avg_top_1_rate", 0)
-                st.metric("GPP Top 1%", f"{_t1_val*100:.0f}%",
-                          delta=f"target: {_targets.get('top_1_rate', 0.03)*100:.0f}%",
+                st.metric("Cash Rate", f"{_cr_val*100:.0f}%",
+                          delta=f"target: {_cr_target*100:.0f}%",
                           delta_color="off")
 
             # History table
