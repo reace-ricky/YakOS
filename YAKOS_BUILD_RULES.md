@@ -155,6 +155,14 @@ scripts/
 - Colors: Green = good, Red = risk, Grey = inactive.
 - Advanced options in `st.expander`.
 
+## Data persistence rules
+
+- Streamlit Cloud has **ephemeral storage** — files written to disk are lost on restart.
+- Any module that writes JSON/data to `data/` **MUST** be registered in `yak_core/github_persistence.py` → `_FEEDBACK_FILES` list.
+- After writing, call `sync_feedback_async()` to push to GitHub.
+- **If it writes to disk and isn't in `_FEEDBACK_FILES`, it will vanish.** No exceptions.
+- Before marking a feature done, verify: "If the app cold-starts, does this data survive?"
+
 ## API rules
 
 - All external data through `yak_core/` client modules.

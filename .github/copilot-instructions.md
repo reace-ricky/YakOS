@@ -39,6 +39,16 @@ If these 3 steps aren’t present, the feature is NOT done.
 
 ---
 
+## Data persistence rules (CRITICAL)
+
+- Streamlit Cloud has **ephemeral storage** — files on disk are lost on restart/redeploy.
+- Any module that writes JSON or data files to `data/` **MUST**:
+  1. Be listed in `yak_core/github_persistence.py` → `_FEEDBACK_FILES`
+  2. Call `sync_feedback_async()` after writing
+- **If it writes to disk and isn’t in `_FEEDBACK_FILES`, the data will vanish on cold start.**
+- Before marking any feature done, ask: “If the app restarts from scratch, does this data survive?”
+- Currently persisted: `calibration_feedback/`, `edge_feedback/`, `contest_results/`
+
 ## State & data rules
 
 - Always READ from and WRITE to these objects:
