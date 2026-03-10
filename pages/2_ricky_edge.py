@@ -210,50 +210,53 @@ def main() -> None:
     st.divider()
 
     # =====================================================================
-    # SECTION 3: TOP STACKS
+    # SECTION 3: TOP STACKS (NBA only — PGA has no team stacking)
     # =====================================================================
-    st.subheader("Top Stacks")
+    _is_pga = (slate.sport or "").upper() == "PGA"
 
-    try:
-        edge_for_stacks = signals_df if "smash_prob" in signals_df.columns else None
-        stack_alerts = compute_tiered_stack_alerts(pool, edge_df=edge_for_stacks)
-        if stack_alerts:
-            _stack_df = pd.DataFrame(stack_alerts).head(5)
-            _stack_cols = [c for c in ["team", "tier", "conditions_met", "key_players", "implied_total"]
-                          if c in _stack_df.columns]
-            if _stack_cols:
-                st.dataframe(_stack_df[_stack_cols], use_container_width=True, hide_index=True)
+    if not _is_pga:
+        st.subheader("Top Stacks")
 
-                # Surface flagged-player warnings
-                _warned = [a for a in stack_alerts[:5] if a.get("leverage_warning")]
-                for w in _warned:
-                    st.caption(f"{w['team']}: {w['leverage_warning']}")
+        try:
+            edge_for_stacks = signals_df if "smash_prob" in signals_df.columns else None
+            stack_alerts = compute_tiered_stack_alerts(pool, edge_df=edge_for_stacks)
+            if stack_alerts:
+                _stack_df = pd.DataFrame(stack_alerts).head(5)
+                _stack_cols = [c for c in ["team", "tier", "conditions_met", "key_players", "implied_total"]
+                              if c in _stack_df.columns]
+                if _stack_cols:
+                    st.dataframe(_stack_df[_stack_cols], use_container_width=True, hide_index=True)
 
-            # Auto-define stacks from top teams if none exist
-            if not edge.stacks:
-                for srow in stack_alerts[:3]:
-                    team = srow.get("team", "")
-                    if team and not pool.empty and "player_name" in pool.columns:
-                        team_players = pool[pool["team"] == team].nlargest(3, "proj")["player_name"].tolist()
-                        if len(team_players) >= 2:
-                            _rationale = f"Auto: {srow.get('tier', '')} ({srow.get('conditions_met', 0)} conditions)"
-                            edge.add_stack(team, team_players[:3], _rationale)
-                set_edge_state(edge)
-        else:
-            st.info("No stack data available.")
-    except Exception:
-        st.info("Run sims in The Lab to generate stack analysis.")
+                    # Surface flagged-player warnings
+                    _warned = [a for a in stack_alerts[:5] if a.get("leverage_warning")]
+                    for w in _warned:
+                        st.caption(f"{w['team']}: {w['leverage_warning']}")
 
-    if edge.stacks:
-        st.caption(f"{len(edge.stacks)} stack(s) defined")
-        rows = []
-        for s in edge.stacks:
-            rows.append({
-                "Team": s.get("team", ""),
-                "Players": ", ".join(s.get("players", [])),
-                "Rationale": s.get("rationale", ""),
-            })
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                # Auto-define stacks from top teams if none exist
+                if not edge.stacks:
+                    for srow in stack_alerts[:3]:
+                        team = srow.get("team", "")
+                        if team and not pool.empty and "player_name" in pool.columns:
+                            team_players = pool[pool["team"] == team].nlargest(3, "proj")["player_name"].tolist()
+                            if len(team_players) >= 2:
+                                _rationale = f"Auto: {srow.get('tier', '')} ({srow.get('conditions_met', 0)} conditions)"
+                                edge.add_stack(team, team_players[:3], _rationale)
+                    set_edge_state(edge)
+            else:
+                st.info("No stack data available.")
+        except Exception:
+            st.info("Run sims in The Lab to generate stack analysis.")
+
+        if edge.stacks:
+            st.caption(f"{len(edge.stacks)} stack(s) defined")
+            rows = []
+            for s in edge.stacks:
+                rows.append({
+                    "Team": s.get("team", ""),
+                    "Players": ", ".join(s.get("players", [])),
+                    "Rationale": s.get("rationale", ""),
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
     st.divider()
 
@@ -336,7 +339,9 @@ def main() -> None:
 
     # Approval checkboxes
     _ck_edges = st.checkbox("Top edges reviewed", key="_re_ck_edges")
-    _ck_stacks = st.checkbox("Stacks confirmed", key="_re_ck_stacks")
+    _ck_stacks = True  # default for PGA (no stacking)
+    if not _is_pga:
+        _ck_stacks = st.checkbox("Stacks confirmed", key="_re_ck_stacks")
     _ck_fades = st.checkbox("Fades and chalk traps noted", key="_re_ck_fades")
 
     _all_checked = _ck_edges and _ck_stacks and _ck_fades
