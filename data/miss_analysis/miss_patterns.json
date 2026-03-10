@@ -1,33 +1,33 @@
 {
-  "computed_at": "2026-03-10T15:36:59.684545+00:00",
+  "computed_at": "2026-03-10T15:51:28.477418+00:00",
   "n_slates": 17,
   "n_player_slates": 2790,
   "classification": {
-    "pop": 622,
-    "bust": 523,
-    "inline": 1645,
-    "pop_rate": 0.223,
-    "bust_rate": 0.187
+    "pop": 617,
+    "bust": 526,
+    "inline": 1647,
+    "pop_rate": 0.221,
+    "bust_rate": 0.189
   },
   "factor_breakdown": {},
   "bracket_breakdown": {
     "lt5k": {
       "n": 1562,
-      "pop_rate": 0.262,
-      "bust_rate": 0.252,
+      "pop_rate": 0.261,
+      "bust_rate": 0.254,
       "avg_residual": 0.2,
       "mae": 7.2
     },
     "5_65k": {
       "n": 596,
-      "pop_rate": 0.216,
+      "pop_rate": 0.213,
       "bust_rate": 0.138,
-      "avg_residual": 0.6,
+      "avg_residual": 0.5,
       "mae": 8.7
     },
     "65_8k": {
       "n": 328,
-      "pop_rate": 0.155,
+      "pop_rate": 0.152,
       "bust_rate": 0.088,
       "avg_residual": 0.1,
       "mae": 8.6
@@ -35,7 +35,7 @@
     "8_10k": {
       "n": 232,
       "pop_rate": 0.099,
-      "bust_rate": 0.06,
+      "bust_rate": 0.065,
       "avg_residual": -1.2,
       "mae": 8.7
     },
@@ -43,7 +43,7 @@
       "n": 72,
       "pop_rate": 0.125,
       "bust_rate": 0.056,
-      "avg_residual": 0.5,
+      "avg_residual": 0.4,
       "mae": 10.5
     }
   },
@@ -81,10 +81,10 @@
     {
       "player": "Reed Sheppard",
       "salary": 5700,
-      "proj": 23.6,
+      "proj": 24.2,
       "actual": 63.8,
-      "residual": 40.2,
-      "ratio": 2.7,
+      "residual": 39.6,
+      "ratio": 2.64,
       "context": [],
       "date": "2026-03-02"
     },
@@ -93,8 +93,8 @@
       "salary": 5700,
       "proj": 24.2,
       "actual": 63.8,
-      "residual": 39.6,
-      "ratio": 2.64,
+      "residual": 39.5,
+      "ratio": 2.63,
       "context": [],
       "date": "2026-03-02"
     },
@@ -253,7 +253,7 @@
   ],
   "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-10T15:36:59.684524+00:00",
+    "computed_at": "2026-03-10T15:51:28.477388+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
