@@ -1880,24 +1880,54 @@ def main() -> None:
                         notes=_cr_notes,
                     )
 
-                    # Score lineups if we have built lineups with actuals
-                    lu_state = get_lineup_state()
-                    _contest_map = {"gpp": "GPP Main", "cash": "Cash Main", "showdown": "Showdown"}
-                    _lu_label = _contest_map.get(_cr_type, "GPP Main")
-                    _lu_df = lu_state.lineups.get(_lu_label)
-
+                    # Build lineups from the archived parquet and score them.
+                    # Previously relied on lineups being in session state, which
+                    # meant scores were always "—" unless you happened to have
+                    # the exact slate loaded.  Now we build on the fly.
                     scores = None
                     diag = None
 
-                    if _lu_df is not None and not _lu_df.empty and "actual_fp" in pool.columns:
-                        # Map actuals onto lineups
-                        actual_map = pool.set_index("player_name")["actual_fp"].to_dict() if "player_name" in pool.columns else {}
-                        _lu_df = _lu_df.copy()
-                        if actual_map:
-                            _lu_df["actual_fp"] = _lu_df["player_name"].map(actual_map).fillna(0)
-                        lu_actuals = _lu_df.groupby("lineup_index")["actual_fp"].sum().tolist()
-                        scores = score_vs_bands(lu_actuals, bands)
-                        diag = diagnose_miss(_lu_df, pool, bands)
+                    try:
+                        from yak_core.lineups import (
+                            build_player_pool,
+                            build_multiple_lineups_with_exposure,
+                        )
+                        from yak_core.config import merge_config as _cr_merge
+                        import glob as _cr_glob
+
+                        _cr_pattern = os.path.join(
+                            YAKOS_ROOT, "data", "slate_archive",
+                            f"{_cr_date}_{_cr_type}*.parquet",
+                        )
+                        _cr_files = sorted(_cr_glob.glob(_cr_pattern))
+                        if _cr_files:
+                            _cr_raw = pd.read_parquet(_cr_files[0])
+                            _cr_cfg = _cr_merge({
+                                "SLATE_DATE": _cr_date,
+                                "CONTEST_TYPE": _cr_type,
+                                "NUM_LINEUPS": 20,
+                                "MAX_EXPOSURE": 0.6,
+                                "PROJ_SOURCE": "parquet",
+                            })
+                            _cr_pool = build_player_pool(_cr_raw, _cr_cfg)
+                            for _cc in ["ceil", "floor", "ownership", "own_proj", "actual_fp", "leverage"]:
+                                if _cc in _cr_raw.columns and _cc not in _cr_pool.columns:
+                                    _cr_pool = _cr_pool.merge(
+                                        _cr_raw[["player_name", _cc]].drop_duplicates("player_name"),
+                                        on="player_name", how="left",
+                                    )
+
+                            _cr_lu_df, _ = build_multiple_lineups_with_exposure(_cr_pool, _cr_cfg)
+
+                            if not _cr_lu_df.empty and "actual_fp" in _cr_raw.columns:
+                                _actual_map = _cr_raw.set_index("player_name")["actual_fp"].to_dict()
+                                _cr_lu_df = _cr_lu_df.copy()
+                                _cr_lu_df["actual_fp"] = _cr_lu_df["player_name"].map(_actual_map).fillna(0)
+                                lu_actuals = _cr_lu_df.groupby("lineup_index")["actual_fp"].sum().tolist()
+                                scores = score_vs_bands(lu_actuals, bands)
+                                diag = diagnose_miss(_cr_lu_df, _cr_pool, bands)
+                    except Exception as _build_err:
+                        st.caption(f"Could not auto-build lineups: {_build_err}")
 
                     save_contest_result(bands, scores=scores, diagnoses=diag)
 
@@ -1905,12 +1935,12 @@ def main() -> None:
                         st.success(
                             f"Saved {_cr_date} {_cr_type.upper()} — "
                             f"Cash rate: {scores['cash_rate']*100:.0f}% "
-                            f"({scores['cashed']}/{scores['n_lineups']})"
+                            f"({scores['cashed']}/{scores['n_lineups']}) "
+                            f"| Best: {scores['best']} | Avg: {scores['avg']}"
                         )
-                        if scores.get("won"):
-                            st.caption(f"Winner-level lineups: {scores['won']}/{scores['n_lineups']}")
                     else:
-                        st.success(f"Saved {_cr_date} {_cr_type.upper()} bands (no lineups to score yet).")
+                        st.success(f"Saved {_cr_date} {_cr_type.upper()} bands (no archived slate found to score).")
+                    st.rerun()
                 else:
                     st.warning("Need at least a date and cash line to save.")
 
