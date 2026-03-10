@@ -77,12 +77,15 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "OWN_SOURCE": "auto",      # "auto" (salary-rank if missing), "salary_rank" (always generate)
     "STACK_WEIGHT": 0.0,       # 0 = disabled; 0.1-0.3 = use stack_score to boost stacked players
     "VALUE_WEIGHT": 0.0,       # 0 = disabled; 0.1-0.3 = use value_score to boost value plays
-    # GPP-specific knobs (H5_ForcedDiverse — backtested on 3/8 slate)
+    # GPP-specific knobs (v6 — backtested on 13 slates 2026-02-02 → 2026-03-08)
     # Only active when CONTEST_TYPE == "gpp"
-    "GPP_MAX_PUNT_PLAYERS": 1,      # max players with salary < $4000
-    "GPP_MIN_MID_PLAYERS": 5,       # min players in $4000-$7000 range
-    "GPP_OWN_CAP": 4.8,             # max total lineup ownership (8 players)
-    "GPP_MIN_LOW_OWN_PLAYERS": 3,   # min players below GPP_LOW_OWN_THRESHOLD
+    # v5/H5_ForcedDiverse had own_cap=4.8, min_mid=5, min_low_own=3 which
+    # caused infeasibility on small-pool slates (e.g. 4-game nights) and
+    # systematically avoided high-ceiling chalk players.
+    "GPP_MAX_PUNT_PLAYERS": 2,      # max players with salary < $4000
+    "GPP_MIN_MID_PLAYERS": 3,       # min players in $4000-$7000 range
+    "GPP_OWN_CAP": 7.0,             # max total lineup ownership (8 players)
+    "GPP_MIN_LOW_OWN_PLAYERS": 1,   # min players below GPP_LOW_OWN_THRESHOLD
     "GPP_LOW_OWN_THRESHOLD": 0.45,  # ownership threshold for "low-owned"
     "GPP_FORCE_GAME_STACK": True,   # require 3+ players from one game
     # Cash-specific knobs (floor-weighted scoring)

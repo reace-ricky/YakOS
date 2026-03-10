@@ -329,23 +329,20 @@ def build_multiple_lineups_with_exposure(
 
     # ── Pre-compute per-player scores by contest type ──────────────
     if is_gpp:
-        # H5_ForcedDiverse GPP formula:
-        # gpp_score = proj*0.30 + ceil*0.30 + upside_gap*0.30
-        #           + mid_salary_bonus*5 - ownership*15
+        # GPP formula (v6 — backtested on 13 GPP slates 2026-02-02 → 2026-03-08):
+        # Ceiling-dominant with light ownership penalty.
+        # v5/H5_ForcedDiverse over-penalized ownership (-own*15) causing
+        # infeasibility on small slates and systematic avoidance of smash
+        # candidates who happened to be popular.
+        # gpp_score = proj*0.35 + ceil*0.55 - own*5
         for p in players:
             proj  = float(p.get("proj", 0))
             ceil_ = float(p.get("ceil", p.get("proj", 0)))
-            floor_= float(p.get("floor", p.get("proj", 0) * 0.6))
             own   = float(p.get("ownership", p.get("own_proj", 0.5)))
-            sal_k = float(p.get("salary", 5000)) / 1000.0
-            upside_gap = ceil_ - floor_
-            mid_bonus  = max(0.0, 1.0 - abs(sal_k - 5.5) / 3.0)
             p["_gpp_score"] = (
-                proj * 0.30
-                + ceil_ * 0.30
-                + upside_gap * 0.30
-                + mid_bonus * 5.0
-                - own * 15.0
+                proj * 0.35
+                + ceil_ * 0.55
+                - own * 5.0
             )
     elif is_cash:
         # Cash formula (blueprint): cash_score = floor*w1 + proj*w2
@@ -576,26 +573,35 @@ def build_multiple_lineups_with_exposure(
                     ) >= gpp_min_low_own
 
             # 5. Game stacking — correlated upside (3+ players from one game)
+            #    Only enforced when opponent data is clean (no blank opponents).
+            #    Archived slates sometimes have missing opponent for some teams,
+            #    which creates degenerate game-key groups and infeasibility.
             if gpp_force_game_stack:
                 _games: Dict[tuple, list] = {}
+                _has_blank_opp = False
                 for i in range(n):
+                    opp = players[i].get("opponent", players[i].get("opp", ""))
+                    if not opp or not str(opp).strip():
+                        _has_blank_opp = True
                     gk = tuple(sorted([
                         players[i].get("team", ""),
-                        players[i].get("opponent", players[i].get("opp", "")),
+                        str(opp or ""),
                     ]))
                     _games.setdefault(gk, []).append(i)
-                _gs_vars = {}
-                for gk, indices in _games.items():
-                    if len(indices) >= 3:
-                        gv = pulp.LpVariable(
-                            f"gs_{gk[0]}_{gk[1]}_{lu_num}", cat="Binary"
-                        )
-                        _gs_vars[gk] = gv
-                        prob += pulp.lpSum(
-                            x[(i, s)] for i in indices for s in DK_POS_SLOTS
-                        ) >= 3 * gv
-                if _gs_vars:
-                    prob += pulp.lpSum(_gs_vars.values()) >= 1
+                # Skip game stack if any player has blank opponent data
+                if not _has_blank_opp:
+                    _gs_vars = {}
+                    for gk, indices in _games.items():
+                        if len(indices) >= 3:
+                            gv = pulp.LpVariable(
+                                f"gs_{gk[0]}_{gk[1]}_{lu_num}", cat="Binary"
+                            )
+                            _gs_vars[gk] = gv
+                            prob += pulp.lpSum(
+                                x[(i, s)] for i in indices for s in DK_POS_SLOTS
+                            ) >= 3 * gv
+                    if _gs_vars:
+                        prob += pulp.lpSum(_gs_vars.values()) >= 1
 
         prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=solver_time_limit))
         if prob.status != 1:
