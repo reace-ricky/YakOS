@@ -1087,21 +1087,9 @@ def main() -> None:
         preset = CONTEST_PRESETS[contest_type_label]
 
     # ── Row 2: Sim Controls (set before loading) ─────────────────────────
-    col_mode, col_var, col_nsims = st.columns(3)
-    with col_mode:
-        sim_mode = st.radio("Mode", ["Live", "Historical"], horizontal=True, key="_lab_mode",
-                            index=0 if sim.sim_mode == "Live" else 1)
-        if sim_mode != sim.sim_mode:
-            sim.sim_mode = sim_mode
-            set_sim_state(sim)
-    with col_var:
-        variance = st.slider(
-            "Sim Variance", min_value=0.5, max_value=2.0, step=0.1,
-            value=float(sim.variance), key="_lab_variance",
-        )
-        if variance != sim.variance:
-            sim.variance = variance
-            set_sim_state(sim)
+    # Mode (Live/Historical) is auto-detected from the date picker.
+    # Sim variance is locked to 1.0 (calibrated empirical baseline).
+    col_nsims, _ = st.columns(2)
     with col_nsims:
         n_sims = st.number_input("MC Iterations", min_value=500, max_value=50000,
                                  step=500, value=int(sim.n_sims), key="_lab_nsims")
