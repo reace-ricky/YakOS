@@ -1,12 +1,17 @@
-"""Lineup Optimizer – FantasyPros-style contest-driven optimizer.
+"""Build & Publish – YakOS Sprint 1 page.
 
-Layout:
-  1. Sport toggle (NBA / PGA)
-  2. Slate status bar
-  3. Contest type selector (drives everything downstream)
-  4. Build settings row (# lineups, max exposure, min salary)
-  5. Player pool table with inline Lock / Exclude checkboxes
-  6. Build button → Lineup results + Export
+Responsibilities (S1.5)
+-----------------------
+- Read roster rules directly from SlateState (Classic / Showdown).
+- Support floor / median / ceiling build modes per contest type.
+- Exposure management (min / max per player for MME).
+- Simple contest selection advisor.
+- Build lineups and support DK CSV export.
+- "Publish to Edge Share" action per contest type.
+- S1.7 late-swap suggestions per contest type using pre-baked GTD rules.
+
+State read:  SlateState, RickyEdgeState (edge_check gate), SimState
+State written: LineupSetState
 """
 
 from __future__ import annotations
@@ -15,9 +20,8 @@ import io
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
+from typing import Optional
 
-import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -38,11 +42,7 @@ from yak_core.lineups import (  # noqa: E402
     to_dk_showdown_upload_format,
 )
 from yak_core.calibration import apply_archetype, DFS_ARCHETYPES  # noqa: E402
-from yak_core.config import (  # noqa: E402
-    CONTEST_PRESETS,
-    UI_CONTEST_LABELS, UI_CONTEST_MAP,
-    PGA_UI_CONTEST_LABELS, PGA_UI_CONTEST_MAP,
-)
+from yak_core.config import CONTEST_PRESETS, CONTEST_PRESET_LABELS, UI_CONTEST_LABELS, UI_CONTEST_MAP  # noqa: E402
 from yak_core.components import render_lineup_cards_paged  # noqa: E402
 from yak_core.publishing import publish_edge_and_lineups  # noqa: E402
 from yak_core.edge import compute_edge_metrics  # noqa: E402
@@ -51,28 +51,12 @@ from yak_core.right_angle import apply_edge_adjustments, compute_breakout_candid
 from yak_core.display_format import normalise_ownership, standard_player_format, standard_lineup_format  # noqa: E402
 
 
-# ── Helpers ────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Game extraction / filter (shared with The Lab)
+# ---------------------------------------------------------------------------
 
-_BUILD_MODE_COLS = {
-    "floor": "floor",
-    "median": "proj",
-    "ceiling": "proj",
-}
-_CONTEST_TO_BUILD_MODE = {
-    "GPP Main": "ceiling",
-    "GPP Early": "ceiling",
-    "GPP Late": "ceiling",
-    "Cash Main": "floor",
-    "Showdown": "ceiling",
-    "PGA GPP": "ceiling",
-}
-
-# NBA positions for filter tabs
-_NBA_POS_FILTERS = ["All", "PG", "SG", "SF", "PF", "C"]
-
-
-def _extract_games(pool: pd.DataFrame) -> list[str]:
-    """Return sorted list of 'TEAM vs OPP' matchup strings."""
+def _extract_games_build(pool: pd.DataFrame) -> list[str]:
+    """Return sorted list of 'TEAM vs OPP' matchup strings from the pool."""
     opp_col = "opp" if "opp" in pool.columns else (
         "opponent" if "opponent" in pool.columns else None
     )
@@ -85,10 +69,12 @@ def _extract_games(pool: pd.DataFrame) -> list[str]:
             if t and o
         }
         return sorted(pairs)
+    elif "team" in pool.columns:
+        return sorted(pool["team"].dropna().str.strip().str.upper().unique().tolist())
     return []
 
 
-def _filter_pool_by_games(pool: pd.DataFrame, selected_games: list[str]) -> pd.DataFrame:
+def _filter_pool_by_games_build(pool: pd.DataFrame, selected_games: list[str]) -> pd.DataFrame:
     """Filter pool to only players in the selected games."""
     if not selected_games:
         return pool
@@ -105,8 +91,26 @@ def _filter_pool_by_games(pool: pd.DataFrame, selected_games: list[str]) -> pd.D
     )
     return pool[keys.isin(selected_games)].reset_index(drop=True)
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-def _apply_sim_learnings(pool: pd.DataFrame, sim) -> pd.DataFrame:
+_BUILD_MODE_COLS = {
+    "floor": "floor",
+    "median": "proj",
+    "ceiling": "proj",  # GPP optimises on proj; ceil-upside handled by archetype
+}
+_CONTEST_TO_BUILD_MODE = {
+    "GPP Main": "ceiling",
+    "GPP Early": "ceiling",
+    "GPP Late": "ceiling",
+    "Cash Main": "floor",
+    "Showdown": "ceiling",
+}
+
+
+
+def _apply_sim_learnings(pool: pd.DataFrame, sim: "SimState") -> pd.DataFrame:
     """Apply non-destructive Sim Learnings boosts to effective_proj column."""
     pool = pool.copy()
     if "proj" not in pool.columns:
@@ -120,160 +124,68 @@ def _apply_sim_learnings(pool: pd.DataFrame, sim) -> pd.DataFrame:
     return pool
 
 
-# ── Pool table builder ─────────────────────────────────────────────
+def _get_proj_col(pool: pd.DataFrame, build_mode: str) -> str:
+    """Return the best available projection column for the build mode."""
+    desired = _BUILD_MODE_COLS.get(build_mode, "proj")
+    if desired in pool.columns:
+        return desired
+    return "proj"
 
-def _build_pool_display(
-    pool: pd.DataFrame,
-    edge_df: Optional[pd.DataFrame],
-    sport: str,
-    contest_label: str,
-    pos_filter: str = "All",
-) -> pd.DataFrame:
-    """Build the display DataFrame for the player pool table.
-
-    Returns a DataFrame with display-friendly columns and Lock/Excl booleans.
-    """
-    df = pool.copy()
-
-    # Merge edge metrics if available
-    if edge_df is not None and not edge_df.empty:
-        _edge_cols = ["player_name"]
-        for c in ["edge_score", "edge_label", "smash_prob", "bust_prob",
-                   "leverage", "own_pct"]:
-            if c in edge_df.columns and c not in df.columns:
-                _edge_cols.append(c)
-        if len(_edge_cols) > 1:
-            _sub = edge_df[_edge_cols].drop_duplicates(subset=["player_name"])
-            df = df.merge(_sub, on="player_name", how="left")
-
-    # Compute Value column
-    _sal = pd.to_numeric(df.get("salary", 0), errors="coerce").fillna(0)
-    _proj = pd.to_numeric(df.get("proj", 0), errors="coerce").fillna(0)
-    df["value"] = np.where(_sal > 0, _proj / (_sal / 1000.0), 0.0)
-
-    # Normalise ownership display
-    _own = pd.to_numeric(df.get("ownership", df.get("own_pct", 0)), errors="coerce").fillna(0)
-    df["own_display"] = _own
-
-    # Add Lock/Exclude boolean columns
-    _prev_lock = st.session_state.get("_opt_locked_players", set())
-    _prev_excl = st.session_state.get("_opt_excluded_players", set())
-    df["Lock"] = df["player_name"].isin(_prev_lock)
-    df["Exclude"] = df["player_name"].isin(_prev_excl)
-
-    # Position filter (NBA only)
-    if sport == "NBA" and pos_filter != "All" and "pos" in df.columns:
-        df = df[df["pos"].str.contains(pos_filter, case=False, na=False)].copy()
-
-    # Select and order columns based on sport + contest
-    is_cash = "cash" in contest_label.lower()
-    is_pga = sport == "PGA"
-
-    if is_pga:
-        cols = ["Lock", "Exclude", "player_name", "salary", "proj", "own_display",
-                "edge_score", "value"]
-        rename = {
-            "player_name": "Player", "salary": "Salary",
-            "proj": "Proj", "own_display": "Own%",
-            "edge_score": "Edge", "value": "Value",
-        }
-        # Add SG / course fit if available
-        for c, label in [("sg_total", "SG Total"), ("course_fit", "Course Fit")]:
-            if c in df.columns:
-                cols.insert(-2, c)
-                rename[c] = label
-    elif is_cash:
-        cols = ["Lock", "Exclude", "player_name", "team", "opp", "pos",
-                "salary", "proj", "floor", "own_display", "value"]
-        rename = {
-            "player_name": "Player", "team": "Team", "opp": "Opp",
-            "pos": "Pos", "salary": "Salary", "proj": "Proj",
-            "floor": "Floor", "own_display": "Own%", "value": "Value",
-        }
-    else:
-        # GPP / Showdown
-        cols = ["Lock", "Exclude", "player_name", "team", "opp", "pos",
-                "salary", "proj", "own_display", "edge_score", "value",
-                "edge_label"]
-        rename = {
-            "player_name": "Player", "team": "Team", "opp": "Opp",
-            "pos": "Pos", "salary": "Salary", "proj": "Proj",
-            "own_display": "Own%", "edge_score": "Edge",
-            "value": "Value", "edge_label": "Label",
-        }
-
-    # Keep only columns that exist
-    cols = [c for c in cols if c in df.columns]
-    display = df[cols].copy()
-    display = display.rename(columns={k: v for k, v in rename.items() if k in display.columns})
-
-    # Sort by Edge desc (GPP), or Proj desc (Cash), or Proj desc (PGA)
-    if "Edge" in display.columns and not is_cash:
-        display = display.sort_values("Edge", ascending=False, na_position="last")
-    elif "Proj" in display.columns:
-        display = display.sort_values("Proj", ascending=False, na_position="last")
-
-    return display.reset_index(drop=True)
-
-
-# ── Lineup builder (same engine, cleaned up) ──────────────────────
 
 def _build_lineups(
     pool: pd.DataFrame,
     num_lineups: int,
     max_exposure: float,
+    min_exposure: float,
     min_salary: int,
+    proj_col: str,
     archetype: str,
-    slate,
+    slate: "SlateState",
     lock_names: list,
     exclude_names: list,
-    contest_label: str,
+    contest_label: str = "GPP Main",
 ) -> tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
     """Build lineups using the appropriate engine (Classic / Showdown)."""
     pool = pool.copy()
-
+    # If edge-adjusted projections exist, promote them to 'proj' so the
+    # archetype layer and optimizer both operate on the adjusted numbers.
     if "effective_proj" in pool.columns:
-        pool["raw_proj"] = pool["proj"].copy()
+        pool["raw_proj"] = pool["proj"].copy()  # preserve original for reference
         pool["proj"] = pool["effective_proj"]
-
+    # Ensure player_id column exists (pool from The Lab may only have player_name)
     if "player_id" not in pool.columns:
         if "player_name" in pool.columns:
             pool["player_id"] = pool["player_name"]
         elif "dk_player_id" in pool.columns:
             pool["player_id"] = pool["dk_player_id"]
-
-    _contest_type_map = {
-        "GPP Main": "gpp", "GPP Early": "gpp", "GPP Late": "gpp",
-        "Cash Main": "cash", "Showdown": "showdown", "PGA GPP": "gpp",
-    }
-
-    proj_col = "proj"
-    if "cash" in contest_label.lower() and "floor" in pool.columns:
-        proj_col = "floor"
-
-    cfg: Dict[str, Any] = {
-        "NUM_LINEUPS": num_lineups,
-        "SALARY_CAP": slate.salary_cap,
-        "MAX_EXPOSURE": max_exposure,
-        "MIN_SALARY_USED": min_salary,
-        "LOCK": lock_names or [],
-        "EXCLUDE": exclude_names or [],
-        "PROJ_COL": proj_col,
-        "CONTEST_TYPE": _contest_type_map.get(contest_label, "gpp"),
-    }
-
-    # Inject per-player exposure caps from edge overrides
-    _eo = st.session_state.get("_edge_overrides", {})
-    if _eo.get("max_exposure_players"):
-        cfg["PLAYER_MAX_EXPOSURE"] = _eo["max_exposure_players"]
-    if _eo.get("tier_player_names"):
-        cfg["TIER_CONSTRAINTS"] = {
-            "tier_player_names": _eo["tier_player_names"],
-            "tier_min_players": _eo.get("tier_min_players", {}),
-            "tier_max_players": _eo.get("tier_max_players", {}),
-        }
-
     try:
+        # Map UI contest label → CONTEST_TYPE for the optimizer
+        # GPP Main/Early/Late → "gpp", Cash Main → "cash", Showdown → "showdown"
+        _contest_type_map = {
+            "GPP Main": "gpp", "GPP Early": "gpp", "GPP Late": "gpp",
+            "Cash Main": "cash", "Showdown": "showdown",
+        }
+        cfg = {
+            "NUM_LINEUPS": num_lineups,
+            "SALARY_CAP": slate.salary_cap,
+            "MAX_EXPOSURE": max_exposure,
+            "MIN_SALARY_USED": min_salary,
+            "LOCK": lock_names or [],
+            "EXCLUDE": exclude_names or [],
+            "PROJ_COL": proj_col,
+            "CONTEST_TYPE": _contest_type_map.get(contest_label, "gpp"),
+        }
+        # Inject per-player exposure caps from edge overrides
+        _eo = st.session_state.get("_edge_overrides", {})
+        if _eo.get("max_exposure_players"):
+            cfg["PLAYER_MAX_EXPOSURE"] = _eo["max_exposure_players"]
+        # Inject tier-based lineup composition constraints
+        if _eo.get("tier_player_names"):
+            cfg["TIER_CONSTRAINTS"] = {
+                "tier_player_names": _eo["tier_player_names"],
+                "tier_min_players": _eo.get("tier_min_players", {}),
+                "tier_max_players": _eo.get("tier_max_players", {}),
+            }
         if slate.is_showdown:
             lineups_df, expo_df = build_showdown_lineups(pool, cfg)
         else:
@@ -285,14 +197,17 @@ def _build_lineups(
         return None, None
 
 
-# ── Late-swap suggestions ──────────────────────────────────────────
-
 def _late_swap_suggestions(
     pool: pd.DataFrame,
     lineups_df: Optional[pd.DataFrame],
     injury_updates: list,
 ) -> list[dict]:
-    """Generate late-swap candidates using pre-baked GTD rules."""
+    """Generate late-swap candidates using pre-baked GTD rules.
+
+    Rules:
+    - OUT → pivot to highest-value replacement at same position
+    - Limited / GTD → reduce exposure suggestion
+    """
     suggestions: list[dict] = []
     if lineups_df is None or lineups_df.empty:
         return suggestions
@@ -302,13 +217,17 @@ def _late_swap_suggestions(
     player_pool_map: dict = {}
     if not pool.empty and "player_name" in pool.columns:
         for _, row in pool.iterrows():
-            player_pool_map[str(row.get("player_name", ""))] = row.to_dict()
+            pname = str(row.get("player_name", ""))
+            player_pool_map[pname] = row.to_dict()
 
     for update in injury_updates:
         pname = str(update.get("player_name", ""))
         status = str(update.get("status", "")).upper()
+
         if not pname:
             continue
+
+        # Check if player is in lineups
         in_lineups = False
         if "player_name" in lineups_df.columns:
             in_lineups = pname in lineups_df["player_name"].values
@@ -316,9 +235,11 @@ def _late_swap_suggestions(
             continue
 
         if status in ("OUT", "IR", "O"):
+            # Find replacement: same position, highest proj, not in lineups
             player_row = player_pool_map.get(pname, {})
             pos = player_row.get("pos", "")
             current_salary = float(player_row.get("salary", 0) or 0)
+
             in_lineup_players = set(lineups_df["player_name"].tolist()) if "player_name" in lineups_df.columns else set()
             candidates = [
                 row for _, row in pool.iterrows()
@@ -333,7 +254,8 @@ def _late_swap_suggestions(
             if candidates:
                 best = max(candidates, key=lambda r: float(r.get("proj", 0) or 0))
                 suggestions.append({
-                    "action": "PIVOT", "out_player": pname,
+                    "action": "PIVOT",
+                    "out_player": pname,
                     "in_player": best.get("player_name", ""),
                     "pos": pos,
                     "salary_delta": int(float(best.get("salary", 0) or 0) - current_salary),
@@ -341,134 +263,84 @@ def _late_swap_suggestions(
                 })
             else:
                 suggestions.append({
-                    "action": "PIVOT", "out_player": pname,
-                    "in_player": "(no replacement found)", "pos": pos,
-                    "salary_delta": 0, "reason": f"{pname} is {status}",
+                    "action": "PIVOT",
+                    "out_player": pname,
+                    "in_player": "(no replacement found)",
+                    "pos": pos,
+                    "salary_delta": 0,
+                    "reason": f"{pname} is {status}",
                 })
+
         elif status in ("GTD", "Q", "QUESTIONABLE", "DOUBTFUL", "LIMITED"):
             suggestions.append({
-                "action": "REDUCE_EXPOSURE", "out_player": pname, "in_player": "",
+                "action": "REDUCE_EXPOSURE",
+                "out_player": pname,
+                "in_player": "",
                 "pos": player_pool_map.get(pname, {}).get("pos", ""),
                 "salary_delta": 0,
-                "reason": f"{pname} is {status} — reduce exposure",
+                "reason": f"{pname} is {status} – reduce exposure",
             })
+
     return suggestions
 
 
-# =====================================================================
-# MAIN PAGE
-# =====================================================================
+# ---------------------------------------------------------------------------
+# Main page
+# ---------------------------------------------------------------------------
 
 def main() -> None:
-    st.set_page_config(layout="wide") if not hasattr(st, "_is_running_with_streamlit") else None
+    st.title("🏗️ Build & Publish")
+    st.caption("Lock in the lineups. Ricky builds from edges, not gut feels.")
 
-    # ── Load state ─────────────────────────────────────────────────
     slate = get_slate_state()
+    edge = get_edge_state()
     sim = get_sim_state()
     lu_state = get_lineup_state()
 
-    # ── 1. Header ──────────────────────────────────────────────────
-    st.title("🎯 Lineup Optimizer")
+    # ── Edge Check Gate ───────────────────────────────────────────────────
+    if not edge.ricky_edge_check:
+        st.error(
+            "Edge Analysis not approved. "
+            "Complete the approval on **Ricky's Edge Analysis** before building lineups."
+        )
+        st.stop()
 
-    # ── 2. Sport toggle ────────────────────────────────────────────
-    sport = getattr(slate, "sport", "NBA") or "NBA"
-    _pool_has_pga = False
-    if slate.player_pool is not None and not slate.player_pool.empty:
-        _positions = set(slate.player_pool.get("pos", pd.Series()).dropna().unique())
-        _pool_has_pga = _positions == {"G"} or sport == "PGA"
-
-    if _pool_has_pga:
-        sport = st.radio("Sport", ["NBA", "PGA"], index=1 if sport == "PGA" else 0,
-                         horizontal=True, key="_opt_sport")
-    else:
-        sport = "NBA"
-
-    # ── 3. Slate check ─────────────────────────────────────────────
     if not slate.is_ready():
-        st.warning("No slate loaded. Go to **The Lab** and load a slate first.")
+        st.warning("No slate published. Go to **The Lab** and load a slate first.")
         st.stop()
 
     pool: pd.DataFrame = slate.player_pool.copy()
     pool = _apply_sim_learnings(pool, sim)
 
-    # Slate status bar
-    _n_games = len(_extract_games(pool))
-    _n_players = len(pool)
-    _game_str = f"{_n_games} games" if _n_games else ""
-    _cap_str = f"${slate.salary_cap:,} cap"
-    _date_str = slate.slate_date or ""
-    _parts = [p for p in [_date_str, _game_str, f"{_n_players} players", _cap_str] if p]
-    st.caption(f"📋 {' · '.join(_parts)}")
-
-    # ── 4. Contest type selector ───────────────────────────────────
-    if sport == "PGA":
-        _labels = PGA_UI_CONTEST_LABELS
-        _label_map = PGA_UI_CONTEST_MAP
-    else:
-        _labels = UI_CONTEST_LABELS
-        _label_map = UI_CONTEST_MAP
-
-    # Inherit from Lab if available
-    _REVERSE_UI_MAP = {v: k for k, v in _label_map.items()}
-    _lab_ui = _REVERSE_UI_MAP.get(slate.contest_name, _labels[0]) if slate.contest_name else _labels[0]
-    _default_idx = _labels.index(_lab_ui) if _lab_ui in _labels else 0
-
-    _ui_contest = st.radio(
-        "Contest Type",
-        _labels,
-        index=_default_idx,
-        horizontal=True,
-        key="_opt_contest",
-    )
-    contest_label = _label_map[_ui_contest]
-    preset = CONTEST_PRESETS.get(contest_label, {})
-
-    # ── 5. Build settings row ──────────────────────────────────────
-    col_lu, col_exp, col_sal = st.columns(3)
-    with col_lu:
-        num_lineups = st.number_input(
-            "# Lineups", min_value=1, max_value=150,
-            value=int(preset.get("default_lineups", preset.get("num_lineups", 20))),
-            key="_opt_num_lineups",
-        )
-    with col_exp:
-        max_exp = st.slider(
-            "Max Exposure", min_value=0.10, max_value=1.0, step=0.05,
-            value=float(preset.get("default_max_exposure", preset.get("max_exposure", 0.50))),
-            key="_opt_max_exp",
-        )
-    with col_sal:
-        min_salary = st.number_input(
-            "Min Salary Used", min_value=40000, max_value=50000, step=500,
-            value=int(preset.get("min_salary", preset.get("min_salary_used", 46000))),
-            key="_opt_min_salary",
-        )
-
-    # ── Game filter (expander) ─────────────────────────────────────
-    all_games = _extract_games(pool)
-    build_games: list[str] = []
-    if all_games and sport == "NBA":
-        _lab_games = slate.selected_games if hasattr(slate, "selected_games") else []
-        _default_all = not _lab_games
-        with st.expander(f"Games ({len(all_games)})", expanded=False):
-            for _g in all_games:
-                _default_on = _g in _lab_games if _lab_games else _default_all
-                if st.checkbox(_g, value=_default_on, key=f"_opt_gf_{_g}"):
-                    build_games.append(_g)
-        if build_games and len(build_games) < len(all_games):
-            pool = _filter_pool_by_games(pool, build_games)
-
-    # ── Compute edge metrics ───────────────────────────────────────
+    # ── Apply Ricky's Edge adjustments to the pool ────────────────────
     _edge_df = getattr(slate, "edge_df", None)
     if _edge_df is None or (hasattr(_edge_df, "empty") and _edge_df.empty):
         try:
-            _edge_df = compute_edge_metrics(
-                pool, calibration_state=slate.calibration_state, sport=sport,
-            )
+            _edge_df = compute_edge_metrics(pool, calibration_state=slate.calibration_state)
         except Exception:
             _edge_df = None
 
-    # Apply edge adjustments (breakout detection, tier classification)
+    # Auto-classify tiers on edge_df (same logic as ricky_edge.py)
+    # Calibrated from 21-slate backtest (Feb 7 – Mar 5 2026, 3512 player-slates).
+    if _edge_df is not None and not _edge_df.empty:
+        if "auto_tier" not in _edge_df.columns:
+            def _classify(row):
+                sal = float(row.get("salary", 6000) or 6000)
+                own = float(row.get("own_pct", 15) or 15)
+                proj = float(row.get("proj", 15) or 15)
+                val = proj / max(sal / 1000.0, 1.0)
+                if sal >= 8000:
+                    return "fade"
+                if sal < 6000 and val >= 2.0 and own < 15:
+                    return "core"
+                if own < 12 and val >= 2.5 and sal < 7500:
+                    return "leverage"
+                if val >= 3.0:
+                    return "value"
+                return "neutral"
+            _edge_df = _edge_df.copy()
+            _edge_df["auto_tier"] = _edge_df.apply(_classify, axis=1)
+
     _breakout_df = None
     try:
         _breakout_df = compute_breakout_candidates(pool, top_n=15)
@@ -476,272 +348,495 @@ def main() -> None:
         pass
 
     pool, _edge_overrides = apply_edge_adjustments(pool, edge_df=_edge_df, breakout_df=_breakout_df)
+
+    # Store overrides in session for use during build
     st.session_state["_edge_overrides"] = _edge_overrides
 
-    # ── 6. Player pool table ───────────────────────────────────────
+    _n_adj = _edge_overrides.get("adjustments_applied", 0)
+    _tier_names = _edge_overrides.get("tier_player_names", {})
+    _has_tiers = bool(_tier_names)
+
+    if _n_adj > 0 or _has_tiers:
+        _n_excl = len(_edge_overrides.get("auto_exclude", []))
+        _n_fade = len(_edge_overrides.get("max_exposure_players", {}))
+        _n_core = len(_edge_overrides.get("min_exposure_players", []))
+        _parts = []
+        if _n_adj:
+            _parts.append(f"{_n_adj} proj adjustments")
+        if _has_tiers:
+            tier_counts = {t: len(names) for t, names in _tier_names.items()}
+            _parts.append(f"tiers: {', '.join(f'{t}={c}' for t, c in tier_counts.items())}")
+            _tier_min = _edge_overrides.get("tier_min_players", {})
+            _tier_max = _edge_overrides.get("tier_max_players", {})
+            if _tier_min:
+                for k, v in _tier_min.items():
+                    _parts.append(f"min {v} {k.replace('_or_', '/')}")
+            if _tier_max:
+                for k, v in _tier_max.items():
+                    _parts.append(f"max {v} {k}/lineup")
+        if _n_fade:
+            _parts.append(f"{_n_fade} fade caps")
+        if _n_excl:
+            _parts.append(f"{_n_excl} auto-excluded")
+        st.caption(f"✅ Edge → Optimizer: {', '.join(_parts)}")
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Section 1: Contest Selection Advisor
+    # ─────────────────────────────────────────────────────────────────────
+    st.subheader("Contest Advisor")
+
+    # Read RCI results from sim state (written by The Lab's RCI section)
+    _rci_data = sim.contest_gauges  # RCI stores results here via set_rci_result
+    _UI_ADVISOR_LABELS = [("GPP", "GPP Main"), ("Cash", "Cash Main"), ("Showdown", "Showdown")]
+    _any_rci = any(_rci_data.get(label, {}).get("rci_score") for _, label in _UI_ADVISOR_LABELS)
+    if _any_rci:
+        advisor_rows = []
+        for ui_label, label in _UI_ADVISOR_LABELS:
+            preset = CONTEST_PRESETS.get(label, {})
+            rci_entry = _rci_data.get(label, {})
+            rci_score = float(rci_entry.get("rci_score", 0))
+            rci_status = rci_entry.get("rci_status", "red")
+            rec = (
+                "✅ Strong" if rci_score >= 70
+                else "✅ Playable" if rci_score >= 45
+                else "⚠️ Thin" if rci_score >= 25
+                else "❌ Not calibrated"
+            )
+            advisor_rows.append({
+                "Contest": ui_label,
+                "Build Mode": _CONTEST_TO_BUILD_MODE.get(label, "median"),
+                "Default Lineups": preset.get("default_lineups", 1),
+                "RCI": f"{int(rci_score)}/100",
+                "Recommendation": rec,
+            })
+        st.dataframe(pd.DataFrame(advisor_rows), use_container_width=True, hide_index=True)
+    else:
+        st.info("Run edge analysis or sims in **The Lab** for contest recommendations.")
+
     st.divider()
 
-    # Position filter tabs (NBA only)
-    pos_filter = "All"
-    if sport == "NBA":
-        pos_filter = st.radio(
-            "Position",
-            _NBA_POS_FILTERS,
-            horizontal=True,
-            key="_opt_pos_filter",
-            label_visibility="collapsed",
+    # ─────────────────────────────────────────────────────────────────────
+    # Section 2: Build Controls
+    # ─────────────────────────────────────────────────────────────────────
+    st.subheader("Build Config")
+
+    # Auto-inherit contest type from Lab selection (mapped to UI labels)
+    _REVERSE_UI_MAP = {v: k for k, v in UI_CONTEST_MAP.items()}
+    _lab_ui = _REVERSE_UI_MAP.get(slate.contest_name, "GPP") if slate.contest_name else "GPP"
+    _default_ui_idx = UI_CONTEST_LABELS.index(_lab_ui) if _lab_ui in UI_CONTEST_LABELS else 0
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        _ui_contest = st.selectbox("Contest Type", UI_CONTEST_LABELS, index=_default_ui_idx, key="_bp_contest")
+        contest_label = UI_CONTEST_MAP[_ui_contest]
+        preset = CONTEST_PRESETS.get(contest_label, {})
+    with col2:
+        default_mode = _CONTEST_TO_BUILD_MODE.get(contest_label, "median")
+        build_mode = st.selectbox(
+            "Build Mode",
+            ["floor", "median", "ceiling"],
+            index=["floor", "median", "ceiling"].index(default_mode),
+            key="_bp_build_mode",
+        )
+    with col3:
+        archetype = st.selectbox(
+            "Archetype",
+            list(DFS_ARCHETYPES.keys()),
+            index=list(DFS_ARCHETYPES.keys()).index(preset.get("archetype", "Balanced"))
+            if preset.get("archetype", "Balanced") in DFS_ARCHETYPES else 0,
+            key="_bp_archetype",
         )
 
-    display_df = _build_pool_display(pool, _edge_df, sport, contest_label, pos_filter)
+    col4, col5, col6 = st.columns(3)
+    with col4:
+        num_lineups = st.number_input(
+            "# Lineups", min_value=1, max_value=150,
+            value=int(preset.get("default_lineups", 1)),
+            key="_bp_num_lineups",
+        )
+    with col5:
+        max_exp = st.slider(
+            "Max Exposure", min_value=0.1, max_value=1.0, step=0.05,
+            value=float(preset.get("default_max_exposure", 0.5)),
+            key="_bp_max_exp",
+        )
+    with col6:
+        min_salary = st.number_input(
+            "Min Salary Used", min_value=40000, max_value=50000, step=100,
+            value=int(preset.get("min_salary", 48000)),
+            key="_bp_min_salary",
+        )
 
-    # Column configs for st.data_editor
-    col_config: Dict[str, Any] = {
-        "Lock": st.column_config.CheckboxColumn("🔒", width="small", default=False),
-        "Exclude": st.column_config.CheckboxColumn("✕", width="small", default=False),
-    }
-    if "Salary" in display_df.columns:
-        col_config["Salary"] = st.column_config.NumberColumn("Salary", format="$%d")
-    if "Proj" in display_df.columns:
-        col_config["Proj"] = st.column_config.NumberColumn("Proj", format="%.1f")
-    if "Floor" in display_df.columns:
-        col_config["Floor"] = st.column_config.NumberColumn("Floor", format="%.1f")
-    if "Own%" in display_df.columns:
-        col_config["Own%"] = st.column_config.NumberColumn("Own%", format="%.1f%%")
-    if "Edge" in display_df.columns:
-        col_config["Edge"] = st.column_config.NumberColumn("Edge", format="%.2f")
-    if "Value" in display_df.columns:
-        col_config["Value"] = st.column_config.NumberColumn("Value", format="%.1fx")
-    if "SG Total" in display_df.columns:
-        col_config["SG Total"] = st.column_config.NumberColumn("SG Total", format="%.2f")
-    if "Course Fit" in display_df.columns:
-        col_config["Course Fit"] = st.column_config.NumberColumn("Fit", format="%.2f")
-    if "Label" in display_df.columns:
-        col_config["Label"] = st.column_config.TextColumn("Label", width="medium")
-    if "Player" in display_df.columns:
-        col_config["Player"] = st.column_config.TextColumn("Player", width="medium")
+    # ── Game Selector — checkboxes in expander ─────────────────────
+    all_games = _extract_games_build(pool)
+    build_games: list[str] = []
+    if all_games:
+        _lab_games = slate.selected_games if hasattr(slate, "selected_games") else []
+        # Default: all games selected unless Lab had a subset
+        _default_all = not _lab_games
+        with st.expander(f"Games ({len(all_games)})", expanded=False):
+            for _g in all_games:
+                _default_on = _g in _lab_games if _lab_games else _default_all
+                if st.checkbox(_g, value=_default_on, key=f"_bp_gf_{_g}"):
+                    build_games.append(_g)
+        if build_games and len(build_games) < len(all_games):
+            pool = _filter_pool_by_games_build(pool, build_games)
 
-    # Render editable table
-    edited_df = st.data_editor(
-        display_df,
-        column_config=col_config,
-        use_container_width=True,
-        hide_index=True,
-        key="_opt_pool_editor",
-        height=min(600, 40 + len(display_df) * 35),
+    # Lock/Exclude inline (no expander)
+    player_names = sorted(pool["player_name"].dropna().tolist()) if "player_name" in pool.columns else []
+    col_lock, col_excl = st.columns(2)
+    with col_lock:
+        lock_names = st.multiselect("Lock (in every lineup)", player_names, key="_bp_lock")
+    with col_excl:
+        exclude_names = st.multiselect("Exclude", player_names, key="_bp_exclude")
+
+    _bp_game_note = f"  |  {len(build_games)} of {len(all_games)} games" if build_games else ""
+    st.caption(
+        f"**{len(pool)} players**  |  "
+        f"Cap: ${slate.salary_cap:,}{_bp_game_note}"
     )
 
-    # Extract lock / exclude selections from edited table
-    _locked = set()
-    _excluded = set()
-    _name_col = "Player" if "Player" in edited_df.columns else "player_name"
-    if _name_col in edited_df.columns:
-        if "Lock" in edited_df.columns:
-            _locked = set(edited_df.loc[edited_df["Lock"] == True, _name_col].tolist())
-        if "Exclude" in edited_df.columns:
-            _excluded = set(edited_df.loc[edited_df["Exclude"] == True, _name_col].tolist())
-    st.session_state["_opt_locked_players"] = _locked
-    st.session_state["_opt_excluded_players"] = _excluded
-
-    # Lock/exclude summary
-    _lock_excl_parts = []
-    if _locked:
-        _lock_excl_parts.append(f"🔒 {len(_locked)} locked")
-    if _excluded:
-        _lock_excl_parts.append(f"✕ {len(_excluded)} excluded")
-    _auto_excl = _edge_overrides.get("auto_exclude", [])
-    if _auto_excl:
-        _lock_excl_parts.append(f"⚠ {len(_auto_excl)} auto-excluded (bust risk)")
-    if _lock_excl_parts:
-        st.caption(" · ".join(_lock_excl_parts))
-
-    # ── 7. Build button ────────────────────────────────────────────
     st.divider()
 
-    archetype = preset.get("archetype", "Balanced")
-    _merged_exclude = list(_excluded | set(_auto_excl))
+    # ─────────────────────────────────────────────────────────────────────
+    # Section 3: Build Lineups
+    # ─────────────────────────────────────────────────────────────────────
+    st.subheader("Build Lineups")
 
-    if st.button("⚡ Build Lineups", type="primary", key="_opt_build", use_container_width=True):
-        with st.spinner(f"Building {num_lineups} {_ui_contest} lineups..."):
+    proj_col = _get_proj_col(pool, build_mode)
+
+    # Merge edge overrides into exclude list
+    _eo = st.session_state.get("_edge_overrides", {})
+    _auto_excl = _eo.get("auto_exclude", [])
+    _merged_exclude = list(set(list(exclude_names) + _auto_excl))
+    if _auto_excl:
+        st.caption(f"Auto-excluded (bust risk): {', '.join(_auto_excl)}")
+
+    if st.button("Build Lineups", type="primary", key="_bp_build"):
+        with st.spinner(f"Building {num_lineups} {contest_label} lineups…"):
             lineups_df, expo_df = _build_lineups(
                 pool,
                 num_lineups=int(num_lineups),
                 max_exposure=float(max_exp),
+                min_exposure=0.0,
                 min_salary=int(min_salary),
+                proj_col=proj_col,
                 archetype=str(archetype),
                 slate=slate,
-                lock_names=list(_locked),
+                lock_names=list(lock_names),
                 exclude_names=_merged_exclude,
                 contest_label=contest_label,
             )
             if lineups_df is not None:
                 lu_state.set_lineups(
-                    contest_label, lineups_df,
+                    contest_label,
+                    lineups_df,
                     {
+                        "build_mode": build_mode,
                         "num_lineups": num_lineups,
                         "max_exposure": max_exp,
                         "min_salary": min_salary,
                         "archetype": archetype,
+                        "proj_col": proj_col,
                     },
                 )
                 if expo_df is not None:
                     lu_state.exposures[contest_label] = expo_df
-
-                # Boom/bust ranking
+                # ── Boom/bust ranking ─────────────────────────────────────
                 player_results = sim.player_results
                 if player_results is not None and not player_results.empty:
-                    try:
-                        bb_rankings = compute_lineup_boom_bust(
-                            lineups_df=lineups_df,
-                            sim_player_results=player_results,
-                            contest_label=contest_label,
-                        )
-                        lu_state.set_boom_bust(contest_label, bb_rankings)
-                    except Exception:
-                        pass
-
+                    bb_rankings = compute_lineup_boom_bust(
+                        lineups_df=lineups_df,
+                        sim_player_results=player_results,
+                        contest_label=contest_label,
+                    )
+                    lu_state.set_boom_bust(contest_label, bb_rankings)
                 set_lineup_state(lu_state)
-                st.success(f"Built {num_lineups} lineups for **{_ui_contest}**.")
+                st.success(f"Built {num_lineups} lineups for **{contest_label}**.")
 
-    # ── 8. Lineup results ──────────────────────────────────────────
+    # ── Built Lineups Summary (across all contest types) ──────────────────
     built_labels = [lbl for lbl, df in lu_state.lineups.items() if df is not None and not df.empty]
-    if not built_labels:
-        return
+    if len(built_labels) > 1:
+        st.divider()
+        st.subheader("Lineup Summary")
+        _summary_rows = []
+        for _bl in built_labels:
+            _bl_df = lu_state.lineups[_bl]
+            _bl_n = len(_bl_df["lineup_index"].unique()) if "lineup_index" in _bl_df.columns else 0
+            _bl_cfg = lu_state.build_configs.get(_bl, {})
+            _bl_pub = "✅" if _bl in lu_state.published_sets else "—"
+            _summary_rows.append({
+                "Contest": _bl,
+                "Lineups": _bl_n,
+                "Mode": _bl_cfg.get("build_mode", "—"),
+                "Archetype": _bl_cfg.get("archetype", "—"),
+                "Published": _bl_pub,
+            })
+        st.dataframe(pd.DataFrame(_summary_rows), use_container_width=True, hide_index=True)
 
-    # Show results for the current contest type
-    view_label = contest_label if contest_label in built_labels else built_labels[0]
-    view_df = lu_state.lineups.get(view_label)
-
-    if view_df is None or view_df.empty:
-        return
-
-    st.divider()
-
-    n_lu = len(view_df["lineup_index"].unique()) if "lineup_index" in view_df.columns else 0
-
-    # ── 8a. Summary metrics ────────────────────────────────────────
-    _total_proj_col = "total_proj" if "total_proj" in view_df.columns else None
-    _total_sal_col = "total_salary" if "total_salary" in view_df.columns else None
-
-    if _total_proj_col or "proj" in view_df.columns:
-        _sc1, _sc2, _sc3, _sc4 = st.columns(4)
-        _sc1.metric("Lineups", n_lu)
-
-        if _total_sal_col:
-            _lu_sals = view_df.groupby("lineup_index")[_total_sal_col].first()
-            _sc2.metric("Avg Salary", f"${_lu_sals.mean():,.0f}")
-        elif "salary" in view_df.columns:
-            _lu_sals = view_df.groupby("lineup_index")["salary"].sum()
-            _sc2.metric("Avg Salary", f"${_lu_sals.mean():,.0f}")
-
-        if _total_proj_col:
-            _lu_projs = view_df.groupby("lineup_index")[_total_proj_col].first()
-            _sc3.metric("Avg Proj", f"{_lu_projs.mean():.1f}")
-            _sc4.metric("Top Lineup", f"{_lu_projs.max():.1f}")
-        elif "proj" in view_df.columns:
-            _lu_projs = view_df.groupby("lineup_index")["proj"].sum()
-            _sc3.metric("Avg Proj", f"{_lu_projs.mean():.1f}")
-            _sc4.metric("Top Lineup", f"{_lu_projs.max():.1f}")
-
-    # ── 8b. Exposure table ─────────────────────────────────────────
-    expo_df = lu_state.exposures.get(view_label)
-    if expo_df is not None and not expo_df.empty:
-        with st.expander("Player Exposures", expanded=False):
-            _expo_fmt = standard_player_format(expo_df)
-            st.dataframe(
-                expo_df.style.format(_expo_fmt, na_rep=""),
-                use_container_width=True, hide_index=True,
-            )
-
-    # ── 8c. Lineup cards (paged) ───────────────────────────────────
-    pipeline_df = sim.pipeline_output.get(contest_label) or sim.pipeline_output.get("GPP_20")
-    bb_df = lu_state.get_boom_bust(view_label)
-
-    render_lineup_cards_paged(
-        lineups_df=view_df,
-        sim_results_df=pipeline_df,
-        salary_cap=slate.salary_cap,
-        nav_key=f"opt_lu_{view_label}",
-        boom_bust_df=bb_df,
-    )
-
-    # ── 8d. Boom/Bust Rankings ─────────────────────────────────────
-    if bb_df is not None and not bb_df.empty:
-        with st.expander("Lineup Rankings (Boom/Bust)", expanded=False):
-            _preset_mode = preset.get("tagging_mode", "ceiling")
-
-            def _colour_grade(val: str) -> str:
-                color = _GRADE_COLORS_HEX.get(str(val), "")
-                return f"background-color:{color};color:#fff;font-weight:700;" if color else ""
-
-            display_bb = bb_df.rename(columns={
-                "lineup_index": "Lineup #", "total_proj": "Total Proj",
-                "total_ceil": "Total Ceil", "total_floor": "Total Floor",
-                "avg_smash_prob": "Avg Smash%", "avg_bust_prob": "Avg Bust%",
-                "boom_score": "Boom Score", "bust_risk": "Bust Risk",
-                "boom_bust_rank": "Rank", "lineup_grade": "Grade",
-            }).copy()
-            _bb_fmt = standard_lineup_format(display_bb)
-            styled = display_bb.style.format(_bb_fmt, na_rep="").applymap(
-                _colour_grade, subset=["Grade"]
-            )
-            st.dataframe(styled, use_container_width=True, hide_index=True)
-
-    # ── 8e. Export & Publish ───────────────────────────────────────
-    st.divider()
-    col_csv, col_publish = st.columns(2)
-
-    with col_csv:
-        if st.button("📥 Prepare DK CSV", key="_opt_prep_csv"):
-            try:
-                if slate.is_showdown:
-                    csv_df = to_dk_showdown_upload_format(view_df)
-                else:
-                    csv_df = to_dk_upload_format(view_df)
-                csv_bytes = csv_df.to_csv(index=False).encode("utf-8")
-                fname = f"yakos_{_ui_contest.lower()}_{slate.slate_date}.csv"
-                st.download_button(
-                    label="Download CSV",
-                    data=csv_bytes,
-                    file_name=fname,
-                    mime="text/csv",
-                    key="_opt_download_csv",
-                )
-            except Exception as exc:
-                st.error(f"CSV export failed: {exc}")
-
-    with col_publish:
-        _is_published = view_label in lu_state.published_sets
-        _pub_label = "✅ Published" if _is_published else f"Publish to Edge Share"
-        if st.button(_pub_label, type="primary", key="_opt_publish", disabled=_is_published):
-            try:
-                _ts = datetime.now(timezone.utc).isoformat()
-                lu_state.publish(view_label, _ts)
+        # Publish All button
+        _unpublished = [lbl for lbl in built_labels if lbl not in lu_state.published_sets]
+        if _unpublished:
+            if st.button(f"Publish All ({len(built_labels)}) to Edge Share", type="primary", key="_bp_publish_all"):
+                _pub_ts = datetime.now(timezone.utc).isoformat()
+                for _pub_lbl in built_labels:
+                    lu_state.publish(_pub_lbl, _pub_ts)
                 set_lineup_state(lu_state)
+
+                # Build friends payload from the last-published slate
                 _eff_edge_df = slate.edge_df
                 if _eff_edge_df is None or _eff_edge_df.empty:
-                    _eff_edge_df = compute_edge_metrics(
-                        pool, calibration_state=slate.calibration_state, sport=sport,
-                    )
-                    slate.edge_df = _eff_edge_df
-                    from yak_core.state import set_slate_state
-                    set_slate_state(slate)
-                payload = publish_edge_and_lineups(slate, view_df)
-                st.session_state["_friends_payload"] = payload
-                st.success(f"**{_ui_contest}** published to Edge Share")
-            except Exception as exc:
-                st.error(f"Publish failed: {exc}")
+                    try:
+                        _eff_edge_df = compute_edge_metrics(pool, calibration_state=slate.calibration_state)
+                        slate.edge_df = _eff_edge_df
+                        from yak_core.state import set_slate_state  # noqa: PLC0415
+                        set_slate_state(slate)
+                    except Exception:
+                        pass
+                st.success(f"Published **{len(built_labels)}** lineup sets to Edge Share.")
 
-    # ── 9. Late Swap (collapsed) ───────────────────────────────────
+    # ── View individual lineups ──────────────────────────────────────────
+    if built_labels:
+        # Default to the contest type that was just built (matches the selector above)
+        _default_view_idx = built_labels.index(contest_label) if contest_label in built_labels else 0
+        view_label = st.selectbox("View lineups for", built_labels, index=_default_view_idx, key="_bp_view_label")
+        view_df = lu_state.lineups.get(view_label)
+
+        if view_df is not None and not view_df.empty:
+            n_lu = len(view_df["lineup_index"].unique()) if "lineup_index" in view_df.columns else 0
+            st.caption(f"{n_lu} lineup(s)")
+
+            # Pull pipeline metrics from SimState if available
+            pipeline_df = sim.pipeline_output.get(contest_label) or sim.pipeline_output.get("GPP_20")
+
+            # Pull boom/bust rankings for this label
+            bb_df = lu_state.get_boom_bust(view_label)
+
+            render_lineup_cards_paged(
+                lineups_df=view_df,
+                sim_results_df=pipeline_df,
+                salary_cap=slate.salary_cap,
+                nav_key=f"bp_lu_{view_label}",
+                boom_bust_df=bb_df,
+            )
+
+            # Exposure view
+            expo_df = lu_state.exposures.get(view_label)
+            if expo_df is not None and not expo_df.empty:
+                with st.expander("Player Exposures", expanded=False):
+                    _expo_fmt = standard_player_format(expo_df)
+                    st.dataframe(
+                        expo_df.style.format(_expo_fmt, na_rep=""),
+                        use_container_width=True, hide_index=True,
+                    )
+
+            # ── Boom/Bust Rankings ────────────────────────────────────────
+            if bb_df is not None and not bb_df.empty:
+                st.divider()
+                st.subheader("🏆 Lineup Rankings (Boom/Bust)")
+
+                # Contest-aware description
+                _preset = CONTEST_PRESETS.get(view_label, {})
+                _mode = _preset.get("tagging_mode", "ceiling")
+                if _mode == "floor":
+                    st.caption(
+                        "Lineups ranked by **floor safety** — boom_score weights "
+                        "floor (60%), projection (30%), and low bust risk (10%)."
+                    )
+                else:
+                    st.caption(
+                        "Lineups ranked by **ceiling upside** — boom_score weights "
+                        "ceiling (50%), smash probability (30%), and low bust risk (20%)."
+                    )
+
+                # Grade colour map for styling
+                def _colour_grade(val: str) -> str:
+                    color = _GRADE_COLORS_HEX.get(str(val), "")
+                    if color:
+                        return f"background-color:{color};color:#fff;font-weight:700;"
+                    return ""
+
+                display_bb = bb_df.rename(columns={
+                    "lineup_index": "Lineup #",
+                    "total_proj": "Total Proj",
+                    "total_ceil": "Total Ceil",
+                    "total_floor": "Total Floor",
+                    "avg_smash_prob": "Avg Smash%",
+                    "avg_bust_prob": "Avg Bust%",
+                    "boom_score": "Boom Score",
+                    "bust_risk": "Bust Risk",
+                    "boom_bust_rank": "Rank",
+                    "lineup_grade": "Grade",
+                }).copy()
+
+                # Apply standard lineup formatting
+                _bb_fmt = standard_lineup_format(display_bb)
+
+                styled = display_bb.style.format(_bb_fmt, na_rep="").applymap(_colour_grade, subset=["Grade"])
+                st.dataframe(styled, use_container_width=True, hide_index=True)
+
+                # Summary line
+                n_ab = int((bb_df["lineup_grade"].isin(["A", "B"])).sum())
+                type_label = "safe floor for cash" if _mode == "floor" else "high ceiling for GPP"
+                st.caption(f"**{n_ab} lineup(s)** graded A or B ({type_label}).")
+
+            # ── Lineup Actuals (historical slates only) ───────────────
+            _bp_has_actuals = (
+                "actual_fp" in pool.columns
+                and pool["actual_fp"].notna().any()
+            )
+            if _bp_has_actuals:
+                st.divider()
+                st.subheader("🎯 Lineup vs Actuals")
+                st.caption("How did these lineups actually perform?")
+                try:
+                    from yak_core.sim_accuracy import score_lineup_set, summarize_lineup_accuracy  # noqa: PLC0415
+
+                    _lu_verdicts = score_lineup_set(
+                        lineups_df=view_df,
+                        pool_df=pool,
+                        pipeline_df=pipeline_df,
+                    )
+                    if not _lu_verdicts.empty:
+                        _lu_summ = summarize_lineup_accuracy(_lu_verdicts)
+
+                        _lsc1, _lsc2, _lsc3 = st.columns(3)
+                        _lsc1.metric("Avg Actual", f"{_lu_summ.get('avg_actual', 0):.1f} FP")
+                        _avg_err = _lu_summ.get('avg_error', 0)
+                        _lsc2.metric("Avg Error", f"{_avg_err:+.1f} FP")
+                        _lsc3.metric("MAE", f"{_lu_summ.get('mae', 0):.1f} FP")
+
+                        # Show sim rating accuracy if available
+                        _rat_acc = _lu_summ.get("rating_accuracy")
+                        if _rat_acc is not None:
+                            _a_avg = _lu_summ.get("a_avg_actual")
+                            _d_avg = _lu_summ.get("d_avg_actual")
+                            _parts = [f"Rating accuracy: {_rat_acc*100:.0f}%"]
+                            if _a_avg is not None:
+                                _parts.append(f"A-rated avg: {_a_avg:.1f}")
+                            if _d_avg is not None:
+                                _parts.append(f"D-rated avg: {_d_avg:.1f}")
+                            st.caption(" · ".join(_parts))
+
+                        # Verdicts table
+                        _lv_show = [c for c in ["lineup_index", "total_proj", "total_actual",
+                                                "lineup_error", "actual_grade"]
+                                    if c in _lu_verdicts.columns]
+                        # Add sim columns if present
+                        for c in ["sim_rating", "sim_bucket", "rating_accurate"]:
+                            if c in _lu_verdicts.columns:
+                                _lv_show.append(c)
+
+                        _lv_display = _lu_verdicts[_lv_show].rename(columns={
+                            "lineup_index": "Lineup",
+                            "total_proj": "Projected",
+                            "total_actual": "Actual",
+                            "lineup_error": "Diff",
+                            "actual_grade": "Grade",
+                            "sim_rating": "Sim Rating",
+                            "sim_bucket": "Sim Grade",
+                            "rating_accurate": "Grade Match",
+                        })
+
+                        _lv_fmt = standard_lineup_format(_lv_display)
+                        if "Sim Rating" in _lv_display.columns:
+                            _lv_fmt["Sim Rating"] = "{:.0f}"
+
+                        def _color_lineup_diff(val):
+                            try:
+                                v = float(val)
+                            except (ValueError, TypeError):
+                                return ""
+                            return "color: #4caf82" if v > 0 else "color: #e05c5c" if v < 0 else ""
+
+                        try:
+                            _lv_styled = _lv_display.style.format(_lv_fmt, na_rep="")
+                            if "Diff" in _lv_display.columns:
+                                _lv_styled = _lv_styled.applymap(_color_lineup_diff, subset=["Diff"])
+                            st.dataframe(_lv_styled, use_container_width=True, hide_index=True)
+                        except Exception:
+                            st.dataframe(_lv_display, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("Not enough actuals to score lineups (need 50%+ of players matched).")
+                except Exception as _lv_exc:
+                    st.warning(f"Lineup scoring failed: {_lv_exc}")
+
+            st.divider()
+
+            # ── Export & Publish ──────────────────────────────────────────
+            st.subheader("Export & Publish")
+
+            col_csv, col_publish = st.columns(2)
+
+            with col_csv:
+                if st.button("Prepare DK CSV", key="_bp_prep_csv"):
+                    try:
+                        if slate.is_showdown:
+                            csv_df = to_dk_showdown_upload_format(view_df)
+                        else:
+                            csv_df = to_dk_upload_format(view_df)
+                        csv_bytes = csv_df.to_csv(index=False).encode("utf-8")
+                        fname = f"yakos_{view_label.replace(' ', '_').lower()}_{slate.slate_date}.csv"
+                        st.download_button(
+                            label="Download DK CSV",
+                            data=csv_bytes,
+                            file_name=fname,
+                            mime="text/csv",
+                            key="_bp_download_csv",
+                        )
+                    except Exception as exc:
+                        st.error(f"CSV export failed: {exc}")
+
+            with col_publish:
+                if st.button(f"Publish {view_label} to Edge Share", type="primary", key="_bp_publish"):
+                    try:
+                        # Publish lineup state
+                        _ts = datetime.now(timezone.utc).isoformat()
+                        lu_state.publish(view_label, _ts)
+                        set_lineup_state(lu_state)
+
+                        # Build friends payload
+                        _eff_edge_df = slate.edge_df
+                        if _eff_edge_df is None or _eff_edge_df.empty:
+                            _eff_edge_df = compute_edge_metrics(
+                                pool,
+                                calibration_state=slate.calibration_state,
+                            )
+                            slate.edge_df = _eff_edge_df
+                            from yak_core.state import set_slate_state  # noqa: PLC0415
+                            set_slate_state(slate)
+                        payload = publish_edge_and_lineups(slate, view_df)
+                        st.session_state["_friends_payload"] = payload
+                        st.success(f"**{view_label}** published to Edge Share")
+                    except Exception as exc:
+                        st.error(f"Publish failed: {exc}")
+
+    else:
+        st.info("Build lineups above to see results and export options.")
+
+    st.divider()
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Section 4: Late Swap Suggestions (S1.7)
+    # ─────────────────────────────────────────────────────────────────────
+    st.subheader("Late Swap")
+    st.caption("OUT → pivot to best replacement, GTD/Limited → reduce exposure.")
+
     injury_updates = st.session_state.get("_hub_injury_updates", [])
-    if injury_updates and built_labels:
-        with st.expander("Late Swap Suggestions", expanded=False):
-            swap_df = lu_state.lineups.get(view_label)
-            suggestions = _late_swap_suggestions(pool, swap_df, injury_updates)
-            if suggestions:
-                st.warning(f"⚠ {len(suggestions)} swap suggestion(s):")
-                st.dataframe(pd.DataFrame(suggestions), use_container_width=True, hide_index=True)
-            else:
-                st.info("No late-swap actions needed.")
+    if not injury_updates:
+        st.info("No injury updates loaded. Use **The Lab → Injury / News Refresh** to fetch updates.")
+    elif built_labels:
+        swap_label = st.selectbox("Contest for swap suggestions", built_labels, key="_bp_swap_label")
+        swap_df = lu_state.lineups.get(swap_label)
+        suggestions = _late_swap_suggestions(pool, swap_df, injury_updates)
+
+        if suggestions:
+            st.warning(f"⚠️ {len(suggestions)} swap suggestion(s) for **{swap_label}**:")
+            st.dataframe(pd.DataFrame(suggestions), use_container_width=True, hide_index=True)
+        else:
+            st.success("✅ No late-swap actions needed for this contest.")
+    else:
+        st.info("Build lineups first to generate late-swap suggestions.")
 
 
 main()
