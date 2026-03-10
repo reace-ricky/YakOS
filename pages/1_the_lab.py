@@ -1773,9 +1773,13 @@ def main() -> None:
                 f"floor_dampen = `{_sb_knobs['floor_dampen']}`"
             )
 
+            _sb_sport = st.radio(
+                "Sport", ["NBA", "PGA"], horizontal=True, key="_lab_sb_sport",
+            )
+
             if st.button("Run Sandbox", key="_lab_run_sandbox"):
-                with st.spinner("Scoring sims against archived slates..."):
-                    _sb_result = run_sandbox(knobs=_sb_knobs)
+                with st.spinner(f"Scoring {_sb_sport} sims against archived slates..."):
+                    _sb_result = run_sandbox(knobs=_sb_knobs, sport=_sb_sport)
 
                 if "error" in _sb_result:
                     st.error(_sb_result["error"])

@@ -363,9 +363,17 @@ def _detect_breakouts(
 def run_sandbox(
     knobs: Optional[Dict[str, float]] = None,
     contest_type: Optional[str] = None,
+    sport: Optional[str] = None,
     n_sims: int = 1000,
 ) -> Dict[str, Any]:
     """Run sim sandbox across all archived slates.
+
+    Parameters
+    ----------
+    sport : str, optional
+        "NBA" or "PGA". Filters archived slates by filename prefix.
+        PGA files start with ``pga_``, NBA files do not.
+        None = include all slates.
 
     Returns aggregate KPIs + per-slate breakdown + recommendations.
     """
@@ -379,6 +387,14 @@ def run_sandbox(
     parquets = sorted([
         f for f in os.listdir(archive_dir) if f.endswith(".parquet")
     ])
+
+    # Sport filter: PGA files are prefixed "pga_", NBA files are not
+    if sport:
+        _sp = sport.upper()
+        if _sp == "PGA":
+            parquets = [f for f in parquets if f.startswith("pga_")]
+        elif _sp == "NBA":
+            parquets = [f for f in parquets if not f.startswith("pga_")]
 
     if contest_type:
         ct = contest_type.lower()
