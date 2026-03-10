@@ -1,18 +1,18 @@
 {
-  "computed_at": "2026-03-10T00:53:17.248904+00:00",
+  "computed_at": "2026-03-10T01:01:19.607407+00:00",
   "n_slates": 14,
-  "n_player_slates": 2295,
+  "n_player_slates": 2294,
   "classification": {
-    "pop": 516,
+    "pop": 518,
     "bust": 423,
-    "inline": 1356,
-    "pop_rate": 0.225,
+    "inline": 1353,
+    "pop_rate": 0.226,
     "bust_rate": 0.184
   },
   "factor_breakdown": {},
   "bracket_breakdown": {
     "lt5k": {
-      "n": 1274,
+      "n": 1273,
       "pop_rate": 0.27,
       "bust_rate": 0.252,
       "avg_residual": 0.2,
@@ -20,24 +20,24 @@
     },
     "5_65k": {
       "n": 494,
-      "pop_rate": 0.219,
+      "pop_rate": 0.221,
       "bust_rate": 0.136,
-      "avg_residual": 0.6,
+      "avg_residual": 0.7,
       "mae": 8.7
     },
     "65_8k": {
       "n": 280,
-      "pop_rate": 0.139,
+      "pop_rate": 0.143,
       "bust_rate": 0.082,
-      "avg_residual": -0.2,
+      "avg_residual": -0.1,
       "mae": 8.5
     },
     "8_10k": {
       "n": 193,
       "pop_rate": 0.098,
       "bust_rate": 0.052,
-      "avg_residual": -1.5,
-      "mae": 8.9
+      "avg_residual": -1.4,
+      "mae": 9.0
     },
     "10k_plus": {
       "n": 54,
@@ -111,19 +111,19 @@
     {
       "player": "OG Anunoby",
       "salary": 6600,
-      "proj": 32.6,
+      "proj": 30.9,
       "actual": 65.2,
-      "residual": 32.7,
-      "ratio": 2.0,
+      "residual": 34.3,
+      "ratio": 2.11,
       "context": [],
       "date": "2026-03-06"
     },
     {
       "player": "OG Anunoby",
       "salary": 6600,
-      "proj": 32.7,
+      "proj": 32.6,
       "actual": 65.2,
-      "residual": 32.6,
+      "residual": 32.7,
       "ratio": 2.0,
       "context": [],
       "date": "2026-03-06"
@@ -241,19 +241,19 @@
       "date": "2026-03-08"
     },
     {
-      "player": "Derik Queen",
-      "salary": 6000,
-      "proj": 26.5,
-      "actual": 3.8,
-      "residual": -22.7,
-      "ratio": 0.14,
+      "player": "Jaylon Tyson",
+      "salary": 5500,
+      "proj": 27.7,
+      "actual": 5.2,
+      "residual": -22.5,
+      "ratio": 0.19,
       "context": [],
-      "date": "2026-03-06"
+      "date": "2026-02-20"
     }
   ],
   "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-10T00:53:17.248885+00:00",
+    "computed_at": "2026-03-10T01:01:19.607386+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
