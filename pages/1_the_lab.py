@@ -60,6 +60,8 @@ from yak_core.config import (  # noqa: E402
     CONTEST_PRESET_LABELS,
     UI_CONTEST_LABELS,
     UI_CONTEST_MAP,
+    PGA_UI_CONTEST_LABELS,
+    PGA_UI_CONTEST_MAP,
     merge_config,
     DK_POS_SLOTS,
     DK_LINEUP_SIZE,
@@ -611,6 +613,101 @@ def _build_player_level_sim_results(pool: pd.DataFrame, variance: float) -> pd.D
 
 
 # ---------------------------------------------------------------------------
+# PGA pool loader (DataGolf API)
+# ---------------------------------------------------------------------------
+
+def _load_pga_pool(
+    slate_date_str: str,
+    contest_type_label: str,
+    preset: dict,
+    slate,
+    sim,
+    _contest_safe: str,
+    status_container,
+) -> Optional[pd.DataFrame]:
+    """Load PGA player pool via DataGolf API."""
+    from yak_core.datagolf import DataGolfClient
+    from yak_core.pga_pool import build_pga_pool
+    from yak_core.config import (
+        DK_PGA_LINEUP_SIZE, DK_PGA_POS_SLOTS, DK_PGA_SALARY_CAP,
+    )
+
+    # Read DataGolf API key from secrets or env
+    dg_key = (
+        st.secrets.get("DATAGOLF_API_KEY")
+        or os.environ.get("DATAGOLF_API_KEY")
+        or "7e0b29081d2adaac7e3de0ed387c"
+    )
+    if not dg_key:
+        status_container.error("DataGolf API key not configured.")
+        return None
+
+    try:
+        status_container.write("Connecting to DataGolf API…")
+        dg = DataGolfClient(api_key=dg_key)
+
+        status_container.write("Building PGA pool (projections + SG + course fit)…")
+        pool = build_pga_pool(dg, site="draftkings", slate="main")
+
+        if pool.empty:
+            status_container.error("DataGolf returned no players for the current event.")
+            return None
+
+        event_name = pool.attrs.get("event_name", "PGA")
+        course_name = pool.attrs.get("course_name", "")
+        n_players = len(pool)
+        status_container.write(
+            f"✅ Pool built: {n_players} players — {event_name}"
+            + (f" at {course_name}" if course_name else "")
+        )
+
+        # Ensure own_proj column exists (required by sims pipeline)
+        if "own_proj" not in pool.columns:
+            if "ownership" in pool.columns:
+                pool["own_proj"] = pool["ownership"]
+            elif "proj_own" in pool.columns:
+                pool["own_proj"] = pool["proj_own"]
+            else:
+                pool["own_proj"] = 5.0
+
+        # Set sim_eligible
+        if "sim_eligible" not in pool.columns:
+            pool["sim_eligible"] = pool.get("status", "Active").apply(
+                lambda s: str(s).strip().upper() not in {"WD", "OUT"}
+            )
+
+        # ── Update slate state ──────────────────────────────────────────
+        slate.sport = "PGA"
+        slate.site = "DK"
+        slate.slate_date = slate_date_str
+        slate.contest_type = contest_type_label
+        slate.contest_name = contest_type_label
+        slate.is_showdown = False
+        slate.roster_slots = DK_PGA_POS_SLOTS
+        slate.salary_cap = DK_PGA_SALARY_CAP
+        slate.player_pool = pool
+        slate.published = False
+        set_slate_state(slate)
+
+        # Cache in session state
+        st.session_state[f"_hub_pool_{slate_date_str}_{_contest_safe}"] = pool
+        st.session_state[f"_hub_rules_{slate_date_str}_{_contest_safe}"] = {
+            "slots": DK_PGA_POS_SLOTS,
+            "lineup_size": DK_PGA_LINEUP_SIZE,
+            "salary_cap": DK_PGA_SALARY_CAP,
+            "is_showdown": False,
+        }
+
+        return pool
+
+    except Exception as exc:
+        status_container.error(f"DataGolf load failed: {exc}")
+        import traceback
+        status_container.write(traceback.format_exc())
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Auto-pipeline: loads player pool (sims are manual)
 # ---------------------------------------------------------------------------
 
@@ -637,6 +734,18 @@ def _auto_load_pool(
     draft_group_id: Optional[int] = selected_dg_id
 
     try:
+        # ── PGA path: use DataGolf API instead of DK/Tank01 ──────────
+        if sport.upper() == "PGA":
+            return _load_pga_pool(
+                slate_date_str=slate_date_str,
+                contest_type_label=contest_type_label,
+                preset=preset,
+                slate=slate,
+                sim=sim,
+                _contest_safe=_contest_safe,
+                status_container=status_container,
+            )
+
         _historical_salary_df: Optional[pd.DataFrame] = None
         _historical_dg_id: Optional[int] = None
 
@@ -1082,8 +1191,10 @@ def main() -> None:
         slate_date = st.date_input("Date", value=pd.to_datetime(_today))
         slate_date_str = str(slate_date)
     with col_contest:
-        _ui_contest = st.selectbox("Contest Type", UI_CONTEST_LABELS)
-        contest_type_label = UI_CONTEST_MAP[_ui_contest]
+        _contest_labels = PGA_UI_CONTEST_LABELS if sport == "PGA" else UI_CONTEST_LABELS
+        _contest_map = PGA_UI_CONTEST_MAP if sport == "PGA" else UI_CONTEST_MAP
+        _ui_contest = st.selectbox("Contest Type", _contest_labels)
+        contest_type_label = _contest_map[_ui_contest]
         preset = CONTEST_PRESETS[contest_type_label]
 
     # ── Row 2: Sim Controls (set before loading) ─────────────────────────
@@ -1133,116 +1244,29 @@ def main() -> None:
 
     proj_source = "model"
 
-    # ── Auto-fetch slates ─────────────────────────────────────────────────
+    # ── Common date helpers ────────────────────────────────────────────────
     from zoneinfo import ZoneInfo as _ZI2
     _today_date = pd.Timestamp.now(tz=_ZI2("America/New_York")).date()
     _is_historical = pd.to_datetime(slate_date_str).date() < _today_date
     _salary_client = SalaryHistoryClient()
 
-    _slate_cache_key = f"_hub_slates_{sport}_{slate_date_str}"
-    _cached_slates = st.session_state.get(_slate_cache_key)
-
-    # Live mode: let user refresh slates (DK removes locked slates over time)
-    if not _is_historical and _cached_slates is not None:
-        if st.button("🔄 Refresh Slates", key="_lab_refresh_slates", type="secondary"):
-            st.session_state.pop(_slate_cache_key, None)
-            _cached_slates = None
-
-    # AUTO-FETCH: if no cached slates for this date/sport combo, fetch them
-    if _cached_slates is None:
-        _auto_fetch_status = st.empty()
-        try:
-            with _auto_fetch_status.container():
-                st.caption("🔍 Fetching available slates…")
-            if _is_historical:
-                raw_dgs = _fetch_historical_draft_groups(slate_date_str)
-                _source = "FantasyLabs"
-            else:
-                try:
-                    raw_dgs = _fetch_dk_draft_groups(sport)
-                    _source = "DraftKings"
-                except Exception:
-                    raw_dgs = []
-                if not raw_dgs:
-                    raw_dgs = _fetch_historical_draft_groups(slate_date_str)
-                    _source = "FantasyLabs"
-            if raw_dgs:
-                slate_options = build_slate_options(raw_dgs)
-                st.session_state[_slate_cache_key] = slate_options
-                _cached_slates = slate_options
-            _auto_fetch_status.empty()
-        except Exception:
-            _auto_fetch_status.empty()
-
-    # ── Auto-select slate (no picker UI) ───────────────────────────────
-    # Showdown → let user pick the matchup.
-    # Classic (GPP/Cash) → let user pick the slate when multiple are available.
-    selected_dg_id: Optional[int] = None
-    selected_slate_label: Optional[str] = None
-
-    if _cached_slates:
-        _is_sd = (contest_type_label == "Showdown")
-        if _is_sd:
-            _candidates = [s for s in _cached_slates if s["game_style"] != "Classic"]
-        else:
-            _candidates = [s for s in _cached_slates if s["game_style"] == "Classic"]
-        if not _candidates:
-            _candidates = _cached_slates  # fallback
-
-        if _is_sd and len(_candidates) > 1:
-            # Showdown: each game is its own draft group — let user pick.
-            _sd_labels = [s["label"] for s in _candidates]
-            _sd_idx = st.selectbox(
-                "🏀 Select Game (Showdown)",
-                options=range(len(_sd_labels)),
-                format_func=lambda i: _sd_labels[i],
-                key=f"_sd_dg_pick_{slate_date_str}",
-            )
-            _pick = _candidates[_sd_idx] if _sd_idx is not None else _candidates[0]
-        elif not _is_sd and len(_candidates) > 1:
-            # Classic: multiple slates available (Main, Night, Turbo, etc.)
-            # Let user choose instead of silently auto-selecting the largest.
-            _classic_labels = [s["label"] for s in _candidates]
-            _classic_idx = st.selectbox(
-                "🏀 Select Slate",
-                options=range(len(_classic_labels)),
-                format_func=lambda i: _classic_labels[i],
-                key=f"_classic_dg_pick_{slate_date_str}",
-            )
-            _pick = _candidates[_classic_idx] if _classic_idx is not None else _candidates[0]
-        else:
-            # Single candidate — auto-select it.
-            _pick = max(_candidates, key=lambda s: s["game_count"])
-
-        selected_dg_id = _pick["draft_group_id"]
-        selected_slate_label = _pick["label"]
-    else:
-        st.info(f"No slates found for {slate_date_str}. Try a different date.")
-
-    # Store selected_dg_id in session state so it persists
-    if selected_dg_id:
-        st.session_state["_lab_selected_dg_id"] = selected_dg_id
-    else:
-        selected_dg_id = st.session_state.get("_lab_selected_dg_id")
-
-    # ── MANUAL LOAD ─────────────────────────────────────────────────────────
-    # User clicks this button to load pool + run sims in one shot.
     _pool_loaded_key = f"_hub_pool_{slate_date_str}_{_contest_safe}"
     _already_loaded = st.session_state.get(_pool_loaded_key) is not None
 
-    if not _already_loaded:
-        if selected_dg_id is not None:
-            if st.button("🚀 Load Pool", key="_lab_load_go", type="primary"):
-                with st.status("Ricky's loading the pool…", expanded=True) as _load_status:
-                    pool_result = _auto_load_pool(
-                        sport=sport,
+    # ── PGA path: skip DK slate picker, go straight to DataGolf ──────────
+    _is_pga = sport == "PGA"
+    selected_dg_id: Optional[int] = None
+    selected_slate_label: Optional[str] = None
+
+    if _is_pga:
+        st.caption("⛳ PGA pools are built from DataGolf (projections + strokes gained + course fit).")
+        if not _already_loaded:
+            if st.button("🚀 Load PGA Pool", key="_lab_load_pga_go", type="primary"):
+                with st.status("Ricky's loading the PGA pool…", expanded=True) as _load_status:
+                    pool_result = _load_pga_pool(
                         slate_date_str=slate_date_str,
                         contest_type_label=contest_type_label,
                         preset=preset,
-                        selected_dg_id=selected_dg_id,
-                        _is_historical=_is_historical,
-                        _salary_client=_salary_client,
-                        _today_date=_today_date,
                         slate=slate,
                         sim=sim,
                         _contest_safe=_contest_safe,
@@ -1251,22 +1275,14 @@ def main() -> None:
                     if pool_result is not None:
                         _load_status.write("Computing edge metrics…")
                         try:
-                            _PIPELINE_TO_OPTIMIZER_BTN = {"GPP_MAIN": "GPP_150", "CASH": "CASH", "SHOWDOWN": "SHOWDOWN"}
-                            _CONTEST_NAME_TO_PIPELINE_BTN = {
-                                "GPP Main": "GPP_MAIN", "Cash Main": "CASH", "Showdown": "SHOWDOWN",
-                            }
-                            _pc = _CONTEST_NAME_TO_PIPELINE_BTN.get(contest_type_label, "GPP_MAIN")
-                            _oc = _PIPELINE_TO_OPTIMIZER_BTN.get(_pc, "GPP_20")
-
                             player_results = _build_player_level_sim_results(pool_result, sim.variance)
                             sim.player_results = player_results
-
                             _edge_df = compute_edge_metrics(
                                 pool_result,
                                 calibration_state=slate.calibration_state,
                                 variance=sim.variance,
+                                sport="PGA",
                             )
-
                             slate.edge_df = _edge_df
                             if "Edge" not in slate.active_layers:
                                 slate.active_layers.append("Edge")
@@ -1275,17 +1291,155 @@ def main() -> None:
                             _load_status.write(f"✅ Pool loaded — {len(player_results)} players analyzed.")
                         except Exception as _edge_exc:
                             _load_status.write(f"⚠️ Edge metrics failed: {_edge_exc}")
-                        _load_status.update(label="✅ Pool loaded", state="complete", expanded=False)
+                        _load_status.update(label="✅ PGA pool loaded", state="complete", expanded=False)
                     else:
                         _load_status.update(label="Load failed", state="error")
                 st.rerun()
-        # else: no slate — message already shown above by the slate picker
+        else:
+            with st.status("✅ PGA pool loaded", state="complete", expanded=False):
+                if st.button("🔄 Reload PGA Pool", key="_lab_force_reload_pga"):
+                    st.session_state.pop(_pool_loaded_key, None)
+                    st.rerun()
+
+    # ── NBA path: DK slate fetching + picker ─────────────────────────────
     else:
-        # Already loaded — show status + reload option
-        with st.status("✅ Pool loaded", state="complete", expanded=False):
-            if st.button("🔄 Reload Pool", key="_lab_force_reload"):
-                st.session_state.pop(_pool_loaded_key, None)
-                st.rerun()
+        _slate_cache_key = f"_hub_slates_{sport}_{slate_date_str}"
+        _cached_slates = st.session_state.get(_slate_cache_key)
+
+        # Live mode: let user refresh slates (DK removes locked slates over time)
+        if not _is_historical and _cached_slates is not None:
+            if st.button("🔄 Refresh Slates", key="_lab_refresh_slates", type="secondary"):
+                st.session_state.pop(_slate_cache_key, None)
+                _cached_slates = None
+
+        # AUTO-FETCH: if no cached slates for this date/sport combo, fetch them
+        if _cached_slates is None:
+            _auto_fetch_status = st.empty()
+            try:
+                with _auto_fetch_status.container():
+                    st.caption("🔍 Fetching available slates…")
+                if _is_historical:
+                    raw_dgs = _fetch_historical_draft_groups(slate_date_str)
+                    _source = "FantasyLabs"
+                else:
+                    try:
+                        raw_dgs = _fetch_dk_draft_groups(sport)
+                        _source = "DraftKings"
+                    except Exception:
+                        raw_dgs = []
+                    if not raw_dgs:
+                        raw_dgs = _fetch_historical_draft_groups(slate_date_str)
+                        _source = "FantasyLabs"
+                if raw_dgs:
+                    slate_options = build_slate_options(raw_dgs)
+                    st.session_state[_slate_cache_key] = slate_options
+                    _cached_slates = slate_options
+                _auto_fetch_status.empty()
+            except Exception:
+                _auto_fetch_status.empty()
+
+        # ── Auto-select slate (no picker UI) ───────────────────────────────
+        # Showdown → let user pick the matchup.
+        # Classic (GPP/Cash) → let user pick the slate when multiple are available.
+        if _cached_slates:
+            _is_sd = (contest_type_label == "Showdown")
+            if _is_sd:
+                _candidates = [s for s in _cached_slates if s["game_style"] != "Classic"]
+            else:
+                _candidates = [s for s in _cached_slates if s["game_style"] == "Classic"]
+            if not _candidates:
+                _candidates = _cached_slates  # fallback
+
+            if _is_sd and len(_candidates) > 1:
+                _sd_labels = [s["label"] for s in _candidates]
+                _sd_idx = st.selectbox(
+                    "🏀 Select Game (Showdown)",
+                    options=range(len(_sd_labels)),
+                    format_func=lambda i: _sd_labels[i],
+                    key=f"_sd_dg_pick_{slate_date_str}",
+                )
+                _pick = _candidates[_sd_idx] if _sd_idx is not None else _candidates[0]
+            elif not _is_sd and len(_candidates) > 1:
+                _classic_labels = [s["label"] for s in _candidates]
+                _classic_idx = st.selectbox(
+                    "🏀 Select Slate",
+                    options=range(len(_classic_labels)),
+                    format_func=lambda i: _classic_labels[i],
+                    key=f"_classic_dg_pick_{slate_date_str}",
+                )
+                _pick = _candidates[_classic_idx] if _classic_idx is not None else _candidates[0]
+            else:
+                _pick = max(_candidates, key=lambda s: s["game_count"])
+
+            selected_dg_id = _pick["draft_group_id"]
+            selected_slate_label = _pick["label"]
+        else:
+            st.info(f"No slates found for {slate_date_str}. Try a different date.")
+
+        # Store selected_dg_id in session state so it persists
+        if selected_dg_id:
+            st.session_state["_lab_selected_dg_id"] = selected_dg_id
+        else:
+            selected_dg_id = st.session_state.get("_lab_selected_dg_id")
+
+        # ── MANUAL LOAD ────────────────────────────────────────────────────
+        if not _already_loaded:
+            if selected_dg_id is not None:
+                if st.button("🚀 Load Pool", key="_lab_load_go", type="primary"):
+                    with st.status("Ricky's loading the pool…", expanded=True) as _load_status:
+                        pool_result = _auto_load_pool(
+                            sport=sport,
+                            slate_date_str=slate_date_str,
+                            contest_type_label=contest_type_label,
+                            preset=preset,
+                            selected_dg_id=selected_dg_id,
+                            _is_historical=_is_historical,
+                            _salary_client=_salary_client,
+                            _today_date=_today_date,
+                            slate=slate,
+                            sim=sim,
+                            _contest_safe=_contest_safe,
+                            status_container=_load_status,
+                        )
+                        if pool_result is not None:
+                            _load_status.write("Computing edge metrics…")
+                            try:
+                                _PIPELINE_TO_OPTIMIZER_BTN = {"GPP_MAIN": "GPP_150", "CASH": "CASH", "SHOWDOWN": "SHOWDOWN"}
+                                _CONTEST_NAME_TO_PIPELINE_BTN = {
+                                    "GPP Main": "GPP_MAIN", "Cash Main": "CASH", "Showdown": "SHOWDOWN",
+                                }
+                                _pc = _CONTEST_NAME_TO_PIPELINE_BTN.get(contest_type_label, "GPP_MAIN")
+                                _oc = _PIPELINE_TO_OPTIMIZER_BTN.get(_pc, "GPP_20")
+
+                                player_results = _build_player_level_sim_results(pool_result, sim.variance)
+                                sim.player_results = player_results
+
+                                _edge_df = compute_edge_metrics(
+                                    pool_result,
+                                    calibration_state=slate.calibration_state,
+                                    variance=sim.variance,
+                                    sport=sport,
+                                )
+
+                                slate.edge_df = _edge_df
+                                if "Edge" not in slate.active_layers:
+                                    slate.active_layers.append("Edge")
+                                set_slate_state(slate)
+                                set_sim_state(sim)
+                                _load_status.write(f"✅ Pool loaded — {len(player_results)} players analyzed.")
+                            except Exception as _edge_exc:
+                                _load_status.write(f"⚠️ Edge metrics failed: {_edge_exc}")
+                            _load_status.update(label="✅ Pool loaded", state="complete", expanded=False)
+                        else:
+                            _load_status.update(label="Load failed", state="error")
+                    st.rerun()
+            # else: no slate — message already shown above by the slate picker
+        else:
+            # Already loaded — show status + reload option
+            with st.status("✅ Pool loaded", state="complete", expanded=False):
+                if st.button("🔄 Reload Pool", key="_lab_force_reload"):
+                    st.session_state.pop(_pool_loaded_key, None)
+                    st.rerun()
 
     # ── Game Filter / External Projections ─────────────────────────────────
     hub_pool: Optional[pd.DataFrame] = st.session_state.get(f"_hub_pool_{slate_date_str}_{_contest_safe}")
@@ -1494,6 +1648,7 @@ def main() -> None:
                         pool,
                         calibration_state=slate.calibration_state,
                         variance=sim.variance,
+                        sport=slate.sport,
                     )
 
                     slate.edge_df = _edge_df
@@ -1541,7 +1696,7 @@ def main() -> None:
             _pn_col = "player_name"
             try:
                 # Re-use edge_df from slate state if available (avoid recomputing)
-                _edge_for_score = slate.edge_df if slate.edge_df is not None and not slate.edge_df.empty else compute_edge_metrics(pool, calibration_state=slate.calibration_state, variance=sim.variance)
+                _edge_for_score = slate.edge_df if slate.edge_df is not None and not slate.edge_df.empty else compute_edge_metrics(pool, calibration_state=slate.calibration_state, variance=sim.variance, sport=slate.sport)
                 _PIPELINE_TO_OPTIMIZER_SC = {"GPP_MAIN": "GPP_150", "GPP_EARLY": "GPP_20", "GPP_LATE": "GPP_20", "CASH": "CASH"}
                 _opt_contest = _PIPELINE_TO_OPTIMIZER_SC.get(pipeline_contest, "GPP_20")
                 _lu_long = build_ricky_lineups(edge_df=_edge_for_score, contest_type=_opt_contest, calibration_state=slate.calibration_state, salary_cap=SALARY_CAP)

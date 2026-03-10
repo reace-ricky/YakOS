@@ -39,8 +39,16 @@ from yak_core.edge_metrics import (  # noqa: E402
     compute_ricky_confidence_for_contest,
     get_confidence_color,
 )
-from yak_core.config import CONTEST_PRESETS, UI_CONTEST_LABELS, UI_CONTEST_MAP  # noqa: E402
+from yak_core.config import (  # noqa: E402
+    CONTEST_PRESETS, UI_CONTEST_LABELS, UI_CONTEST_MAP,
+    PGA_UI_CONTEST_LABELS, PGA_UI_CONTEST_MAP,
+    DK_PGA_LINEUP_SIZE, DK_PGA_POS_SLOTS, DK_PGA_SALARY_CAP,
+)
 from yak_core.ricky_signals import compute_ricky_signals, generate_slate_overview  # noqa: E402
+from yak_core.right_angle import (  # noqa: E402
+    compute_pga_breakout_signals,
+    generate_pga_slate_overview,
+)
 from yak_core.context import get_lab_analysis  # noqa: E402
 from yak_core.display_format import normalise_ownership, standard_player_format  # noqa: E402
 from yak_core.lineups import (  # noqa: E402
@@ -67,6 +75,7 @@ _CONTEST_TO_BUILD_MODE = {
     "GPP Late": "ceiling",
     "Cash Main": "floor",
     "Showdown": "ceiling",
+    "PGA GPP": "ceiling",
 }
 _BUILD_MODE_PROJ_COL = {
     "floor": "floor",
@@ -341,6 +350,64 @@ def _render_tab_analysis(slate, edge, lu_state, sim_state) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Tab 1 (PGA) — PGA Edge Analysis powered by breakout signals
+# ---------------------------------------------------------------------------
+
+def _render_tab_analysis_pga(slate) -> None:
+    """Tab 1 for PGA: breakout signals + slate overview from DataGolf data."""
+    has_pool = slate.player_pool is not None and not slate.player_pool.empty
+    if not has_pool:
+        st.info("No PGA slate loaded yet. Load a PGA pool in The Lab first.")
+        return
+
+    pool = slate.player_pool.copy()
+    _analysis = get_lab_analysis()
+    if not _analysis["pool"].empty:
+        pool = _analysis["pool"]
+
+    # Compute PGA breakout signals
+    signals_df = compute_pga_breakout_signals(pool)
+    event_name = pool.attrs.get("event_name", "") if hasattr(pool, "attrs") else ""
+    overview = generate_pga_slate_overview(pool, signals_df, event_name=event_name)
+
+    # Slate overview bullets
+    for bullet in overview["bullets"]:
+        st.markdown(f"- {bullet}")
+    if overview["recommendation"]:
+        st.info(overview["recommendation"])
+
+    st.divider()
+
+    # Top edges table
+    top_edges = signals_df[signals_df["pga_edge_composite"] > 0].head(12)
+    if not top_edges.empty:
+        st.markdown("**Top PGA Edges**")
+        display_df = pd.DataFrame()
+        display_df["Player"] = top_edges["player_name"].values
+        display_df["Salary"] = top_edges["salary"].values if "salary" in top_edges.columns else 0
+        display_df["Proj"] = top_edges["proj"].values if "proj" in top_edges.columns else 0
+        if "sg_total" in top_edges.columns:
+            display_df["SG Total"] = top_edges["sg_total"].values
+        if "course_fit" in top_edges.columns:
+            display_df["Course Fit"] = top_edges["course_fit"].values
+        own_col = "ownership" if "ownership" in top_edges.columns else "own_pct"
+        if own_col in top_edges.columns:
+            display_df["Own%"] = normalise_ownership(pd.Series(top_edges[own_col].values)).values
+        display_df["Edge"] = (top_edges["pga_edge_composite"].values * 100).round(0).astype(int)
+        display_df["Signals"] = top_edges["pga_signal_badges"].values
+
+        _fmt = standard_player_format(display_df)
+        if "SG Total" in display_df.columns:
+            _fmt["SG Total"] = "{:+.2f}"
+        if "Course Fit" in display_df.columns:
+            _fmt["Course Fit"] = "{:+.2f}"
+        st.dataframe(
+            display_df.style.format(_fmt, na_rep=""),
+            use_container_width=True, hide_index=True,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Tab 2 — Friends Optimizer
 # ---------------------------------------------------------------------------
 
@@ -362,12 +429,15 @@ def _render_tab_optimizer(slate) -> None:
     )
 
     # ── Controls ──────────────────────────────────────────────────────
+    _opt_sport = slate.sport or "NBA"
+    _opt_labels = PGA_UI_CONTEST_LABELS if _opt_sport == "PGA" else UI_CONTEST_LABELS
+    _opt_map = PGA_UI_CONTEST_MAP if _opt_sport == "PGA" else UI_CONTEST_MAP
     col1, col2 = st.columns(2)
     with col1:
         ui_contest = st.selectbox(
-            "Contest Type", UI_CONTEST_LABELS, index=0, key="_rar_opt_contest"
+            "Contest Type", _opt_labels, index=0, key="_rar_opt_contest"
         )
-        contest_label = UI_CONTEST_MAP[ui_contest]
+        contest_label = _opt_map[ui_contest]
         preset = CONTEST_PRESETS.get(contest_label, {})
 
     with col2:
@@ -410,6 +480,7 @@ def _render_tab_optimizer(slate) -> None:
         _contest_type_map = {
             "GPP Main": "gpp", "GPP Early": "gpp", "GPP Late": "gpp",
             "Cash Main": "cash", "Showdown": "showdown",
+            "PGA GPP": "gpp",
         }
         cfg = {
             "NUM_LINEUPS": int(num_lineups),
@@ -486,7 +557,18 @@ def main() -> None:
     st.title("\U0001f4d0 Right Angle Ricky")
     st.caption(_ricky_quote())
 
+    # ── Sport toggle at top ───────────────────────────────────────────
     slate = get_slate_state()
+    _detected_sport = slate.sport if slate.sport else "NBA"
+    sport = st.radio(
+        "Sport",
+        ["NBA", "PGA"],
+        index=0 if _detected_sport == "NBA" else 1,
+        horizontal=True,
+        key="_rar_sport_toggle",
+    )
+    _is_pga = sport == "PGA"
+
     edge = get_edge_state()
     lu_state = get_lineup_state()
     sim_state = get_sim_state()
@@ -499,16 +581,23 @@ def main() -> None:
     has_pool = slate.player_pool is not None and not slate.player_pool.empty
 
     if not has_edge and not has_lineups and not has_pool:
-        st.info(
-            "Ricky's got nothing to show yet. Load a slate in **The Lab**, "
-            "approve in **Ricky's Edge Analysis**, and publish from **Build & Publish**."
-        )
+        if _is_pga:
+            st.info(
+                "No PGA pool loaded yet. Select **PGA** in **The Lab** and "
+                "load a pool from DataGolf."
+            )
+        else:
+            st.info(
+                "Ricky's got nothing to show yet. Load a slate in **The Lab**, "
+                "approve in **Ricky's Edge Analysis**, and publish from **Build & Publish**."
+            )
         return
 
-    # Confidence strip
-    _confidence_pills(edge)
-    if has_edge:
-        st.divider()
+    # Confidence strip (NBA only — PGA doesn't have published edge contests)
+    if not _is_pga:
+        _confidence_pills(edge)
+        if has_edge:
+            st.divider()
 
     # Two tabs
     tab_analysis, tab_optimizer = st.tabs(
@@ -516,7 +605,10 @@ def main() -> None:
     )
 
     with tab_analysis:
-        _render_tab_analysis(slate, edge, lu_state, sim_state)
+        if _is_pga:
+            _render_tab_analysis_pga(slate)
+        else:
+            _render_tab_analysis(slate, edge, lu_state, sim_state)
 
     with tab_optimizer:
         _render_tab_optimizer(slate)

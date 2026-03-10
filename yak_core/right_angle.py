@@ -1361,3 +1361,175 @@ def detect_minute_cannibals(
     # Sort by combined minutes descending (biggest overlap first)
     pairs.sort(key=lambda d: d["combined_minutes"], reverse=True)
     return pairs
+
+
+# ============================================================
+# PGA BREAKOUT DETECTION
+# ============================================================
+
+def compute_pga_breakout_signals(pool_df: pd.DataFrame) -> pd.DataFrame:
+    """Compute PGA-specific breakout signals for Right Angle Ricky.
+
+    Signals detected:
+      - Course Fit Surge: course_fit significantly above field average
+      - SG Form Surge: sg_total trending well above field median
+      - Value Breakout: high projection relative to salary
+      - Approach Specialist: sg_app + approach_fit indicating course suits game
+      - Low Ownership Leverage: high projection + low ownership = leverage spot
+
+    Parameters
+    ----------
+    pool_df : pd.DataFrame
+        PGA player pool with DataGolf columns (sg_total, sg_app, course_fit,
+        approach_fit, proj, salary, ownership, etc.).
+
+    Returns
+    -------
+    pd.DataFrame
+        Pool with added signal columns: ``pga_signal_badges``, ``pga_edge_composite``,
+        and individual boolean signal columns.
+    """
+    if pool_df is None or pool_df.empty:
+        return pool_df
+
+    df = pool_df.copy()
+
+    # Parse key columns
+    proj = pd.to_numeric(df.get("proj", 0), errors="coerce").fillna(0)
+    salary = pd.to_numeric(df.get("salary", 0), errors="coerce").fillna(0)
+    own = pd.to_numeric(df.get("ownership", 5), errors="coerce").fillna(5)
+    sg_total = pd.to_numeric(df.get("sg_total", 0), errors="coerce").fillna(0)
+    sg_app = pd.to_numeric(df.get("sg_app", 0), errors="coerce").fillna(0)
+    sg_ott = pd.to_numeric(df.get("sg_ott", 0), errors="coerce").fillna(0)
+    sg_putt = pd.to_numeric(df.get("sg_putt", 0), errors="coerce").fillna(0)
+    course_fit = pd.to_numeric(df.get("course_fit", 0), errors="coerce").fillna(0)
+    approach_fit = pd.to_numeric(df.get("approach_fit", 0), errors="coerce").fillna(0)
+    win_prob = pd.to_numeric(df.get("win_prob", 0), errors="coerce").fillna(0)
+    make_cut = pd.to_numeric(df.get("make_cut_prob", 0), errors="coerce").fillna(0)
+    value = proj / salary.clip(lower=1) * 1000
+
+    # Percentile thresholds (pool-relative)
+    sg_p80 = float(sg_total.quantile(0.80))
+    sg_p60 = float(sg_total.quantile(0.60))
+    cf_p80 = float(course_fit.quantile(0.80))
+    app_p80 = float(sg_app.quantile(0.80))
+    val_p80 = float(value.quantile(0.80))
+    own_p30 = float(own.quantile(0.30))  # low ownership threshold
+    proj_p50 = float(proj.quantile(0.50))
+
+    # ── Signal 1: Course Fit Surge ────────────────────────────────────
+    sig_course_fit = course_fit >= cf_p80
+    df["sig_course_fit"] = sig_course_fit
+
+    # ── Signal 2: SG Form Surge ───────────────────────────────────────
+    sig_sg_surge = sg_total >= sg_p80
+    df["sig_sg_surge"] = sig_sg_surge
+
+    # ── Signal 3: Value Breakout ──────────────────────────────────────
+    sig_value = (value >= val_p80) & (proj >= proj_p50)
+    df["sig_value"] = sig_value
+
+    # ── Signal 4: Approach Specialist ─────────────────────────────────
+    sig_approach = (sg_app >= app_p80) & (approach_fit > 0)
+    df["sig_approach"] = sig_approach
+
+    # ── Signal 5: Low Ownership Leverage ──────────────────────────────
+    sig_leverage = (proj >= proj_p50) & (own <= own_p30) & (own > 0)
+    df["sig_leverage"] = sig_leverage
+
+    # ── Signal 6: Cut Safety (high make-cut probability + solid SG) ──
+    mc_p80 = float(make_cut.quantile(0.80))
+    sig_safe = (make_cut >= mc_p80) & (sg_total >= sg_p60)
+    df["sig_safe"] = sig_safe
+
+    # ── Composite edge score (0-1) ────────────────────────────────────
+    composite = (
+        sig_course_fit.astype(float) * 0.20
+        + sig_sg_surge.astype(float) * 0.25
+        + sig_value.astype(float) * 0.15
+        + sig_approach.astype(float) * 0.15
+        + sig_leverage.astype(float) * 0.15
+        + sig_safe.astype(float) * 0.10
+    )
+    df["pga_edge_composite"] = composite
+
+    # ── Badge strings ─────────────────────────────────────────────────
+    _BADGE_MAP = [
+        ("sig_sg_surge", "\U0001f4aa SG Surge"),
+        ("sig_course_fit", "\U0001f3af Course Fit"),
+        ("sig_approach", "\U0001f3cc\ufe0f Approach"),
+        ("sig_value", "\U0001f4b0 Value"),
+        ("sig_leverage", "\U0001f50d Leverage"),
+        ("sig_safe", "\U0001f6e1\ufe0f Cut Safe"),
+    ]
+    badges = []
+    for _, row in df.iterrows():
+        parts = [label for col, label in _BADGE_MAP if row.get(col, False)]
+        badges.append(" | ".join(parts) if parts else "")
+    df["pga_signal_badges"] = badges
+
+    return df.sort_values("pga_edge_composite", ascending=False).reset_index(drop=True)
+
+
+def generate_pga_slate_overview(
+    pool_df: pd.DataFrame,
+    signals_df: pd.DataFrame,
+    event_name: str = "",
+) -> dict:
+    """Generate a PGA slate overview for Right Angle Ricky.
+
+    Returns
+    -------
+    dict
+        ``bullets``: list of markdown strings.
+        ``recommendation``: summary recommendation string.
+    """
+    bullets = []
+    rec = ""
+
+    if pool_df is None or pool_df.empty:
+        return {"bullets": ["No PGA pool data available."], "recommendation": ""}
+
+    n_players = len(pool_df)
+    if event_name:
+        bullets.append(f"**{event_name}** — {n_players} golfers in the field")
+    else:
+        bullets.append(f"**PGA** — {n_players} golfers in the field")
+
+    # Top SG players
+    if "sg_total" in pool_df.columns:
+        top_sg = pool_df.nlargest(3, "sg_total")
+        names = ", ".join(top_sg["player_name"].tolist())
+        bullets.append(f"\U0001f4aa **Top SG Total**: {names}")
+
+    # Best course fits
+    if "course_fit" in pool_df.columns:
+        top_cf = pool_df.nlargest(3, "course_fit")
+        names = ", ".join(top_cf["player_name"].tolist())
+        bullets.append(f"\U0001f3af **Best Course Fits**: {names}")
+
+    # Value plays
+    if not signals_df.empty and "sig_value" in signals_df.columns:
+        val_plays = signals_df[signals_df["sig_value"]].head(3)
+        if not val_plays.empty:
+            names = ", ".join(val_plays["player_name"].tolist())
+            bullets.append(f"\U0001f4b0 **Value Breakouts**: {names}")
+
+    # Leverage spots
+    if not signals_df.empty and "sig_leverage" in signals_df.columns:
+        lev_plays = signals_df[signals_df["sig_leverage"]].head(3)
+        if not lev_plays.empty:
+            names = ", ".join(lev_plays["player_name"].tolist())
+            bullets.append(f"\U0001f50d **Leverage Spots**: {names}")
+
+    # Recommendation
+    if not signals_df.empty and "pga_edge_composite" in signals_df.columns:
+        top_edge = signals_df[signals_df["pga_edge_composite"] > 0.3]
+        if len(top_edge) >= 5:
+            rec = f"{len(top_edge)} golfers with strong multi-signal edges — look for course-fit + SG overlap."
+        elif len(top_edge) >= 2:
+            rec = f"{len(top_edge)} golfers with breakout signals — chalk is thin, leverage available."
+        else:
+            rec = "Thin signal field — consider balanced builds over heavy stacks."
+
+    return {"bullets": bullets, "recommendation": rec}

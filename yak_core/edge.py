@@ -112,6 +112,7 @@ def compute_empirical_std(
     variance_mult: float = 1.0,
     min_std: float = 0.5,
     contest_mode: str = "gpp",
+    std_dev: "np.ndarray | pd.Series | None" = None,
 ) -> np.ndarray:
     """Return per-player standard deviation using the salary-bracket variance model.
 
@@ -146,6 +147,20 @@ def compute_empirical_std(
     """
     proj_arr = np.asarray(proj, dtype=float)
     sal_arr = np.asarray(salary, dtype=float)
+
+    # PGA path: use DataGolf's per-player std_dev directly when provided
+    if std_dev is not None:
+        std_arr = np.asarray(std_dev, dtype=float)
+        # Apply contest dampening + global multiplier
+        contest_key = contest_mode.strip().lower().replace(" ", "_").replace("-", "_")
+        contest_damp = _CONTEST_VARIANCE_MULT.get(contest_key, 1.0)
+        std_result = std_arr * variance_mult * contest_damp
+        # Fall back to salary-bracket for any zero/NaN entries
+        _missing = np.isnan(std_result) | (std_result <= 0)
+        if _missing.any():
+            _fallback = proj_arr[_missing] * 0.44 * variance_mult * contest_damp  # mid-tier ratio
+            std_result[_missing] = _fallback
+        return np.clip(std_result, min_std, None)
 
     # Start with mid-tier default
     vol_ratio = np.full(len(proj_arr), _EMPIRICAL_VOL_RATIO["65_8k"])
@@ -412,10 +427,205 @@ def _compute_edge_labels(df: pd.DataFrame) -> pd.Series:
 # Public API
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# PGA Edge Helpers
+# ---------------------------------------------------------------------------
+
+def _compute_pga_edge(
+    pool_df: pd.DataFrame,
+    variance: float = 1.0,
+) -> pd.DataFrame:
+    """Compute edge metrics for a PGA pool.
+
+    PGA edge differs from NBA in several key ways:
+      1. Uses DataGolf's per-player ``std_dev`` directly (no salary-bracket model).
+      2. Strokes Gained metrics are the primary edge signal.
+      3. Course fit, approach fit, and value are weighted heavily.
+      4. No stacking / correlation logic.
+
+    Edge score components (PGA):
+      - SG Total (0.25): overall strokes gained skill
+      - Course Fit (0.20): how well the player's game fits the course
+      - Smash Probability (0.20): likelihood of a top performance
+      - Value (0.15): projection relative to salary
+      - Safety (0.10): inverse bust probability
+      - Leverage (0.10): ownership edge
+    """
+    if pool_df is None or pool_df.empty:
+        return pd.DataFrame(columns=EDGE_DF_COLUMNS)
+
+    df = pool_df.copy()
+
+    salary = _parse_numeric(df.get("salary", pd.Series(0, index=df.index)), 0.0)
+    proj = _parse_numeric(df.get("proj", pd.Series(0, index=df.index)), 0.0)
+    ceil = _parse_numeric(df.get("ceil", proj * 1.4), proj * 1.4)
+    floor = _parse_numeric(df.get("floor", proj * 0.7), proj * 0.7)
+    own = _parse_numeric(df.get("ownership", pd.Series(5.0, index=df.index)), 5.0)
+    std_dev = _parse_numeric(df.get("std_dev", pd.Series(0.0, index=df.index)), 0.0)
+
+    # ── Use DataGolf std_dev directly for smash/bust ────────────────
+    # Fall back to (ceil-floor)/2Z if std_dev unavailable
+    _Z_85_val = float(_norm.ppf(0.85))
+    std = std_dev.copy()
+    _no_std = std <= 0
+    std[_no_std] = ((ceil[_no_std] - floor[_no_std]) / (2.0 * _Z_85_val)).clip(lower=0.5)
+    std = std.clip(lower=0.5) * variance
+
+    # PGA smash line: top-20 finish value (~5x DK value equivalent)
+    # DK PGA scoring roughly: winner ~90-110 FP, avg field ~50-70 FP
+    # Use salary/200 same as NBA (5x value) — works for PGA salary range too
+    smash_line = salary / _SMASH_VALUE_DIV
+    smash_z = (smash_line - proj) / std
+    smash_prob = pd.Series(1.0 - _norm.cdf(smash_z), index=df.index).clip(0.01, 0.95)
+
+    bust_z = (floor - proj) / std
+    bust_prob = pd.Series(_norm.cdf(bust_z), index=df.index).clip(0.01, 0.95)
+
+    # ── Leverage ────────────────────────────────────────────────────
+    own_safe = own.clip(lower=_MIN_OWN_FOR_LEVERAGE)
+    leverage = proj / own_safe
+    leverage[own < _MIN_OWN_FOR_LEVERAGE] = np.nan
+    leverage[proj < 5.0] = np.nan  # PGA has lower proj floor than NBA
+
+    # ── Normalised components ──────────────────────────────────────
+    # SG Total (strokes gained — the big thing for PGA DFS)
+    sg_total = _parse_numeric(df.get("sg_total", pd.Series(0.0, index=df.index)), 0.0)
+    _sg_min, _sg_max = float(sg_total.min()), float(sg_total.max())
+    _sg_range = max(_sg_max - _sg_min, 0.01)
+    sg_norm = ((sg_total - _sg_min) / _sg_range).clip(0, 1)
+
+    # Course Fit
+    course_fit = _parse_numeric(df.get("course_fit", pd.Series(0.0, index=df.index)), 0.0)
+    _cf_min, _cf_max = float(course_fit.min()), float(course_fit.max())
+    _cf_range = max(_cf_max - _cf_min, 0.01)
+    cf_norm = ((course_fit - _cf_min) / _cf_range).clip(0, 1)
+
+    # Value (proj / salary * 1000)
+    value_raw = proj / salary.clip(lower=1) * 1000
+    _val_max = float(value_raw.max())
+    val_norm = (value_raw / max(_val_max, 1.0)).clip(0, 1)
+
+    # Ceiling magnitude
+    _ceil_max = float(ceil.max())
+    ceil_magnitude = ceil / max(_ceil_max, 1.0)
+
+    # Leverage normalised (with stud protection)
+    _lev_filled = leverage.fillna(0.0)
+    _lev_max = float(_lev_filled.max())
+    lev_norm = _lev_filled / max(_lev_max, 1.0)
+
+    # ── PGA Edge Score (SG-dominant) ───────────────────────────────
+    edge_score = (
+        sg_norm * 0.25
+        + cf_norm * 0.20
+        + smash_prob * 0.20
+        + val_norm * 0.15
+        + (1.0 - bust_prob) * 0.10
+        + lev_norm * 0.10
+    )
+
+    # Tournament anchor: top 8 projected
+    _proj_rank = proj.rank(ascending=False, method="first")
+    is_anchor = _proj_rank <= 8
+
+    # ── Pop catalyst: use course_fit as PGA's equivalent ───────────
+    pop_cat = _parse_numeric(
+        df.get("pop_catalyst_score", pd.Series(0.0, index=df.index)),
+        0.0,
+    )
+
+    out = df.copy()
+    out["salary"] = salary.values
+    out["proj"] = proj.values
+    out["own_pct"] = own.values
+    out["leverage"] = leverage.values
+    out["smash_prob"] = smash_prob.values
+    out["bust_prob"] = bust_prob.values
+    out["ceil_magnitude"] = ceil_magnitude.values
+    out["pop_catalyst_score"] = pop_cat.values
+    if "pop_catalyst_tag" not in out.columns:
+        out["pop_catalyst_tag"] = ""
+    out["edge_score"] = edge_score.values
+    out["is_anchor"] = is_anchor.values
+
+    # PGA-specific edge labels
+    out["edge_label"] = _compute_pga_edge_labels(out)
+
+    return out.sort_values("edge_score", ascending=False).reset_index(drop=True)
+
+
+def _compute_pga_edge_labels(df: pd.DataFrame) -> pd.Series:
+    """PGA-specific edge labels using SG metrics and course fit."""
+    n = len(df)
+    labels_list: list[list[str]] = [[] for _ in range(n)]
+
+    smash = pd.to_numeric(df.get("smash_prob", pd.Series(0.0, index=df.index)), errors="coerce").fillna(0.0)
+    bust = pd.to_numeric(df.get("bust_prob", pd.Series(0.0, index=df.index)), errors="coerce").fillna(0.0)
+    lev = pd.to_numeric(df.get("leverage", pd.Series(0.0, index=df.index)), errors="coerce").fillna(0.0)
+    is_anchor = df.get("is_anchor", pd.Series(False, index=df.index)).fillna(False).astype(bool)
+    sg_total = pd.to_numeric(df.get("sg_total", pd.Series(0.0, index=df.index)), errors="coerce").fillna(0.0)
+    course_fit = pd.to_numeric(df.get("course_fit", pd.Series(0.0, index=df.index)), errors="coerce").fillna(0.0)
+    sg_app = pd.to_numeric(df.get("sg_app", pd.Series(0.0, index=df.index)), errors="coerce").fillna(0.0)
+
+    # Pool-relative cutoffs
+    sg_p85 = max(float(sg_total.quantile(0.85)), 0.5)
+    sg_p70 = max(float(sg_total.quantile(0.70)), 0.0)
+    cf_p85 = float(course_fit.quantile(0.85))
+    smash_p85 = max(float(smash.quantile(0.85)), 0.25)
+    bust_p90 = max(float(bust.quantile(0.90)), 0.35)
+    lev_p85 = max(float(lev.quantile(0.85)), 3.0)
+    app_p85 = max(float(sg_app.quantile(0.85)), 0.3)
+
+    for i in range(n):
+        tags: list[str] = []
+
+        if is_anchor.iloc[i]:
+            tags.append("\U0001f3c6 GPP Anchor")
+
+        # SG Elite — top ~15% strokes gained
+        if sg_total.iloc[i] >= sg_p85:
+            tags.append("\U0001f4aa SG Elite")
+        elif sg_total.iloc[i] >= sg_p70:
+            tags.append("\u26f3 SG Solid")
+
+        # Course Fit
+        if course_fit.iloc[i] >= cf_p85:
+            tags.append("\U0001f3af Course Fit")
+
+        # Approach Specialist
+        if sg_app.iloc[i] >= app_p85:
+            tags.append("\U0001f3cc Approach")
+
+        # Smash
+        if smash.iloc[i] >= smash_p85:
+            tags.append("\U0001f525 Smash")
+
+        # Bust Risk
+        if bust.iloc[i] >= bust_p90:
+            tags.append("\U0001f480 Bust Risk")
+
+        # Leverage
+        l = lev.iloc[i]
+        if l >= lev_p85:
+            tags.append("\u2705 +Leverage")
+
+        labels_list[i] = tags
+
+    return pd.Series(
+        [" | ".join(t) if t else "\u2014" for t in labels_list],
+        index=df.index,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
 def compute_edge_metrics(
     pool_df: pd.DataFrame,
     calibration_state: Optional[Dict[str, Any]] = None,
     variance: float = 1.0,
+    sport: str = "NBA",
 ) -> pd.DataFrame:
     """Compute edge metrics for every player in *pool_df*.
 
@@ -458,6 +668,10 @@ def compute_edge_metrics(
 
     if "player_name" not in pool_df.columns:
         raise ValueError("compute_edge_metrics: pool_df must contain 'player_name' column.")
+
+    # ── PGA branch: uses SG-based edge model ─────────────────────────
+    if sport.upper() == "PGA":
+        return _compute_pga_edge(pool_df, variance=variance)
 
     cal = dict(calibration_state) if calibration_state else {}
 

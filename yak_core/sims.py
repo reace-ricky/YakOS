@@ -342,8 +342,15 @@ def run_monte_carlo_for_lineups(
         projs = grp["proj"].fillna(0).values.astype(float)
         salaries = pd.to_numeric(grp.get("salary", pd.Series(6000, index=grp.index)), errors="coerce").fillna(6000).values.astype(float)
 
-        # Empirical salary-bracket variance (calibrated from 21-slate backtest)
-        stds = compute_empirical_std(projs, salaries, variance_mult=variance_mult, contest_mode=_contest_mode)
+        # PGA: use DataGolf per-player std_dev when available
+        _dg_std = None
+        if "std_dev" in grp.columns:
+            _dg_std_raw = pd.to_numeric(grp["std_dev"], errors="coerce").fillna(0).values.astype(float)
+            if (_dg_std_raw > 0).any():
+                _dg_std = _dg_std_raw
+
+        # Empirical variance (PGA path uses DataGolf std_dev; NBA uses salary-bracket model)
+        stds = compute_empirical_std(projs, salaries, variance_mult=variance_mult, contest_mode=_contest_mode, std_dev=_dg_std)
 
         # (n_sims × n_players) outcome matrix
         sim_matrix = rng.normal(
@@ -706,8 +713,28 @@ def compute_player_anomaly_table(
 
         projs_arr = np.array(projs_list)
         sals_arr = np.array(sals_list)
-        # Empirical salary-bracket variance (calibrated from 21-slate backtest)
-        stds_arr = compute_empirical_std(projs_arr, sals_arr)
+
+        # PGA: check if pool has DataGolf std_dev for per-player variance
+        _pat_dg_std = None
+        if not pool_df.empty:
+            _std_col = pool_df.get("std_dev")
+            if _std_col is not None:
+                _std_vals = pd.to_numeric(_std_col, errors="coerce").fillna(0)
+                if (_std_vals > 0).any():
+                    # Build std_dev array matching player order in this lineup
+                    _std_lookup = dict(zip(
+                        pool_df.get("player_name", pool_df.get("name", pd.Series())),
+                        _std_vals,
+                    ))
+                    _std_arr = np.array([
+                        float(_std_lookup.get(grp.iloc[j]["player_name"], 0))
+                        for j in range(len(grp))
+                    ])
+                    if (_std_arr > 0).any():
+                        _pat_dg_std = _std_arr
+
+        # Empirical variance (PGA uses DataGolf std_dev; NBA uses salary-bracket model)
+        stds_arr = compute_empirical_std(projs_arr, sals_arr, std_dev=_pat_dg_std)
 
         sim_matrix = rng.normal(
             loc=projs_arr[None, :],
@@ -1058,7 +1085,14 @@ def run_sims_pipeline(
     _pipe_contest_mode = contest_type.strip().lower().replace(" ", "_")
     _pipe_cm_map = {"gpp_main": "gpp", "gpp_early": "gpp", "gpp_late": "gpp", "cash_main": "cash"}
     _pipe_contest_mode = _pipe_cm_map.get(_pipe_contest_mode, _pipe_contest_mode)
-    _all_stds = compute_empirical_std(_all_projs, _all_sals, variance_mult=variance, contest_mode=_pipe_contest_mode)
+    # PGA: use DataGolf per-player std_dev when available
+    _pipe_dg_std = None
+    if "std_dev" in pool.columns:
+        _std_series = pd.to_numeric(pool["std_dev"], errors="coerce").fillna(0)
+        if (_std_series > 0).any():
+            _std_map = dict(zip(pool["player_name"], _std_series))
+            _pipe_dg_std = np.array([float(_std_map.get(n, 0)) for n in _all_names])
+    _all_stds = compute_empirical_std(_all_projs, _all_sals, variance_mult=variance, contest_mode=_pipe_contest_mode, std_dev=_pipe_dg_std)
     for i, pname in enumerate(_all_names):
         all_player_sims[pname] = rng.normal(_all_projs[i], _all_stds[i], n_sims)
 
@@ -1397,10 +1431,14 @@ def run_sims_for_contest_type(
     own = pd.to_numeric(df.get("own_pct", 5.0), errors="coerce").fillna(5.0)
 
     rng = np.random.default_rng(seed=42)
-    # Empirical salary-bracket variance (calibrated from 21-slate backtest)
-    # Contest-mode dampening: cash = tighter distributions, showdown = wider
+    # Empirical variance — PGA uses DataGolf std_dev when available
     _ct_mode = contest_type.strip().lower().replace(" ", "_")
-    std = compute_empirical_std(proj.values, salary.values, variance_mult=variance, contest_mode=_ct_mode)
+    _ct_dg_std = None
+    if "std_dev" in df.columns:
+        _ct_std = pd.to_numeric(df["std_dev"], errors="coerce").fillna(0).values
+        if (_ct_std > 0).any():
+            _ct_dg_std = _ct_std
+    std = compute_empirical_std(proj.values, salary.values, variance_mult=variance, contest_mode=_ct_mode, std_dev=_ct_dg_std)
     proj_vals = proj.values
 
     # Simulate n_sims score draws per player

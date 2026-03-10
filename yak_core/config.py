@@ -37,6 +37,44 @@ DK_SHOWDOWN_LINEUP_SIZE = 6
 DK_SHOWDOWN_SLOTS = ["CPT", "FLEX", "FLEX", "FLEX", "FLEX", "FLEX"]
 DK_SHOWDOWN_CAPTAIN_MULTIPLIER = 1.5  # Captain 1.5× salary AND 1.5× fantasy points
 
+# ----- DK PGA roster shape -----
+DK_PGA_LINEUP_SIZE = 6
+DK_PGA_POS_SLOTS = ["G", "G", "G", "G", "G", "G"]  # No positional constraints
+DK_PGA_SALARY_CAP = 50000
+
+# ----- Default PGA DK GPP config -----
+PGA_DEFAULT_CONFIG: Dict[str, Any] = {
+    "SPORT": "PGA",
+    "SITE": "DK",
+    "CONTEST_TYPE": "gpp",
+    "NUM_LINEUPS": 20,
+    "SALARY_CAP": DK_PGA_SALARY_CAP,
+    "LINEUP_SIZE": DK_PGA_LINEUP_SIZE,
+    "MAX_EXPOSURE": 0.6,
+    "MIN_SALARY_USED": 46000,
+    # PGA has no positions, stacking, or game correlation
+    "POS_CAPS": {},
+    "STACK_WEIGHT": 0.0,
+    "VALUE_WEIGHT": 0.30,
+    "OWN_WEIGHT": 0.25,
+    "MIN_TEAM_STACK": 0,
+    "MIN_GAME_STACK": 0,
+    "CORRELATION_RULES": {},
+    # GPP-specific for PGA
+    "GPP_OWN_CAP": 5.0,           # max total lineup ownership (6 players, not 8)
+    "GPP_MIN_LOW_OWN_PLAYERS": 1,
+    "GPP_LOW_OWN_THRESHOLD": 0.40,
+    "GPP_FORCE_GAME_STACK": False,  # No games to stack in PGA
+    "GPP_MAX_PUNT_PLAYERS": 1,
+    "GPP_MIN_MID_PLAYERS": 2,
+    # Player controls
+    "LOCK": [],
+    "EXCLUDE": [],
+    "BUMP": {},
+    "NOT_WITH": [],
+    "SOLVER_TIME_LIMIT": 30,
+}
+
 # ----- Default config for historical NBA DK GPP -----
 DEFAULT_CONFIG: Dict[str, Any] = {
     "SPORT": "NBA",
@@ -264,16 +302,63 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
     },
 }
 
+# ----- PGA contest presets -----
+# PGA DFS is simpler: GPP only (no cash/showdown on DK for golf).
+# 6 golfers, no positions, no stacking.
+PGA_CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
+    "PGA GPP": {
+        "description": "PGA tournament GPP — 6 golfers, max upside",
+        "slate_type": "Classic",
+        "archetype": "Ceiling Hunter",
+        "internal_contest": "MME",
+        "projection_style": "ceil",
+        "volatility": "high",
+        "correlation_mode": None,   # No team stacking in PGA
+        "lineup_size": DK_PGA_LINEUP_SIZE,
+        "num_lineups": 20,
+        "salary_cap": DK_PGA_SALARY_CAP,
+        "min_salary_used": 46000,
+        "max_exposure": 0.60,
+        "pos_slots": DK_PGA_POS_SLOTS,
+        "pos_caps": {},
+        # Ownership / leverage
+        "own_weight": 0.25,
+        "own_cap": 5.0,
+        "min_low_own_players": 1,
+        "low_own_threshold": 0.40,
+        # GPP structure
+        "min_mid_salary_players": 2,
+        "max_punt_players": 1,
+        "force_game_stack": False,
+        # Correlation rules
+        "not_with_auto": False,
+        "max_per_team": None,
+        # Exposure
+        "exposure_rules": False,
+        # Ownership sim contest type
+        "ownership_contest_type": "gpp",
+    },
+}
+
+# Merge PGA presets into the main dict
+CONTEST_PRESETS.update(PGA_CONTEST_PRESETS)
+
 # Ordered list of ALL contest preset labels (internal, preserves display order)
 CONTEST_PRESET_LABELS: List[str] = list(CONTEST_PRESETS.keys())
 
-# User-facing contest type labels — simplified to 3 choices.
-# Internally mapped to the full preset keys via UI_CONTEST_MAP.
+# User-facing contest type labels — sport-aware.
+# NBA gets GPP/Cash/Showdown, PGA gets GPP only.
 UI_CONTEST_LABELS: List[str] = ["GPP", "Cash", "Showdown"]
 UI_CONTEST_MAP: Dict[str, str] = {
     "GPP": "GPP Main",       # Game filter handles early/late scoping
     "Cash": "Cash Main",
     "Showdown": "Showdown",
+}
+
+# PGA contest UI — simpler, GPP only
+PGA_UI_CONTEST_LABELS: List[str] = ["GPP"]
+PGA_UI_CONTEST_MAP: Dict[str, str] = {
+    "GPP": "PGA GPP",
 }
 
 # Short archetype labels for each contest preset label.
@@ -283,6 +368,7 @@ CONTEST_PRESET_ARCH_LABELS: Dict[str, str] = {
     "GPP Late": "GPP-L",
     "Showdown": "SD",
     "Cash Main": "CASH",
+    "PGA GPP": "PGA",
 }
 
 # ============================================================
