@@ -291,6 +291,12 @@ class LineupSetState:
                 ),
             }
             self.snapshot_times[contest_label] = ts
+            # Persist to disk so data survives page refresh
+            try:
+                from yak_core.lineup_store import save_published_set
+                save_published_set(contest_label, self.published_sets[contest_label])
+            except Exception:
+                pass  # Don't break publish if disk write fails
 
     def get_published_labels(self) -> List[str]:
         """Return list of contest labels that have published lineups."""
@@ -444,11 +450,25 @@ def set_edge_state(state: RickyEdgeState) -> None:
 
 
 def get_lineup_state() -> LineupSetState:
-    """Return the current LineupSetState from session_state, creating if absent."""
+    """Return the current LineupSetState from session_state, creating if absent.
+
+    On a fresh session (no published sets in memory), restores any
+    previously persisted published sets from disk.
+    """
     ss = _ss()
     if _KEY_LINEUP not in ss:
         ss[_KEY_LINEUP] = LineupSetState()
-    return ss[_KEY_LINEUP]
+    state: LineupSetState = ss[_KEY_LINEUP]
+    # Restore persisted published sets on fresh session
+    if not state.published_sets:
+        try:
+            from yak_core.lineup_store import load_all_published
+            persisted = load_all_published()
+            if persisted:
+                state.published_sets = persisted
+        except Exception:
+            pass
+    return state
 
 
 def set_lineup_state(state: LineupSetState) -> None:

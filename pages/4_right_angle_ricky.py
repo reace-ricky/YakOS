@@ -37,6 +37,7 @@ from yak_core.state import (  # noqa: E402
     get_slate_state,
     get_edge_state,
     get_lineup_state,
+    set_lineup_state,
     get_sim_state,
 )
 from yak_core.components import render_premium_lineup_card, render_lineup_cards_paged  # noqa: E402
@@ -401,6 +402,13 @@ def _render_tab_analysis(slate, edge, lu_state, sim_state) -> None:
                         compact=True,
                     )
 
+        if st.button("\U0001f5d1\ufe0f Clear Published Lineups", key="_rar_clear_pub_nba"):
+            from yak_core.lineup_store import clear_published
+            clear_published()
+            lu_state.published_sets.clear()
+            set_lineup_state(lu_state)
+            st.rerun()
+
 
 # ---------------------------------------------------------------------------
 # Tab 1 (PGA) — PGA Edge Analysis powered by breakout signals
@@ -500,19 +508,36 @@ def _render_tab_analysis_pga(slate, lu_state, sim_state) -> None:
             "FADE", stat_format="proj_salary",
         )
 
-    # ── Top PGA GPP lineup from Build & Publish ───────────────────────
-    lu_rows, sim_metrics, bb_row = _get_best_lineup(lu_state, sim_state, "PGA GPP")
-    if lu_rows is not None and not lu_rows.empty:
+    # ── Top PGA lineups from Build & Publish (GPP / Cash / Showdown) ───
+    _pga_lineup_data = []
+    for _pga_cl in ["PGA GPP", "PGA Cash", "PGA Showdown"]:
+        lu_rows, sim_metrics, bb_row = _get_best_lineup(lu_state, sim_state, _pga_cl)
+        if lu_rows is not None and not lu_rows.empty:
+            _short = _LABEL_SHORT.get(_pga_cl, _pga_cl)
+            _pga_lineup_data.append((_pga_cl, _short, lu_rows, sim_metrics, bb_row))
+
+    if _pga_lineup_data:
         st.divider()
-        st.markdown("**Top PGA GPP Lineup**")
-        render_premium_lineup_card(
-            lineup_rows=lu_rows,
-            sim_metrics=sim_metrics,
-            lineup_label="#1 PGA GPP",
-            salary_cap=slate.salary_cap,
-            boom_bust_row=bb_row,
-            compact=True,
-        )
+        for i in range(0, len(_pga_lineup_data), 2):
+            chunk = _pga_lineup_data[i:i + 2]
+            cols = st.columns(len(chunk))
+            for col, (_pga_cl, _short, lu_rows, sim_metrics, bb_row) in zip(cols, chunk):
+                with col:
+                    render_premium_lineup_card(
+                        lineup_rows=lu_rows,
+                        sim_metrics=sim_metrics,
+                        lineup_label=f"Top {_short}",
+                        salary_cap=slate.salary_cap,
+                        boom_bust_row=bb_row,
+                        compact=True,
+                    )
+
+        if st.button("\U0001f5d1\ufe0f Clear Published Lineups", key="_rar_clear_pub_pga"):
+            from yak_core.lineup_store import clear_published
+            clear_published()
+            lu_state.published_sets.clear()
+            set_lineup_state(lu_state)
+            st.rerun()
 
 
 # ===========================================================================
