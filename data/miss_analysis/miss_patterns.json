@@ -1,11 +1,11 @@
 {
-  "computed_at": "2026-03-10T02:18:42.712744+00:00",
+  "computed_at": "2026-03-10T02:29:53.467674+00:00",
   "n_slates": 14,
   "n_player_slates": 2411,
   "classification": {
-    "pop": 540,
+    "pop": 541,
     "bust": 445,
-    "inline": 1426,
+    "inline": 1425,
     "pop_rate": 0.224,
     "bust_rate": 0.185
   },
@@ -233,9 +233,9 @@
     {
       "player": "Myles Turner",
       "salary": 5500,
-      "proj": 30.6,
+      "proj": 30.5,
       "actual": 5.5,
-      "residual": -25.1,
+      "residual": -25.0,
       "ratio": 0.18,
       "context": [],
       "date": "2026-03-08"
@@ -253,7 +253,7 @@
   ],
   "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-10T02:18:42.712711+00:00",
+    "computed_at": "2026-03-10T02:29:53.467653+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
