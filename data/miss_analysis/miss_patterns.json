@@ -1,12 +1,12 @@
 {
-  "computed_at": "2026-03-10T01:10:39.505202+00:00",
+  "computed_at": "2026-03-10T02:18:42.712744+00:00",
   "n_slates": 14,
   "n_player_slates": 2411,
   "classification": {
-    "pop": 538,
+    "pop": 540,
     "bust": 445,
-    "inline": 1428,
-    "pop_rate": 0.223,
+    "inline": 1426,
+    "pop_rate": 0.224,
     "bust_rate": 0.185
   },
   "factor_breakdown": {},
@@ -15,7 +15,7 @@
       "n": 1326,
       "pop_rate": 0.268,
       "bust_rate": 0.253,
-      "avg_residual": 0.2,
+      "avg_residual": 0.3,
       "mae": 7.2
     },
     "5_65k": {
@@ -27,23 +27,23 @@
     },
     "65_8k": {
       "n": 296,
-      "pop_rate": 0.145,
+      "pop_rate": 0.149,
       "bust_rate": 0.084,
-      "avg_residual": -0.2,
-      "mae": 8.5
+      "avg_residual": -0.1,
+      "mae": 8.6
     },
     "8_10k": {
       "n": 205,
-      "pop_rate": 0.102,
+      "pop_rate": 0.107,
       "bust_rate": 0.059,
-      "avg_residual": -1.4,
+      "avg_residual": -1.3,
       "mae": 8.9
     },
     "10k_plus": {
       "n": 64,
       "pop_rate": 0.094,
       "bust_rate": 0.062,
-      "avg_residual": -0.6,
+      "avg_residual": -0.5,
       "mae": 10.3
     }
   },
@@ -221,16 +221,6 @@
       "date": "2026-03-05"
     },
     {
-      "player": "Myles Turner",
-      "salary": 5500,
-      "proj": 30.8,
-      "actual": 5.5,
-      "residual": -25.3,
-      "ratio": 0.18,
-      "context": [],
-      "date": "2026-03-08"
-    },
-    {
       "player": "Jaylon Tyson",
       "salary": 6600,
       "proj": 30.4,
@@ -239,6 +229,16 @@
       "ratio": 0.17,
       "context": [],
       "date": "2026-02-20"
+    },
+    {
+      "player": "Myles Turner",
+      "salary": 5500,
+      "proj": 30.6,
+      "actual": 5.5,
+      "residual": -25.1,
+      "ratio": 0.18,
+      "context": [],
+      "date": "2026-03-08"
     },
     {
       "player": "Myles Turner",
@@ -253,7 +253,7 @@
   ],
   "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-10T01:10:39.505182+00:00",
+    "computed_at": "2026-03-10T02:18:42.712711+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
