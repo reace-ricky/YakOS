@@ -1,7 +1,7 @@
 """yak_core.sim_sandbox -- Sim Calibration Sandbox.
 
 Runs sim configs against archived slates with actuals, scores prediction
-accuracy, detects breakouts, and recommends knob adjustments.
+accuracy, detects breakouts, and builds a breakout fingerprint profile.
 
 Absorbs the old "Signal Accuracy" display into a unified calibration tool
 that actually persists results and closes the feedback loop.
@@ -13,17 +13,12 @@ KPIs:
   - Coverage (% of actuals within sim range)
   - Breakout Hit Rate (ceiling-beaters we identified)
 
-Knobs tuned:
-  - ceiling_boost  (scales upside outcomes in MC sims)
-  - floor_dampen   (compresses downside outcomes in MC sims)
-
 Workflow:
   1. Load archived slates (they have proj, ceil, floor, actual_fp)
   2. Run sim scoring with current knobs
   3. Compute verdicts (SMASHED / HIT / MISS / BUSTED) per player
   4. Detect breakouts (players who blew past ceiling)
-  5. Recommend knob adjustments
-  6. One-click Apply writes new knobs
+  5. Build breakout profile (signal weights from ceiling-beater fingerprint)
 
 Storage: JSON in data/sim_sandbox/
 """
@@ -489,138 +484,9 @@ def run_sandbox(
         } for r in slate_results],
     }
 
-    agg["recommendations"] = _generate_recommendations(agg)
+    agg["breakout_profile"] = build_breakout_profile(sport=sport)
 
     return agg
-
-
-# ── Recommendation Engine ──────────────────────────────────────────
-
-def _generate_recommendations(agg: Dict[str, Any]) -> Dict[str, Any]:
-    """Analyze results and recommend knob adjustments.
-
-    Knob triggers (independent — each fires on its own):
-
-    ceiling_boost:
-      - smash_prec < 15%  → big bump (+0.12)
-      - smash_prec < 25%  → nudge  (+0.06)
-      - smash_prec > 35%  → trim   (-0.05)  (over-predicting upside)
-      - upside_acc < 50%  → bump   (+0.10)
-      - upside_acc < 65%  → nudge  (+0.05)
-
-    floor_dampen:
-      - bust_prec < 20%   → bump   (+0.12)
-      - bust_prec < 35%   → nudge  (+0.06)
-      - bust_prec > 50%   → trim   (-0.05)
-      - downside_acc < 50% → bump  (+0.10)
-      - downside_acc < 65% → nudge (+0.05)
-
-    Multiple reasons can fire. The largest applicable bump wins per knob.
-    """
-    current = agg["knobs"]
-    cb = current.get("ceiling_boost", 1.0)
-    fd = current.get("floor_dampen", 1.0)
-
-    upside_acc = agg.get("avg_upside_accuracy", 0)
-    downside_acc = agg.get("avg_downside_accuracy", 0)
-    coverage = agg.get("avg_coverage", 0)
-    smash_prec = agg.get("avg_smash_precision", 0)
-    bust_prec = agg.get("avg_bust_precision", 0)
-
-    cb_delta = 0.0
-    fd_delta = 0.0
-    reasons = []
-
-    # ── Ceiling boost: smash precision is the primary signal ──────────
-    if smash_prec < 0.15:
-        _d = 0.12
-        cb_delta = max(cb_delta, _d)
-        reasons.append(f"Smash precision {smash_prec:.0%} is very low — bump ceiling_boost +{_d}")
-    elif smash_prec < 0.25:
-        _d = 0.06
-        cb_delta = max(cb_delta, _d)
-        reasons.append(f"Smash precision {smash_prec:.0%} below target 25% — nudge ceiling_boost +{_d}")
-    elif smash_prec > 0.35:
-        _d = -0.05
-        cb_delta = min(cb_delta, _d)
-        reasons.append(f"Smash precision {smash_prec:.0%} is high — trim ceiling_boost {_d}")
-
-    # Upside accuracy as secondary signal
-    if upside_acc < 0.50:
-        _d = 0.10
-        if _d > cb_delta:
-            cb_delta = _d
-        reasons.append(f"Upside accuracy {upside_acc:.0%} is low — ceiling_boost +{_d}")
-    elif upside_acc < 0.65:
-        _d = 0.05
-        if _d > cb_delta:
-            cb_delta = _d
-        reasons.append(f"Upside accuracy {upside_acc:.0%} could improve — ceiling_boost +{_d}")
-
-    # ── Floor dampen: bust precision is the primary signal ────────────
-    if bust_prec < 0.20:
-        _d = 0.12
-        fd_delta = max(fd_delta, _d)
-        reasons.append(f"Bust precision {bust_prec:.0%} is very low — bump floor_dampen +{_d}")
-    elif bust_prec < 0.35:
-        _d = 0.06
-        fd_delta = max(fd_delta, _d)
-        reasons.append(f"Bust precision {bust_prec:.0%} below target 35% — nudge floor_dampen +{_d}")
-    elif bust_prec > 0.50:
-        _d = -0.05
-        fd_delta = min(fd_delta, _d)
-        reasons.append(f"Bust precision {bust_prec:.0%} is high — trim floor_dampen {_d}")
-
-    # Downside accuracy as secondary signal
-    if downside_acc < 0.50:
-        _d = 0.10
-        if _d > fd_delta:
-            fd_delta = _d
-        reasons.append(f"Downside accuracy {downside_acc:.0%} is low — floor_dampen +{_d}")
-    elif downside_acc < 0.65:
-        _d = 0.05
-        if _d > fd_delta:
-            fd_delta = _d
-        reasons.append(f"Downside accuracy {downside_acc:.0%} could improve — floor_dampen +{_d}")
-
-    # ── Coverage check (advisory only, no knob change) ───────────────
-    if coverage > 0.90:
-        reasons.append(f"Coverage {coverage:.0%} is very high — sims may be too conservative")
-    elif coverage < 0.60:
-        reasons.append(f"Coverage {coverage:.0%} is low — sims may be too aggressive")
-
-    # Apply deltas
-    new_cb = round(cb + cb_delta, 3)
-    new_fd = round(fd + fd_delta, 3)
-
-    # Guard rails
-    new_cb = round(max(0.5, min(2.0, new_cb)), 3)
-    new_fd = round(max(0.5, min(2.0, new_fd)), 3)
-
-    # changed flag follows the deltas, not new-vs-old comparison.
-    # The old check (abs(new - old) > 0.001) would say "no changes"
-    # when knobs had already been applied but KPIs hadn't improved.
-    # Also respect guard rails: if we hit the cap, no point recommending.
-    changed = (abs(new_cb - cb) > 0.001) or (abs(new_fd - fd) > 0.001)
-    if not changed and (abs(cb_delta) > 0.001 or abs(fd_delta) > 0.001):
-        # Deltas fired but the knobs didn't move (already at cap or
-        # already at the recommended value). Tell the user.
-        if cb >= 2.0 or fd >= 2.0:
-            reasons.append("Knobs are at their maximum — further tuning won't help. "
-                           "The issue is upstream (projection quality, not sim width).")
-        else:
-            # Deltas fired and knobs aren't at cap, so apply them.
-            changed = True
-
-    if not reasons:
-        reasons.append("Current config looks solid — no changes recommended")
-
-    return {
-        "current": {"ceiling_boost": cb, "floor_dampen": fd},
-        "recommended": {"ceiling_boost": new_cb, "floor_dampen": new_fd},
-        "changed": changed,
-        "reasons": reasons,
-    }
 
 
 # ── History Tracking ───────────────────────────────────────────────
@@ -677,6 +543,7 @@ _DEFAULT_SIGNAL_WEIGHTS: Dict[str, float] = {
 
 
 def build_breakout_profile(
+    sport: Optional[str] = None,
     min_breakouts: int = 5,
 ) -> Dict[str, Any]:
     """Build a breakout signal-weight profile from archived slate data.
@@ -692,6 +559,10 @@ def build_breakout_profile(
 
     Parameters
     ----------
+    sport : str, optional
+        "NBA" or "PGA". Filters archived slates by filename prefix.
+        PGA files start with ``pga_``, NBA files do not.
+        None = include all slates.
     min_breakouts : int
         Minimum number of confirmed breakout players required across all
         slates before learning weights.  If fewer are found, equal weights
@@ -714,9 +585,18 @@ def build_breakout_profile(
     non_breakout_counts: Dict[str, int] = {s: 0 for s in signal_names}
     total_breakouts = 0
     total_players = 0
+    total_slates = 0
 
     if os.path.isdir(archive_dir):
-        for fname in sorted(os.listdir(archive_dir)):
+        fnames = sorted(os.listdir(archive_dir))
+        # Sport filter: PGA files are prefixed "pga_", NBA files are not
+        if sport:
+            _sp = sport.upper()
+            if _sp == "PGA":
+                fnames = [f for f in fnames if f.startswith("pga_")]
+            elif _sp == "NBA":
+                fnames = [f for f in fnames if not f.startswith("pga_")]
+        for fname in fnames:
             if not fname.endswith(".parquet"):
                 continue
             try:
@@ -734,6 +614,8 @@ def build_breakout_profile(
 
             if len(df) < 3:
                 continue
+
+            total_slates += 1
 
             salary = df["salary"].values.astype(float)
             proj = df["proj"].values.astype(float)
@@ -790,6 +672,7 @@ def build_breakout_profile(
 
     profile: Dict[str, Any] = {
         "signals": weights,
+        "n_slates": total_slates,
         "n_breakouts": total_breakouts,
         "n_players": total_players,
         "built_at": datetime.now(timezone.utc).isoformat(),
