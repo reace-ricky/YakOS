@@ -77,6 +77,7 @@ EDGE_DF_COLUMNS = [
     "ceil_magnitude",
     "pop_catalyst_score",
     "pop_catalyst_tag",
+    "fp_efficiency",
     "edge_score",
     "edge_label",
     "is_anchor",
@@ -695,6 +696,33 @@ def compute_edge_metrics(
     ceil = ceil + (proj * ceil_boost)
     floor = floor + (proj * floor_red)
 
+    # ── Per-minute efficiency signal ──────────────────────────────────────────
+    # Per-minute efficiency: how much does this player produce per minute played?
+    # Players with high FP/min are breakout candidates if they get extra run.
+    # When proj_minutes is absent (defaults to 0), all players score below the
+    # 10-minute threshold and eff_norm is zeroed out — no boost applied.
+    proj_minutes = _parse_numeric(df.get("proj_minutes", pd.Series(0, index=df.index)), 0.0)
+    fp_per_min = proj / proj_minutes.clip(lower=10.0)  # avoid div/0 on low-min players
+
+    # Value efficiency: FP/min relative to salary tier.
+    # A $4K player at 1.3 FP/min is more undervalued than a $10K player at 1.3 FP/min.
+    salary_k = (salary / 1000.0).clip(lower=3.0)
+    efficiency_value = fp_per_min / salary_k  # higher = more efficient per dollar-minute
+
+    # Normalize 0-1 within slate
+    _eff_max = float(efficiency_value.max())
+    eff_norm = efficiency_value / max(_eff_max, 0.001)
+
+    # Only meaningful for players with 10+ projected minutes
+    eff_norm[proj_minutes < 10] = 0.0
+
+    # High-efficiency players get ceiling boost (up to +10%).
+    # Any extra minutes translate directly to more FP for these players.
+    # Note: this boost multiplies the ceiling AFTER calibration boosts have been
+    # applied additively above (ceil_boost), compounding those adjustments.
+    eff_ceil_boost = 1.0 + (eff_norm * 0.10)
+    ceil = ceil * eff_ceil_boost
+
     # Apply calibration projection bumps
     eff_proj = _apply_calibration_bumps(proj, salary, cal)
 
@@ -781,6 +809,7 @@ def compute_edge_metrics(
     # Preserve pop_catalyst_tag from pool if present
     if "pop_catalyst_tag" not in out.columns:
         out["pop_catalyst_tag"] = ""
+    out["fp_efficiency"] = eff_norm.values
     out["edge_score"] = edge_score.values
     out["is_anchor"] = is_anchor.values
 
