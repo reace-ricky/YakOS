@@ -110,6 +110,28 @@ class TestPublishEdgeAndLineups:
         assert len(payload["lineups"]) == 1
         assert payload["lineups"][0]["lineup_index"] == 0
 
+    def test_filtered_lineups_only_publishes_selected(self):
+        """Passing a pre-filtered DataFrame publishes only the selected lineups."""
+        slate = _make_slate_state_with_edge()
+        # Simulate 3 lineups built, user selects only lineup_index 0 and 2
+        all_lineups = pd.DataFrame({
+            "lineup_index": [0, 0, 1, 1, 2, 2],
+            "slot": ["PG", "SG", "PG", "SG", "PG", "SG"],
+            "player_name": ["P0", "P1", "P2", "P3", "P4", "P5"],
+            "salary": [5000, 5400, 5000, 5400, 5000, 5400],
+            "proj": [20.0, 21.5, 18.0, 19.5, 22.0, 23.5],
+        })
+        # Filter to only selected indices (0 and 2) — mirrors UI logic
+        selected_indices = [0, 2]
+        filtered_df = all_lineups[all_lineups["lineup_index"].isin(selected_indices)].copy()
+
+        payload = publish_edge_and_lineups(slate, filtered_df)
+        published_indices = [lu["lineup_index"] for lu in payload["lineups"]]
+        assert len(published_indices) == 2, f"Expected 2 lineups, got {len(published_indices)}"
+        assert 0 in published_indices
+        assert 2 in published_indices
+        assert 1 not in published_indices
+
     def test_missing_edge_df_does_not_crash(self):
         slate = SlateState()
         slate.edge_df = None
