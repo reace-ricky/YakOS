@@ -398,33 +398,95 @@ def main() -> None:
     # ─────────────────────────────────────────────────────────────────────
     st.subheader("Contest Advisor")
 
-    # Read RCI results from sim state (written by The Lab's RCI section)
-    _rci_data = sim.contest_gauges  # RCI stores results here via set_rci_result
+    # Derive recommendations from edge_df (populated after edge analysis in The Lab)
+    # Threshold: leverage > _LEVERAGE_THRESHOLD = underowned relative to projection (proj/own%).
+    _LEVERAGE_THRESHOLD = 2.0
+    _edge_df = slate.edge_df
+    _has_edge = _edge_df is not None and not _edge_df.empty
     _UI_ADVISOR_LABELS = [("GPP", "GPP Main"), ("Cash", "Cash Main"), ("Showdown", "Showdown")]
-    _any_rci = any(_rci_data.get(label, {}).get("rci_score") for _, label in _UI_ADVISOR_LABELS)
-    if _any_rci:
+    if _has_edge:
+        # Pre-compute slate-level edge signals once
+        _lev = _edge_df["leverage"].dropna()
+        _own = (
+            _edge_df["own_pct"] if "own_pct" in _edge_df.columns
+            else _edge_df["ownership"] if "ownership" in _edge_df.columns
+            else pd.Series(dtype=float)
+        )
+        _bust = _edge_df["bust_prob"] if "bust_prob" in _edge_df.columns else pd.Series(dtype=float)
+        _smash = _edge_df["smash_prob"] if "smash_prob" in _edge_df.columns else pd.Series(dtype=float)
+        _ceil_mag = _edge_df["ceil_magnitude"] if "ceil_magnitude" in _edge_df.columns else pd.Series(dtype=float)
+        _edge_score = _edge_df["edge_score"] if "edge_score" in _edge_df.columns else pd.Series(dtype=float)
+
+        # Top-8 players by edge_score (core plays)
+        _top8_idx = _edge_score.nlargest(8).index
+        # NaN ownership → GPP thresholds won't trigger; treated as data-unavailable
+        _avg_own_top8 = float(_own.reindex(_top8_idx).mean()) if not _own.empty else float("nan")
+
+        # Count signals
+        _n_high_lev = int((_lev > _LEVERAGE_THRESHOLD).sum())
+        _n_safe_floor = int((_bust < 0.25).sum()) if not _bust.empty else 0
+        _avg_smash_top8 = float(_smash.reindex(_top8_idx).mean()) if not _smash.empty else 0.0
+        _n_high_ceil = int((_ceil_mag > 0.6).sum()) if not _ceil_mag.empty else 0
+        _avg_edge_top8 = float(_edge_score.reindex(_top8_idx).mean()) if not _edge_score.empty else 0.0
+
+        # Salary-efficient value plays: salary in lower half + ceil_magnitude above median
+        _salary = _edge_df["salary"] if "salary" in _edge_df.columns else pd.Series(dtype=float)
+        _sal_median = float(_salary.median()) if not _salary.empty else 0.0
+        _ceil_median = float(_ceil_mag.median()) if not _ceil_mag.empty else 0.0
+        _n_value = (
+            int(((_salary < _sal_median) & (_ceil_mag > _ceil_median)).sum())
+            if not _salary.empty and not _ceil_mag.empty else 0
+        )
+
         advisor_rows = []
         for ui_label, label in _UI_ADVISOR_LABELS:
             preset = CONTEST_PRESETS.get(label, {})
-            rci_entry = _rci_data.get(label, {})
-            rci_score = float(rci_entry.get("rci_score", 0))
-            rci_status = rci_entry.get("rci_status", "red")
-            rec = (
-                "✅ Strong" if rci_score >= 70
-                else "✅ Playable" if rci_score >= 45
-                else "⚠️ Thin" if rci_score >= 25
-                else "❌ Not calibrated"
-            )
+
+            if label == "GPP Main":
+                # GPP favours high-leverage (underowned) plays and a low-ownership pool
+                _own_ok = not (pd.isna(_avg_own_top8))
+                _own_str = f"{_avg_own_top8:.0f}% avg own" if _own_ok else "own N/A"
+                if _n_high_lev >= 5 and (_own_ok and _avg_own_top8 < 20):
+                    rec = f"✅ Strong — {_n_high_lev} leveraged, {_own_str}"
+                elif _n_high_lev >= 3 or (_own_ok and _avg_own_top8 < 25):
+                    rec = f"✅ Playable — {_n_high_lev} leveraged, {_own_str}"
+                elif _n_high_lev >= 1:
+                    rec = f"⚠️ Thin — {_n_high_lev} leveraged play(s), {_own_str}"
+                else:
+                    rec = "❌ Pass — no leverage edge detected"
+
+            elif label == "Cash Main":
+                # Cash favours safe floors (low bust) and consistent scorers (high smash)
+                if _n_safe_floor >= 8 and _avg_smash_top8 > 0.45:
+                    rec = f"✅ Strong — {_n_safe_floor} safe floors, {_avg_smash_top8:.2f} avg smash"
+                elif _n_safe_floor >= 5 or _avg_smash_top8 > 0.35:
+                    rec = f"✅ Playable — {_n_safe_floor} safe floors, {_avg_smash_top8:.2f} avg smash"
+                elif _n_safe_floor >= 3:
+                    rec = f"⚠️ Thin — {_n_safe_floor} safe-floor plays"
+                else:
+                    rec = "❌ Pass — floor concentration too low"
+
+            else:  # Showdown
+                # Showdown favours ceiling upside and overall edge density
+                if _n_high_ceil >= 4 and _avg_edge_top8 > 0.5:
+                    rec = f"✅ Strong — {_n_high_ceil} high-ceil plays, {_avg_edge_top8:.2f} avg edge"
+                elif _n_high_ceil >= 2 or _avg_edge_top8 > 0.4:
+                    rec = f"✅ Playable — {_n_high_ceil} high-ceil plays, {_avg_edge_top8:.2f} avg edge"
+                elif _n_high_ceil >= 1:
+                    rec = f"⚠️ Thin — {_n_high_ceil} high-ceil play(s)"
+                else:
+                    rec = "❌ Pass — ceiling concentration too low"
+
             advisor_rows.append({
                 "Contest": ui_label,
                 "Build Mode": _CONTEST_TO_BUILD_MODE.get(label, "median"),
                 "Default Lineups": preset.get("default_lineups", 1),
-                "RCI": f"{int(rci_score)}/100",
+                "Value Plays": _n_value,
                 "Recommendation": rec,
             })
         st.dataframe(pd.DataFrame(advisor_rows), use_container_width=True, hide_index=True)
     else:
-        st.info("Run edge analysis or sims in **The Lab** for contest recommendations.")
+        st.info("Run edge analysis in **The Lab** for contest recommendations.")
 
     st.divider()
 
