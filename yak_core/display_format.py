@@ -25,8 +25,54 @@ import numpy as np
 
 
 # ---------------------------------------------------------------------------
-# Ownership normalisation
+# Shared tier / tag display constants
 # ---------------------------------------------------------------------------
+
+#: Emoji badge for each player tier/tag, shared across all pages.
+TAG_COLORS: Dict[str, str] = {
+    "core": "\U0001f7e2",       # 🟢
+    "secondary": "\U0001f535",  # 🔵
+    "value": "\U0001f7e1",      # 🟡
+    "leverage": "\u26a1",       # ⚡
+    "punt": "\u26aa",           # ⚫
+    "fade": "\U0001f534",       # 🔴
+    "neutral": "\u26aa",        # ⚫
+}
+
+
+# ---------------------------------------------------------------------------
+# Player tier classification
+# ---------------------------------------------------------------------------
+
+def classify_player_tier(salary: float, proj: float, own: float) -> str:
+    """Auto-classify a player into a tier based on salary, projection and ownership.
+
+    Calibrated from 21-slate backtest (Feb 7 – Mar 5 2026, 3512 player-slates).
+
+    Parameters
+    ----------
+    salary : float   Player salary.
+    proj   : float   Projected fantasy points.
+    own    : float   Projected ownership (0-100 scale).
+
+    Returns
+    -------
+    str  One of "core", "leverage", "value", "fade", or "neutral".
+    """
+    sal = float(salary or 6000)
+    prj = float(proj or 0)
+    ow = float(own or 15)
+    val = prj / max(sal / 1000.0, 1.0)
+    if sal >= 8000:
+        return "fade"
+    if sal < 6000 and val >= 2.0 and ow < 15:
+        return "core"
+    if ow < 12 and val >= 2.5 and sal < 7500:
+        return "leverage"
+    if val >= 3.0:
+        return "value"
+    return "neutral"
+
 
 def normalise_ownership(series: pd.Series) -> pd.Series:
     """Ensure ownership is on a 0-100 scale (percentage points).
