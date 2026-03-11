@@ -1,26 +1,26 @@
 {
-  "computed_at": "2026-03-11T12:50:33.777029+00:00",
+  "computed_at": "2026-03-11T13:37:39.546059+00:00",
   "n_slates": 19,
-  "n_player_slates": 3068,
+  "n_player_slates": 3067,
   "classification": {
-    "pop": 673,
+    "pop": 675,
     "bust": 575,
-    "inline": 1820,
-    "pop_rate": 0.219,
+    "inline": 1817,
+    "pop_rate": 0.22,
     "bust_rate": 0.187
   },
   "factor_breakdown": {},
   "bracket_breakdown": {
     "lt5k": {
-      "n": 1720,
-      "pop_rate": 0.257,
-      "bust_rate": 0.253,
+      "n": 1719,
+      "pop_rate": 0.258,
+      "bust_rate": 0.252,
       "avg_residual": 0.1,
       "mae": 7.2
     },
     "5_65k": {
       "n": 648,
-      "pop_rate": 0.213,
+      "pop_rate": 0.215,
       "bust_rate": 0.137,
       "avg_residual": 0.5,
       "mae": 8.8
@@ -34,27 +34,27 @@
     },
     "8_10k": {
       "n": 262,
-      "pop_rate": 0.103,
-      "bust_rate": 0.065,
-      "avg_residual": -0.9,
-      "mae": 9.1
+      "pop_rate": 0.099,
+      "bust_rate": 0.069,
+      "avg_residual": -1.0,
+      "mae": 9.2
     },
     "10k_plus": {
       "n": 78,
       "pop_rate": 0.115,
       "bust_rate": 0.051,
       "avg_residual": 0.5,
-      "mae": 10.3
+      "mae": 10.1
     }
   },
   "top_pops": [
     {
       "player": "Bam Adebayo",
       "salary": 8400,
-      "proj": 36.3,
+      "proj": 42.0,
       "actual": 105.8,
-      "residual": 69.4,
-      "ratio": 2.91,
+      "residual": 63.7,
+      "ratio": 2.52,
       "context": [],
       "date": "2026-03-10"
     },
@@ -64,7 +64,7 @@
       "proj": 11.0,
       "actual": 65.8,
       "residual": 54.8,
-      "ratio": 5.98,
+      "ratio": 5.99,
       "context": [],
       "date": "2026-03-10"
     },
@@ -253,7 +253,7 @@
   ],
   "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-11T12:50:33.776984+00:00",
+    "computed_at": "2026-03-11T13:37:39.546021+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
