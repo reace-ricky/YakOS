@@ -159,6 +159,62 @@ def load_dvp_table(path: str | Path = _DVP_DEFAULT_PATH) -> Optional[pd.DataFram
         return None
 
 
+def get_dvp_boost(player_pos: str, opp_team: str, dvp_df: pd.DataFrame) -> float:
+    """Return DvP boost for a player's position vs their opponent.
+
+    Returns a float centered around 0.0:
+    - Positive = soft matchup (opponent allows more FP than average at this position)
+    - Negative = tough matchup
+    - 0.0 = no DVP data available
+
+    Normalized to roughly [-0.15, +0.15] range representing % adjustment.
+
+    Parameters
+    ----------
+    player_pos:
+        Canonical position string, e.g. ``"PG"``, ``"SG"``, ``"SF"``,
+        ``"PF"``, or ``"C"``.
+    opp_team:
+        Opponent team abbreviation, e.g. ``"LAL"``.  Matched
+        case-insensitively against the ``Team`` column.
+    dvp_df:
+        DvP table from :func:`load_dvp_table` or :func:`parse_dvp_upload`.
+
+    Returns
+    -------
+    float
+        Percentage adjustment in [-0.15, +0.15].  Returns ``0.0`` if
+        ``dvp_df`` is empty, the position column is absent, or the opponent
+        team is not found.
+    """
+    if dvp_df is None or dvp_df.empty:
+        return 0.0
+
+    pos = str(player_pos).strip().upper()
+    if pos not in dvp_df.columns:
+        return 0.0
+
+    league_avgs = compute_league_averages(dvp_df)
+    if pos not in league_avgs or league_avgs[pos] == 0.0:
+        return 0.0
+
+    opp = str(opp_team).strip().upper()
+    if "Team" not in dvp_df.columns:
+        return 0.0
+
+    mask = dvp_df["Team"].astype(str).str.strip().str.upper() == opp
+    matches = dvp_df.loc[mask, pos]
+    if matches.empty or matches.isna().all():
+        return 0.0
+
+    opp_fppg = float(matches.iloc[0])
+    if pd.isna(opp_fppg):
+        return 0.0
+
+    pct_diff = (opp_fppg - league_avgs[pos]) / league_avgs[pos]
+    return float(max(-0.15, min(0.15, pct_diff)))
+
+
 def dvp_staleness_days(path: str | Path = _DVP_DEFAULT_PATH) -> Optional[float]:
     """Return the age of the DvP file in days, or ``None`` if it doesn't exist.
 
