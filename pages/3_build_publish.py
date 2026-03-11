@@ -42,7 +42,7 @@ from yak_core.lineups import (  # noqa: E402
     to_dk_showdown_upload_format,
 )
 from yak_core.calibration import apply_archetype, DFS_ARCHETYPES  # noqa: E402
-from yak_core.config import CONTEST_PRESETS, CONTEST_PRESET_LABELS, UI_CONTEST_LABELS, UI_CONTEST_MAP  # noqa: E402
+from yak_core.config import CONTEST_PRESETS, CONTEST_PRESET_LABELS, UI_CONTEST_LABELS, UI_CONTEST_MAP, PGA_UI_CONTEST_LABELS, PGA_UI_CONTEST_MAP  # noqa: E402
 from yak_core.components import render_lineup_cards_scrollable  # noqa: E402
 from yak_core.publishing import publish_edge_and_lineups  # noqa: E402
 from yak_core.edge import compute_edge_metrics  # noqa: E402
@@ -165,6 +165,10 @@ def _build_lineups(
             "Cash Main": "cash", "Showdown": "showdown",
             "PGA GPP": "gpp", "PGA Cash": "cash", "PGA Showdown": "gpp",
         }
+        # Start with the contest preset as the config base so ALL optimizer
+        # knobs (GPP constraints, pos slots, lineup size, etc.) are always
+        # present — no reliance on hardcoded fallbacks in lineups.py.
+        _preset_cfg = dict(CONTEST_PRESETS.get(contest_label, {}))
         cfg = {
             "NUM_LINEUPS": num_lineups,
             "SALARY_CAP": slate.salary_cap,
@@ -175,18 +179,17 @@ def _build_lineups(
             "PROJ_COL": proj_col,
             "CONTEST_TYPE": _contest_type_map.get(contest_label, "gpp"),
         }
-        # Inject PGA-specific optimizer settings from the preset
-        if contest_label.startswith("PGA"):
-            _pga_preset = CONTEST_PRESETS.get(contest_label, {})
-            cfg["POS_SLOTS"] = _pga_preset.get("pos_slots", ["G"] * 6)
-            cfg["LINEUP_SIZE"] = _pga_preset.get("lineup_size", 6)
-            cfg["POS_CAPS"] = _pga_preset.get("pos_caps", {})
-            cfg["GPP_MAX_PUNT_PLAYERS"] = _pga_preset.get("max_punt_players", 1)
-            cfg["GPP_MIN_MID_PLAYERS"] = _pga_preset.get("min_mid_salary_players", 2)
-            cfg["GPP_OWN_CAP"] = _pga_preset.get("own_cap", 5.0)
-            cfg["GPP_MIN_LOW_OWN_PLAYERS"] = _pga_preset.get("min_low_own_players", 1)
-            cfg["GPP_LOW_OWN_THRESHOLD"] = _pga_preset.get("low_own_threshold", 0.40)
-            cfg["GPP_FORCE_GAME_STACK"] = _pga_preset.get("force_game_stack", False)
+        # Inject optimizer settings from the contest preset (works for both NBA and PGA)
+        if _preset_cfg:
+            cfg["POS_SLOTS"] = _preset_cfg.get("pos_slots", [])
+            cfg["LINEUP_SIZE"] = _preset_cfg.get("lineup_size", 8)
+            cfg["POS_CAPS"] = _preset_cfg.get("pos_caps", {})
+            cfg["GPP_MAX_PUNT_PLAYERS"] = _preset_cfg.get("max_punt_players", _preset_cfg.get("GPP_MAX_PUNT_PLAYERS", 2))
+            cfg["GPP_MIN_MID_PLAYERS"] = _preset_cfg.get("min_mid_salary_players", _preset_cfg.get("GPP_MIN_MID_PLAYERS", 3))
+            cfg["GPP_OWN_CAP"] = _preset_cfg.get("own_cap", _preset_cfg.get("GPP_OWN_CAP", 6.0))
+            cfg["GPP_MIN_LOW_OWN_PLAYERS"] = _preset_cfg.get("min_low_own_players", _preset_cfg.get("GPP_MIN_LOW_OWN_PLAYERS", 1))
+            cfg["GPP_LOW_OWN_THRESHOLD"] = _preset_cfg.get("low_own_threshold", _preset_cfg.get("GPP_LOW_OWN_THRESHOLD", 0.40))
+            cfg["GPP_FORCE_GAME_STACK"] = _preset_cfg.get("force_game_stack", _preset_cfg.get("GPP_FORCE_GAME_STACK", True))
         # Inject per-player exposure caps from edge overrides
         _eo = st.session_state.get("_edge_overrides", {})
         if _eo.get("max_exposure_players"):
@@ -496,14 +499,18 @@ def main() -> None:
     st.subheader("Build Config")
 
     # Auto-inherit contest type from Lab selection (mapped to UI labels)
-    _REVERSE_UI_MAP = {v: k for k, v in UI_CONTEST_MAP.items()}
+    # Sport-aware: PGA slates use PGA contest labels → PGA presets
+    _is_pga = getattr(slate, "sport", "NBA").upper() == "PGA"
+    _active_ui_labels = PGA_UI_CONTEST_LABELS if _is_pga else UI_CONTEST_LABELS
+    _active_ui_map = PGA_UI_CONTEST_MAP if _is_pga else UI_CONTEST_MAP
+    _REVERSE_UI_MAP = {v: k for k, v in _active_ui_map.items()}
     _lab_ui = _REVERSE_UI_MAP.get(slate.contest_name, "GPP") if slate.contest_name else "GPP"
-    _default_ui_idx = UI_CONTEST_LABELS.index(_lab_ui) if _lab_ui in UI_CONTEST_LABELS else 0
+    _default_ui_idx = _active_ui_labels.index(_lab_ui) if _lab_ui in _active_ui_labels else 0
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        _ui_contest = st.selectbox("Contest Type", UI_CONTEST_LABELS, index=_default_ui_idx, key="_bp_contest")
-        contest_label = UI_CONTEST_MAP[_ui_contest]
+        _ui_contest = st.selectbox("Contest Type", _active_ui_labels, index=_default_ui_idx, key="_bp_contest")
+        contest_label = _active_ui_map[_ui_contest]
         preset = CONTEST_PRESETS.get(contest_label, {})
     with col2:
         default_mode = _CONTEST_TO_BUILD_MODE.get(contest_label, "median")
