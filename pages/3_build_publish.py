@@ -779,50 +779,85 @@ def main() -> None:
             # ── Export & Publish ──────────────────────────────────────────
             st.subheader("Export & Publish")
 
+            # Lineup selection – default all selected
+            _all_lu_indices = (
+                sorted(view_df["lineup_index"].unique().tolist())
+                if "lineup_index" in view_df.columns
+                else []
+            )
+            # Use sequential "Lineup 1 … N" labels; mapping dict avoids O(n²) lookup
+            _lu_options = [f"Lineup {i + 1}" for i in range(len(_all_lu_indices))]
+            _label_to_idx = {lbl: _all_lu_indices[i] for i, lbl in enumerate(_lu_options)}
+            _selected_lu_labels = st.multiselect(
+                "Select lineups to export / publish",
+                options=_lu_options,
+                default=_lu_options,
+                key=f"_bp_lu_select_{view_label}",
+            )
+            _selected_indices = [_label_to_idx[lbl] for lbl in _selected_lu_labels]
+            _n_selected = len(_selected_indices)
+            _n_total = len(_all_lu_indices)
+            st.caption(f"Publishing **{_n_selected} of {_n_total}** lineup(s)")
+
+            # Filtered DataFrame for selected lineups only (empty if nothing selected)
+            if _selected_indices and "lineup_index" in view_df.columns:
+                _publish_df = view_df[view_df["lineup_index"].isin(_selected_indices)].copy()
+            else:
+                _publish_df = pd.DataFrame()
+
             col_csv, col_publish = st.columns(2)
 
             with col_csv:
                 if st.button("Prepare DK CSV", key="_bp_prep_csv"):
-                    try:
-                        if slate.is_showdown:
-                            csv_df = to_dk_showdown_upload_format(view_df)
-                        else:
-                            csv_df = to_dk_upload_format(view_df)
-                        csv_bytes = csv_df.to_csv(index=False).encode("utf-8")
-                        fname = f"yakos_{view_label.replace(' ', '_').lower()}_{slate.slate_date}.csv"
-                        st.download_button(
-                            label="Download DK CSV",
-                            data=csv_bytes,
-                            file_name=fname,
-                            mime="text/csv",
-                            key="_bp_download_csv",
-                        )
-                    except Exception as exc:
-                        st.error(f"CSV export failed: {exc}")
+                    if not _selected_indices:
+                        st.warning("No lineups selected. Select at least one lineup to export.")
+                    else:
+                        try:
+                            if slate.is_showdown:
+                                csv_df = to_dk_showdown_upload_format(_publish_df)
+                            else:
+                                csv_df = to_dk_upload_format(_publish_df)
+                            csv_bytes = csv_df.to_csv(index=False).encode("utf-8")
+                            fname = f"yakos_{view_label.replace(' ', '_').lower()}_{slate.slate_date}.csv"
+                            st.download_button(
+                                label="Download DK CSV",
+                                data=csv_bytes,
+                                file_name=fname,
+                                mime="text/csv",
+                                key="_bp_download_csv",
+                            )
+                        except Exception as exc:
+                            st.error(f"CSV export failed: {exc}")
 
             with col_publish:
                 if st.button(f"Publish {view_label} to Edge Share", type="primary", key="_bp_publish"):
-                    try:
-                        # Publish lineup state
-                        _ts = datetime.now(timezone.utc).isoformat()
-                        lu_state.publish(view_label, _ts)
-                        set_lineup_state(lu_state)
+                    if not _selected_indices:
+                        st.warning("No lineups selected. Select at least one lineup to publish.")
+                    else:
+                        try:
+                            # Publish lineup state
+                            _ts = datetime.now(timezone.utc).isoformat()
+                            lu_state.publish(view_label, _ts)
+                            set_lineup_state(lu_state)
 
-                        # Build friends payload
-                        _eff_edge_df = slate.edge_df
-                        if _eff_edge_df is None or _eff_edge_df.empty:
-                            _eff_edge_df = compute_edge_metrics(
-                                pool,
-                                calibration_state=slate.calibration_state,
+                            # Build friends payload
+                            _eff_edge_df = slate.edge_df
+                            if _eff_edge_df is None or _eff_edge_df.empty:
+                                _eff_edge_df = compute_edge_metrics(
+                                    pool,
+                                    calibration_state=slate.calibration_state,
+                                )
+                                slate.edge_df = _eff_edge_df
+                                from yak_core.state import set_slate_state  # noqa: PLC0415
+                                set_slate_state(slate)
+                            payload = publish_edge_and_lineups(slate, _publish_df)
+                            st.session_state["_friends_payload"] = payload
+                            st.success(
+                                f"**{view_label}** published to Edge Share "
+                                f"({_n_selected} of {_n_total} lineup(s))"
                             )
-                            slate.edge_df = _eff_edge_df
-                            from yak_core.state import set_slate_state  # noqa: PLC0415
-                            set_slate_state(slate)
-                        payload = publish_edge_and_lineups(slate, view_df)
-                        st.session_state["_friends_payload"] = payload
-                        st.success(f"**{view_label}** published to Edge Share")
-                    except Exception as exc:
-                        st.error(f"Publish failed: {exc}")
+                        except Exception as exc:
+                            st.error(f"Publish failed: {exc}")
 
     else:
         st.info("Build lineups above to see results and export options.")
