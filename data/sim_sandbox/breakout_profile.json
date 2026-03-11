@@ -1,0 +1,14 @@
+{
+  "signals": {
+    "is_cheap": 0.824,
+    "is_low_own": 0.7735,
+    "has_positive_correction": 1.2219,
+    "is_contrarian": 0.767,
+    "is_volatile": 1.2569,
+    "is_value": 1.2309
+  },
+  "n_slates": 30,
+  "n_breakouts": 1135,
+  "n_players": 3173,
+  "built_at": "2026-03-11T22:59:06.072193+00:00"
+}
