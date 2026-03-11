@@ -378,7 +378,7 @@ def build_multiple_lineups_with_exposure(
 
     players = player_pool.to_dict("records")
     n = len(players)
-    if n < _lineup_size:
+    if n < lineup_size:
         raise ValueError(
             f"Pool has only {n} players, need at least {_lineup_size} to build a lineup"
     if n < lineup_size:
