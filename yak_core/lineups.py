@@ -713,6 +713,11 @@ def build_multiple_lineups_with_exposure(
                         tidx = [_nit[p] for p in tier_player_names.get(tier_key, []) if p in _nit]
                         if tidx:
                             prob2 += pulp.lpSum(x2[(j, s)] for j in set(tidx) for s in pos_slots) <= max_count
+                # Uniqueness: must differ from previous lineups
+                for prev_indices in _prev_lineups:
+                    prob2 += pulp.lpSum(
+                        x2[(pi, s)] for pi in prev_indices for s in pos_slots
+                    ) <= lineup_size - _MIN_DIFF
                 prob2.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=solver_time_limit))
                 if prob2.status == 1:
                     print(
