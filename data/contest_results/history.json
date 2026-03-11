@@ -247,5 +247,45 @@
       "projection_miss": 57
     },
     "n_missed": 20
+  },
+  "2026-02-05_gpp": {
+    "slate_date": "2026-02-05",
+    "contest_type": "gpp",
+    "cash_line": 331.75,
+    "top_15_score": 0,
+    "top_1_score": 0,
+    "winning_score": 386.0,
+    "num_entries": 14268,
+    "notes": "",
+    "recorded_at": "2026-03-11T13:58:37.086855+00:00",
+    "scores": {
+      "n_lineups": 20,
+      "cashed": 0,
+      "top_15": 0,
+      "top_1": 0,
+      "won": 0,
+      "cash_rate": 0.0,
+      "top_15_rate": 0.0,
+      "top_1_rate": 0.0,
+      "best": 313.5,
+      "avg": 251.7,
+      "median": 253.9,
+      "bands": {
+        "slate_date": "2026-02-05",
+        "contest_type": "gpp",
+        "cash_line": 331.75,
+        "top_15_score": 0,
+        "top_1_score": 0,
+        "winning_score": 386.0,
+        "num_entries": 14268,
+        "notes": "",
+        "recorded_at": "2026-03-11T13:58:37.086855+00:00"
+      }
+    },
+    "miss_summary": {
+      "projection_miss": 45,
+      "ownership_miss": 4
+    },
+    "n_missed": 20
   }
 }
