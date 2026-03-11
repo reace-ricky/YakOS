@@ -327,13 +327,14 @@ def build_multiple_lineups_with_exposure(
     is_gpp = contest_type == "gpp"
     is_cash = contest_type == "cash"
 
-    # GPP constraint knobs — overridable via cfg
-    gpp_max_punt_players = int(cfg.get("GPP_MAX_PUNT_PLAYERS", 2))       # max players < $4 000
-    gpp_min_mid_players  = int(cfg.get("GPP_MIN_MID_PLAYERS", 3))        # min players $4 000-$7 000
-    gpp_own_cap          = float(cfg.get("GPP_OWN_CAP", 6.0))            # max total lineup ownership
-    gpp_min_low_own      = int(cfg.get("GPP_MIN_LOW_OWN_PLAYERS", 2))    # min players below threshold
-    gpp_low_own_thresh   = float(cfg.get("GPP_LOW_OWN_THRESHOLD", 0.40)) # ownership threshold
-    gpp_force_game_stack = bool(cfg.get("GPP_FORCE_GAME_STACK", True))   # require 3+ from one game
+    # GPP constraint knobs — overridable via cfg; defaults come from DEFAULT_CONFIG
+    # (single source of truth in config.py — do NOT add numeric literals here)
+    gpp_max_punt_players = int(cfg.get("GPP_MAX_PUNT_PLAYERS", DEFAULT_CONFIG["GPP_MAX_PUNT_PLAYERS"]))
+    gpp_min_mid_players  = int(cfg.get("GPP_MIN_MID_PLAYERS",  DEFAULT_CONFIG["GPP_MIN_MID_PLAYERS"]))
+    gpp_own_cap          = float(cfg.get("GPP_OWN_CAP",         DEFAULT_CONFIG["GPP_OWN_CAP"]))
+    gpp_min_low_own      = int(cfg.get("GPP_MIN_LOW_OWN_PLAYERS", DEFAULT_CONFIG["GPP_MIN_LOW_OWN_PLAYERS"]))
+    gpp_low_own_thresh   = float(cfg.get("GPP_LOW_OWN_THRESHOLD", DEFAULT_CONFIG["GPP_LOW_OWN_THRESHOLD"]))
+    gpp_force_game_stack = bool(cfg.get("GPP_FORCE_GAME_STACK",  DEFAULT_CONFIG["GPP_FORCE_GAME_STACK"]))
 
     # ── Sport-aware roster shape ───────────────────────────────────
     # PGA (and other uniform-slot sports) pass POS_SLOTS via cfg;
