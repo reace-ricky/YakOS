@@ -48,6 +48,7 @@ from yak_core.edge_metrics import (  # noqa: E402
 from yak_core.config import (  # noqa: E402
     CONTEST_PRESETS, UI_CONTEST_LABELS, UI_CONTEST_MAP,
     PGA_UI_CONTEST_LABELS, PGA_UI_CONTEST_MAP,
+    DK_POS_SLOTS, DK_LINEUP_SIZE,
 )
 from yak_core.ricky_signals import compute_ricky_signals, generate_slate_overview  # noqa: E402
 from yak_core.right_angle import (  # noqa: E402
@@ -905,6 +906,8 @@ def _render_tab_optimizer(slate) -> None:
             "EXCLUDE": _merged_exclude,
             "PROJ_COL": proj_col,
             "CONTEST_TYPE": _contest_type_map.get(contest_label, "gpp"),
+            "POS_SLOTS": preset.get("pos_slots", DK_POS_SLOTS),
+            "LINEUP_SIZE": preset.get("lineup_size", DK_LINEUP_SIZE),
         }
 
         # Inject PGA-specific optimizer settings from the preset so the

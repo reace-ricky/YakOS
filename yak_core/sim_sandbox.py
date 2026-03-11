@@ -443,6 +443,24 @@ def run_sandbox(
         vals = [r[key] for r in slate_results if key in r]
         return round(float(np.mean(vals)), 3) if vals else 0.0
 
+    # Deduplicate smashes/busts by player name across slates.
+    # A player can appear in multiple slates (e.g. GPP + Cash on the same day)
+    # with slightly different projections. Keep the entry with the most extreme diff.
+    def _dedup_by_player(entries: List[Dict[str, Any]], keep_max: bool) -> List[Dict[str, Any]]:
+        best: Dict[str, Dict[str, Any]] = {}
+        for e in entries:
+            name = e["player"]
+            if name not in best:
+                best[name] = e
+            elif keep_max and e["diff"] > best[name]["diff"]:
+                best[name] = e
+            elif not keep_max and e["diff"] < best[name]["diff"]:
+                best[name] = e
+        return list(best.values())
+
+    all_smashes = _dedup_by_player(all_smashes, keep_max=True)
+    all_busts = _dedup_by_player(all_busts, keep_max=False)
+
     # Sort smashes/busts across all slates
     all_smashes.sort(key=lambda x: x["diff"], reverse=True)
     all_busts.sort(key=lambda x: x["diff"])
