@@ -563,6 +563,13 @@ def main() -> None:
         # Default: all games selected unless Lab had a subset
         _default_all = not _lab_games
         with st.expander(f"Games ({len(all_games)})", expanded=False):
+            _all_on = st.checkbox("Select All", value=_default_all, key="_bp_gf_select_all")
+            # When Select All toggles, sync all individual game keys in session_state
+            _sa_prev_key = "_bp_gf_select_all_prev"
+            if _sa_prev_key in st.session_state and st.session_state[_sa_prev_key] != _all_on:
+                for _g in all_games:
+                    st.session_state[f"_bp_gf_{_g}"] = _all_on
+            st.session_state[_sa_prev_key] = _all_on
             for _g in all_games:
                 _default_on = _g in _lab_games if _lab_games else _default_all
                 if st.checkbox(_g, value=_default_on, key=f"_bp_gf_{_g}"):
