@@ -27,16 +27,24 @@ Signals
    exceeds their current projection.  A player who has *shown* they can
    pop is more likely to pop again.  Uses ``rolling_fp_5`` max vs proj.
 
+5. **Pace / Game Environment** (``pace_environment``)
+   Flags players in high-scoring game environments (high vegas total),
+   especially when their salary doesn't reflect the pace-up.  Also
+   adjusts for spread: big underdogs get a slight boost (forced to keep
+   shooting), big favorites get dampened (blowout risk).  Normalised
+   0-1 within the slate using ``vegas_total`` and ``vegas_spread``.
+
 Output
 ------
 ``compute_pop_catalyst(pool_df)`` adds columns to the pool:
 
-- ``pop_catalyst_score`` : float 0-1, composite of all 4 signals
-- ``pop_catalyst_tag``   : str, human-readable tag (e.g. "Injury Opp + Salary Lag")
-- ``pop_injury_opp``     : float 0-1, individual signal
-- ``pop_salary_lag``     : float 0-1, individual signal
-- ``pop_minutes_trend``  : float 0-1, individual signal
-- ``pop_ceiling_flash``  : float 0-1, individual signal
+- ``pop_catalyst_score``    : float 0-1, composite of all 5 signals
+- ``pop_catalyst_tag``      : str, human-readable tag (e.g. "Injury Opp + Salary Lag")
+- ``pop_injury_opp``        : float 0-1, individual signal
+- ``pop_salary_lag``        : float 0-1, individual signal
+- ``pop_minutes_trend``     : float 0-1, individual signal
+- ``pop_ceiling_flash``     : float 0-1, individual signal
+- ``pop_pace_environment``  : float 0-1, individual signal
 
 The composite ``pop_catalyst_score`` is used by ``compute_edge_metrics``
 as a weighted component of ``edge_score``.
@@ -54,10 +62,11 @@ import pandas as pd
 # Signal weights (must sum to 1.0)
 # ---------------------------------------------------------------------------
 SIGNAL_WEIGHTS: Dict[str, float] = {
-    "injury_opp":     0.35,   # biggest driver historically (67% of spikes)
-    "salary_lag":     0.25,   # pricing inefficiency
-    "minutes_trend":  0.20,   # role expansion
-    "ceiling_flash":  0.20,   # proven upside
+    "injury_opp":       0.30,   # biggest driver historically (67% of spikes)
+    "salary_lag":       0.25,   # pricing inefficiency
+    "minutes_trend":    0.15,   # role expansion
+    "ceiling_flash":    0.15,   # proven upside
+    "pace_environment": 0.15,   # game environment / vegas total
 }
 
 # ---------------------------------------------------------------------------
@@ -187,15 +196,61 @@ def _compute_ceiling_flash(df: pd.DataFrame) -> pd.Series:
     return score
 
 
+def _compute_pace_environment(df: pd.DataFrame) -> pd.Series:
+    """Signal 5: Game environment — high vegas total = more stats available.
+
+    Players in games with above-average totals get a boost, especially
+    when their salary doesn't reflect the pace-up.  A $5K player in a
+    240-total game has more breakout upside than one in a 210-total game.
+
+    Also factors in spread: players on big underdogs get a slight boost
+    (garbage time / forced to keep shooting), while big favorites get
+    dampened (blowout risk = bench early).
+
+    Uses ``vegas_total`` and ``vegas_spread`` from the pool.
+    Players with missing or zero vegas_total receive 0.0.
+    """
+    total = _safe_col(df, "vegas_total").replace(0.0, np.nan)
+    spread = _safe_col(df, "vegas_spread")
+
+    # Players with no game total data get 0
+    missing_mask = total.isna()
+
+    # Slate average total (only from valid rows)
+    slate_avg = float(total.mean()) if total.notna().any() else 220.0
+
+    # Raw pace signal: how far above slate average this game is
+    pace_raw = (total - slate_avg) / slate_avg
+
+    # Underdog boost: spread > 5 means this team is a big underdog
+    pace_raw = pace_raw.where(spread <= 5, pace_raw + 0.1)
+
+    # Favorite dampen: spread < -8 means this team is a big favourite
+    pace_raw = pace_raw.where(spread >= -8, pace_raw - 0.1)
+
+    # Zero out players without valid game totals
+    pace_raw = pace_raw.where(~missing_mask, 0.0).fillna(0.0)
+
+    # Clip negatives to 0 before normalising (negative = below average)
+    pace_raw = pace_raw.clip(lower=0.0)
+
+    # Normalise 0-1 within the slate
+    _max = float(pace_raw.max())
+    if _max > 0:
+        return (pace_raw / _max).clip(0.0, 1.0)
+    return pd.Series(0.0, index=df.index)
+
+
 # ---------------------------------------------------------------------------
 # Tag generation
 # ---------------------------------------------------------------------------
 
 _SIGNAL_LABELS: Dict[str, str] = {
-    "injury_opp":     "Injury Opp",
-    "salary_lag":     "Salary Lag",
-    "minutes_trend":  "Min Trend",
-    "ceiling_flash":  "Ceiling Flash",
+    "injury_opp":       "Injury Opp",
+    "salary_lag":       "Salary Lag",
+    "minutes_trend":    "Min Trend",
+    "ceiling_flash":    "Ceiling Flash",
+    "pace_environment": "Pace/Env",
 }
 
 
@@ -225,14 +280,15 @@ def compute_pop_catalyst(pool_df: pd.DataFrame) -> pd.DataFrame:
         Player pool with columns from DK + Tank01 enrichment + injury cascade.
         Expected columns (all optional, gracefully degrade):
         ``injury_bump_fp``, ``salary``, ``rolling_fp_5``, ``rolling_fp_10``,
-        ``rolling_min_5``, ``rolling_min_10``, ``proj``.
+        ``rolling_min_5``, ``rolling_min_10``, ``proj``,
+        ``vegas_total``, ``vegas_spread``.
 
     Returns
     -------
     pd.DataFrame
         Copy of pool with new columns: ``pop_catalyst_score``,
         ``pop_catalyst_tag``, ``pop_injury_opp``, ``pop_salary_lag``,
-        ``pop_minutes_trend``, ``pop_ceiling_flash``.
+        ``pop_minutes_trend``, ``pop_ceiling_flash``, ``pop_pace_environment``.
     """
     if pool_df is None or pool_df.empty:
         return pool_df
@@ -244,13 +300,15 @@ def compute_pop_catalyst(pool_df: pd.DataFrame) -> pd.DataFrame:
     df["pop_salary_lag"] = _compute_salary_lag(df)
     df["pop_minutes_trend"] = _compute_minutes_trend(df)
     df["pop_ceiling_flash"] = _compute_ceiling_flash(df)
+    df["pop_pace_environment"] = _compute_pace_environment(df)
 
     # Composite score (weighted average)
     df["pop_catalyst_score"] = (
-        df["pop_injury_opp"]     * SIGNAL_WEIGHTS["injury_opp"]
-        + df["pop_salary_lag"]   * SIGNAL_WEIGHTS["salary_lag"]
-        + df["pop_minutes_trend"] * SIGNAL_WEIGHTS["minutes_trend"]
-        + df["pop_ceiling_flash"] * SIGNAL_WEIGHTS["ceiling_flash"]
+        df["pop_injury_opp"]       * SIGNAL_WEIGHTS["injury_opp"]
+        + df["pop_salary_lag"]     * SIGNAL_WEIGHTS["salary_lag"]
+        + df["pop_minutes_trend"]  * SIGNAL_WEIGHTS["minutes_trend"]
+        + df["pop_ceiling_flash"]  * SIGNAL_WEIGHTS["ceiling_flash"]
+        + df["pop_pace_environment"] * SIGNAL_WEIGHTS["pace_environment"]
     ).round(3)
 
     # Zero out players with negligible projections

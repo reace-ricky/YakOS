@@ -11,6 +11,7 @@ from yak_core.pop_catalyst import (
     _compute_salary_lag,
     _compute_minutes_trend,
     _compute_ceiling_flash,
+    _compute_pace_environment,
     _build_tag,
     _MIN_PROJ_FOR_POP,
     _MIN_TAG_SCORE,
@@ -32,6 +33,8 @@ def _make_pool(n: int = 6) -> pd.DataFrame:
         "rolling_fp_10": [10.0, 18.0, 21.0, 29.0, 35.0, 12.0],
         "rolling_min_5": [22.0, 30.0, 28.0, 34.0, 36.0, 25.0],
         "rolling_min_10": [18.0, 26.0, 29.0, 33.0, 36.0, 20.0],
+        "vegas_total": [220.0, 235.0, 235.0, 210.0, 210.0, 240.0],
+        "vegas_spread": [3.0, -3.0, -3.0, 6.0, 6.0, 7.0],
     })
 
 
@@ -46,6 +49,8 @@ def _hendricks_pool() -> pd.DataFrame:
         "rolling_fp_10": [15.0, 39.0, 5.5],
         "rolling_min_5": [30.0, 36.0, 12.0],
         "rolling_min_10": [22.0, 35.0, 12.0],
+        "vegas_total": [230.0, 230.0, 215.0],
+        "vegas_spread": [4.0, -4.0, 2.0],
     })
 
 
@@ -57,8 +62,8 @@ class TestSignalWeights:
     def test_weights_sum_to_one(self):
         assert abs(sum(SIGNAL_WEIGHTS.values()) - 1.0) < 1e-9
 
-    def test_four_signals(self):
-        assert len(SIGNAL_WEIGHTS) == 4
+    def test_five_signals(self):
+        assert len(SIGNAL_WEIGHTS) == 5
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +150,67 @@ class TestCeilingFlash:
         assert result.iloc[0] == 0.0
 
 
+class TestPaceEnvironment:
+    def test_high_total_scores_above_zero(self):
+        # Player in 240-total game vs slate avg 220 should get a positive signal
+        df = pd.DataFrame({
+            "vegas_total": [240.0, 210.0, 220.0],
+            "vegas_spread": [0.0, 0.0, 0.0],
+        })
+        result = _compute_pace_environment(df)
+        assert result.iloc[0] > 0.0
+
+    def test_below_average_total_scores_zero(self):
+        # Player in below-average game gets 0 (clipped)
+        df = pd.DataFrame({
+            "vegas_total": [240.0, 200.0, 220.0],
+            "vegas_spread": [0.0, 0.0, 0.0],
+        })
+        result = _compute_pace_environment(df)
+        assert result.iloc[1] == 0.0
+
+    def test_normalised_0_to_1(self):
+        df = pd.DataFrame({
+            "vegas_total": [210.0, 225.0, 240.0],
+            "vegas_spread": [0.0, 0.0, 0.0],
+        })
+        result = _compute_pace_environment(df)
+        assert result.min() >= 0.0
+        assert result.max() <= 1.0
+
+    def test_missing_total_returns_zero(self):
+        df = pd.DataFrame({
+            "vegas_total": [0.0, 0.0],
+            "vegas_spread": [0.0, 0.0],
+        })
+        result = _compute_pace_environment(df)
+        assert (result == 0.0).all()
+
+    def test_no_total_column_returns_zero(self):
+        df = pd.DataFrame({"other": [1, 2, 3]})
+        result = _compute_pace_environment(df)
+        assert (result == 0.0).all()
+
+    def test_underdog_boost_applied(self):
+        # Two players in same total game; underdog (spread > 5) should score strictly higher
+        df = pd.DataFrame({
+            "vegas_total": [230.0, 230.0],
+            "vegas_spread": [7.0, 0.0],   # player 0 is big underdog
+        })
+        result = _compute_pace_environment(df)
+        assert result.iloc[0] > result.iloc[1]
+
+    def test_big_favourite_dampened(self):
+        # Player in a high-total game but as a big favourite gets a lower score than
+        # a neutral player in the same high-total game.
+        df = pd.DataFrame({
+            "vegas_total": [250.0, 250.0, 210.0],
+            "vegas_spread": [-10.0, 0.0, 0.0],  # player 0 is big favourite
+        })
+        result = _compute_pace_environment(df)
+        assert result.iloc[0] < result.iloc[1]
+
+
 # ---------------------------------------------------------------------------
 # Composite & tag tests
 # ---------------------------------------------------------------------------
@@ -155,7 +221,8 @@ class TestComputePopCatalyst:
         result = compute_pop_catalyst(pool)
         for col in ["pop_catalyst_score", "pop_catalyst_tag",
                      "pop_injury_opp", "pop_salary_lag",
-                     "pop_minutes_trend", "pop_ceiling_flash"]:
+                     "pop_minutes_trend", "pop_ceiling_flash",
+                     "pop_pace_environment"]:
             assert col in result.columns, f"Missing column: {col}"
 
     def test_scores_between_0_and_1(self):
