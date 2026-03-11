@@ -15,6 +15,8 @@ from .config import (
     DEFAULT_CONFIG,
     DK_LINEUP_SIZE,
     DK_POS_SLOTS,
+    DK_PGA_LINEUP_SIZE,
+    DK_PGA_POS_SLOTS,
     DK_SHOWDOWN_LINEUP_SIZE,
     DK_SHOWDOWN_SLOTS,
     DK_SHOWDOWN_CAPTAIN_MULTIPLIER,
@@ -250,7 +252,24 @@ def build_slate_pool(
 # --------------------------------------------------------------------
 # Optimizer
 # --------------------------------------------------------------------
-def _eligible_slots(pos_str: str) -> Tuple[str, ...]:
+def _eligible_slots(pos_str: str, pos_slots: list | None = None) -> Tuple[str, ...]:
+    """Return the roster slots a player is eligible for.
+
+    When *pos_slots* is provided and all entries are the same (e.g. PGA's
+    ``["G","G","G","G","G","G"]``), every player is eligible for every
+    indexed slot (``G_0 … G_5``).  This bypasses the NBA position-mapping
+    logic entirely.
+
+    For NBA (the default), the original mapping applies: PG→{PG,G},
+    SG→{SG,G}, SF→{SF,F}, PF→{PF,F}, C→{C}, plus UTIL for all.
+    """
+    # PGA / uniform-slot mode: all slots identical → eligible for every slot
+    if pos_slots is not None:
+        unique = set(pos_slots)
+        if len(unique) == 1:
+            return tuple(f"{pos_slots[0]}_{i}" for i in range(len(pos_slots)))
+
+    # NBA (default) position-eligibility mapping
     if not isinstance(pos_str, str):
         return ("UTIL",)
     parts = [p.strip().upper() for p in pos_str.split("/")]
@@ -316,16 +335,38 @@ def build_multiple_lineups_with_exposure(
     gpp_low_own_thresh   = float(cfg.get("GPP_LOW_OWN_THRESHOLD", 0.45)) # ownership threshold
     gpp_force_game_stack = bool(cfg.get("GPP_FORCE_GAME_STACK", True))   # require 3+ from one game
 
+    # ── Sport-aware roster shape ───────────────────────────────────
+    # PGA (and other uniform-slot sports) pass POS_SLOTS via cfg;
+    # NBA uses the module-level defaults.
+    raw_pos_slots = cfg.get("POS_SLOTS", DK_POS_SLOTS)
+    lineup_size = int(cfg.get("LINEUP_SIZE", len(raw_pos_slots)))
+
+    # When all slots are identical (PGA: 6×G), create indexed slot names
+    # so the LP has distinct variable names: G_0 … G_5.  Every player is
+    # eligible for every slot.  Otherwise keep the NBA-style named slots.
+    _unique_raw = set(raw_pos_slots)
+    if len(_unique_raw) == 1:
+        _slot_base = list(_unique_raw)[0]
+        pos_slots = [f"{_slot_base}_{i}" for i in range(lineup_size)]
+        _uniform_slots = True
+    else:
+        pos_slots = list(raw_pos_slots)
+        _uniform_slots = False
+
     players = player_pool.to_dict("records")
     n = len(players)
-    if n < DK_LINEUP_SIZE:
+    if n < lineup_size:
         raise ValueError(
-            f"Pool has only {n} players, need at least {DK_LINEUP_SIZE} to build a lineup"
+            f"Pool has only {n} players, need at least {lineup_size} to build a lineup"
         )
 
     for i, p in enumerate(players):
         p["_idx"] = i
-        p["_slots"] = _eligible_slots(p.get("pos", ""))
+        if _uniform_slots:
+            # PGA: every player eligible for every indexed slot
+            p["_slots"] = tuple(pos_slots)
+        else:
+            p["_slots"] = _eligible_slots(p.get("pos", ""))
 
     # ── Pre-compute per-player scores by contest type ──────────────
     if is_gpp:
@@ -366,7 +407,7 @@ def build_multiple_lineups_with_exposure(
         x = {}
 
         for i in range(n):
-            for s in DK_POS_SLOTS:
+            for s in pos_slots:
                 x[(i, s)] = pulp.LpVariable(f"x_{i}_{s}_{lu_num}", cat="Binary")
 
         # ── Objective function ───────────────────────────────────────
@@ -375,14 +416,14 @@ def build_multiple_lineups_with_exposure(
             prob += pulp.lpSum(
                 players[i]["_gpp_score"] * x[(i, s)]
                 for i in range(n)
-                for s in DK_POS_SLOTS
+                for s in pos_slots
             )
         elif is_cash:
             # Cash: maximize floor-weighted score (consistency is king)
             prob += pulp.lpSum(
                 players[i]["_cash_score"] * x[(i, s)]
                 for i in range(n)
-                for s in DK_POS_SLOTS
+                for s in pos_slots
             )
         else:
             # Fallback: blend projection + ownership leverage + edge scores.
@@ -406,20 +447,20 @@ def build_multiple_lineups_with_exposure(
             prob += pulp.lpSum(
                 _effective_proj(players[i]) * x[(i, s)]
                 for i in range(n)
-                for s in DK_POS_SLOTS
+                for s in pos_slots
             )
 
         # Exactly one player per slot
-        for s in DK_POS_SLOTS:
+        for s in pos_slots:
             prob += pulp.lpSum(x[(i, s)] for i in range(n)) == 1
 
         # Each player at most in one slot
         for i in range(n):
-            prob += pulp.lpSum(x[(i, s)] for s in DK_POS_SLOTS) <= 1
+            prob += pulp.lpSum(x[(i, s)] for s in pos_slots) <= 1
 
         # Position eligibility
         for i in range(n):
-            for s in DK_POS_SLOTS:
+            for s in pos_slots:
                 if s not in players[i]["_slots"]:
                     prob += x[(i, s)] == 0
 
@@ -427,12 +468,12 @@ def build_multiple_lineups_with_exposure(
         prob += pulp.lpSum(
             players[i]["salary"] * x[(i, s)]
             for i in range(n)
-            for s in DK_POS_SLOTS
+            for s in pos_slots
         ) <= salary_cap
         prob += pulp.lpSum(
             players[i]["salary"] * x[(i, s)]
             for i in range(n)
-            for s in DK_POS_SLOTS
+            for s in pos_slots
         ) >= min_salary
 
         # Per-position caps
@@ -448,7 +489,7 @@ def build_multiple_lineups_with_exposure(
                     prob += pulp.lpSum(
                         x[(j, s)]
                         for j in eligible_players
-                        for s in DK_POS_SLOTS
+                        for s in pos_slots
                     ) <= cap_val
 
         # LOCK list
@@ -456,7 +497,7 @@ def build_multiple_lineups_with_exposure(
             for j in range(n):
                 if players[j].get("player_name", "") in lock_names:
                     prob += pulp.lpSum(
-                        x[(j, s)] for s in DK_POS_SLOTS
+                        x[(j, s)] for s in pos_slots
                     ) == 1
 
         # NOT_WITH: pairs of players that must never appear in the same lineup.
@@ -469,8 +510,8 @@ def build_multiple_lineups_with_exposure(
                 ib = name_to_idx.get(pb)
                 if ia is not None and ib is not None:
                     prob += (
-                        pulp.lpSum(x[(ia, s)] for s in DK_POS_SLOTS)
-                        + pulp.lpSum(x[(ib, s)] for s in DK_POS_SLOTS)
+                        pulp.lpSum(x[(ia, s)] for s in pos_slots)
+                        + pulp.lpSum(x[(ib, s)] for s in pos_slots)
                         <= 1
                     )
 
@@ -480,7 +521,7 @@ def build_multiple_lineups_with_exposure(
             p_max_exp = player_max_exp.get(pname)
             p_max_app = max(1, int(num_lineups * p_max_exp)) if p_max_exp is not None else max_appearances
             if appearance_count[i] >= p_max_app:
-                for s in DK_POS_SLOTS:
+                for s in pos_slots:
                     prob += x[(i, s)] == 0
 
         # Pair-fade diversity: prevent overused player pairs from appearing together
@@ -488,8 +529,8 @@ def build_multiple_lineups_with_exposure(
             for (pi, pj), count in pair_appearances.items():
                 if count >= max_pair_appearances:
                     prob += (
-                        pulp.lpSum(x[(pi, s)] for s in DK_POS_SLOTS)
-                        + pulp.lpSum(x[(pj, s)] for s in DK_POS_SLOTS)
+                        pulp.lpSum(x[(pi, s)] for s in pos_slots)
+                        + pulp.lpSum(x[(pj, s)] for s in pos_slots)
                         <= 1
                     )
 
@@ -510,7 +551,7 @@ def build_multiple_lineups_with_exposure(
                             eligible_idx.append(idx_val)
                 if eligible_idx:
                     prob += pulp.lpSum(
-                        x[(j, s)] for j in set(eligible_idx) for s in DK_POS_SLOTS
+                        x[(j, s)] for j in set(eligible_idx) for s in pos_slots
                     ) >= min_count
 
             # Max constraints: e.g., "fade" <= 3
@@ -522,7 +563,7 @@ def build_multiple_lineups_with_exposure(
                 ]
                 if tier_idx:
                     prob += pulp.lpSum(
-                        x[(j, s)] for j in set(tier_idx) for s in DK_POS_SLOTS
+                        x[(j, s)] for j in set(tier_idx) for s in pos_slots
                     ) <= max_count
 
         # Uniqueness: each new lineup must differ by at least 3 players
@@ -531,8 +572,8 @@ def build_multiple_lineups_with_exposure(
         for prev_indices in _prev_lineups:
             # sum of slots assigned to prev players <= LINEUP_SIZE - _MIN_DIFF
             prob += pulp.lpSum(
-                x[(pi, s)] for pi in prev_indices for s in DK_POS_SLOTS
-            ) <= DK_LINEUP_SIZE - _MIN_DIFF
+                x[(pi, s)] for pi in prev_indices for s in pos_slots
+            ) <= lineup_size - _MIN_DIFF
 
         # ── GPP-specific constraints (H5_ForcedDiverse) ──────────────
         # Backtested on 3/8 slate: moved from 0 lineups above 280 to
@@ -542,7 +583,7 @@ def build_multiple_lineups_with_exposure(
             _punt_idx = [i for i in range(n) if players[i].get("salary", 0) < 4000]
             if _punt_idx:
                 prob += pulp.lpSum(
-                    x[(i, s)] for i in _punt_idx for s in DK_POS_SLOTS
+                    x[(i, s)] for i in _punt_idx for s in pos_slots
                 ) <= gpp_max_punt_players
 
             # 2. Min mid-salary players ($4000-$7000) — the smash sweet spot
@@ -550,14 +591,14 @@ def build_multiple_lineups_with_exposure(
                         if 4000 <= players[i].get("salary", 0) <= 7000]
             if _mid_idx and gpp_min_mid_players > 0:
                 prob += pulp.lpSum(
-                    x[(i, s)] for i in _mid_idx for s in DK_POS_SLOTS
+                    x[(i, s)] for i in _mid_idx for s in pos_slots
                 ) >= gpp_min_mid_players
 
             # 3. Total lineup ownership cap — force diversification
             prob += pulp.lpSum(
                 float(players[i].get("ownership", players[i].get("own_proj", 0.5)))
                 * x[(i, s)]
-                for i in range(n) for s in DK_POS_SLOTS
+                for i in range(n) for s in pos_slots
             ) <= gpp_own_cap
 
             # 4. Min low-owned players — ensure contrarian exposure
@@ -569,7 +610,7 @@ def build_multiple_lineups_with_exposure(
                 ]
                 if _low_own_idx:
                     prob += pulp.lpSum(
-                        x[(i, s)] for i in _low_own_idx for s in DK_POS_SLOTS
+                        x[(i, s)] for i in _low_own_idx for s in pos_slots
                     ) >= gpp_min_low_own
 
             # 5. Game stacking — correlated upside (3+ players from one game)
@@ -598,7 +639,7 @@ def build_multiple_lineups_with_exposure(
                             )
                             _gs_vars[gk] = gv
                             prob += pulp.lpSum(
-                                x[(i, s)] for i in indices for s in DK_POS_SLOTS
+                                x[(i, s)] for i in indices for s in pos_slots
                             ) >= 3 * gv
                     if _gs_vars:
                         prob += pulp.lpSum(_gs_vars.values()) >= 1
@@ -613,7 +654,7 @@ def build_multiple_lineups_with_exposure(
                 prob2 = pulp.LpProblem(f"lineup_{lu_num}_fallback", pulp.LpMaximize)
                 x2 = {}
                 for i in range(n):
-                    for s in DK_POS_SLOTS:
+                    for s in pos_slots:
                         x2[(i, s)] = pulp.LpVariable(f"x2_{i}_{s}_{lu_num}", cat="Binary")
                 if own_weight > 0 and any("leverage" in p for p in players):
                     prob2 += pulp.lpSum(
@@ -623,26 +664,26 @@ def build_multiple_lineups_with_exposure(
                         )
                         * x2[(i, s)]
                         for i in range(n)
-                        for s in DK_POS_SLOTS
+                        for s in pos_slots
                     )
                 else:
                     prob2 += pulp.lpSum(
                         players[i]["proj"] * x2[(i, s)]
                         for i in range(n)
-                        for s in DK_POS_SLOTS
+                        for s in pos_slots
                     )
-                for s in DK_POS_SLOTS:
+                for s in pos_slots:
                     prob2 += pulp.lpSum(x2[(i, s)] for i in range(n)) == 1
                 for i in range(n):
-                    prob2 += pulp.lpSum(x2[(i, s)] for s in DK_POS_SLOTS) <= 1
+                    prob2 += pulp.lpSum(x2[(i, s)] for s in pos_slots) <= 1
                 for i in range(n):
-                    for s in DK_POS_SLOTS:
+                    for s in pos_slots:
                         if s not in players[i]["_slots"]:
                             prob2 += x2[(i, s)] == 0
                 salary_sum2 = pulp.lpSum(
                     players[i]["salary"] * x2[(i, s)]
                     for i in range(n)
-                    for s in DK_POS_SLOTS
+                    for s in pos_slots
                 )
                 prob2 += salary_sum2 <= salary_cap
                 prob2 += salary_sum2 >= min_salary
@@ -654,12 +695,12 @@ def build_multiple_lineups_with_exposure(
                         ]
                         if eligible_players:
                             prob2 += pulp.lpSum(
-                                x2[(j, s)] for j in eligible_players for s in DK_POS_SLOTS
+                                x2[(j, s)] for j in eligible_players for s in pos_slots
                             ) <= cap_val
                 if lock_names:
                     for j in range(n):
                         if players[j].get("player_name", "") in lock_names:
-                            prob2 += pulp.lpSum(x2[(j, s)] for s in DK_POS_SLOTS) == 1
+                            prob2 += pulp.lpSum(x2[(j, s)] for s in pos_slots) == 1
                 # Tier constraints in fallback too
                 if tier_player_names:
                     _nit = {players[i].get("player_name", ""): i for i in range(n)}
@@ -667,11 +708,11 @@ def build_multiple_lineups_with_exposure(
                         tl = [t.strip() for t in group_key.replace("_or_", ",").split(",")]
                         eidx = [_nit[p] for t in tl for p in tier_player_names.get(t, []) if p in _nit]
                         if eidx:
-                            prob2 += pulp.lpSum(x2[(j, s)] for j in set(eidx) for s in DK_POS_SLOTS) >= min_count
+                            prob2 += pulp.lpSum(x2[(j, s)] for j in set(eidx) for s in pos_slots) >= min_count
                     for tier_key, max_count in tier_max_players.items():
                         tidx = [_nit[p] for p in tier_player_names.get(tier_key, []) if p in _nit]
                         if tidx:
-                            prob2 += pulp.lpSum(x2[(j, s)] for j in set(tidx) for s in DK_POS_SLOTS) <= max_count
+                            prob2 += pulp.lpSum(x2[(j, s)] for j in set(tidx) for s in pos_slots) <= max_count
                 prob2.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=solver_time_limit))
                 if prob2.status == 1:
                     print(
@@ -680,7 +721,7 @@ def build_multiple_lineups_with_exposure(
                     )
                     selected_in_lu = []
                     for i in range(n):
-                        for s in DK_POS_SLOTS:
+                        for s in pos_slots:
                             if pulp.value(x2[(i, s)]) and pulp.value(x2[(i, s)]) > 0.5:
                                 row = dict(players[i])
                                 row["slot"] = s
@@ -705,7 +746,7 @@ def build_multiple_lineups_with_exposure(
 
         selected_in_lu = []
         for i in range(n):
-            for s in DK_POS_SLOTS:
+            for s in pos_slots:
                 if pulp.value(x[(i, s)]) and pulp.value(x[(i, s)]) > 0.5:
                     row = dict(players[i])
                     row["slot"] = s
@@ -805,6 +846,40 @@ def to_dk_upload_format(lineups_df: pd.DataFrame) -> pd.DataFrame:
                 team = str(p.get("team", ""))
                 row[slot] = f"{name} ({team})" if team and team != "nan" else name
         rows.append(row)
+
+    return pd.DataFrame(rows, columns=all_cols)
+
+
+def to_dk_pga_upload_format(lineups_df: pd.DataFrame) -> pd.DataFrame:
+    """Convert long-format PGA lineups to DraftKings PGA bulk upload format.
+
+    DraftKings PGA format has 6 "G" columns.  Players are formatted as
+    ``"Name (TEAM)"`` (team is typically empty for golf).
+
+    The internal slot names are ``G_0 … G_5``; this function maps them
+    to the DK upload column names ``G``, ``G``, … (6 times).
+    """
+    meta_cols = ["Entry ID", "Contest Name", "Contest ID", "Entry Fee"]
+    slot_cols = ["G"] * DK_PGA_LINEUP_SIZE
+    all_cols = meta_cols + slot_cols
+
+    if lineups_df.empty or "lineup_index" not in lineups_df.columns:
+        return pd.DataFrame(columns=all_cols)
+
+    rows = []
+    for lu_id in sorted(lineups_df["lineup_index"].unique()):
+        lu = lineups_df[lineups_df["lineup_index"] == lu_id]
+        row_data = ["", "", "", ""]  # meta cols
+        # Collect all G-slot players in order
+        g_players = lu.sort_values("slot")
+        for _, p in g_players.iterrows():
+            name = str(p.get("player_name", ""))
+            team = str(p.get("team", ""))
+            row_data.append(f"{name} ({team})" if team and team != "nan" else name)
+        # Pad if fewer than 6
+        while len(row_data) < len(all_cols):
+            row_data.append("")
+        rows.append(row_data[:len(all_cols)])
 
     return pd.DataFrame(rows, columns=all_cols)
 
@@ -1201,7 +1276,8 @@ def run_lineups_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     }
 
     salary_cap = int(merged.get("SALARY_CAP", 50000))
-    lineup_size = DK_LINEUP_SIZE
+    _raw_slots = merged.get("POS_SLOTS", DK_POS_SLOTS)
+    lineup_size = int(merged.get("LINEUP_SIZE", len(_raw_slots)))
     validation_errors = []
     for lu_idx in lineups_df["lineup_index"].unique():
         lu = lineups_df[lineups_df["lineup_index"] == lu_idx]
