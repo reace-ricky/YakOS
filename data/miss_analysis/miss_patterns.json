@@ -1,53 +1,73 @@
 {
-  "computed_at": "2026-03-10T15:57:57.057382+00:00",
-  "n_slates": 17,
-  "n_player_slates": 2790,
+  "computed_at": "2026-03-11T12:12:26.458768+00:00",
+  "n_slates": 18,
+  "n_player_slates": 2930,
   "classification": {
-    "pop": 613,
-    "bust": 526,
-    "inline": 1651,
-    "pop_rate": 0.22,
+    "pop": 640,
+    "bust": 555,
+    "inline": 1735,
+    "pop_rate": 0.218,
     "bust_rate": 0.189
   },
   "factor_breakdown": {},
   "bracket_breakdown": {
     "lt5k": {
-      "n": 1562,
-      "pop_rate": 0.259,
-      "bust_rate": 0.254,
-      "avg_residual": 0.1,
+      "n": 1643,
+      "pop_rate": 0.254,
+      "bust_rate": 0.255,
+      "avg_residual": 0.0,
       "mae": 7.2
     },
     "5_65k": {
-      "n": 596,
-      "pop_rate": 0.213,
-      "bust_rate": 0.138,
+      "n": 622,
+      "pop_rate": 0.214,
+      "bust_rate": 0.14,
       "avg_residual": 0.5,
-      "mae": 8.7
+      "mae": 8.8
     },
     "65_8k": {
-      "n": 328,
-      "pop_rate": 0.152,
-      "bust_rate": 0.088,
-      "avg_residual": 0.0,
-      "mae": 8.6
-    },
-    "8_10k": {
-      "n": 232,
-      "pop_rate": 0.099,
-      "bust_rate": 0.065,
-      "avg_residual": -1.2,
+      "n": 343,
+      "pop_rate": 0.16,
+      "bust_rate": 0.085,
+      "avg_residual": 0.3,
       "mae": 8.7
     },
+    "8_10k": {
+      "n": 246,
+      "pop_rate": 0.102,
+      "bust_rate": 0.065,
+      "avg_residual": -1.0,
+      "mae": 9.0
+    },
     "10k_plus": {
-      "n": 72,
-      "pop_rate": 0.125,
-      "bust_rate": 0.056,
-      "avg_residual": 0.4,
+      "n": 76,
+      "pop_rate": 0.118,
+      "bust_rate": 0.053,
+      "avg_residual": 0.5,
       "mae": 10.5
     }
   },
   "top_pops": [
+    {
+      "player": "Bam Adebayo",
+      "salary": 8400,
+      "proj": 36.3,
+      "actual": 105.8,
+      "residual": 69.4,
+      "ratio": 2.91,
+      "context": [],
+      "date": "2026-03-10"
+    },
+    {
+      "player": "Cameron Payne",
+      "salary": 5000,
+      "proj": 11.0,
+      "actual": 65.8,
+      "residual": 54.8,
+      "ratio": 5.98,
+      "context": [],
+      "date": "2026-03-10"
+    },
     {
       "player": "Alondes Williams",
       "salary": 3000,
@@ -127,26 +147,6 @@
       "ratio": 2.07,
       "context": [],
       "date": "2026-03-06"
-    },
-    {
-      "player": "OG Anunoby",
-      "salary": 6600,
-      "proj": 32.6,
-      "actual": 65.2,
-      "residual": 32.7,
-      "ratio": 2.0,
-      "context": [],
-      "date": "2026-03-06"
-    },
-    {
-      "player": "Maxime Raynaud",
-      "salary": 6300,
-      "proj": 21.6,
-      "actual": 53.8,
-      "residual": 32.2,
-      "ratio": 2.49,
-      "context": [],
-      "date": "2026-03-08"
     }
   ],
   "top_busts": [
@@ -253,7 +253,7 @@
   ],
   "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-10T15:57:57.057357+00:00",
+    "computed_at": "2026-03-11T12:12:26.458746+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
