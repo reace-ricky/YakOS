@@ -369,6 +369,18 @@ def build_multiple_lineups_with_exposure(
         else:
             p["_slots"] = _eligible_slots(p.get("pos", ""))
 
+    # ── Breakout ceiling boost (GPP only) ─────────────────────────
+    # Players with breakout_score >= 60 get up to +8% proj boost in the
+    # optimizer objective only. This uses the player dicts (already a copy
+    # of the input DataFrame) and does NOT modify the displayed projection.
+    # If breakout_score column is absent, this block is skipped entirely.
+    if is_gpp and "breakout_score" in player_pool.columns:
+        for p in players:
+            breakout_score = float(p.get("breakout_score", 0))
+            # Scale: scores 60–100 map linearly to 0–8% boost; below 60 → no boost
+            boost_factor = max(0.0, (min(breakout_score, 100.0) / 100.0 - 0.6)) / 0.4
+            p["proj"] = float(p.get("proj", 0)) * (1.0 + boost_factor * 0.08)
+
     # ── Pre-compute per-player scores by contest type ──────────────
     if is_gpp:
         # GPP formula (v6 — backtested on 13 GPP slates 2026-02-02 → 2026-03-08):
