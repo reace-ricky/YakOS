@@ -175,6 +175,18 @@ def _build_lineups(
             "PROJ_COL": proj_col,
             "CONTEST_TYPE": _contest_type_map.get(contest_label, "gpp"),
         }
+        # Inject PGA-specific optimizer settings from the preset
+        if contest_label.startswith("PGA"):
+            _pga_preset = CONTEST_PRESETS.get(contest_label, {})
+            cfg["POS_SLOTS"] = _pga_preset.get("pos_slots", ["G"] * 6)
+            cfg["LINEUP_SIZE"] = _pga_preset.get("lineup_size", 6)
+            cfg["POS_CAPS"] = _pga_preset.get("pos_caps", {})
+            cfg["GPP_MAX_PUNT_PLAYERS"] = _pga_preset.get("max_punt_players", 1)
+            cfg["GPP_MIN_MID_PLAYERS"] = _pga_preset.get("min_mid_salary_players", 2)
+            cfg["GPP_OWN_CAP"] = _pga_preset.get("own_cap", 5.0)
+            cfg["GPP_MIN_LOW_OWN_PLAYERS"] = _pga_preset.get("min_low_own_players", 1)
+            cfg["GPP_LOW_OWN_THRESHOLD"] = _pga_preset.get("low_own_threshold", 0.40)
+            cfg["GPP_FORCE_GAME_STACK"] = _pga_preset.get("force_game_stack", False)
         # Inject per-player exposure caps from edge overrides
         _eo = st.session_state.get("_edge_overrides", {})
         if _eo.get("max_exposure_players"):

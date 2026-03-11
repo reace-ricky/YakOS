@@ -15,6 +15,8 @@ from .config import (
     DEFAULT_CONFIG,
     DK_LINEUP_SIZE,
     DK_POS_SLOTS,
+    DK_PGA_LINEUP_SIZE,
+    DK_PGA_POS_SLOTS,
     DK_SHOWDOWN_LINEUP_SIZE,
     DK_SHOWDOWN_SLOTS,
     DK_SHOWDOWN_CAPTAIN_MULTIPLIER,
@@ -259,6 +261,24 @@ def _eligible_slots(pos_str: str, pos_slots: tuple = None) -> Tuple[str, ...]:
     if _unique_slots == {"G"} or _unique_slots == {"UTIL"}:
         return tuple(sorted(_unique_slots))
 
+def _eligible_slots(pos_str: str, pos_slots: list | None = None) -> Tuple[str, ...]:
+    """Return the roster slots a player is eligible for.
+
+    When *pos_slots* is provided and all entries are the same (e.g. PGA's
+    ``["G","G","G","G","G","G"]``), every player is eligible for every
+    indexed slot (``G_0 … G_5``).  This bypasses the NBA position-mapping
+    logic entirely.
+
+    For NBA (the default), the original mapping applies: PG→{PG,G},
+    SG→{SG,G}, SF→{SF,F}, PF→{PF,F}, C→{C}, plus UTIL for all.
+    """
+    # PGA / uniform-slot mode: all slots identical → eligible for every slot
+    if pos_slots is not None:
+        unique = set(pos_slots)
+        if len(unique) == 1:
+            return tuple(f"{pos_slots[0]}_{i}" for i in range(len(pos_slots)))
+
+    # NBA (default) position-eligibility mapping
     if not isinstance(pos_str, str):
         return ("UTIL",) if "UTIL" in _unique_slots else tuple(sorted(_unique_slots))[:1]
     parts = [p.strip().upper() for p in pos_str.split("/")]
@@ -338,16 +358,42 @@ def build_multiple_lineups_with_exposure(
     gpp_low_own_thresh   = float(cfg.get("GPP_LOW_OWN_THRESHOLD", 0.45)) # ownership threshold
     gpp_force_game_stack = bool(cfg.get("GPP_FORCE_GAME_STACK", True))   # require 3+ from one game
 
+    # ── Sport-aware roster shape ───────────────────────────────────
+    # PGA (and other uniform-slot sports) pass POS_SLOTS via cfg;
+    # NBA uses the module-level defaults.
+    raw_pos_slots = cfg.get("POS_SLOTS", DK_POS_SLOTS)
+    lineup_size = int(cfg.get("LINEUP_SIZE", len(raw_pos_slots)))
+
+    # When all slots are identical (PGA: 6×G), create indexed slot names
+    # so the LP has distinct variable names: G_0 … G_5.  Every player is
+    # eligible for every slot.  Otherwise keep the NBA-style named slots.
+    _unique_raw = set(raw_pos_slots)
+    if len(_unique_raw) == 1:
+        _slot_base = list(_unique_raw)[0]
+        pos_slots = [f"{_slot_base}_{i}" for i in range(lineup_size)]
+        _uniform_slots = True
+    else:
+        pos_slots = list(raw_pos_slots)
+        _uniform_slots = False
+
     players = player_pool.to_dict("records")
     n = len(players)
     if n < _lineup_size:
         raise ValueError(
             f"Pool has only {n} players, need at least {_lineup_size} to build a lineup"
+    if n < lineup_size:
+        raise ValueError(
+            f"Pool has only {n} players, need at least {lineup_size} to build a lineup"
         )
 
     for i, p in enumerate(players):
         p["_idx"] = i
         p["_slots"] = _eligible_slots(p.get("pos", ""), _pos_slots)
+        if _uniform_slots:
+            # PGA: every player eligible for every indexed slot
+            p["_slots"] = tuple(pos_slots)
+        else:
+            p["_slots"] = _eligible_slots(p.get("pos", ""))
 
     # ── Pre-compute per-player scores by contest type ──────────────
     if is_gpp:
@@ -389,6 +435,7 @@ def build_multiple_lineups_with_exposure(
 
         for i in range(n):
             for s in _pos_slots:
+            for s in pos_slots:
                 x[(i, s)] = pulp.LpVariable(f"x_{i}_{s}_{lu_num}", cat="Binary")
 
         # ── Objective function ───────────────────────────────────────
@@ -398,6 +445,7 @@ def build_multiple_lineups_with_exposure(
                 players[i]["_gpp_score"] * x[(i, s)]
                 for i in range(n)
                 for s in _pos_slots
+                for s in pos_slots
             )
         elif is_cash:
             # Cash: maximize floor-weighted score (consistency is king)
@@ -405,6 +453,7 @@ def build_multiple_lineups_with_exposure(
                 players[i]["_cash_score"] * x[(i, s)]
                 for i in range(n)
                 for s in _pos_slots
+                for s in pos_slots
             )
         else:
             # Fallback: blend projection + ownership leverage + edge scores.
@@ -433,6 +482,11 @@ def build_multiple_lineups_with_exposure(
 
         # Exactly one player per slot
         for s in _pos_slots:
+                for s in pos_slots
+            )
+
+        # Exactly one player per slot
+        for s in pos_slots:
             prob += pulp.lpSum(x[(i, s)] for i in range(n)) == 1
 
         # Each player at most in one slot
@@ -442,6 +496,11 @@ def build_multiple_lineups_with_exposure(
         # Position eligibility
         for i in range(n):
             for s in _pos_slots:
+            prob += pulp.lpSum(x[(i, s)] for s in pos_slots) <= 1
+
+        # Position eligibility
+        for i in range(n):
+            for s in pos_slots:
                 if s not in players[i]["_slots"]:
                     prob += x[(i, s)] == 0
 
@@ -455,6 +514,7 @@ def build_multiple_lineups_with_exposure(
             players[i]["salary"] * x[(i, s)]
             for i in range(n)
             for s in _pos_slots
+            for s in pos_slots
         ) >= min_salary
 
         # Per-position caps
@@ -471,6 +531,7 @@ def build_multiple_lineups_with_exposure(
                         x[(j, s)]
                         for j in eligible_players
                         for s in _pos_slots
+                        for s in pos_slots
                     ) <= cap_val
 
         # LOCK list
@@ -479,6 +540,7 @@ def build_multiple_lineups_with_exposure(
                 if players[j].get("player_name", "") in lock_names:
                     prob += pulp.lpSum(
                         x[(j, s)] for s in _pos_slots
+                        x[(j, s)] for s in pos_slots
                     ) == 1
 
         # NOT_WITH: pairs of players that must never appear in the same lineup.
@@ -491,8 +553,8 @@ def build_multiple_lineups_with_exposure(
                 ib = name_to_idx.get(pb)
                 if ia is not None and ib is not None:
                     prob += (
-                        pulp.lpSum(x[(ia, s)] for s in _pos_slots)
-                        + pulp.lpSum(x[(ib, s)] for s in _pos_slots)
+                        pulp.lpSum(x[(ia, s)] for s in pos_slots)
+                        + pulp.lpSum(x[(ib, s)] for s in pos_slots)
                         <= 1
                     )
 
@@ -836,6 +898,40 @@ def to_dk_upload_format(lineups_df: pd.DataFrame) -> pd.DataFrame:
                 team = str(p.get("team", ""))
                 row[slot] = f"{name} ({team})" if team and team != "nan" else name
         rows.append(row)
+
+    return pd.DataFrame(rows, columns=all_cols)
+
+
+def to_dk_pga_upload_format(lineups_df: pd.DataFrame) -> pd.DataFrame:
+    """Convert long-format PGA lineups to DraftKings PGA bulk upload format.
+
+    DraftKings PGA format has 6 "G" columns.  Players are formatted as
+    ``"Name (TEAM)"`` (team is typically empty for golf).
+
+    The internal slot names are ``G_0 … G_5``; this function maps them
+    to the DK upload column names ``G``, ``G``, … (6 times).
+    """
+    meta_cols = ["Entry ID", "Contest Name", "Contest ID", "Entry Fee"]
+    slot_cols = ["G"] * DK_PGA_LINEUP_SIZE
+    all_cols = meta_cols + slot_cols
+
+    if lineups_df.empty or "lineup_index" not in lineups_df.columns:
+        return pd.DataFrame(columns=all_cols)
+
+    rows = []
+    for lu_id in sorted(lineups_df["lineup_index"].unique()):
+        lu = lineups_df[lineups_df["lineup_index"] == lu_id]
+        row_data = ["", "", "", ""]  # meta cols
+        # Collect all G-slot players in order
+        g_players = lu.sort_values("slot")
+        for _, p in g_players.iterrows():
+            name = str(p.get("player_name", ""))
+            team = str(p.get("team", ""))
+            row_data.append(f"{name} ({team})" if team and team != "nan" else name)
+        # Pad if fewer than 6
+        while len(row_data) < len(all_cols):
+            row_data.append("")
+        rows.append(row_data[:len(all_cols)])
 
     return pd.DataFrame(rows, columns=all_cols)
 
