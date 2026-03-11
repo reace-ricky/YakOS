@@ -198,6 +198,41 @@ class TestRickyEdgeState:
         assert not e.ricky_edge_check
         assert e.edge_check_ts == ""
 
+    def test_optimizer_queue_defaults_empty(self):
+        e = RickyEdgeState()
+        assert e.optimizer_queue == {}
+
+    def test_queue_player(self):
+        e = RickyEdgeState()
+        e.queue_player("James Harden", "core")
+        assert e.optimizer_queue == {"James Harden": "core"}
+
+    def test_queue_player_overwrites_tier(self):
+        e = RickyEdgeState()
+        e.queue_player("Player A", "value")
+        e.queue_player("Player A", "leverage")
+        assert e.optimizer_queue["Player A"] == "leverage"
+
+    def test_dequeue_player(self):
+        e = RickyEdgeState()
+        e.queue_player("Dennis Schroder", "value")
+        e.dequeue_player("Dennis Schroder")
+        assert "Dennis Schroder" not in e.optimizer_queue
+
+    def test_dequeue_player_nonexistent_is_noop(self):
+        e = RickyEdgeState()
+        e.dequeue_player("NoSuchPlayer")  # Should not raise
+
+    def test_optimizer_queue_multiple_players(self):
+        e = RickyEdgeState()
+        e.queue_player("Player A", "core")
+        e.queue_player("Player B", "leverage")
+        e.queue_player("Player C", "value")
+        assert len(e.optimizer_queue) == 3
+        assert e.optimizer_queue["Player A"] == "core"
+        assert e.optimizer_queue["Player B"] == "leverage"
+        assert e.optimizer_queue["Player C"] == "value"
+
 
 # ---------------------------------------------------------------------------
 # LineupSetState

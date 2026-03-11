@@ -48,7 +48,7 @@ from yak_core.publishing import publish_edge_and_lineups  # noqa: E402
 from yak_core.edge import compute_edge_metrics  # noqa: E402
 from yak_core.lineup_scoring import compute_lineup_boom_bust, GRADE_COLORS as _GRADE_COLORS_HEX  # noqa: E402
 from yak_core.right_angle import apply_edge_adjustments, compute_breakout_candidates  # noqa: E402
-from yak_core.display_format import normalise_ownership, standard_player_format, standard_lineup_format  # noqa: E402
+from yak_core.display_format import normalise_ownership, standard_player_format, standard_lineup_format, TAG_COLORS, classify_player_tier  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -346,22 +346,15 @@ def main() -> None:
     # Calibrated from 21-slate backtest (Feb 7 – Mar 5 2026, 3512 player-slates).
     if _edge_df is not None and not _edge_df.empty:
         if "auto_tier" not in _edge_df.columns:
-            def _classify(row):
-                sal = float(row.get("salary", 6000) or 6000)
-                own = float(row.get("own_pct", 15) or 15)
-                proj = float(row.get("proj", 15) or 15)
-                val = proj / max(sal / 1000.0, 1.0)
-                if sal >= 8000:
-                    return "fade"
-                if sal < 6000 and val >= 2.0 and own < 15:
-                    return "core"
-                if own < 12 and val >= 2.5 and sal < 7500:
-                    return "leverage"
-                if val >= 3.0:
-                    return "value"
-                return "neutral"
             _edge_df = _edge_df.copy()
-            _edge_df["auto_tier"] = _edge_df.apply(_classify, axis=1)
+            _edge_df["auto_tier"] = _edge_df.apply(
+                lambda row: classify_player_tier(
+                    row.get("salary", 6000),
+                    row.get("proj", 0),
+                    row.get("own_pct", 15) if "own_pct" in row.index else row.get("ownership", 15),
+                ),
+                axis=1,
+            )
 
     _breakout_df = None
     try:
@@ -577,6 +570,20 @@ def main() -> None:
         lock_names = st.multiselect("Lock (in every lineup)", player_names, key="_bp_lock")
     with col_excl:
         exclude_names = st.multiselect("Exclude", player_names, key="_bp_exclude")
+
+    # ── Queued from Edge Analysis ────────────────────────────────────────
+    if edge.optimizer_queue:
+        st.caption("📋 Queued from Edge Analysis")
+        # Group by tier for a clean, consistent layout
+        _QUEUE_TIER_ORDER = [("core", "🟢 Core"), ("leverage", "⚡ Leverage"), ("value", "🟡 Value")]
+        _queue_by_tier = {}
+        for _qp, _qt in edge.optimizer_queue.items():
+            _queue_by_tier.setdefault(_qt, []).append(_qp)
+        for _qt, _qlabel in _QUEUE_TIER_ORDER:
+            _qplayers = sorted(_queue_by_tier.get(_qt, []))
+            if not _qplayers:
+                continue
+            st.markdown(f"**{_qlabel}:** " + "  ·  ".join(_qplayers))
 
     _bp_game_note = f"  |  {len(build_games)} of {len(all_games)} games" if build_games else ""
     st.caption(

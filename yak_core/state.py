@@ -172,6 +172,10 @@ class RickyEdgeState:
     edge_suggestions_dismissed: Dict[str, List[str]] = field(default_factory=dict)
     # {contest_label: [player_name, ...]} — dismissed suggestions per contest
 
+    # Optimizer queue — players flagged on Edge Analysis for use in Build & Publish
+    optimizer_queue: Dict[str, str] = field(default_factory=dict)
+    # {player_name: tier}  e.g. {"James Harden": "core", "Dennis Schroder": "value"}
+
     def tag_player(self, player_name: str, tag: str, conviction: int = 3) -> None:
         """Set tag and conviction for a player."""
         self.player_tags[player_name] = {"tag": tag, "conviction": max(1, min(5, conviction))}
@@ -233,6 +237,14 @@ class RickyEdgeState:
             self.edge_suggestions_dismissed[contest_label] = []
         if player_name not in self.edge_suggestions_dismissed[contest_label]:
             self.edge_suggestions_dismissed[contest_label].append(player_name)
+
+    def queue_player(self, player_name: str, tier: str) -> None:
+        """Add a player to the optimizer queue with their tier context."""
+        self.optimizer_queue[player_name] = tier
+
+    def dequeue_player(self, player_name: str) -> None:
+        """Remove a player from the optimizer queue."""
+        self.optimizer_queue.pop(player_name, None)
 
     def reset_manual_overrides(self) -> None:
         """Clear all manual tag overrides."""
