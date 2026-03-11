@@ -687,3 +687,133 @@ def render_lineup_cards_paged(
         show_rating=bool(sim_metrics),
         boom_bust_row=bb_row,
     )
+
+
+def render_lineup_cards_scrollable(
+    lineups_df: pd.DataFrame,
+    sim_results_df: Optional[pd.DataFrame] = None,
+    contest_type: str = "GPP_20",
+    salary_cap: int = 50000,
+    nav_key: str = "lineup_nav",
+    boom_bust_df: Optional[pd.DataFrame] = None,
+) -> None:
+    """Render all lineup cards in a scrollable vertical list sorted best-to-worst.
+
+    Shows all lineups at once sorted by grade/boom score so the user can
+    quickly identify the best lineups without clicking through one at a time.
+
+    Parameters
+    ----------
+    lineups_df : pd.DataFrame
+        Full lineup DataFrame in long format with ``lineup_index`` column.
+    sim_results_df : pd.DataFrame, optional
+        Pipeline output from ``run_sims_pipeline``.  When provided, metrics
+        are pulled from this table and displayed in each card footer.
+    contest_type : str
+        Passed to the rating system if metrics are not pre-computed.
+    salary_cap : int
+        DK salary cap.
+    nav_key : str
+        Base key (unused for navigation but kept for API compatibility).
+    boom_bust_df : pd.DataFrame, optional
+        Rankings DataFrame from ``compute_lineup_boom_bust``.  When provided,
+        lineups are sorted by rank/score and grade badges are shown in headers.
+        Expected columns: ``lineup_index``, ``boom_bust_rank``, ``boom_score``,
+        ``lineup_grade``.
+    """
+    if st is None:
+        raise RuntimeError("Streamlit is not available.")
+
+    if lineups_df is None or lineups_df.empty:
+        st.info("No lineups to display.")
+        return
+
+    unique_idxs = (
+        sorted(lineups_df["lineup_index"].unique().tolist())
+        if "lineup_index" in lineups_df.columns
+        else [0]
+    )
+    n_lineups = len(unique_idxs)
+
+    # ── Sort lineup indices by grade ──────────────────────────────────────
+    if boom_bust_df is not None and not boom_bust_df.empty and "lineup_index" in boom_bust_df.columns:
+        if "boom_bust_rank" in boom_bust_df.columns:
+            rank_map = dict(zip(boom_bust_df["lineup_index"], boom_bust_df["boom_bust_rank"]))
+            unique_idxs = sorted(unique_idxs, key=lambda i: rank_map.get(i, 9999))
+        elif "boom_score" in boom_bust_df.columns:
+            score_map = dict(zip(boom_bust_df["lineup_index"], boom_bust_df["boom_score"]))
+            unique_idxs = sorted(unique_idxs, key=lambda i: score_map.get(i, 0), reverse=True)
+
+    # ── Summary header ────────────────────────────────────────────────────
+    # Pre-build lookup dicts for O(1) access inside loops
+    bb_row_map: Dict[Any, Dict[str, Any]] = {}
+    if boom_bust_df is not None and not boom_bust_df.empty and "lineup_index" in boom_bust_df.columns:
+        for _, row in boom_bust_df.iterrows():
+            bb_row_map[row["lineup_index"]] = row.to_dict()
+
+    sim_metrics_map: Dict[Any, Dict[str, Any]] = {}
+    if sim_results_df is not None and not sim_results_df.empty and "lineup_index" in sim_results_df.columns:
+        for _, row in sim_results_df.iterrows():
+            sim_metrics_map[row["lineup_index"]] = row.to_dict()
+
+    grade_dist_html = ""
+    if boom_bust_df is not None and not boom_bust_df.empty and "lineup_grade" in boom_bust_df.columns:
+        grade_map = dict(zip(boom_bust_df["lineup_index"], boom_bust_df["lineup_grade"]))
+        grade_counts: Dict[str, int] = {}
+        for idx in unique_idxs:
+            g = str(grade_map.get(idx, "?"))
+            grade_counts[g] = grade_counts.get(g, 0) + 1
+        parts = []
+        for grade in ["A", "B", "C", "D", "F"]:
+            if grade in grade_counts:
+                color = _GRADE_COLORS.get(grade, "#9da5b4")
+                parts.append(
+                    f"<span style='color:{color};font-weight:700;'>"
+                    f"{grade_counts[grade]}{grade}</span>"
+                )
+        grade_dist_html = " · ".join(parts)
+
+    summary_html = (
+        f"<div style='padding:8px 0 10px 0;font-size:0.9rem;color:{_TEXT_SECONDARY};'>"
+        f"Showing <b style='color:{_TEXT_PRIMARY};'>{n_lineups}</b> lineup"
+        f"{'s' if n_lineups != 1 else ''} (sorted best → worst)"
+        + (f"&nbsp;&nbsp;{grade_dist_html}" if grade_dist_html else "")
+        + "</div>"
+    )
+    st.markdown(summary_html, unsafe_allow_html=True)
+
+    # ── Scrollable container (open) ───────────────────────────────────────
+    st.markdown(
+        "<div style='max-height:800px;overflow-y:auto;padding-right:6px;'>",
+        unsafe_allow_html=True,
+    )
+
+    for rank_pos, actual_idx in enumerate(unique_idxs, start=1):
+        lu_rows = lineups_df[lineups_df["lineup_index"] == actual_idx]
+
+        # Resolve sim metrics and boom/bust row via pre-built lookups
+        sim_metrics: Dict[str, Any] = sim_metrics_map.get(actual_idx, {})
+        bb_row: Optional[Dict[str, Any]] = bb_row_map.get(actual_idx)
+
+        # Build label with grade when available
+        if bb_row:
+            grade = bb_row.get("lineup_grade", "")
+            grade_str = f" — Grade {grade}" if grade else ""
+            lineup_label = f"#{rank_pos}{grade_str} (Lineup {actual_idx})"
+        else:
+            lineup_label = f"Lineup {rank_pos} of {n_lineups}"
+
+        render_lineup_card(
+            lineup_rows=lu_rows,
+            sim_metrics=sim_metrics if sim_metrics else None,
+            lineup_label=lineup_label,
+            salary_cap=salary_cap,
+            show_rating=bool(sim_metrics),
+            boom_bust_row=bb_row,
+        )
+
+        # Spacer between cards
+        st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
+
+    # ── Scrollable container (close) ──────────────────────────────────────
+    st.markdown("</div>", unsafe_allow_html=True)

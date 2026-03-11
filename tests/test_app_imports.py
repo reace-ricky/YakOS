@@ -527,6 +527,10 @@ class TestComponentsImports:
         mod = importlib.import_module("yak_core.components")
         assert hasattr(mod, "render_lineup_cards_paged")
 
+    def test_render_lineup_cards_scrollable(self):
+        mod = importlib.import_module("yak_core.components")
+        assert hasattr(mod, "render_lineup_cards_scrollable")
+
 
 class TestRCIImports:
     """Smoke tests for yak_core.rci — RCI engine."""
