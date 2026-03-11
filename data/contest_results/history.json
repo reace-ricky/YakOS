@@ -168,5 +168,16 @@
       "ownership_miss": 20
     },
     "n_missed": 20
+  },
+  "2026-03-10_cash": {
+    "slate_date": "2026-03-10",
+    "contest_type": "cash",
+    "cash_line": 327.0,
+    "top_15_score": 0,
+    "top_1_score": 0,
+    "winning_score": 347.0,
+    "num_entries": 11,
+    "notes": "",
+    "recorded_at": "2026-03-11T12:14:00.152572+00:00"
   }
 }
