@@ -6,6 +6,10 @@ import pytest
 from yak_core.injury_cascade import (
     KEY_INJURY_MIN_MINUTES,
     MAX_PLAYER_MINUTES,
+    _PRIMARY_BACKUP_BOOST_MULT,
+    _PRIMARY_BACKUP_MAX_EXTRA_MINS,
+    _find_primary_backup_idx,
+    _primary_backup_boost,
     apply_injury_cascade,
     find_key_injuries,
 )
@@ -524,3 +528,177 @@ class TestManualOverrideDropPattern:
         if "status" in result.columns:
             bad = result[result["status"].fillna("").str.upper().isin({"OUT", "IR", "O"})]
             assert bad.empty, f"OUT players still present: {bad[['player_name','status']].to_dict('records')}"
+
+
+# ---------------------------------------------------------------------------
+# _primary_backup_boost unit tests
+# ---------------------------------------------------------------------------
+
+class TestPrimaryBackupBoost:
+    """Unit tests for the _primary_backup_boost helper."""
+
+    def _make_eligible(self) -> pd.DataFrame:
+        """Small eligible DataFrame with players across position/minute tiers."""
+        rows = [
+            # Same position as out PG, mid-rotation (18 min) → primary backup
+            {"player_name": "Backup PG", "pos": "PG", "proj_minutes": 18.0},
+            # Same position as out PG, but only 10 min (below 12 threshold)
+            {"player_name": "Deep Bench PG", "pos": "PG", "proj_minutes": 10.0},
+            # Different position
+            {"player_name": "SG One", "pos": "SG", "proj_minutes": 22.0},
+            # Same position but starter (28+ min → above 28 threshold)
+            {"player_name": "Starter PG", "pos": "PG", "proj_minutes": 30.0},
+        ]
+        return pd.DataFrame(rows)
+
+    def test_identifies_same_pos_candidate(self):
+        """Primary backup must be the same-pos player in 12–28 min range."""
+        df = self._make_eligible()
+        weights = {i: 10.0 for i in df.index}
+        boosted = _primary_backup_boost(weights, df, "PG", 28.0)
+        # Backup PG is index 0; should have 2x weight
+        assert boosted[0] == pytest.approx(10.0 * _PRIMARY_BACKUP_BOOST_MULT)
+
+    def test_applies_2x_multiplier(self):
+        """The primary backup's weight must be exactly _PRIMARY_BACKUP_BOOST_MULT × original."""
+        df = self._make_eligible()
+        weights = {i: 5.0 * (i + 1) for i in df.index}  # varied weights
+        boosted = _primary_backup_boost(weights, df, "PG", 28.0)
+        orig_w = weights[0]
+        assert boosted[0] == pytest.approx(orig_w * _PRIMARY_BACKUP_BOOST_MULT)
+
+    def test_non_primary_weights_unchanged(self):
+        """All players except the primary backup must keep their original weight."""
+        df = self._make_eligible()
+        weights = {i: 8.0 for i in df.index}
+        boosted = _primary_backup_boost(weights, df, "PG", 28.0)
+        for idx in [1, 2, 3]:
+            assert boosted[idx] == pytest.approx(8.0)
+
+    def test_no_candidate_returns_unchanged(self):
+        """If no same-pos player is in 12–28 min range, return weights unchanged."""
+        df = self._make_eligible()
+        # Ask for SF position — no SF in the eligible set
+        weights = {i: 10.0 for i in df.index}
+        boosted = _primary_backup_boost(weights, df, "SF", 25.0)
+        assert boosted == weights
+
+    def test_highest_minutes_chosen_among_same_pos(self):
+        """When multiple same-pos candidates exist, the one with highest minutes wins."""
+        rows = [
+            {"player_name": "PG A", "pos": "PG", "proj_minutes": 15.0},
+            {"player_name": "PG B", "pos": "PG", "proj_minutes": 20.0},  # highest
+            {"player_name": "SG One", "pos": "SG", "proj_minutes": 22.0},
+        ]
+        df = pd.DataFrame(rows)
+        weights = {i: 10.0 for i in df.index}
+        boosted = _primary_backup_boost(weights, df, "PG", 28.0)
+        # Index 1 (PG B, 20 min) should be boosted
+        assert boosted[1] == pytest.approx(10.0 * _PRIMARY_BACKUP_BOOST_MULT)
+        assert boosted[0] == pytest.approx(10.0)  # PG A unchanged
+
+    def test_above_28min_not_a_candidate(self):
+        """A same-pos player with >= 28 min is NOT in the primary backup tier."""
+        rows = [
+            {"player_name": "PG Starter", "pos": "PG", "proj_minutes": 28.0},
+            {"player_name": "SG One", "pos": "SG", "proj_minutes": 22.0},
+        ]
+        df = pd.DataFrame(rows)
+        weights = {i: 10.0 for i in df.index}
+        boosted = _primary_backup_boost(weights, df, "PG", 28.0)
+        assert boosted == weights  # no candidate, unchanged
+
+    def test_exactly_12min_qualifies(self):
+        """A same-pos player at exactly 12 min is the lower bound (inclusive)."""
+        rows = [
+            {"player_name": "PG Edge", "pos": "PG", "proj_minutes": 12.0},
+            {"player_name": "C One", "pos": "C", "proj_minutes": 20.0},
+        ]
+        df = pd.DataFrame(rows)
+        weights = {i: 10.0 for i in df.index}
+        boosted = _primary_backup_boost(weights, df, "PG", 25.0)
+        assert boosted[0] == pytest.approx(10.0 * _PRIMARY_BACKUP_BOOST_MULT)
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: primary backup boost in apply_injury_cascade
+# ---------------------------------------------------------------------------
+
+class TestPrimaryBackupBoostIntegration:
+    """Verify that primary backup boost concentrates minutes correctly in the
+    full apply_injury_cascade pipeline."""
+
+    def _make_pool_with_clear_backup(self) -> pd.DataFrame:
+        """Pool where Backup PG (18 min) is the clear primary backup for Star PG (OUT, 28 min).
+
+        All other teammates are different positions, ensuring the 2x boost has
+        a measurable effect on minute concentration.
+        """
+        return pd.DataFrame([
+            {"player_name": "Star PG", "team": "LAL", "pos": "PG",
+             "salary": 9000, "proj": 50.0, "proj_minutes": 28.0, "status": "OUT"},
+            {"player_name": "Backup PG", "team": "LAL", "pos": "PG",
+             "salary": 4500, "proj": 20.0, "proj_minutes": 18.0, "status": "Active"},
+            {"player_name": "SF One", "team": "LAL", "pos": "SF",
+             "salary": 6000, "proj": 30.0, "proj_minutes": 25.0, "status": "Active"},
+            {"player_name": "PF One", "team": "LAL", "pos": "PF",
+             "salary": 5500, "proj": 27.0, "proj_minutes": 24.0, "status": "Active"},
+            {"player_name": "C One", "team": "LAL", "pos": "C",
+             "salary": 5200, "proj": 24.0, "proj_minutes": 20.0, "status": "Active"},
+        ])
+
+    def test_primary_backup_gets_most_minutes(self):
+        """After boost, Backup PG should receive more extra minutes than any other player."""
+        pool = self._make_pool_with_clear_backup()
+        updated, report = apply_injury_cascade(pool)
+        # Gather extra_minutes for active LAL players
+        extra_by_player = {}
+        for b in report[0]["beneficiaries"]:
+            extra_by_player[b["name"]] = b["extra_minutes"]
+        backup_extra = extra_by_player.get("Backup PG", 0)
+        others_extra = [v for k, v in extra_by_player.items() if k != "Backup PG"]
+        assert backup_extra > max(others_extra), (
+            f"Backup PG ({backup_extra:.1f} min) should beat max secondary "
+            f"({max(others_extra):.1f} min)"
+        )
+
+    def test_primary_backup_12min_cap_enforced(self):
+        """Backup PG must never receive more than _PRIMARY_BACKUP_MAX_EXTRA_MINS
+        extra minutes from a single injury, even with the boost applied."""
+        pool = self._make_pool_with_clear_backup()
+        updated, report = apply_injury_cascade(pool)
+        for b in report[0]["beneficiaries"]:
+            if b["name"] == "Backup PG":
+                assert b["extra_minutes"] <= _PRIMARY_BACKUP_MAX_EXTRA_MINS + 0.01, (
+                    f"Backup PG extra_minutes {b['extra_minutes']:.2f} exceeds cap "
+                    f"{_PRIMARY_BACKUP_MAX_EXTRA_MINS}"
+                )
+
+    def test_overflow_redistributed_total_minutes_conserved(self):
+        """Total extra minutes distributed must equal the OUT player's projected minutes
+        (or less, only if headroom constraints prevent full redistribution)."""
+        pool = self._make_pool_with_clear_backup()
+        updated, report = apply_injury_cascade(pool)
+        total_extra = sum(b["extra_minutes"] for b in report[0]["beneficiaries"])
+        out_mins = report[0]["out_proj_mins"]
+        # Total distributed must not exceed original out_mins
+        assert total_extra <= out_mins + 0.05
+
+    def test_no_primary_backup_weights_unchanged(self):
+        """If there is no same-pos candidate in 12–28 min range, the cascade
+        should still run (no crash) and distribute normally."""
+        pool = pd.DataFrame([
+            {"player_name": "Star C", "team": "BOS", "pos": "C",
+             "salary": 9000, "proj": 50.0, "proj_minutes": 30.0, "status": "OUT"},
+            # Two SG players — no C backup in 12-28 min range
+            {"player_name": "SG A", "team": "BOS", "pos": "SG",
+             "salary": 5000, "proj": 25.0, "proj_minutes": 22.0, "status": "Active"},
+            {"player_name": "SF A", "team": "BOS", "pos": "SF",
+             "salary": 5200, "proj": 26.0, "proj_minutes": 24.0, "status": "Active"},
+        ])
+        updated, report = apply_injury_cascade(pool)
+        assert len(report) == 1
+        # Both players should still get bumped (normal cascade fires)
+        bumps = {b["name"]: b["bump"] for b in report[0]["beneficiaries"]}
+        assert bumps["SG A"] > 0
+        assert bumps["SF A"] > 0
