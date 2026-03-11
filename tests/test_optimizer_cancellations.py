@@ -130,3 +130,39 @@ class TestExposureFallback:
         c_slot_players = lu_df[lu_df["slot"] == "C"]
         pfc_in_c = c_slot_players[c_slot_players["pos"] == "PF/C"]
         assert len(pfc_in_c) > 0, "PF/C players must be eligible for and fill the C slot"
+
+
+class TestFallbackUniqueness:
+    """Verify that the fallback solver enforces the uniqueness constraint.
+
+    When tight MAX_EXPOSURE causes the main solver to fail, the fallback solver
+    must still produce lineups that differ by at least _MIN_DIFF (3) players
+    from every previously built lineup.  Without the uniqueness constraint the
+    fallback would generate identical lineups for every slot it fills.
+    """
+
+    def test_fallback_lineups_are_unique(self):
+        """No two lineups should share more than (lineup_size - 3) players."""
+        from yak_core.config import DK_LINEUP_SIZE
+
+        # Very tight exposure forces the fallback solver starting at lineup 2.
+        pool = _make_pool()
+        cfg = dict(_BASE_CFG, MAX_EXPOSURE=0.05, NUM_LINEUPS=5)
+        lu_df, _ = build_multiple_lineups_with_exposure(pool, cfg)
+
+        lineup_indices = list(lu_df["lineup_index"].unique())
+        assert len(lineup_indices) == 5, "All 5 lineups should be built"
+
+        # Build a frozenset of player_ids per lineup for pairwise comparison.
+        lineup_sets = {
+            lu: frozenset(lu_df[lu_df["lineup_index"] == lu]["player_id"])
+            for lu in lineup_indices
+        }
+        min_diff = 3  # matches _MIN_DIFF in the optimizer
+        for i, lu_a in enumerate(lineup_indices):
+            for lu_b in lineup_indices[i + 1:]:
+                shared = len(lineup_sets[lu_a] & lineup_sets[lu_b])
+                assert shared <= DK_LINEUP_SIZE - min_diff, (
+                    f"Lineups {lu_a} and {lu_b} share {shared} players "
+                    f"(max allowed: {DK_LINEUP_SIZE - min_diff})"
+                )
