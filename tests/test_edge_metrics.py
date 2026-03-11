@@ -151,6 +151,54 @@ class TestComputeEdgeMetrics:
         assert len(result) == 1
         assert result.iloc[0]["player_name"] == "Solo"
 
+    def test_fp_efficiency_column_present(self):
+        pool = _make_pool()
+        result = compute_edge_metrics(pool)
+        assert "fp_efficiency" in result.columns
+
+    def test_fp_efficiency_between_0_and_1(self):
+        pool = _make_pool()
+        pool["proj_minutes"] = [30.0 + i for i in range(len(pool))]
+        result = compute_edge_metrics(pool)
+        assert (result["fp_efficiency"].between(0, 1)).all()
+
+    def test_fp_efficiency_zero_for_low_minutes(self):
+        """Players with < 10 projected minutes get eff_norm = 0."""
+        pool = pd.DataFrame({
+            "player_name": ["LowMin", "HighMin"],
+            "salary": [5000, 7000],
+            "proj": [15.0, 30.0],
+            "floor": [10.0, 22.0],
+            "ceil": [20.0, 40.0],
+            "ownership": [5.0, 12.0],
+            "proj_minutes": [5.0, 30.0],  # LowMin has < 10
+        })
+        result = compute_edge_metrics(pool)
+        low_row = result[result["player_name"] == "LowMin"].iloc[0]
+        assert low_row["fp_efficiency"] == 0.0
+
+    def test_fp_efficiency_higher_for_efficient_players(self):
+        """Higher FP/min at lower salary should yield higher fp_efficiency."""
+        pool = pd.DataFrame({
+            "player_name": ["Efficient", "Inefficient"],
+            "salary": [4000, 9000],
+            "proj": [20.0, 30.0],
+            "floor": [14.0, 22.0],
+            "ceil": [28.0, 40.0],
+            "ownership": [5.0, 20.0],
+            "proj_minutes": [20.0, 35.0],  # Efficient: 1.0 FP/min / 4.0 salary_k = 0.25 eff; Inefficient: ~0.86 FP/min / 9.0 salary_k = ~0.095 eff
+        })
+        result = compute_edge_metrics(pool)
+        eff_row = result[result["player_name"] == "Efficient"].iloc[0]
+        ineff_row = result[result["player_name"] == "Inefficient"].iloc[0]
+        assert eff_row["fp_efficiency"] > ineff_row["fp_efficiency"]
+
+    def test_fp_efficiency_no_proj_minutes_column(self):
+        """When proj_minutes is absent, eff_norm should be 0 for all (< 10 mins default)."""
+        pool = _make_pool()  # no proj_minutes column
+        result = compute_edge_metrics(pool)
+        assert (result["fp_efficiency"] == 0.0).all()
+
 
 # ---------------------------------------------------------------------------
 # yak_core/edge_metrics.py — Ricky Confidence helpers
