@@ -181,9 +181,15 @@ def _build_lineups(
         }
         # Inject optimizer settings from the contest preset (works for both NBA and PGA)
         if _preset_cfg:
-            cfg["POS_SLOTS"] = _preset_cfg.get("pos_slots", [])
-            cfg["LINEUP_SIZE"] = _preset_cfg.get("lineup_size", 8)
-            cfg["POS_CAPS"] = _preset_cfg.get("pos_caps", {})
+            # Only inject pos_slots/lineup_size/pos_caps when the preset
+            # defines them (PGA).  NBA presets omit these and rely on the
+            # module-level DK_POS_SLOTS default inside lineups.py.
+            if _preset_cfg.get("pos_slots"):
+                cfg["POS_SLOTS"] = _preset_cfg["pos_slots"]
+            if _preset_cfg.get("lineup_size"):
+                cfg["LINEUP_SIZE"] = _preset_cfg["lineup_size"]
+            if _preset_cfg.get("pos_caps"):
+                cfg["POS_CAPS"] = _preset_cfg["pos_caps"]
             cfg["GPP_MAX_PUNT_PLAYERS"] = _preset_cfg.get("max_punt_players", _preset_cfg.get("GPP_MAX_PUNT_PLAYERS", 2))
             cfg["GPP_MIN_MID_PLAYERS"] = _preset_cfg.get("min_mid_salary_players", _preset_cfg.get("GPP_MIN_MID_PLAYERS", 3))
             cfg["GPP_OWN_CAP"] = _preset_cfg.get("own_cap", _preset_cfg.get("GPP_OWN_CAP", 6.0))
