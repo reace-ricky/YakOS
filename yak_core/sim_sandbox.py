@@ -596,7 +596,20 @@ def _generate_recommendations(agg: Dict[str, Any]) -> Dict[str, Any]:
     new_cb = round(max(0.5, min(2.0, new_cb)), 3)
     new_fd = round(max(0.5, min(2.0, new_fd)), 3)
 
+    # changed flag follows the deltas, not new-vs-old comparison.
+    # The old check (abs(new - old) > 0.001) would say "no changes"
+    # when knobs had already been applied but KPIs hadn't improved.
+    # Also respect guard rails: if we hit the cap, no point recommending.
     changed = (abs(new_cb - cb) > 0.001) or (abs(new_fd - fd) > 0.001)
+    if not changed and (abs(cb_delta) > 0.001 or abs(fd_delta) > 0.001):
+        # Deltas fired but the knobs didn't move (already at cap or
+        # already at the recommended value). Tell the user.
+        if cb >= 2.0 or fd >= 2.0:
+            reasons.append("Knobs are at their maximum — further tuning won't help. "
+                           "The issue is upstream (projection quality, not sim width).")
+        else:
+            # Deltas fired and knobs aren't at cap, so apply them.
+            changed = True
 
     if not reasons:
         reasons.append("Current config looks solid — no changes recommended")
