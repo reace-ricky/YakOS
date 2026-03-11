@@ -44,6 +44,7 @@ from .config import YAKOS_ROOT
 _SANDBOX_DIR = os.path.join(YAKOS_ROOT, "data", "sim_sandbox")
 _KNOBS_FILE = os.path.join(_SANDBOX_DIR, "active_knobs.json")
 _HISTORY_FILE = os.path.join(_SANDBOX_DIR, "sandbox_history.json")
+_PROFILE_FILE = os.path.join(_SANDBOX_DIR, "breakout_profile.json")
 
 
 def _ensure_dir() -> None:
@@ -660,3 +661,302 @@ def _load_history() -> List[Dict[str, Any]]:
 def get_sandbox_history() -> List[Dict[str, Any]]:
     """Return all saved sandbox runs for trend display."""
     return _load_history()
+
+
+# ── Breakout Profile ───────────────────────────────────────────────
+
+# Default equal weights used when no profile has been built yet.
+_DEFAULT_SIGNAL_WEIGHTS: Dict[str, float] = {
+    "is_cheap": 1.0,
+    "is_low_own": 1.0,
+    "has_positive_correction": 1.0,
+    "is_contrarian": 1.0,
+    "is_volatile": 1.0,
+    "is_value": 1.0,
+}
+
+
+def build_breakout_profile(
+    min_breakouts: int = 5,
+) -> Dict[str, Any]:
+    """Build a breakout signal-weight profile from archived slate data.
+
+    Analyzes historical archived slates (data/slate_archive/) to identify
+    which pre-game signals were most predictive of breakout players (those
+    who beat their ceiling by ≥10 FP or put up ≥5x value).  Signal weights
+    are set proportional to how frequently each signal appeared among
+    confirmed breakout players vs. the rest of the pool.
+
+    The resulting profile is persisted to data/sim_sandbox/breakout_profile.json
+    so that score_player_breakout() can load it without re-computing.
+
+    Parameters
+    ----------
+    min_breakouts : int
+        Minimum number of confirmed breakout players required across all
+        slates before learning weights.  If fewer are found, equal weights
+        are used and the profile is still saved (so callers get a result).
+
+    Returns
+    -------
+    dict
+        {
+          "signals": {signal_name: weight, ...},
+          "n_breakouts": int,
+          "n_players": int,
+          "built_at": ISO timestamp,
+        }
+    """
+    archive_dir = os.path.join(YAKOS_ROOT, "data", "slate_archive")
+
+    signal_names = list(_DEFAULT_SIGNAL_WEIGHTS.keys())
+    breakout_counts: Dict[str, int] = {s: 0 for s in signal_names}
+    non_breakout_counts: Dict[str, int] = {s: 0 for s in signal_names}
+    total_breakouts = 0
+    total_players = 0
+
+    if os.path.isdir(archive_dir):
+        for fname in sorted(os.listdir(archive_dir)):
+            if not fname.endswith(".parquet"):
+                continue
+            try:
+                df = pd.read_parquet(os.path.join(archive_dir, fname))
+            except Exception:
+                continue
+
+            required = {"salary", "proj", "ceil", "floor", "actual_fp"}
+            if not required.issubset(df.columns):
+                # Try alternate actual column name
+                if "actual" in df.columns and "actual_fp" not in df.columns:
+                    df = df.rename(columns={"actual": "actual_fp"})
+                else:
+                    continue
+
+            if len(df) < 3:
+                continue
+
+            salary = df["salary"].values.astype(float)
+            proj = df["proj"].values.astype(float)
+            ceil_ = df["ceil"].values.astype(float)
+            floor_ = df["floor"].values.astype(float)
+            actual = df["actual_fp"].values.astype(float)
+            own = df["ownership"].values.astype(float) if "ownership" in df.columns else np.zeros(len(df))
+            proj_corr = df["proj_correction"].values.astype(float) if "proj_correction" in df.columns else np.ones(len(df))
+            rolling_fp = df["rolling_fp_10"].values.astype(float) if "rolling_fp_10" in df.columns else proj.copy()
+
+            sal_med = float(np.median(salary[salary > 0])) if np.any(salary > 0) else 1.0
+            own_med = float(np.median(own))
+            vol = ceil_ - floor_
+            vol_med = float(np.median(vol))
+            with np.errstate(divide="ignore", invalid="ignore"):
+                value_pp = np.where(salary > 0, proj / (salary / 1000.0), 0.0)
+            val_med = float(np.median(value_pp[value_pp > 0])) if np.any(value_pp > 0) else 0.0
+
+            for i in range(len(df)):
+                is_breakout = (actual[i] - ceil_[i] >= 10) or (
+                    salary[i] > 0 and actual[i] / (salary[i] / 1000.0) >= 5.0
+                )
+                signals = {
+                    "is_cheap": bool(salary[i] < sal_med),
+                    "is_low_own": bool(own[i] < own_med),
+                    "has_positive_correction": bool(proj_corr[i] > 1.0),
+                    "is_contrarian": bool(rolling_fp[i] < proj[i] - 2),
+                    "is_volatile": bool(vol[i] > vol_med),
+                    "is_value": bool(val_med > 0 and value_pp[i] > val_med),
+                }
+                total_players += 1
+                if is_breakout:
+                    total_breakouts += 1
+                    for s, hit in signals.items():
+                        if hit:
+                            breakout_counts[s] += 1
+                else:
+                    for s, hit in signals.items():
+                        if hit:
+                            non_breakout_counts[s] += 1
+
+    # Compute lift: how much more often does each signal appear among breakouts?
+    if total_breakouts >= min_breakouts:
+        total_non = max(total_players - total_breakouts, 1)
+        weights: Dict[str, float] = {}
+        for s in signal_names:
+            bo_rate = breakout_counts[s] / total_breakouts
+            non_rate = non_breakout_counts[s] / total_non
+            # lift = bo_rate / non_rate, clipped to [0.1, 5.0] then normalised
+            lift = bo_rate / max(non_rate, 0.01)
+            weights[s] = round(float(np.clip(lift, 0.1, 5.0)), 4)
+    else:
+        weights = dict(_DEFAULT_SIGNAL_WEIGHTS)
+
+    profile: Dict[str, Any] = {
+        "signals": weights,
+        "n_breakouts": total_breakouts,
+        "n_players": total_players,
+        "built_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    _ensure_dir()
+    with open(_PROFILE_FILE, "w") as f:
+        json.dump(profile, f, indent=2)
+
+    try:
+        from .github_persistence import sync_feedback_async
+        sync_feedback_async(
+            files=["data/sim_sandbox/breakout_profile.json"],
+            commit_message="Breakout profile: updated signal weights",
+        )
+    except Exception:
+        pass
+
+    return profile
+
+
+def _load_breakout_profile() -> Optional[Dict[str, Any]]:
+    """Load profile from disk, return None if absent or corrupt."""
+    if not os.path.isfile(_PROFILE_FILE):
+        return None
+    try:
+        with open(_PROFILE_FILE, "r") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+# ── Live-Pool Breakout Scoring ─────────────────────────────────────
+
+def score_player_breakout(
+    pool_df: pd.DataFrame,
+    profile: Optional[Dict[str, Any]] = None,
+) -> pd.Series:
+    """Score each player in a live pool against the archived breakout profile.
+
+    Parameters
+    ----------
+    pool_df : pd.DataFrame
+        Live slate pool with columns: player_name, salary, proj, ceil, floor,
+        ownership, proj_correction, rolling_fp_10
+    profile : dict, optional
+        Breakout profile from build_breakout_profile(). If None, loads from
+        data/sim_sandbox/breakout_profile.json. If no profile exists, returns
+        all zeros with a warning.
+
+    Returns
+    -------
+    pd.Series
+        Breakout score 0-100 for each player. Higher = more breakout signals.
+        Index matches pool_df.index.
+    """
+    zeros = pd.Series(0.0, index=pool_df.index, dtype=float)
+
+    if pool_df.empty:
+        return zeros
+
+    if profile is None:
+        profile = _load_breakout_profile()
+    if profile is None:
+        import warnings
+        warnings.warn(
+            "No breakout profile found. Run build_breakout_profile() first. "
+            "Returning all-zero scores.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return zeros
+
+    raw_weights: Dict[str, float] = profile.get("signals", {})
+    if not raw_weights:
+        return zeros
+
+    # ── Slate-level medians ────────────────────────────────────────
+    salary = pool_df["salary"].values.astype(float) if "salary" in pool_df.columns else np.zeros(len(pool_df))
+    proj = pool_df["proj"].values.astype(float) if "proj" in pool_df.columns else np.zeros(len(pool_df))
+    ceil_ = pool_df["ceil"].values.astype(float) if "ceil" in pool_df.columns else proj.copy()
+    floor_ = pool_df["floor"].values.astype(float) if "floor" in pool_df.columns else proj.copy()
+    own = pool_df["ownership"].values.astype(float) if "ownership" in pool_df.columns else np.zeros(len(pool_df))
+
+    sal_med = float(np.median(salary[salary > 0])) if np.any(salary > 0) else float(np.median(salary))
+    own_med = float(np.median(own))
+    vol = ceil_ - floor_
+    vol_med = float(np.median(vol))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        value_pp = np.where(salary > 0, proj / (salary / 1000.0), 0.0)
+    val_med = float(np.median(value_pp[value_pp > 0])) if np.any(value_pp > 0) else 0.0
+
+    # Optional columns — skip signal and drop weight if missing
+    has_proj_corr = "proj_correction" in pool_df.columns
+    has_rolling = "rolling_fp_10" in pool_df.columns
+
+    proj_corr = pool_df["proj_correction"].values.astype(float) if has_proj_corr else np.ones(len(pool_df))
+    rolling_fp = pool_df["rolling_fp_10"].values.astype(float) if has_rolling else proj.copy()
+
+    # Build the effective weight set (drop signals we can't compute)
+    active_weights: Dict[str, float] = {}
+    for s, w in raw_weights.items():
+        if s == "has_positive_correction" and not has_proj_corr:
+            continue
+        if s == "is_contrarian" and not has_rolling:
+            continue
+        active_weights[s] = w
+
+    total_weight = sum(active_weights.values())
+    if total_weight == 0:
+        return zeros
+
+    # ── Per-player scoring ─────────────────────────────────────────
+    scores = np.zeros(len(pool_df))
+    for idx in range(len(pool_df)):
+        player_score = 0.0
+        if "is_cheap" in active_weights:
+            if salary[idx] < sal_med:
+                player_score += active_weights["is_cheap"]
+        if "is_low_own" in active_weights:
+            if own[idx] < own_med:
+                player_score += active_weights["is_low_own"]
+        if "has_positive_correction" in active_weights:
+            if proj_corr[idx] > 1.0:
+                player_score += active_weights["has_positive_correction"]
+        if "is_contrarian" in active_weights:
+            if rolling_fp[idx] < proj[idx] - 2:
+                player_score += active_weights["is_contrarian"]
+        if "is_volatile" in active_weights:
+            if vol[idx] > vol_med:
+                player_score += active_weights["is_volatile"]
+        if "is_value" in active_weights:
+            if val_med > 0 and value_pp[idx] > val_med:
+                player_score += active_weights["is_value"]
+        scores[idx] = player_score
+
+    # Scale to 0–100
+    scaled = scores / total_weight * 100.0
+    scaled = np.clip(scaled, 0.0, 100.0)
+
+    return pd.Series(scaled, index=pool_df.index, dtype=float)
+
+
+def get_breakout_candidates(
+    pool_df: pd.DataFrame,
+    threshold: int = 60,
+    profile: Optional[Dict[str, Any]] = None,
+) -> pd.DataFrame:
+    """Return players scoring above the breakout threshold, sorted by score.
+
+    Parameters
+    ----------
+    pool_df : pd.DataFrame
+        Live slate pool (same schema as score_player_breakout).
+    threshold : int
+        Minimum breakout score (0–100) to include.  Default 60.
+    profile : dict, optional
+        Breakout profile.  Forwarded to score_player_breakout().
+
+    Returns
+    -------
+    pd.DataFrame
+        Subset of pool_df for players above the threshold, with an added
+        ``breakout_score`` column, sorted descending by that column.
+    """
+    scores = score_player_breakout(pool_df, profile=profile)
+    result = pool_df.copy()
+    result["breakout_score"] = scores
+    result = result[result["breakout_score"] >= threshold]
+    return result.sort_values("breakout_score", ascending=False).reset_index(drop=True)

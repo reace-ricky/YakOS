@@ -42,6 +42,7 @@ _FEEDBACK_FILES = [
     "data/edge_feedback/signal_history.json",
     "data/edge_feedback/signal_weights.json",
     "data/contest_results/history.json",
+    "data/sim_sandbox/breakout_profile.json",
 ]
 
 # Binary file extensions that need base64 encoding directly from bytes
