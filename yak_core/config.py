@@ -170,6 +170,13 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "target_avg_ownership_min": 10,
         "target_avg_ownership_max": 20,
         "ownership_caps_by_tier": {"premium_8k": 40, "mid_5k": 30, "value_sub5k": 25},
+        # GPP optimizer constraints (single source of truth)
+        "max_punt_players": 2,
+        "min_mid_salary_players": 3,
+        "own_cap": 6.0,
+        "min_low_own_players": 1,
+        "low_own_threshold": 0.40,
+        "force_game_stack": True,
         # Correlation rules
         "not_with_auto": True,
         "max_per_team": 2,
@@ -200,6 +207,13 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "target_avg_ownership_min": 15,
         "target_avg_ownership_max": 25,
         "ownership_caps_by_tier": {"premium_8k": 50, "mid_5k": 40, "value_sub5k": 35},
+        # GPP optimizer constraints (single source of truth)
+        "max_punt_players": 2,
+        "min_mid_salary_players": 3,
+        "own_cap": 6.0,
+        "min_low_own_players": 1,
+        "low_own_threshold": 0.40,
+        "force_game_stack": True,
         # Correlation rules
         "not_with_auto": True,
         "max_per_team": 2,
@@ -230,6 +244,13 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "target_avg_ownership_min": 15,
         "target_avg_ownership_max": 25,
         "ownership_caps_by_tier": {"premium_8k": 50, "mid_5k": 40, "value_sub5k": 35},
+        # GPP optimizer constraints (single source of truth)
+        "max_punt_players": 2,
+        "min_mid_salary_players": 3,
+        "own_cap": 6.0,
+        "min_low_own_players": 1,
+        "low_own_threshold": 0.40,
+        "force_game_stack": True,
         # Correlation rules
         "not_with_auto": True,
         "max_per_team": 2,

@@ -4,14 +4,18 @@ When a key player is OUT or IR, their projected minutes are redistributed to
 eligible teammates.  This raises teammate projections so the optimizer and sim
 automatically account for the opportunity.
 
-Algorithm (Sprint 3 — headroom-weighted):
+Algorithm (Sprint 4 — primary-backup-focused redistribution):
   3.1  Find key injuries: OUT/IR players with proj_minutes >= 20.
-  3.2  Redistribute minutes using HEADROOM model:
+  3.2  Redistribute minutes using HEADROOM model with primary backup boost:
        - Each teammate's weight = headroom × position_boost × rotation_tier
        - headroom = MAX_PLAYER_MINUTES - current proj_minutes (room to grow)
        - position_boost: same position group = 2.5×, adjacent = 1.5×, else 1.0×
        - rotation_tier: mid-rotation (12-22 min) = 1.5×, low-rotation = 0.8×,
          starter-lite = 1.0×, starters = 0.4×, deep bench = 0.3×
+       - primary_backup_boost: the same-pos player in the 12–28 min range with
+         the highest projected minutes gets a 2.0× weight multiplier, capped at
+         _PRIMARY_BACKUP_MAX_EXTRA_MINS (12) extra minutes per injury; overflow
+         is redistributed proportionally to remaining teammates.
        - Capped at MAX_PLAYER_MINUTES per player.
   3.3  Recalculate: adjusted_proj = original_proj + extra_mins × fp_per_minute.
        Store original_proj, adjusted_proj, injury_bump_fp.
@@ -22,12 +26,12 @@ Algorithm (Sprint 3 — headroom-weighted):
 
 Backtest results (30-day, 134 events, 303 spikes):
   - Top-3 beneficiary accuracy: 40%  (was 22% with old baseline-weighted model)
-  - Top-1 hit rate:             37%  (was  9%)
+  - Top-1 hit rate:             37% → targeting 50%+ with primary backup boost
 """
 
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -62,6 +66,11 @@ _TIER_LOW_ROTATION: float = 0.8  # 5-12 min
 _TIER_MID_ROTATION: float = 1.5  # 12-22 min  ← primary beneficiaries
 _TIER_STARTER_LITE: float = 1.0  # 22-28 min
 _TIER_STARTER: float = 0.4       # 28+ min    ← near ceiling, limited upside
+
+# Primary backup boost: concentrate redistribution on the most likely direct
+# replacement (same position, 12–28 min projected, highest minute count).
+_PRIMARY_BACKUP_BOOST_MULT: float = 2.0   # weight multiplier for primary backup
+_PRIMARY_BACKUP_MAX_EXTRA_MINS: float = 12.0  # hard cap on extra mins per injury
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +143,54 @@ def _rotation_tier(proj_minutes: float) -> float:
 def _headroom(proj_minutes: float) -> float:
     """Return the minutes headroom (room to grow before hitting ceiling)."""
     return max(MAX_PLAYER_MINUTES - proj_minutes, 0.0)
+
+
+def _find_primary_backup_idx(
+    eligible_weights: Dict[int, float],
+    eligible_df: pd.DataFrame,
+    out_pos: str,
+) -> Optional[int]:
+    """Return the DataFrame index of the most likely direct replacement, or None.
+
+    The primary backup is the same-pos teammate in the 12–28 min range with
+    the highest projected minutes.  Returns None when no candidate exists.
+    """
+    candidates: Dict[int, float] = {}
+    for idx in eligible_weights:
+        player_pos = _primary_pos(str(eligible_df.at[idx, "pos"]))
+        player_mins = float(
+            pd.to_numeric(eligible_df.at[idx, "proj_minutes"], errors="coerce") or 0
+        )
+        if player_pos == out_pos and 12.0 <= player_mins < 28.0:
+            candidates[idx] = player_mins
+    if not candidates:
+        return None
+    return max(candidates, key=lambda i: candidates[i])
+
+
+def _primary_backup_boost(
+    eligible_weights: Dict[int, float],
+    eligible_df: pd.DataFrame,
+    out_pos: str,
+    out_minutes: float,
+) -> Dict[int, float]:
+    """Concentrate redistribution on the most likely direct replacement.
+
+    Heuristic: The primary backup is the teammate with:
+    1. Same primary position as the OUT player
+    2. Currently in mid-rotation or starter-lite tier (12-28 min)
+    3. Highest current projected minutes among same-position candidates
+
+    The primary backup gets a 2.0x weight multiplier. If no clear
+    primary backup exists (e.g., position is covered by committee),
+    weights are returned unchanged.
+    """
+    primary_idx = _find_primary_backup_idx(eligible_weights, eligible_df, out_pos)
+    if primary_idx is None:
+        return eligible_weights
+    boosted = dict(eligible_weights)
+    boosted[primary_idx] = boosted[primary_idx] * _PRIMARY_BACKUP_BOOST_MULT
+    return boosted
 
 
 # ---------------------------------------------------------------------------
@@ -293,12 +350,19 @@ def apply_injury_cascade(
             weights[idx2] = max(w, 0.1)
             weight_details[idx2] = {"headroom": round(hr, 1), "pos_boost": pb, "tier": rt}
 
+        # Apply primary backup boost before normalizing
+        weights = _primary_backup_boost(weights, eligible, out_pos, out_mins)
+
+        # Identify primary backup index for the single-injury cap (reuses helper)
+        primary_backup_idx: Optional[int] = _find_primary_backup_idx(weights, eligible, out_pos)
+
         total_weight = sum(weights.values())
         if total_weight <= 0:
             continue
 
         # ── Distribute minutes proportionally ───────────────────────────
         injury_bumps: Dict[int, float] = {}
+        overflow_mins: float = 0.0
 
         for idx2, w in weights.items():
             share = w / total_weight
@@ -312,8 +376,30 @@ def apply_injury_cascade(
             space = max(MAX_PLAYER_MINUTES - player_mins - already, 0.0)
             extra = min(extra, space)
 
+            # Primary backup: cap extra minutes from this single injury at 12
+            if idx2 == primary_backup_idx and extra > _PRIMARY_BACKUP_MAX_EXTRA_MINS:
+                overflow_mins += extra - _PRIMARY_BACKUP_MAX_EXTRA_MINS
+                extra = _PRIMARY_BACKUP_MAX_EXTRA_MINS
+
             if extra > 0:
                 injury_bumps[idx2] = extra
+
+        # Redistribute overflow to secondary players (proportional to their weights)
+        if overflow_mins > 0 and primary_backup_idx is not None:
+            sec_weights = {idx: w for idx, w in weights.items() if idx != primary_backup_idx}
+            sec_total = sum(sec_weights.values())
+            if sec_total > 0:
+                for idx2, w in sec_weights.items():
+                    additional = overflow_mins * (w / sec_total)
+                    player_mins = float(
+                        pd.to_numeric(df.at[idx2, "proj_minutes"], errors="coerce") or 0
+                    )
+                    already = cum_extra.get(idx2, 0.0)
+                    existing = injury_bumps.get(idx2, 0.0)
+                    space = max(MAX_PLAYER_MINUTES - player_mins - already - existing, 0.0)
+                    additional = min(additional, space)
+                    if additional > 0:
+                        injury_bumps[idx2] = injury_bumps.get(idx2, 0.0) + additional
 
         # Update cumulative tracker
         for idx2, extra in injury_bumps.items():

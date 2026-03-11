@@ -12,6 +12,7 @@ from yak_core.dvp import (
     DVP_STALE_DAYS,
     compute_league_averages,
     dvp_staleness_days,
+    get_dvp_boost,
     load_dvp_table,
     parse_dvp_upload,
     save_dvp_table,
@@ -259,3 +260,94 @@ class TestDvpStalenessDays:
 
     def test_stale_days_constant_is_7(self):
         assert DVP_STALE_DAYS == 7
+
+
+# ---------------------------------------------------------------------------
+# get_dvp_boost
+# ---------------------------------------------------------------------------
+
+def _make_dvp_full():
+    """Full 3-team DvP table for testing get_dvp_boost."""
+    return pd.DataFrame({
+        "Team": ["LAL", "BOS", "GSW"],
+        "PG": [44.1, 41.3, 46.0],
+        "SG": [42.0, 39.7, 43.5],
+        "SF": [40.5, 38.1, 41.0],
+        "PF": [39.8, 37.6, 40.2],
+        "C":  [38.2, 36.0, 39.5],
+    })
+
+
+class TestGetDvpBoost:
+    def test_returns_float(self):
+        dvp = _make_dvp_full()
+        result = get_dvp_boost("PG", "LAL", dvp)
+        assert isinstance(result, float)
+
+    def test_soft_matchup_is_positive(self):
+        # GSW allows 46.0 PG FPPG — above league avg of (44.1+41.3+46.0)/3 ≈ 43.8
+        dvp = _make_dvp_full()
+        boost = get_dvp_boost("PG", "GSW", dvp)
+        assert boost > 0.0
+
+    def test_tough_matchup_is_negative(self):
+        # BOS allows 41.3 PG FPPG — below league avg
+        dvp = _make_dvp_full()
+        boost = get_dvp_boost("PG", "BOS", dvp)
+        assert boost < 0.0
+
+    def test_neutral_matchup_is_near_zero(self):
+        # When opp fppg equals exactly the league average, boost should be ~0
+        dvp = pd.DataFrame({"Team": ["AAA"], "PG": [43.8]})
+        # Single-team table: league avg == opp value → boost == 0
+        boost = get_dvp_boost("PG", "AAA", dvp)
+        assert boost == pytest.approx(0.0)
+
+    def test_capped_at_positive_015(self):
+        # Extreme soft matchup should be capped at +0.15
+        dvp = pd.DataFrame({"Team": ["LAL", "BOS"], "PG": [100.0, 10.0]})
+        boost = get_dvp_boost("PG", "LAL", dvp)
+        assert boost == pytest.approx(0.15)
+
+    def test_capped_at_negative_015(self):
+        # Extreme tough matchup should be capped at -0.15
+        dvp = pd.DataFrame({"Team": ["LAL", "BOS"], "PG": [10.0, 100.0]})
+        boost = get_dvp_boost("PG", "LAL", dvp)
+        assert boost == pytest.approx(-0.15)
+
+    def test_missing_opp_returns_zero(self):
+        dvp = _make_dvp_full()
+        assert get_dvp_boost("PG", "XXX", dvp) == 0.0
+
+    def test_missing_position_column_returns_zero(self):
+        dvp = pd.DataFrame({"Team": ["LAL"], "C": [38.2]})
+        assert get_dvp_boost("PG", "LAL", dvp) == 0.0
+
+    def test_none_dvp_returns_zero(self):
+        assert get_dvp_boost("PG", "LAL", None) == 0.0
+
+    def test_empty_dvp_returns_zero(self):
+        assert get_dvp_boost("PG", "LAL", pd.DataFrame()) == 0.0
+
+    def test_case_insensitive_opp(self):
+        dvp = _make_dvp_full()
+        boost_upper = get_dvp_boost("PG", "GSW", dvp)
+        boost_lower = get_dvp_boost("PG", "gsw", dvp)
+        assert boost_upper == pytest.approx(boost_lower)
+
+    def test_case_insensitive_pos(self):
+        dvp = _make_dvp_full()
+        boost_upper = get_dvp_boost("PG", "GSW", dvp)
+        boost_lower = get_dvp_boost("pg", "GSW", dvp)
+        assert boost_upper == pytest.approx(boost_lower)
+
+    def test_nan_opp_fppg_returns_zero(self):
+        dvp = pd.DataFrame({"Team": ["LAL", "BOS"], "PG": [float("nan"), 41.3]})
+        assert get_dvp_boost("PG", "LAL", dvp) == 0.0
+
+    def test_result_within_bounds(self):
+        dvp = _make_dvp_full()
+        for team in ["LAL", "BOS", "GSW"]:
+            for pos in ["PG", "SG", "SF", "PF", "C"]:
+                boost = get_dvp_boost(pos, team, dvp)
+                assert -0.15 <= boost <= 0.15
