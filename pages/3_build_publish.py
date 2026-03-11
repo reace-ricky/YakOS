@@ -43,7 +43,7 @@ from yak_core.lineups import (  # noqa: E402
 )
 from yak_core.calibration import apply_archetype, DFS_ARCHETYPES  # noqa: E402
 from yak_core.config import CONTEST_PRESETS, CONTEST_PRESET_LABELS, UI_CONTEST_LABELS, UI_CONTEST_MAP  # noqa: E402
-from yak_core.components import render_lineup_cards_paged  # noqa: E402
+from yak_core.components import render_lineup_cards_scrollable  # noqa: E402
 from yak_core.publishing import publish_edge_and_lineups  # noqa: E402
 from yak_core.edge import compute_edge_metrics  # noqa: E402
 from yak_core.lineup_scoring import compute_lineup_boom_bust, GRADE_COLORS as _GRADE_COLORS_HEX  # noqa: E402
@@ -687,7 +687,7 @@ def main() -> None:
             # Pull boom/bust rankings for this label
             bb_df = lu_state.get_boom_bust(view_label)
 
-            render_lineup_cards_paged(
+            render_lineup_cards_scrollable(
                 lineups_df=view_df,
                 sim_results_df=pipeline_df,
                 salary_cap=slate.salary_cap,
