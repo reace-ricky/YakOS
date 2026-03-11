@@ -22,6 +22,8 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm as _norm
 
+from yak_core.dvp import get_dvp_boost, load_dvp_table
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -77,6 +79,7 @@ EDGE_DF_COLUMNS = [
     "ceil_magnitude",
     "pop_catalyst_score",
     "pop_catalyst_tag",
+    "dvp_matchup_boost",
     "edge_score",
     "edge_label",
     "is_anchor",
@@ -698,6 +701,27 @@ def compute_edge_metrics(
     # Apply calibration projection bumps
     eff_proj = _apply_calibration_bumps(proj, salary, cal)
 
+    # ── DvP matchup boost (applied before smash/bust so adjusted ceiling is used) ──
+    # Load the DvP table (returns None if not yet uploaded).
+    _dvp_df = load_dvp_table()
+    _dvp_boost = pd.Series(0.0, index=df.index)
+    if _dvp_df is not None and not _dvp_df.empty:
+        _pos_col = df.get("pos", pd.Series("", index=df.index))
+        _opp_col = df.get("opponent", pd.Series("", index=df.index))
+        _dvp_boost = pd.Series(
+            [
+                get_dvp_boost(str(p), str(o), _dvp_df)
+                for p, o in zip(_pos_col, _opp_col)
+            ],
+            index=df.index,
+        )
+
+    # Apply DvP boost to ceiling: soft matchups raise it, tough matchups lower it.
+    ceil = ceil * (1.0 + _dvp_boost)
+    # Re-enforce: ceil must remain above proj after adjustment.
+    _bad_post = ceil <= proj
+    ceil = ceil.where(~_bad_post, proj * 1.4)
+
     # Compute smash/bust probabilities (empirical model, calibrated from backtest)
     # Now incorporates ceiling/floor gap — narrow-range players get dampened.
     smash_prob, bust_prob = _compute_smash_bust(eff_proj, salary, own, ceil, floor, variance)
@@ -715,6 +739,7 @@ def compute_edge_metrics(
     # ── Ceiling magnitude: normalised raw ceiling value ──
     # This ensures studs with 60+ FP ceilings surface alongside value plays.
     # Normalised 0-1 within the slate so it's comparable across days.
+    # Uses DvP-adjusted ceiling so matchup quality is reflected.
     _ceil_max = float(ceil.max())
     _ceil_denom = max(_ceil_max, 1.0)
     ceil_magnitude = ceil / _ceil_denom  # 0-1 range, studs near 1.0
@@ -750,18 +775,26 @@ def compute_edge_metrics(
         errors="coerce",
     ).fillna(0.0)
 
-    # ── Edge score: 5-component composite ──
+    # ── DvP normalised component for edge score ──
+    # Map raw boost [-0.15, +0.15] → [0, 1] so it fits the 0-1 score range.
+    # 0.0 boost (no data / neutral) → 0.5 (neutral contribution).
+    dvp_norm = (_dvp_boost + 0.15) / 0.30  # -0.15 → 0.0, neutral → 0.5, +0.15 → 1.0
+    dvp_norm = dvp_norm.clip(0.0, 1.0)
+
+    # ── Edge score: 6-component composite ──
     # Ceiling Magnitude (0.25): rewards high absolute upside (studs)
     # Smash Probability (0.25): rewards likelihood of hitting ceiling
-    # Safety (0.18): (1 - bust_prob), penalises bust risk
-    # Leverage (0.17): ownership edge, capped for studs
+    # Safety (0.13): (1 - bust_prob), penalises bust risk
+    # Leverage (0.12): ownership edge, capped for studs
     # Pop Catalyst (0.15): situational upside (injury opp, salary lag, etc.)
+    # DvP Matchup (0.10): matchup quality vs opponent at player's position
     edge_score = (
         ceil_magnitude * 0.25
         + smash_dampened * 0.25
-        + (1.0 - bust_prob) * 0.18
-        + lev_norm_capped * 0.17
+        + (1.0 - bust_prob) * 0.13
+        + lev_norm_capped * 0.12
         + pop_cat * 0.15
+        + dvp_norm * 0.10
     )
 
     # ── Tournament anchor flag ──
@@ -781,6 +814,7 @@ def compute_edge_metrics(
     # Preserve pop_catalyst_tag from pool if present
     if "pop_catalyst_tag" not in out.columns:
         out["pop_catalyst_tag"] = ""
+    out["dvp_matchup_boost"] = _dvp_boost.values
     out["edge_score"] = edge_score.values
     out["is_anchor"] = is_anchor.values
 

@@ -257,3 +257,94 @@ class TestGetConfidenceColor:
 
     def test_boundary_59_red(self):
         assert get_confidence_color(59) == "red"
+
+
+# ---------------------------------------------------------------------------
+# DVP integration in compute_edge_metrics
+# ---------------------------------------------------------------------------
+
+class TestComputeEdgeMetricsDvpIntegration:
+    """Tests that DVP matchup boost flows correctly through compute_edge_metrics."""
+
+    def _make_pool_with_opp(self) -> pd.DataFrame:
+        return pd.DataFrame({
+            "player_name": ["PG_Soft", "PG_Tough", "C_Neutral"],
+            "pos":         ["PG",      "PG",       "C"],
+            "opponent":    ["LAL",     "BOS",      "GSW"],
+            "salary":      [7000,      7000,       6000],
+            "proj":        [30.0,      30.0,       25.0],
+            "floor":       [22.0,      22.0,       18.0],
+            "ceil":        [42.0,      42.0,       35.0],
+            "ownership":   [15.0,      15.0,       12.0],
+        })
+
+    def _make_dvp(self) -> "pd.DataFrame":
+        import pandas as _pd
+        # LAL allows 46.0 PG (soft), BOS allows 40.0 PG (tough), league avg 43.0
+        return _pd.DataFrame({
+            "Team": ["LAL", "BOS", "GSW"],
+            "PG":   [46.0,  40.0,  43.0],
+            "C":    [39.0,  36.0,  37.5],
+        })
+
+    def test_dvp_matchup_boost_column_present(self):
+        pool = self._make_pool_with_opp()
+        result = compute_edge_metrics(pool)
+        assert "dvp_matchup_boost" in result.columns
+
+    def test_dvp_matchup_boost_zero_without_dvp_data(self, tmp_path, monkeypatch):
+        """When no DVP file is on disk, dvp_matchup_boost should be 0.0."""
+        import yak_core.edge as edge_mod
+        monkeypatch.setattr(edge_mod, "load_dvp_table", lambda: None)
+        pool = self._make_pool_with_opp()
+        result = compute_edge_metrics(pool)
+        assert (result["dvp_matchup_boost"] == 0.0).all()
+
+    def test_soft_matchup_has_higher_boost_than_tough(self, monkeypatch):
+        import pandas as _pd
+        import yak_core.edge as edge_mod
+        dvp = self._make_dvp()
+        monkeypatch.setattr(edge_mod, "load_dvp_table", lambda: dvp)
+        pool = self._make_pool_with_opp()
+        result = compute_edge_metrics(pool).set_index("player_name")
+        assert result.loc["PG_Soft", "dvp_matchup_boost"] > result.loc["PG_Tough", "dvp_matchup_boost"]
+
+    def test_soft_matchup_raises_edge_score(self, monkeypatch):
+        import pandas as _pd
+        import yak_core.edge as edge_mod
+        dvp = self._make_dvp()
+        # Run once with DVP, once without
+        monkeypatch.setattr(edge_mod, "load_dvp_table", lambda: dvp)
+        pool = self._make_pool_with_opp()
+        with_dvp = compute_edge_metrics(pool).set_index("player_name")
+
+        monkeypatch.setattr(edge_mod, "load_dvp_table", lambda: None)
+        without_dvp = compute_edge_metrics(pool).set_index("player_name")
+
+        # PG_Soft faces a soft matchup — edge score should be >= without DVP
+        assert with_dvp.loc["PG_Soft", "edge_score"] >= without_dvp.loc["PG_Soft", "edge_score"]
+
+    def test_no_dvp_defaults_neutral_edge_score_weight(self, monkeypatch):
+        """Without DVP data dvp_norm=0.5 (neutral); edge_score should still sum correctly."""
+        import yak_core.edge as edge_mod
+        monkeypatch.setattr(edge_mod, "load_dvp_table", lambda: None)
+        pool = self._make_pool_with_opp()
+        result = compute_edge_metrics(pool)
+        assert (result["edge_score"] >= 0).all()
+
+    def test_pool_without_pos_or_opponent_still_works(self, monkeypatch):
+        """Pool with no pos/opponent columns should not crash — falls back to 0 boost."""
+        import yak_core.edge as edge_mod
+        dvp = self._make_dvp()
+        monkeypatch.setattr(edge_mod, "load_dvp_table", lambda: dvp)
+        pool = pd.DataFrame({
+            "player_name": ["A", "B"],
+            "salary":      [6000, 7000],
+            "proj":        [22.0, 30.0],
+            "floor":       [15.0, 22.0],
+            "ceil":        [32.0, 42.0],
+            "ownership":   [10.0, 18.0],
+        })
+        result = compute_edge_metrics(pool)
+        # No pos/opponent → get_dvp_boost returns 0.0 for all
+        assert (result["dvp_matchup_boost"] == 0.0).all()
