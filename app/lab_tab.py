@@ -84,14 +84,46 @@ def render_lab_tab(sport: str) -> None:
     pool_path = out_dir / "slate_pool.parquet"
     if pool_path.exists():
         pool = pd.read_parquet(pool_path)
-        st.markdown(f"**Current pool:** {len(pool)} players")
+
         preview_cols = ["player_name", "pos", "team", "salary", "proj", "floor", "ceil", "ownership"]
         if is_pga:
             preview_cols += ["wave", "r1_teetime"]
             if "early_late_wave" in pool.columns and "wave" not in pool.columns:
                 pool["wave"] = pool["early_late_wave"].map({0: "Early", 1: "Late"}).fillna("")
         avail = [c for c in preview_cols if c in pool.columns]
-        st.dataframe(pool[avail].head(20), use_container_width=True, hide_index=True)
+        display_pool = pool[avail].copy().sort_values("salary", ascending=False).reset_index(drop=True)
+
+        # ── Exclude checkboxes (PGA) ──
+        # File-based exclusion list so it survives reruns
+        _excl_file = out_dir / "excluded_players.json"
+        _saved_excl: list[str] = []
+        if _excl_file.exists():
+            _saved_excl = json.loads(_excl_file.read_text())
+
+        if is_pga:
+            display_pool.insert(0, "exclude", display_pool["player_name"].isin(_saved_excl))
+            st.markdown(f"**Current pool:** {len(display_pool)} players — check to exclude")
+            edited = st.data_editor(
+                display_pool,
+                use_container_width=True,
+                hide_index=True,
+                height=500,
+                column_config={
+                    "exclude": st.column_config.CheckboxColumn("Exclude", default=False),
+                },
+                disabled=[c for c in avail],  # only exclude column is editable
+                key=f"lab_pool_editor_{sport}",
+            )
+            # Save exclusions to file whenever they change
+            new_excl = edited[edited["exclude"]]["player_name"].tolist()
+            if new_excl != _saved_excl:
+                _excl_file.write_text(json.dumps(new_excl))
+            n_excl = len(new_excl)
+            if n_excl > 0:
+                st.caption(f"❌ {n_excl} player(s) excluded from builds")
+        else:
+            st.markdown(f"**Current pool:** {len(display_pool)} players")
+            st.dataframe(display_pool, use_container_width=True, hide_index=True, height=400)
 
         sal_col = pd.to_numeric(pool.get("salary", pd.Series(dtype=float)), errors="coerce")
         proj_col = pd.to_numeric(pool.get("proj", pd.Series(dtype=float)), errors="coerce")
@@ -181,6 +213,14 @@ def render_lab_tab(sport: str) -> None:
 
     lock_list = [n.strip() for n in lock_input.split(",") if n.strip()] if lock_input else []
     exclude_list = [n.strip() for n in exclude_input.split(",") if n.strip()] if exclude_input else []
+
+    # Merge checkbox exclusions (PGA pool editor) into exclude list
+    _excl_file_build = out_dir / "excluded_players.json"
+    if _excl_file_build.exists():
+        _cb_excl = json.loads(_excl_file_build.read_text())
+        for name in _cb_excl:
+            if name not in exclude_list:
+                exclude_list.append(name)
 
     if st.button("Build Lineups", key=f"lab_build_{sport}"):
         if is_nba_showdown and len(showdown_teams) != 2:
