@@ -2682,6 +2682,35 @@ def main() -> None:
 
     # (Sections 5-6 removed: Learning Status, RCI, Edge Check Gate — not in calibration path)
 
+    # ── GitHub Sync Test (diagnostic) ─────────────────────────────────────
+    st.divider()
+    with st.expander("🔧 GitHub Sync Test (diagnostic)", expanded=False):
+        st.caption("Write a test file to `data/published/sync_test.json` and push it to GitHub. "
+                   "The standalone Ricky app should then be able to read it.")
+        if st.button("Test GitHub Sync", key="_sync_test_btn"):
+            import json as _json
+            _sync_payload = {
+                "test": True,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "message": "sync test from main app",
+            }
+            _sync_dir = os.path.join(YAKOS_ROOT, "data", "published")
+            os.makedirs(_sync_dir, exist_ok=True)
+            _sync_path = os.path.join(_sync_dir, "sync_test.json")
+            with open(_sync_path, "w") as _f:
+                _json.dump(_sync_payload, _f, indent=2)
+            st.code(_json.dumps(_sync_payload, indent=2), language="json")
+            with st.spinner("Pushing to GitHub..."):
+                from yak_core.github_persistence import sync_feedback_to_github
+                _result = sync_feedback_to_github(
+                    files=["data/published/sync_test.json"],
+                    commit_message="Sync test",
+                )
+            if _result.get("status") == "ok":
+                st.success(f"Synced to GitHub — commit {_result['sha'][:12]}")
+            else:
+                st.error(f"Sync failed: {_result}")
+
 
 main()
 

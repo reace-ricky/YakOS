@@ -71,6 +71,95 @@ from yak_core.pga_state import (  # noqa: E402
     _pga_clear_published,
 )
 
+# ── GitHub Sync Check (diagnostic) ───────────────────────────────────
+
+import json as _json
+import os as _os
+import subprocess as _sp
+
+from yak_core.config import YAKOS_ROOT as _YAKOS_ROOT
+
+_PUBLISHED_DIR = _os.path.join(_YAKOS_ROOT, "data", "published")
+_SYNC_TEST_PATH = _os.path.join(_PUBLISHED_DIR, "sync_test.json")
+
+
+@st.cache_data(ttl=60)
+def _pull_latest_from_github() -> str:
+    """Try git pull to get latest commits. Returns status message."""
+    try:
+        result = _sp.run(
+            ["git", "pull", "origin", "main"],
+            capture_output=True, text=True, timeout=15,
+            cwd=_YAKOS_ROOT,
+        )
+        if result.returncode == 0:
+            return f"git pull OK: {result.stdout.strip()}"
+        return f"git pull failed (rc={result.returncode}): {result.stderr.strip()}"
+    except Exception as e:
+        return f"git pull error: {e}"
+
+
+def _fetch_sync_test_via_api() -> dict | None:
+    """Fallback: fetch sync_test.json via GitHub API if git pull didn't work."""
+    try:
+        token = None
+        try:
+            token = st.secrets.get("GITHUB_TOKEN")
+        except Exception:
+            token = _os.environ.get("GITHUB_TOKEN") or _os.environ.get("GH_TOKEN")
+        if not token:
+            return None
+        import requests
+        resp = requests.get(
+            "https://api.github.com/repos/reace-ricky/YakOS/contents/data/published/sync_test.json",
+            headers={"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"},
+            params={"ref": "main"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            import base64
+            content = base64.b64decode(resp.json()["content"]).decode()
+            return _json.loads(content)
+    except Exception:
+        pass
+    return None
+
+
+with st.expander("🔧 GitHub Sync Status (diagnostic)", expanded=False):
+    _pull_msg = _pull_latest_from_github()
+    st.text(_pull_msg)
+
+    # Show sync_test.json if it exists on disk
+    if _os.path.isfile(_SYNC_TEST_PATH):
+        with open(_SYNC_TEST_PATH) as _f:
+            _sync_data = _json.load(_f)
+        st.success(f"Sync test file found on disk — timestamp: {_sync_data.get('timestamp', '?')}")
+        st.json(_sync_data)
+    else:
+        st.warning("No sync test file found on disk.")
+        # Try GitHub API fallback
+        _api_data = _fetch_sync_test_via_api()
+        if _api_data:
+            st.info(f"Found via GitHub API — timestamp: {_api_data.get('timestamp', '?')}")
+            st.json(_api_data)
+        else:
+            st.caption("Could not fetch via GitHub API either (no token or file doesn't exist yet).")
+
+    # List files in data/published/
+    st.markdown("**Files in `data/published/`:**")
+    if _os.path.isdir(_PUBLISHED_DIR):
+        _pub_files = []
+        for _root, _dirs, _files in _os.walk(_PUBLISHED_DIR):
+            for _file in _files:
+                _pub_files.append(_os.path.relpath(_os.path.join(_root, _file), _PUBLISHED_DIR))
+        if _pub_files:
+            for _pf in sorted(_pub_files):
+                st.text(f"  {_pf}")
+        else:
+            st.caption("Directory exists but is empty.")
+    else:
+        st.caption("Directory does not exist yet.")
+
 # ── Session-state key prefix (unique to standalone app) ──────────────
 _K = "_ricky_sa_"
 
