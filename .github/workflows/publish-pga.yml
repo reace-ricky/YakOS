@@ -1,0 +1,59 @@
+name: Publish PGA
+
+on:
+  workflow_dispatch:
+    inputs:
+      contest:
+        description: "Contest preset"
+        required: true
+        default: "PGA GPP"
+        type: choice
+        options:
+          - "PGA GPP"
+          - "PGA Cash"
+          - "PGA Showdown"
+      count:
+        description: "Number of lineups (blank = preset default)"
+        required: false
+        type: string
+      slate:
+        description: "Slate type"
+        required: true
+        default: "main"
+        type: choice
+        options:
+          - "main"
+          - "showdown"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run publish pipeline
+        env:
+          RAPIDAPI_KEY: ${{ secrets.TANK01_API_KEY }}
+          TANK01_API_KEY: ${{ secrets.TANK01_API_KEY }}
+          DATAGOLF_API_KEY: ${{ secrets.DATAGOLF_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd scripts
+          CMD="python publish.py --sport PGA --contest '${{ inputs.contest }}' --slate ${{ inputs.slate }}"
+          if [ -n "${{ inputs.count }}" ]; then
+            CMD="$CMD --count ${{ inputs.count }}"
+          fi
+          echo "Running: $CMD"
+          eval $CMD

@@ -1,0 +1,70 @@
+name: Publish NBA
+
+on:
+  workflow_dispatch:
+    inputs:
+      contest:
+        description: "Contest preset"
+        required: true
+        default: "GPP Main"
+        type: choice
+        options:
+          - "GPP Main"
+          - "GPP Early"
+          - "GPP Late"
+          - "Showdown"
+          - "Cash Main"
+      count:
+        description: "Number of lineups (blank = preset default)"
+        required: false
+        type: string
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check for RG CSV in repo
+        id: rg_check
+        run: |
+          # Look for the most recent RG CSV committed to data/imports/
+          RG_FILE=$(ls -t data/imports/RG-Proj-*.csv 2>/dev/null | head -1)
+          if [ -n "$RG_FILE" ]; then
+            echo "rg_file=$RG_FILE" >> $GITHUB_OUTPUT
+            echo "Found RG file: $RG_FILE"
+          else
+            echo "rg_file=" >> $GITHUB_OUTPUT
+            echo "No RG file found — running without RG overlay"
+          fi
+
+      - name: Run publish pipeline
+        env:
+          RAPIDAPI_KEY: ${{ secrets.TANK01_API_KEY }}
+          TANK01_API_KEY: ${{ secrets.TANK01_API_KEY }}
+          DATAGOLF_API_KEY: ${{ secrets.DATAGOLF_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd scripts
+          CMD="python publish.py --sport NBA --contest '${{ inputs.contest }}'"
+          if [ -n "${{ inputs.count }}" ]; then
+            CMD="$CMD --count ${{ inputs.count }}"
+          fi
+          RG="${{ steps.rg_check.outputs.rg_file }}"
+          if [ -n "$RG" ]; then
+            CMD="$CMD --rg-csv ../$RG"
+          fi
+          echo "Running: $CMD"
+          eval $CMD
