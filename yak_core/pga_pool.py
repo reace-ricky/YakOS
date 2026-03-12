@@ -167,6 +167,15 @@ def build_pga_pool(
             pool["status"] = pool["dg_id"].apply(
                 lambda x: "Active" if x in field_ids else "WD"
             )
+            # Also flag players explicitly marked as WD in field data
+            if any(c in field_df.columns for c in ["wd", "is_wd", "status"]):
+                _wd_col = next(c for c in ["wd", "is_wd", "status"] if c in field_df.columns)
+                _wd_ids = set(field_df.loc[
+                    field_df[_wd_col].astype(str).str.lower().isin(["wd", "true", "1", "withdrawn"]),
+                    "dg_id"
+                ].values)
+                if _wd_ids:
+                    pool.loc[pool["dg_id"].isin(_wd_ids), "status"] = "WD"
             print(f"[pga_pool] Merged field updates ({len(field_df)} players)")
     except Exception as e:
         print(f"[pga_pool] Field updates failed: {e}")
@@ -186,6 +195,13 @@ def build_pga_pool(
 
     # Sim eligibility — exclude WDs
     pool["sim_eligible"] = pool.get("status", "Active") == "Active"
+
+    # Remove withdrawn players from the pool
+    _wd_count = (pool["status"] == "WD").sum()
+    if _wd_count > 0:
+        _wd_names = pool.loc[pool["status"] == "WD", "player_name"].tolist()
+        pool = pool[pool["status"] != "WD"].reset_index(drop=True)
+        print(f"[pga_pool] Removed {_wd_count} withdrawn player(s): {', '.join(_wd_names[:10])}")
 
     # Ensure numeric types
     for col in ["proj", "ceil", "floor", "std_dev", "salary"]:

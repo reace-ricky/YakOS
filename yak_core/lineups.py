@@ -159,6 +159,13 @@ def build_player_pool(opt_pool: pd.DataFrame,
     cols = [c for c in base_cols if c in df.columns]
     df = df[cols].reset_index(drop=True)
 
+    # --- Filter withdrawn players ---
+    if "status" in df.columns:
+        _wd = df[df["status"] == "WD"]
+        if not _wd.empty:
+            df = df[df["status"] != "WD"].reset_index(drop=True)
+            print(f"[build_player_pool] Filtered {len(_wd)} WD player(s)")
+
     # --- EXCLUDE: remove players by name ---
     exclude_list = [n.strip() for n in cfg.get("EXCLUDE", [])]
     if exclude_list:
