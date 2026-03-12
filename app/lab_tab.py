@@ -155,6 +155,22 @@ def render_lab_tab(sport: str) -> None:
         default_n = preset.get("default_lineups", 20)
         num_lineups = st.number_input("Lineups", min_value=1, max_value=150, value=min(default_n, 20), key=f"lab_nlu_{sport}")
 
+    # ── Showdown game picker (NBA only) ──
+    showdown_teams: list[str] = []
+    is_nba_showdown = (
+        not is_pga
+        and (preset.get("slate_type") == "Showdown Captain" or "showdown" in contest_label.lower())
+    )
+    if is_nba_showdown and pool_path.exists():
+        _sd_pool = pd.read_parquet(pool_path)
+        available_teams = sorted(_sd_pool["team"].dropna().unique().tolist())
+        showdown_teams = st.multiselect(
+            "Showdown matchup (pick 2 teams)",
+            options=available_teams,
+            max_selections=2,
+            key=f"lab_sd_teams_{sport}",
+        )
+
     lock_input = st.text_input("Lock players (comma-separated)", key=f"lab_lock_{sport}")
     exclude_input = st.text_input("Exclude players (comma-separated)", key=f"lab_excl_{sport}")
 
@@ -162,12 +178,17 @@ def render_lab_tab(sport: str) -> None:
     exclude_list = [n.strip() for n in exclude_input.split(",") if n.strip()] if exclude_input else []
 
     if st.button("Build Lineups", key=f"lab_build_{sport}"):
-        if not pool_path.exists():
+        if is_nba_showdown and len(showdown_teams) != 2:
+            st.warning("Pick exactly 2 teams for Showdown.")
+        elif not pool_path.exists():
             st.warning("Load a pool first.")
         else:
             with st.spinner(f"Building {num_lineups} lineups..."):
                 try:
-                    lineups_df = _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir)
+                    lineups_df = _build_lineups(
+                        sport, contest_label, num_lineups, lock_list, exclude_list, out_dir,
+                        showdown_teams=showdown_teams if is_nba_showdown else None,
+                    )
                     n_built = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else 0
                     st.success(f"Built {n_built} lineups for {contest_label}")
 
@@ -515,6 +536,7 @@ def _build_lineups(
     lock: list,
     exclude: list,
     out_dir: Path,
+    showdown_teams: list[str] | None = None,
 ) -> pd.DataFrame:
     """Build lineups (mirrors scripts/build_lineups.build_lineups)."""
     import re
@@ -576,6 +598,10 @@ def _build_lineups(
     # Apply exclude filter directly on the pool
     if exclude:
         pool = pool[~pool["player_name"].isin(exclude)].reset_index(drop=True)
+
+    # NBA Showdown: filter pool to the selected 2-team matchup
+    if showdown_teams and len(showdown_teams) == 2:
+        pool = pool[pool["team"].isin(showdown_teams)].reset_index(drop=True)
 
     if is_showdown and sport.upper() == "NBA":
         lineups_df, exposure_df = build_showdown_lineups(pool, cfg)

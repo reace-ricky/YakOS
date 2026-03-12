@@ -157,12 +157,31 @@ def render_optimizer_tab(sport: str) -> None:
         default_exp = preset.get("default_max_exposure", 0.35)
         max_exposure = st.slider("Max exposure", 0.1, 1.0, default_exp, 0.05, key=f"opt_exp_{sport}")
 
+    # ── Showdown game picker (NBA only) ──
+    showdown_teams: list[str] = []
+    is_nba_showdown = (
+        not is_pga
+        and (preset.get("slate_type") == "Showdown Captain" or "showdown" in contest_label.lower())
+    )
+    if is_nba_showdown:
+        available_teams = sorted(pool["team"].dropna().unique().tolist())
+        showdown_teams = st.multiselect(
+            "Showdown matchup (pick 2 teams)",
+            options=available_teams,
+            max_selections=2,
+            key=f"opt_sd_teams_{sport}",
+        )
+
     # ── Build button ──
     if st.button("Build Lineups", type="primary", key=f"opt_build_{sport}"):
         is_showdown = (
             preset.get("slate_type") == "Showdown Captain"
             or "showdown" in contest_label.lower()
         )
+
+        if is_nba_showdown and len(showdown_teams) != 2:
+            st.warning("Pick exactly 2 teams for Showdown.")
+            return
 
         # Prepare pool
         build_pool = pool.copy()
@@ -180,6 +199,10 @@ def render_optimizer_tab(sport: str) -> None:
         # Apply lock/exclude directly on the pool
         if excluded:
             build_pool = build_pool[~build_pool["player_name"].isin(excluded)].reset_index(drop=True)
+
+        # NBA Showdown: filter pool to the selected 2-team matchup
+        if is_nba_showdown and showdown_teams:
+            build_pool = build_pool[build_pool["team"].isin(showdown_teams)].reset_index(drop=True)
 
         cfg = _build_optimizer_cfg(preset, sport, num_lineups, max_exposure, locked, excluded)
 
