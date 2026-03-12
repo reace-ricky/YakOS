@@ -1197,38 +1197,29 @@ def main() -> None:
     st.caption(_ricky_quote())
 
     # ── Sport toggle at top ───────────────────────────────────────────
-    # Detect which sport is active — check both NBA and PGA state to see
-    # which has a loaded pool.  Updates the default each visit so the
-    # toggle follows whatever you were last working on in The Lab.
-    slate = get_slate_state()
-    _nba_has_pool = slate.player_pool is not None and not slate.player_pool.empty
-    try:
-        from yak_core import pga_state as _pga_detect  # noqa: PLC0415
-        _pga_slate = _pga_detect.get_slate_state()
-        _pga_has_pool = _pga_slate.player_pool is not None and not _pga_slate.player_pool.empty
-    except Exception:
-        _pga_has_pool = False
-    # Default to whichever sport has data; prefer PGA if both do and NBA
-    # slate is stale (PGA was loaded more recently in The Lab)
-    if _pga_has_pool and not _nba_has_pool:
-        _detected_sport = "PGA"
-    elif _nba_has_pool and not _pga_has_pool:
-        _detected_sport = "NBA"
-    elif _pga_has_pool and _nba_has_pool:
-        # Both have pools — use the Lab's current sport setting if available
-        _lab_sport = st.session_state.get("_lab_sport", slate.sport or "NBA")
-        _detected_sport = _lab_sport if _lab_sport in ["NBA", "PGA"] else "NBA"
-    else:
-        _detected_sport = slate.sport if slate.sport else "NBA"
-    # Sync toggle to detected sport when it changes (e.g. user loaded PGA
-    # in The Lab after starting on NBA) — but only if user hasn't manually
-    # overridden the toggle this rerun.
+    # One-time initialization: detect which sport has data for the default.
+    # After first visit the radio widget manages its own state via key= —
+    # user clicks are NEVER overridden by auto-detection.
     if "_rar_sport_toggle" not in st.session_state:
+        slate = get_slate_state()
+        _nba_has_pool = slate.player_pool is not None and not slate.player_pool.empty
+        try:
+            from yak_core import pga_state as _pga_detect  # noqa: PLC0415
+            _pga_slate = _pga_detect.get_slate_state()
+            _pga_has_pool = _pga_slate.player_pool is not None and not _pga_slate.player_pool.empty
+        except Exception:
+            _pga_has_pool = False
+        if _pga_has_pool and not _nba_has_pool:
+            _detected_sport = "PGA"
+        elif _nba_has_pool and not _pga_has_pool:
+            _detected_sport = "NBA"
+        elif _pga_has_pool and _nba_has_pool:
+            _lab_sport = st.session_state.get("_lab_sport", slate.sport or "NBA")
+            _detected_sport = _lab_sport if _lab_sport in ["NBA", "PGA"] else "NBA"
+        else:
+            _detected_sport = slate.sport if slate.sport else "NBA"
         st.session_state["_rar_sport_toggle"] = _detected_sport
-    elif st.session_state.get("_rar_last_detected") != _detected_sport:
-        # The Lab sport changed since last visit — follow it
-        st.session_state["_rar_sport_toggle"] = _detected_sport
-    st.session_state["_rar_last_detected"] = _detected_sport
+
     sport = st.radio(
         "Sport",
         ["NBA", "PGA"],
@@ -1245,6 +1236,7 @@ def main() -> None:
         lu_state = _pga_mod.get_lineup_state()
         sim_state = _pga_mod.get_sim_state()
     else:
+        slate = get_slate_state()
         edge = get_edge_state()
         lu_state = get_lineup_state()
         sim_state = get_sim_state()
