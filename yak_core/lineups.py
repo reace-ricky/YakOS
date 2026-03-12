@@ -1113,6 +1113,23 @@ def build_showdown_lineups(
                         (y[pi] + y[m + pi]) + (y[pj] + y[m + pj]) <= 1
                     )
 
+        # DK rule: at least 1 player from each team
+        _sd_teams = set()
+        for j in range(m):
+            t = str(base_players[j].get("team", "")).strip().upper()
+            if t:
+                _sd_teams.add(t)
+        if len(_sd_teams) >= 2:
+            for team in _sd_teams:
+                _team_indices = [
+                    j for j in range(m)
+                    if str(base_players[j].get("team", "")).strip().upper() == team
+                ]
+                # At least one player from this team (CPT or FLEX)
+                prob += pulp.lpSum(
+                    y[j] + y[m + j] for j in _team_indices
+                ) >= 1
+
         # Lineup uniqueness: each new lineup must differ from every
         # previous lineup by at least 2 original players (out of 6).
         _SD_MIN_DIFF = 2

@@ -332,6 +332,20 @@ def _build_single_showdown_lineup(
     # Salary cap
     prob += pulp.lpSum(players[i]["salary"] * y[i] for i in range(n)) <= salary_cap
 
+    # DK rule: at least 1 player from each team
+    _sd_teams = set()
+    for j in range(m):
+        t = str(base_players[j].get("team", "")).strip().upper()
+        if t:
+            _sd_teams.add(t)
+    if len(_sd_teams) >= 2:
+        for team in _sd_teams:
+            _team_idx = [
+                j for j in range(m)
+                if str(base_players[j].get("team", "")).strip().upper() == team
+            ]
+            prob += pulp.lpSum(y[j] + y[m + j] for j in _team_idx) >= 1
+
     prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=solver_time_limit))
 
     if prob.status != 1:
