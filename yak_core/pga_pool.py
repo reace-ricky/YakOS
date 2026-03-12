@@ -238,6 +238,54 @@ def build_pga_pool(
     except Exception as e:
         print(f"[pga_pool] Course metadata/weather enrichment failed: {e}")
 
+    # ── 10. Showdown (single-round) projection adjustment ───────────
+    if slate == "showdown":
+        _has_preds = all(
+            c in pool.columns for c in ["win_prob", "top5_prob", "top10_prob", "top20_prob", "make_cut_prob"]
+        )
+        if _has_preds and pool["win_prob"].notna().any():
+            try:
+                from .pga_archiver import _derive_round_projections
+
+                # Build the preds_df that _derive_round_projections expects
+                _sd_preds = pool[["dg_id", "player_name"]].copy()
+                _sd_preds["win"] = pool["win_prob"]
+                _sd_preds["top_5"] = pool["top5_prob"]
+                _sd_preds["top_10"] = pool["top10_prob"]
+                _sd_preds["top_20"] = pool["top20_prob"]
+                _sd_preds["make_cut"] = pool["make_cut_prob"]
+                _sd_preds = _sd_preds.dropna(subset=["win", "top_5", "top_10", "top_20", "make_cut"])
+
+                if not _sd_preds.empty:
+                    _sd_result = _derive_round_projections(_sd_preds)
+                    # Merge single-round proj/ceil/floor back into pool
+                    _sd_merge = _sd_result[["dg_id", "proj", "ceil", "floor"]].rename(
+                        columns={"proj": "proj_sd", "ceil": "ceil_sd", "floor": "floor_sd"}
+                    )
+                    pool = pool.merge(_sd_merge, on="dg_id", how="left")
+                    # Replace where we have single-round values
+                    _mask = pool["proj_sd"].notna()
+                    pool.loc[_mask, "proj"] = pool.loc[_mask, "proj_sd"]
+                    pool.loc[_mask, "ceil"] = pool.loc[_mask, "ceil_sd"]
+                    pool.loc[_mask, "floor"] = pool.loc[_mask, "floor_sd"]
+                    pool.loc[_mask, "std_dev"] = (
+                        (pool.loc[_mask, "ceil"] - pool.loc[_mask, "proj"]) / Z_85
+                    )
+                    pool = pool.drop(columns=["proj_sd", "ceil_sd", "floor_sd"])
+                    # Recalculate value with new projections
+                    pool["value"] = (pool["proj"] / (pool["salary"] / 1000)).round(2)
+                    print("[pga_pool] Applied single-round projection model (showdown)")
+            except Exception as e:
+                print(f"[pga_pool] Single-round projection model failed: {e}")
+        else:
+            # Fallback: scale tournament projections by ~30%
+            pool["proj"] = (pool["proj"] * 0.30).round(2)
+            pool["ceil"] = (pool["ceil"] * 0.30).round(2)
+            pool["floor"] = (pool["floor"] * 0.30).round(2)
+            pool["std_dev"] = ((pool["ceil"] - pool["proj"]) / Z_85).round(2)
+            pool["value"] = (pool["proj"] / (pool["salary"] / 1000)).round(2)
+            print("[pga_pool] Single-round fallback: pre-tournament preds unavailable, using 0.30x scaling")
+
     # Filter to players with salary and projection
     pool = pool[(pool["salary"] > 0) & (pool["proj"] > 0)].reset_index(drop=True)
 
