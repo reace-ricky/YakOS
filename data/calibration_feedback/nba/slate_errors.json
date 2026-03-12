@@ -1522,7 +1522,7 @@
         "mae": 9.55
       },
       "PF": {
-        "mean_error": -2.08,
+        "mean_error": -2.09,
         "median_error": -4.95,
         "n": 15,
         "mae": 10.25
@@ -1535,7 +1535,7 @@
       },
       "SF": {
         "mean_error": -2.14,
-        "median_error": -7.64,
+        "median_error": -7.65,
         "n": 11,
         "mae": 12.15
       },
@@ -1560,8 +1560,8 @@
         "mae": 8.0
       },
       "5-6K": {
-        "mean_error": -6.48,
-        "median_error": -7.6,
+        "mean_error": -6.49,
+        "median_error": -7.61,
         "n": 8,
         "mae": 8.59
       },
