@@ -161,15 +161,21 @@ def render_lab_tab(sport: str) -> None:
         not is_pga
         and (preset.get("slate_type") == "Showdown Captain" or "showdown" in contest_label.lower())
     )
-    if is_nba_showdown and pool_path.exists():
-        _sd_pool = pd.read_parquet(pool_path)
-        available_teams = sorted(_sd_pool["team"].dropna().unique().tolist())
-        showdown_teams = st.multiselect(
-            "Showdown matchup (pick 2 teams)",
-            options=available_teams,
-            max_selections=2,
-            key=f"lab_sd_teams_{sport}",
-        )
+    if is_nba_showdown:
+        _meta_path = out_dir / "slate_meta.json"
+        _sd_meta = json.loads(_meta_path.read_text()) if _meta_path.exists() else {}
+        matchups = _sd_meta.get("matchups", [])
+        if matchups:
+            matchup_labels = [m["label"] for m in matchups]
+            selected_matchup = st.selectbox(
+                "Showdown matchup", options=matchup_labels, key=f"lab_sd_matchup_{sport}"
+            )
+            # Extract the two teams from the selected matchup
+            sel = next((m for m in matchups if m["label"] == selected_matchup), None)
+            if sel:
+                showdown_teams = [sel["away"], sel["home"]]
+        else:
+            st.warning("No matchup data found. Re-run Load Pool to fetch the schedule.")
 
     lock_input = st.text_input("Lock players (comma-separated)", key=f"lab_lock_{sport}")
     exclude_input = st.text_input("Exclude players (comma-separated)", key=f"lab_excl_{sport}")

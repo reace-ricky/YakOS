@@ -15,5 +15,61 @@
   ],
   "lineup_size": 8,
   "pool_size": 218,
-  "proj_source": "rotogrinders+tank01"
+  "proj_source": "rotogrinders+tank01",
+  "matchups": [
+    {
+      "away": "WAS",
+      "home": "ORL",
+      "game_id": "20260312_WAS@ORL",
+      "label": "WAS @ ORL"
+    },
+    {
+      "away": "CHI",
+      "home": "LAL",
+      "game_id": "20260312_CHI@LAL",
+      "label": "CHI @ LAL"
+    },
+    {
+      "away": "MIL",
+      "home": "MIA",
+      "game_id": "20260312_MIL@MIA",
+      "label": "MIL @ MIA"
+    },
+    {
+      "away": "BKN",
+      "home": "ATL",
+      "game_id": "20260312_BKN@ATL",
+      "label": "BKN @ ATL"
+    },
+    {
+      "away": "DEN",
+      "home": "SA",
+      "game_id": "20260312_DEN@SA",
+      "label": "DEN @ SA"
+    },
+    {
+      "away": "PHI",
+      "home": "DET",
+      "game_id": "20260312_PHI@DET",
+      "label": "PHI @ DET"
+    },
+    {
+      "away": "PHO",
+      "home": "IND",
+      "game_id": "20260312_PHO@IND",
+      "label": "PHO @ IND"
+    },
+    {
+      "away": "DAL",
+      "home": "MEM",
+      "game_id": "20260312_DAL@MEM",
+      "label": "DAL @ MEM"
+    },
+    {
+      "away": "BOS",
+      "home": "OKC",
+      "game_id": "20260312_BOS@OKC",
+      "label": "BOS @ OKC"
+    }
+  ]
 }

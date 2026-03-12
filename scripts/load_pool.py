@@ -135,6 +135,40 @@ def _load_nba_pool(slate_date: str, site: str) -> tuple[pd.DataFrame, dict]:
     if "ownership" not in pool.columns:
         pool["ownership"] = 0.0
 
+    # ── Fetch schedule for matchup labels + opponent column ──
+    import requests
+    matchups: list[dict] = []
+    try:
+        sched_url = "https://tank01-fantasy-stats.p.rapidapi.com/getNBAGamesForDate"
+        sched_resp = requests.get(
+            sched_url,
+            headers={"x-rapidapi-host": "tank01-fantasy-stats.p.rapidapi.com",
+                     "x-rapidapi-key": api_key},
+            params={"gameDate": slate_date.replace("-", "")},
+            timeout=15,
+        )
+        sched_resp.raise_for_status()
+        sched_body = sched_resp.json().get("body", [])
+        if isinstance(sched_body, dict):
+            sched_body = sched_body.get("games", sched_body.get("schedule", []))
+        for g in (sched_body if isinstance(sched_body, list) else []):
+            away = g.get("away", g.get("aTeam", g.get("awayTeam", "")))
+            home = g.get("home", g.get("hTeam", g.get("homeTeam", "")))
+            gid = g.get("gameID", g.get("gameId", ""))
+            if away and home:
+                matchups.append({"away": away, "home": home, "game_id": gid,
+                                 "label": f"{away} @ {home}"})
+        # Populate opponent column from schedule
+        if matchups:
+            team_to_opp = {}
+            for m in matchups:
+                team_to_opp[m["away"]] = m["home"]
+                team_to_opp[m["home"]] = m["away"]
+            pool["opponent"] = pool["team"].map(team_to_opp).fillna("")
+        print(f"[load_pool] Schedule: {len(matchups)} games")
+    except Exception as exc:
+        print(f"[load_pool] WARNING: Could not fetch schedule: {exc}")
+
     meta = {  # NOTE: rg_csv merge happens after this returns, in main()
         "sport": "NBA",
         "site": site,
@@ -144,6 +178,7 @@ def _load_nba_pool(slate_date: str, site: str) -> tuple[pd.DataFrame, dict]:
         "lineup_size": DK_LINEUP_SIZE,
         "pool_size": len(pool),
         "proj_source": cfg.get("PROJ_SOURCE", "salary_implied"),
+        "matchups": matchups,
     }
     return pool, meta
 

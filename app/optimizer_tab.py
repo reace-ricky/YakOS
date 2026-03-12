@@ -164,13 +164,19 @@ def render_optimizer_tab(sport: str) -> None:
         and (preset.get("slate_type") == "Showdown Captain" or "showdown" in contest_label.lower())
     )
     if is_nba_showdown:
-        available_teams = sorted(pool["team"].dropna().unique().tolist())
-        showdown_teams = st.multiselect(
-            "Showdown matchup (pick 2 teams)",
-            options=available_teams,
-            max_selections=2,
-            key=f"opt_sd_teams_{sport}",
-        )
+        from app.data_loader import load_fresh_meta
+        _sd_meta = load_fresh_meta(sport)
+        matchups = _sd_meta.get("matchups", [])
+        if matchups:
+            matchup_labels = [m["label"] for m in matchups]
+            selected_matchup = st.selectbox(
+                "Showdown matchup", options=matchup_labels, key=f"opt_sd_matchup_{sport}"
+            )
+            sel = next((m for m in matchups if m["label"] == selected_matchup), None)
+            if sel:
+                showdown_teams = [sel["away"], sel["home"]]
+        else:
+            st.warning("No matchup data found. Re-run Load Pool to fetch the schedule.")
 
     # ── Build button ──
     if st.button("Build Lineups", type="primary", key=f"opt_build_{sport}"):
