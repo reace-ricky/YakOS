@@ -37,10 +37,10 @@ is_admin = check_admin_password()
 # ── Tabs ──────────────────────────────────────────────────────────────────
 if is_admin:
     tab_edge, tab_optimizer, tab_lab, tab_dashboard = st.tabs(
-        ["Edge Analysis", "Optimizer", "The Lab", "Dashboard"]
+        ["📐 Ricky's Edge Analysis", "⚙️ Optimizer", "🧪 The Lab", "📊 Dashboard"]
     )
 else:
-    tab_edge, tab_optimizer = st.tabs(["Edge Analysis", "Optimizer"])
+    tab_edge, tab_optimizer = st.tabs(["📐 Ricky's Edge Analysis", "⚙️ Optimizer"])
     tab_lab = None
     tab_dashboard = None
 
