@@ -653,7 +653,7 @@ def main() -> None:
 
     # ── Built Lineups Summary (across all contest types) ──────────────────
     built_labels = [lbl for lbl, df in lu_state.lineups.items() if df is not None and not df.empty]
-    if len(built_labels) > 1:
+    if len(built_labels) >= 1:
         st.divider()
         st.subheader("Lineup Summary")
         _summary_rows = []
@@ -680,16 +680,23 @@ def main() -> None:
                     lu_state.publish(_pub_lbl, _pub_ts)
                 set_lineup_state(lu_state)
 
-                # Build friends payload from the last-published slate
+                # Persist slate & edge to disk so standalone Ricky app can load them
+                from yak_core.lineup_store import save_slate, save_edge  # noqa: PLC0415
+                slate.published = True
+                slate.published_at = _pub_ts
                 _eff_edge_df = slate.edge_df
                 if _eff_edge_df is None or _eff_edge_df.empty:
                     try:
                         _eff_edge_df = compute_edge_metrics(pool, calibration_state=slate.calibration_state)
                         slate.edge_df = _eff_edge_df
-                        from yak_core.state import set_slate_state  # noqa: PLC0415
-                        set_slate_state(slate)
                     except Exception:
                         pass
+                save_slate(slate)
+                try:
+                    edge = get_edge_state()
+                    save_edge(edge)
+                except Exception:
+                    pass
                 st.success(f"Published **{len(built_labels)}** lineup sets to Edge Share.")
 
     # ── View individual lineups ──────────────────────────────────────────
@@ -925,7 +932,10 @@ def main() -> None:
                             lu_state.publish(view_label, _ts)
                             set_lineup_state(lu_state)
 
-                            # Build friends payload
+                            # Persist slate & edge to disk so standalone Ricky app can load them
+                            from yak_core.lineup_store import save_slate, save_edge  # noqa: PLC0415
+                            slate.published = True
+                            slate.published_at = _ts
                             _eff_edge_df = slate.edge_df
                             if _eff_edge_df is None or _eff_edge_df.empty:
                                 _eff_edge_df = compute_edge_metrics(
@@ -933,8 +943,14 @@ def main() -> None:
                                     calibration_state=slate.calibration_state,
                                 )
                                 slate.edge_df = _eff_edge_df
-                                from yak_core.state import set_slate_state  # noqa: PLC0415
-                                set_slate_state(slate)
+                            save_slate(slate)
+                            try:
+                                edge = get_edge_state()
+                                save_edge(edge)
+                            except Exception:
+                                pass
+
+                            # Build friends payload
                             payload = publish_edge_and_lineups(slate, _publish_df)
                             st.session_state["_friends_payload"] = payload
                             st.success(
