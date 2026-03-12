@@ -147,6 +147,10 @@ def _build_lineups(
 ) -> tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
     """Build lineups using the appropriate engine (Classic / Showdown)."""
     pool = pool.copy()
+    # --- EXCLUDE: filter out excluded players before optimizer ---
+    _excl = [n.strip() for n in (exclude_names or []) if n]
+    if _excl and "player_name" in pool.columns:
+        pool = pool[~pool["player_name"].isin(_excl)].reset_index(drop=True)
     # If edge-adjusted projections exist, promote them to 'proj' so the
     # archetype layer and optimizer both operate on the adjusted numbers.
     if "effective_proj" in pool.columns:
