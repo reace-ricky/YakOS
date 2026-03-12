@@ -29,5 +29,25 @@
     "Xander Schauffele",
     "Hideki Matsuyama"
   ],
-  "calibration_slates": 13
+  "calibration_slates": 13,
+  "wave_split": {
+    "early_count": 62,
+    "late_count": 60,
+    "early_avg_proj": 42.0,
+    "late_avg_proj": 41.8,
+    "early_players": [
+      "Rory McIlroy",
+      "Xander Schauffele",
+      "Cameron Young",
+      "Min Woo Lee",
+      "Hideki Matsuyama"
+    ],
+    "late_players": [
+      "Scottie Scheffler",
+      "Collin Morikawa",
+      "Si Woo Kim",
+      "Tommy Fleetwood",
+      "Russell Henley"
+    ]
+  }
 }
