@@ -653,6 +653,16 @@ def _load_pga_pool(
             status_container.error("DataGolf returned no players for the current event.")
             return None
 
+        # Apply PGA calibration corrections
+        try:
+            from yak_core.calibration_feedback import get_correction_factors, apply_corrections
+            _cf = get_correction_factors(sport="PGA")
+            if _cf.get("n_slates", 0) > 0:
+                pool = apply_corrections(pool, _cf, sport="PGA")
+                status_container.write(f"📐 PGA calibration applied ({_cf['n_slates']} event(s))")
+        except Exception:
+            pass
+
         event_name = pool.attrs.get("event_name", "PGA")
         course_name = pool.attrs.get("course_name", "")
         n_players = len(pool)
@@ -938,9 +948,9 @@ def _auto_load_pool(
             # Apply calibration corrections (file-backed — persists across sessions)
             try:
                 from yak_core.calibration_feedback import get_correction_factors, apply_corrections
-                _cf = get_correction_factors()
+                _cf = get_correction_factors(sport="NBA")
                 if _cf.get("n_slates", 0) > 0:
-                    pool = apply_corrections(pool, _cf)
+                    pool = apply_corrections(pool, _cf, sport="NBA")
                     status_container.write(f"📐 Calibration corrections applied ({_cf['n_slates']} slate(s))")
             except Exception:
                 pass
@@ -1017,7 +1027,7 @@ def _auto_load_pool(
                             if "proj" in pool.columns and "actual_fp" in pool.columns:
                                 try:
                                     from yak_core.calibration_feedback import record_slate_errors
-                                    _fb_result = record_slate_errors(slate_date_str, pool)
+                                    _fb_result = record_slate_errors(slate_date_str, pool, sport="NBA")
                                     if "error" not in _fb_result:
                                         _fb_mae = _fb_result.get("overall", {}).get("mae", "?")
                                         status_container.write(f"📐 Calibration feedback recorded (MAE: {_fb_mae})")
@@ -1312,6 +1322,79 @@ def main() -> None:
                 if st.button("🔄 Reload PGA Pool", key="_lab_force_reload_pga"):
                     st.session_state.pop(_pool_loaded_key, None)
                     st.rerun()
+
+        # ── Calibrate Past PGA Events ────────────────────────────────────
+        with st.expander("📐 Calibrate Past Events", expanded=False):
+            st.caption(
+                "Backfill PGA calibration by comparing DataGolf projections "
+                "to actual DK fantasy points from completed events."
+            )
+            _dg_key = (
+                st.secrets.get("DATAGOLF_API_KEY")
+                or os.environ.get("DATAGOLF_API_KEY")
+                or "7e0b29081d2adaac7e3de0ed387c"
+            )
+            if not _dg_key:
+                st.warning("DataGolf API key not configured.")
+            else:
+                from yak_core.datagolf import DataGolfClient as _DGC
+                _cal_dg = _DGC(api_key=_dg_key)
+
+                _evt_cache_key = "_pga_cal_event_list"
+                if _evt_cache_key not in st.session_state:
+                    try:
+                        from yak_core.pga_calibration import get_pga_event_list
+                        st.session_state[_evt_cache_key] = get_pga_event_list(_cal_dg)
+                    except Exception as _evt_exc:
+                        st.error(f"Could not fetch event list: {_evt_exc}")
+                        st.session_state[_evt_cache_key] = pd.DataFrame()
+
+                _evt_df = st.session_state[_evt_cache_key]
+                if _evt_df.empty:
+                    st.info("No completed PGA events with DK data found.")
+                else:
+                    _evt_options = [
+                        f"{row.get('event_name', 'Event')} ({row.get('date', '?')}) — ID {row['event_id']}"
+                        for _, row in _evt_df.iterrows()
+                    ]
+                    _sel_idx = st.selectbox(
+                        "Select event", range(len(_evt_options)),
+                        format_func=lambda i: _evt_options[i],
+                        key="_pga_cal_event_sel",
+                    )
+                    if st.button("Load & Calibrate", key="_pga_cal_go"):
+                        _sel_row = _evt_df.iloc[_sel_idx]
+                        _eid = int(_sel_row["event_id"])
+                        _yr = int(_sel_row["calendar_year"])
+                        _edate = str(_sel_row.get("date", ""))
+                        with st.spinner(f"Calibrating event {_eid} ({_yr})…"):
+                            try:
+                                from yak_core.pga_calibration import calibrate_pga_event
+                                _cal_result = calibrate_pga_event(
+                                    _cal_dg, event_id=_eid, year=_yr, slate_date=_edate,
+                                )
+                                if "error" in _cal_result:
+                                    st.warning(_cal_result["error"])
+                                else:
+                                    _cal_mae = _cal_result.get("overall", {}).get("mae", "?")
+                                    _cal_n = _cal_result.get("n_players_calibrated", 0)
+                                    st.success(
+                                        f"Calibrated {_cal_n} players — MAE: {_cal_mae}"
+                                    )
+                            except Exception as _cal_exc:
+                                st.error(f"Calibration failed: {_cal_exc}")
+
+                    # Show current PGA calibration summary
+                    try:
+                        from yak_core.calibration_feedback import get_calibration_summary
+                        _pga_summary = get_calibration_summary(sport="PGA")
+                        if _pga_summary.get("n_slates", 0) > 0:
+                            st.markdown(
+                                f"**PGA calibration**: {_pga_summary['n_slates']} event(s), "
+                                f"overall MAE {_pga_summary.get('overall_mae', '?'):.1f}"
+                            )
+                    except Exception:
+                        pass
 
     # ── NBA path: DK slate fetching + picker ─────────────────────────────
     else:
