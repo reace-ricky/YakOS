@@ -578,20 +578,6 @@ def main() -> None:
     with col_excl:
         exclude_names = st.multiselect("Exclude", player_names, key="_bp_exclude")
 
-    # ── Queued from Edge Analysis ────────────────────────────────────────
-    if edge.optimizer_queue:
-        st.caption("📋 Queued from Edge Analysis")
-        # Group by tier for a clean, consistent layout
-        _QUEUE_TIER_ORDER = [("core", "🟢 Core"), ("leverage", "⚡ Leverage"), ("value", "🟡 Value")]
-        _queue_by_tier = {}
-        for _qp, _qt in edge.optimizer_queue.items():
-            _queue_by_tier.setdefault(_qt, []).append(_qp)
-        for _qt, _qlabel in _QUEUE_TIER_ORDER:
-            _qplayers = sorted(_queue_by_tier.get(_qt, []))
-            if not _qplayers:
-                continue
-            st.markdown(f"**{_qlabel}:** " + "  ·  ".join(_qplayers))
-
     _bp_game_note = f"  |  {len(build_games)} of {len(all_games)} games" if build_games else ""
     st.caption(
         f"**{len(pool)} players**  |  "

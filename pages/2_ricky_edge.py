@@ -37,7 +37,7 @@ from yak_core.ricky_signals import (  # noqa: E402
     generate_slate_overview,
     SIGNAL_BADGES,
 )
-from yak_core.display_format import normalise_ownership, standard_player_format, TAG_COLORS, classify_player_tier  # noqa: E402
+from yak_core.display_format import normalise_ownership, standard_player_format, TAG_COLORS  # noqa: E402
 
 _TAG_COLORS = TAG_COLORS  # backward-compat alias used throughout this module
 _PLAYER_TAGS = ["core", "secondary", "value", "leverage", "neutral", "fade"]
@@ -207,105 +207,6 @@ def main() -> None:
     st.divider()
 
     # =====================================================================
-    # SECTION 2c: QUEUE FOR OPTIMIZER
-    # =====================================================================
-    # Show tier-grouped players with checkboxes so users can flag them
-    # for the Build & Publish page (informational — not auto-locked).
-    # =====================================================================
-
-    # Build a combined tier table from signals_df and manual player_tags
-    _tier_rows = []
-    for _, _row in signals_df.iterrows():
-        _pname = str(_row.get("player_name", ""))
-        if not _pname:
-            continue
-        # Effective tier: manual tag first, then auto-classify from signals
-        _manual = edge.player_tags.get(_pname, {}).get("tag", "")
-        if _manual in ("core", "leverage", "value"):
-            _tier = _manual
-        else:
-            # Auto-classify using shared thresholds (calibrated from 21-slate backtest)
-            _sal = float(_row.get("salary", 6000) or 6000)
-            _own = float(_row.get("ownership", 15) if "ownership" in _row.index else
-                         _row.get("own_pct", 15) if "own_pct" in _row.index else 15)
-            _proj = float(_row.get("proj", 15) or 15)
-            _tier = classify_player_tier(_sal, _proj, _own)
-        if _tier in ("core", "leverage", "value"):
-            _tier_rows.append({
-                "player_name": _pname,
-                "tier": _tier,
-                "pos": str(_row.get("pos", "")),
-                "team": str(_row.get("team", "")),
-                "salary": int(_row.get("salary", 0) or 0),
-                "proj": float(_row.get("proj", 0) or 0),
-            })
-
-    _tier_df = pd.DataFrame(_tier_rows) if _tier_rows else pd.DataFrame(
-        columns=["player_name", "tier", "pos", "team", "salary", "proj"]
-    )
-
-    with st.expander(
-        f"Queue for Optimizer ({len(edge.optimizer_queue)} queued)", expanded=False
-    ):
-        st.caption(
-            "Check players to send them to Build & Publish with their tier context. "
-            "Queued players are **not** auto-locked — just highlighted in the optimizer."
-        )
-
-        _TIER_ORDER = [("core", "🟢 Core Plays"), ("leverage", "⚡ Leverage Plays"), ("value", "🟡 Value Plays")]
-        _queue_changed = False
-
-        for _tier_key, _tier_label in _TIER_ORDER:
-            _grp = _tier_df[_tier_df["tier"] == _tier_key].copy() if not _tier_df.empty else pd.DataFrame()
-            if _grp.empty:
-                continue
-
-            st.markdown(f"**{_tier_label}**")
-
-            # Build editor DataFrame
-            _edit_rows = []
-            for _, _pr in _grp.iterrows():
-                _pn = str(_pr["player_name"])
-                _edit_rows.append({
-                    "Queue": _pn in edge.optimizer_queue,
-                    "Player": _pn,
-                    "Pos": str(_pr.get("pos", "")),
-                    "Team": str(_pr.get("team", "")),
-                    "Salary": int(_pr.get("salary", 0) or 0),
-                    "Proj": float(_pr.get("proj", 0) or 0),
-                })
-            _edit_df = pd.DataFrame(_edit_rows)
-
-            _edited = st.data_editor(
-                _edit_df,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Queue": st.column_config.CheckboxColumn("Queue", default=False),
-                    "Salary": st.column_config.NumberColumn("Salary", format="$%d"),
-                    "Proj": st.column_config.NumberColumn("Proj", format="%.1f"),
-                },
-                disabled=["Player", "Pos", "Team", "Salary", "Proj"],
-                key=f"_re_queue_{_tier_key}",
-            )
-
-            # Sync changes back to edge.optimizer_queue
-            for _, _er in _edited.iterrows():
-                _pn = str(_er["Player"])
-                if _er["Queue"]:
-                    if edge.optimizer_queue.get(_pn) != _tier_key:
-                        edge.queue_player(_pn, _tier_key)
-                        _queue_changed = True
-                else:
-                    if _pn in edge.optimizer_queue:
-                        edge.dequeue_player(_pn)
-                        _queue_changed = True
-
-        if _queue_changed:
-            set_edge_state(edge)
-            st.rerun()
-
-    # =====================================================================
     # SECTION 3: TOP STACKS (NBA only — PGA has no team stacking)
     # =====================================================================
     _is_pga = (slate.sport or "").upper() == "PGA"
@@ -424,29 +325,6 @@ def main() -> None:
         if notes != edge.slate_notes:
             edge.slate_notes = notes
             set_edge_state(edge)
-
-    st.divider()
-
-    # =====================================================================
-    # SECTION 5b: OPTIMIZER QUEUE SUMMARY
-    # =====================================================================
-    if edge.optimizer_queue:
-        st.subheader("📋 Optimizer Queue")
-        st.caption("Players flagged for Build & Publish. Not auto-locked — informational only.")
-
-        _oq_rows = []
-        for _pn, _tier in sorted(edge.optimizer_queue.items()):
-            _oq_rows.append({
-                "Tier": f"{_TAG_COLORS.get(_tier, '')} {_tier.title()}",
-                "Player": _pn,
-            })
-        _oq_df = pd.DataFrame(_oq_rows)
-        st.dataframe(_oq_df, use_container_width=True, hide_index=True)
-
-        if st.button("Clear Queue", key="_re_clear_queue"):
-            edge.optimizer_queue.clear()
-            set_edge_state(edge)
-            st.rerun()
 
     st.divider()
 
