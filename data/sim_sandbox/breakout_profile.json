@@ -2,13 +2,13 @@
   "signals": {
     "is_cheap": 0.8179,
     "is_low_own": 0.7632,
-    "has_positive_correction": 1.2216,
-    "is_contrarian": 0.7594,
-    "is_volatile": 1.2736,
-    "is_value": 1.2588
+    "has_positive_correction": 1.2211,
+    "is_contrarian": 0.7568,
+    "is_volatile": 1.2706,
+    "is_value": 1.2617
   },
   "n_slates": 33,
   "n_breakouts": 1257,
   "n_players": 3534,
-  "built_at": "2026-03-12T02:27:51.266974+00:00"
+  "built_at": "2026-03-12T02:32:29.230299+00:00"
 }
