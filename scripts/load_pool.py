@@ -255,6 +255,26 @@ def main(argv: list[str] | None = None) -> pd.DataFrame:
         print(f"[load_pool] Trimmed {trimmed} low-projection players ({pre_trim} → {len(pool)})")
     meta["pool_size"] = len(pool)
 
+    # ── Ownership model ────────────────────────────────────────────────────
+    # Run YakOS ownership model for every player. Where RG provided real
+    # ownership data (> 0), keep it; fill the rest from the model.
+    from yak_core.ownership import salary_rank_ownership
+
+    rg_own = pd.to_numeric(pool.get("ownership", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
+    has_rg = rg_own > 0
+    n_rg = int(has_rg.sum())
+
+    # Generate model ownership for full pool
+    pool = salary_rank_ownership(pool, col="_model_own")
+
+    # Blend: keep RG where available, model everywhere else
+    pool["ownership"] = rg_own.where(has_rg, pool["_model_own"])
+    pool["own_proj"] = pool["ownership"]
+    pool["own_source"] = "yakos_model"
+    pool.loc[has_rg, "own_source"] = "rotogrinders"
+    pool.drop(columns=["_model_own"], inplace=True)
+    print(f"[load_pool] Ownership: {n_rg} RG + {len(pool) - n_rg} model = {len(pool)} total")
+
     # Write outputs
     out_dir = published_dir(sport)
     pool_path = f"{out_dir}/slate_pool.parquet"
