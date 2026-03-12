@@ -207,6 +207,19 @@ def main(argv: list[str] | None = None) -> pd.DataFrame:
     else:
         pool, meta = _load_pga_pool(slate_date, args.slate)
 
+    # ── Trim obvious filler ────────────────────────────────────────────────
+    # DK lists full 17-18 man rosters. Drop deep bench guys nobody would
+    # roster — keeps the pool focused on real options.
+    pre_trim = len(pool)
+    if sport == "NBA":
+        pool = pool[(pool["proj"] >= 5) & (pool["salary"] > 3000)].reset_index(drop=True)
+    elif sport == "PGA":
+        pool = pool[pool["proj"] >= 5].reset_index(drop=True)
+    trimmed = pre_trim - len(pool)
+    if trimmed > 0:
+        print(f"[load_pool] Trimmed {trimmed} low-projection players ({pre_trim} → {len(pool)})")
+    meta["pool_size"] = len(pool)
+
     # Write outputs
     out_dir = published_dir(sport)
     pool_path = f"{out_dir}/slate_pool.parquet"
