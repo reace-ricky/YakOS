@@ -151,8 +151,7 @@ def render_optimizer_tab(sport: str) -> None:
         contest_label = st.selectbox("Contest type", contest_options, key=f"opt_contest_{sport}")
     with col_count:
         preset = CONTEST_PRESETS.get(contest_label, {})
-        default_n = preset.get("default_lineups", 20)
-        num_lineups = st.number_input("Lineups", min_value=1, max_value=150, value=min(default_n, 20), key=f"opt_nlu_{sport}")
+        num_lineups = st.number_input("Lineups", min_value=1, max_value=150, value=1, key=f"opt_nlu_{sport}")
     with col_exp:
         default_exp = preset.get("default_max_exposure", 0.35)
         max_exposure = st.slider("Max exposure", 0.1, 1.0, default_exp, 0.05, key=f"opt_exp_{sport}")

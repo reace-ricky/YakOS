@@ -152,8 +152,7 @@ def render_lab_tab(sport: str) -> None:
         contest_label = st.selectbox("Contest type", contest_options, key=f"lab_contest_{sport}")
     with col_n:
         preset = CONTEST_PRESETS.get(contest_label, {})
-        default_n = preset.get("default_lineups", 20)
-        num_lineups = st.number_input("Lineups", min_value=1, max_value=150, value=min(default_n, 20), key=f"lab_nlu_{sport}")
+        num_lineups = st.number_input("Lineups", min_value=1, max_value=150, value=1, key=f"lab_nlu_{sport}")
 
     # ── Showdown game picker (NBA only) ──
     showdown_teams: list[str] = []
