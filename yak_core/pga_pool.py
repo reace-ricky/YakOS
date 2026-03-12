@@ -148,14 +148,19 @@ def build_pga_pool(
     except Exception as e:
         print(f"[pga_pool] Skill ratings failed: {e}")
 
-    # ── 6. Field Updates (WDs, rankings) ─────────────────────────────
+    # ── 6. Field Updates (WDs, rankings, tee times) ──────────────────
     try:
         field_df = dg.get_field()
         if not field_df.empty:
             field_cols = ["dg_id", "dg_rank"]
-            # Tee times might already be in projections
-            if "teetimes" in field_df.columns:
-                field_cols.append("teetimes")
+            # Pick up tee-time columns under any name the API uses
+            _tt_candidates = ["teetimes", "r1_teetime", "round_1_teetime", "tee_time"]
+            for _ttc in _tt_candidates:
+                if _ttc in field_df.columns and _ttc not in field_cols:
+                    field_cols.append(_ttc)
+            # Also grab early_late_wave if the field endpoint provides it
+            if "early_late_wave" in field_df.columns:
+                field_cols.append("early_late_wave")
             field_cols = [c for c in field_cols if c in field_df.columns]
             pool = pool.merge(
                 field_df[field_cols].drop_duplicates(subset=["dg_id"]),
@@ -180,6 +185,30 @@ def build_pga_pool(
     except Exception as e:
         print(f"[pga_pool] Field updates failed: {e}")
         pool["status"] = "Active"
+
+    # ── 6b. Normalise tee-time / wave columns ─────────────────────────
+    # Ensure r1_teetime exists — map from variant column names if needed
+    if "r1_teetime" not in pool.columns or pool["r1_teetime"].isna().all():
+        for _alt in ["teetimes", "round_1_teetime", "tee_time"]:
+            if _alt in pool.columns and pool[_alt].notna().any():
+                pool["r1_teetime"] = pool[_alt]
+                print(f"[pga_pool] Mapped '{_alt}' → 'r1_teetime'")
+                break
+
+    # Derive early_late_wave from r1_teetime if not already populated
+    if ("early_late_wave" not in pool.columns or pool["early_late_wave"].isna().all()) \
+            and "r1_teetime" in pool.columns and pool["r1_teetime"].notna().any():
+        _times = pd.to_datetime(pool["r1_teetime"], format="%H:%M", errors="coerce")
+        if _times.notna().any():
+            _cutoff = pd.to_datetime("11:30", format="%H:%M")
+            pool["early_late_wave"] = _times.apply(
+                lambda t: "Early" if pd.notna(t) and t <= _cutoff else (
+                    "Late" if pd.notna(t) else None
+                )
+            )
+            _n_early = (pool["early_late_wave"] == "Early").sum()
+            _n_late = (pool["early_late_wave"] == "Late").sum()
+            print(f"[pga_pool] Derived early_late_wave from r1_teetime ({_n_early} early, {_n_late} late)")
 
     # ── 7. Fill YakOS-standard columns ───────────────────────────────
     pool["pos"] = "G"  # All golfers — no positional constraints in PGA DFS
