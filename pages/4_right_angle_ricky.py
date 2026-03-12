@@ -561,9 +561,9 @@ def _render_pga_info_cards(pool: pd.DataFrame) -> None:
     with r2c1:
         if has_wave:
             has_any = True
-            wave_col = pool["early_late_wave"].fillna("")
-            early = pool[wave_col.str.lower().str.contains("early", na=False)]
-            late = pool[wave_col.str.lower().str.contains("late", na=False)]
+            wave_col = pool["early_late_wave"].astype(str).str.strip().str.lower()
+            early = pool[wave_col.str.contains("early", na=False)]
+            late = pool[wave_col.str.contains("late", na=False)]
             lines = []
             lines.append(
                 f"Early wave: {len(early)} players | "
