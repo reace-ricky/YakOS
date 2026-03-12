@@ -573,6 +573,10 @@ def _build_lineups(
 
     is_showdown = preset.get("slate_type") == "Showdown Captain" or "showdown" in contest_label.lower()
 
+    # Apply exclude filter directly on the pool
+    if exclude:
+        pool = pool[~pool["player_name"].isin(exclude)].reset_index(drop=True)
+
     if is_showdown and sport.upper() == "NBA":
         lineups_df, exposure_df = build_showdown_lineups(pool, cfg)
     else:
