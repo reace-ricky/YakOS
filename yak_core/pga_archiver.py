@@ -105,6 +105,85 @@ def _derive_projections(preds_df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _derive_round_projections(preds_df: pd.DataFrame) -> pd.DataFrame:
+    """Derive single-round proj/ceil/floor from pre-tournament probabilities.
+
+    For showdown (single-round) contests, tournament finish bonuses don't
+    apply (except R4) and make-cut probability is irrelevant — every player
+    plays the round.  This model estimates per-round DK fantasy points using
+    only the scoring component of the tournament projection.
+
+    Approach:
+      - Compute the full tournament proj via _derive_projections()
+      - Subtract the finish-bonus component (approximated as the probability-
+        weighted finish bonus embedded in the bucket FP values)
+      - Divide the scoring-only portion by the expected number of rounds
+        the player would play (2 for missed-cut, 4 for made-cut, weighted
+        by make_cut probability)
+      - Apply tighter volatility for single-round (less variance than 4 days)
+
+    Parameters
+    ----------
+    preds_df : pd.DataFrame
+        Pre-tournament predictions with columns:
+        dg_id, player_name, win, top_5, top_10, top_20, make_cut.
+
+    Returns
+    -------
+    pd.DataFrame
+        Same rows with added columns: proj, ceil, floor, std_model.
+        Values are on a single-round FP scale (~25-55 FP range).
+    """
+    df = preds_df.copy()
+
+    # Full tournament projection (scoring + finish bonuses combined)
+    full = _derive_projections(df)
+
+    # Approximate finish-bonus component per player.
+    # DK tournament finish bonuses: 1st=30, 2nd=20, 3rd=18, 4th=14, 5th=12,
+    # 6th=10, 7th=9, 8th=8, 9th=7, 10th=6, 11-15=5, 16-20=4, 21-25=3, ...
+    # We approximate expected finish bonus from probabilities:
+    _EFB_WIN = 30.0
+    _EFB_T5 = 16.0    # avg of 2nd-5th finish bonuses
+    _EFB_T10 = 8.0    # avg of 6th-10th
+    _EFB_T20 = 4.0    # avg of 11th-20th
+    _EFB_CUT = 1.5    # avg of 21st+ who made cut
+    _EFB_MC = 0.0     # no finish bonus for missed cut
+
+    expected_finish_bonus = (
+        df["win"] * _EFB_WIN
+        + (df["top_5"] - df["win"]) * _EFB_T5
+        + (df["top_10"] - df["top_5"]) * _EFB_T10
+        + (df["top_20"] - df["top_10"]) * _EFB_T20
+        + (df["make_cut"] - df["top_20"]) * _EFB_CUT
+        + (1.0 - df["make_cut"]) * _EFB_MC
+    )
+
+    # Scoring-only tournament FP
+    scoring_only = full["proj"] - expected_finish_bonus
+
+    # Expected rounds played: missed-cut players play 2, made-cut play 4
+    expected_rounds = df["make_cut"] * 4.0 + (1.0 - df["make_cut"]) * 2.0
+
+    # Single-round projection = scoring per round
+    df["proj"] = (scoring_only / expected_rounds).clip(lower=5.0).round(2)
+
+    # Volatility for single round — tighter than tournament
+    # Use 65% of tournament vol_ratio (less compounding over 1 round)
+    vol_ratio = np.interp(
+        df["make_cut"].values,
+        _VOL_CUT_ANCHORS,
+        _VOL_RATIO_ANCHORS,
+    ) * 0.65
+
+    std = df["proj"].values * vol_ratio
+    df["std_model"] = std
+    df["ceil"] = df["proj"] + _BOUND_MULT * _Z_85 * std
+    df["floor"] = np.maximum(df["proj"] - _BOUND_MULT * _Z_85 * std, 0.0)
+
+    return df
+
+
 def archive_pga_event(
     client: Any,
     event_id: int,

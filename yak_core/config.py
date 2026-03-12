@@ -42,6 +42,11 @@ DK_PGA_LINEUP_SIZE = 6
 DK_PGA_POS_SLOTS = ["G", "G", "G", "G", "G", "G"]  # No positional constraints
 DK_PGA_SALARY_CAP = 50000
 
+# ----- PGA Showdown salary bins (used by calibration_feedback) -----
+# Same bins as PGA tournament for now; adjust once showdown-specific data is available.
+_PGA_SD_SALARY_BINS = [0, 6500, 7500, 8500, 9500, 10500, 99999]
+_PGA_SD_SALARY_LABELS = ["<6.5K", "6.5-7.5K", "7.5-8.5K", "8.5-9.5K", "9.5-10.5K", "10.5K+"]
+
 # ----- Default PGA DK GPP config -----
 PGA_DEFAULT_CONFIG: Dict[str, Any] = {
     "SPORT": "PGA",
@@ -333,6 +338,7 @@ PGA_CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "slate_type": "Classic",
         "archetype": "Ceiling Hunter",
         "internal_contest": "MME",
+        "projection_slate": "main",
         "projection_style": "ceil",
         "volatility": "high",
         "correlation_mode": None,   # No team stacking in PGA
@@ -376,6 +382,7 @@ PGA_CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "slate_type": "Classic",
         "archetype": "Balanced",
         "internal_contest": "CASH",
+        "projection_slate": "main",
         "projection_style": "floor",
         "volatility": "low",
         "correlation_mode": None,
@@ -414,6 +421,7 @@ PGA_CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "slate_type": "Classic",
         "archetype": "Ceiling Hunter",
         "internal_contest": "SD",
+        "projection_slate": "showdown",
         "projection_style": "ceil",
         "volatility": "high",
         "correlation_mode": None,

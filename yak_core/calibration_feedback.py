@@ -40,6 +40,10 @@ _NBA_SALARY_LABELS = ["<4K", "4-5K", "5-6K", "6-7K", "7-8K", "8-9K", "9K+"]
 _PGA_SALARY_BINS = [0, 6500, 7500, 8500, 9500, 10500, 99999]
 _PGA_SALARY_LABELS = ["<6.5K", "6.5-7.5K", "7.5-8.5K", "8.5-9.5K", "9.5-10.5K", "10.5K+"]
 
+# PGA Showdown (single-round) — same bins as PGA tournament for now
+_PGA_SD_SALARY_BINS = [0, 6500, 7500, 8500, 9500, 10500, 99999]
+_PGA_SD_SALARY_LABELS = ["<6.5K", "6.5-7.5K", "7.5-8.5K", "8.5-9.5K", "9.5-10.5K", "10.5K+"]
+
 # Legacy aliases (NBA defaults)
 _SALARY_BINS = _NBA_SALARY_BINS
 _SALARY_LABELS = _NBA_SALARY_LABELS
@@ -74,13 +78,15 @@ def _get_salary_config(sport: str) -> Tuple[list, list]:
     sport = sport.upper()
     if sport == "PGA":
         return _PGA_SALARY_BINS, _PGA_SALARY_LABELS
+    if sport == "PGA_SD":
+        return _PGA_SD_SALARY_BINS, _PGA_SD_SALARY_LABELS
     return _NBA_SALARY_BINS, _NBA_SALARY_LABELS
 
 
 def _get_valid_positions(sport: str) -> set:
     """Return the set of valid positions for the given sport."""
     sport = sport.upper()
-    if sport == "PGA":
+    if sport in ("PGA", "PGA_SD"):
         return _PGA_VALID_POSITIONS
     return _NBA_VALID_POSITIONS
 

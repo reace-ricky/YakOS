@@ -193,6 +193,155 @@ def calibrate_pga_event(
     return result
 
 
+def calibrate_pga_showdown_event(
+    dg: Any,
+    event_id: int,
+    year: int,
+    pool_df: Optional[pd.DataFrame] = None,
+    slate_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Full calibration flow for one PGA showdown (single-round) event.
+
+    Similar to ``calibrate_pga_event`` but uses ``sport="PGA_SD"`` and
+    derives single-round projections via ``_derive_round_projections``
+    instead of the tournament-level ``_derive_projections``.
+
+    Parameters
+    ----------
+    dg : DataGolfClient
+        Authenticated DataGolf API client.
+    event_id : int
+        DataGolf event ID.
+    year : int
+        Calendar year of the event.
+    pool_df : pd.DataFrame, optional
+        Pre-existing pool with projections.
+    slate_date : str, optional
+        ISO date string for the event.
+
+    Returns
+    -------
+    dict
+        Calibration result from ``record_slate_errors``, or error dict.
+    """
+    from yak_core.calibration_feedback import record_slate_errors
+
+    # Fetch actuals (full-tournament DFS points)
+    actuals = fetch_pga_actuals(dg, event_id, year)
+    if actuals.empty:
+        return {"error": "No actuals available (may require DataGolf premium)"}
+
+    if not slate_date:
+        slate_date = f"{year}-{event_id:03d}"
+
+    # Build pool from pre-tournament preds using single-round projection model
+    if pool_df is None or pool_df.empty:
+        pool_df = _build_showdown_pool_from_preds(dg, actuals, event_id, year)
+
+    if pool_df is None or pool_df.empty or "proj" not in pool_df.columns:
+        return {"error": "No projection data available for showdown calibration"}
+
+    # Merge actuals into pool
+    if "actual_fp" not in pool_df.columns:
+        pool_df = _merge_actuals_into_pool(pool_df, actuals)
+
+    # For showdown calibration, we need per-round actuals, not tournament totals.
+    # Approximate: actual single-round FP ≈ actual_fp / rounds_played.
+    # Players who missed cut played 2 rounds, made-cut played 4.
+    # Use fin_text to determine: MC = 2 rounds, else 4.
+    if "actual_fp" in pool_df.columns:
+        if "fin_text" in actuals.columns:
+            fin_map = actuals.set_index("player_name")["fin_text"].to_dict() if "player_name" in actuals.columns else {}
+            pool_df["_fin_text"] = pool_df["player_name"].map(fin_map).fillna("")
+            pool_df["_rounds_played"] = pool_df["_fin_text"].apply(
+                lambda f: 2.0 if str(f).upper() in ("MC", "CUT", "MDF") else 4.0
+            )
+        else:
+            # Default to 4 rounds if we can't determine
+            pool_df["_rounds_played"] = 4.0
+
+        pool_df["actual_fp"] = (
+            pd.to_numeric(pool_df["actual_fp"], errors="coerce") / pool_df["_rounds_played"]
+        )
+        pool_df.drop(columns=["_fin_text", "_rounds_played"], errors="ignore", inplace=True)
+
+    if "pos" not in pool_df.columns:
+        pool_df["pos"] = "G"
+
+    # Filter to players with valid data
+    pool_df = pool_df[
+        (pool_df["actual_fp"] > 0) & pool_df["proj"].notna() & pool_df["salary"].notna()
+    ].copy()
+
+    if pool_df.empty:
+        return {"error": "No valid proj/actual pairs after filtering"}
+
+    # Record calibration errors under PGA_SD sport key
+    result = record_slate_errors(slate_date, pool_df, sport="PGA_SD")
+    result["n_players_calibrated"] = len(pool_df)
+    result["event_id"] = event_id
+    result["year"] = year
+
+    # Backfill actuals into showdown archives too
+    _backfill_actuals_into_archive(slate_date, actuals)
+
+    return result
+
+
+def _build_showdown_pool_from_preds(
+    dg: Any,
+    actuals: pd.DataFrame,
+    event_id: int,
+    year: int,
+) -> pd.DataFrame:
+    """Build a showdown calibration pool from pre-tournament preds.
+
+    Uses ``_derive_round_projections`` for single-round FP estimates.
+    """
+    preds_df = pd.DataFrame()
+    for attempt in range(3):
+        try:
+            preds_df = dg.get_historical_pre_tournament(
+                event_id=event_id, year=year,
+            )
+            break
+        except Exception as e:
+            if "429" in str(e) and attempt < 2:
+                time.sleep(30)
+            else:
+                break
+
+    if preds_df.empty:
+        return pd.DataFrame()
+
+    from yak_core.pga_archiver import _derive_round_projections
+
+    for col in ("win", "top_5", "top_10", "top_20", "make_cut"):
+        if col not in preds_df.columns:
+            return pd.DataFrame()
+
+    proj_df = _derive_round_projections(preds_df)
+
+    # Merge with actuals on dg_id or player_name
+    if "dg_id" in proj_df.columns and "dg_id" in actuals.columns:
+        merged = proj_df.merge(
+            actuals[["dg_id", "actual_fp", "salary"]].drop_duplicates("dg_id"),
+            on="dg_id",
+            how="inner",
+        )
+    elif "player_name" in proj_df.columns and "player_name" in actuals.columns:
+        merged = proj_df.merge(
+            actuals[["player_name", "actual_fp", "salary"]].drop_duplicates("player_name"),
+            on="player_name",
+            how="inner",
+        )
+    else:
+        return pd.DataFrame()
+
+    merged["pos"] = "G"
+    return merged
+
+
 def _backfill_actuals_into_archive(
     slate_date: str,
     actuals: pd.DataFrame,

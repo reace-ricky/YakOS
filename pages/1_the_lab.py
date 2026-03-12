@@ -646,20 +646,22 @@ def _load_pga_pool(
         status_container.write("Connecting to DataGolf API…")
         dg = DataGolfClient(api_key=dg_key)
 
-        status_container.write("Building PGA pool (projections + SG + course fit)…")
-        pool = build_pga_pool(dg, site="draftkings", slate="main")
+        _dg_slate = preset.get("projection_slate", "main")
+        status_container.write(f"Building PGA pool (projections + SG + course fit, slate={_dg_slate})…")
+        pool = build_pga_pool(dg, site="draftkings", slate=_dg_slate)
 
         if pool.empty:
             status_container.error("DataGolf returned no players for the current event.")
             return None
 
-        # Apply PGA calibration corrections
+        # Apply PGA calibration corrections (PGA_SD for showdown slates)
+        _cal_sport = "PGA_SD" if _dg_slate == "showdown" else "PGA"
         try:
             from yak_core.calibration_feedback import get_correction_factors, apply_corrections
-            _cf = get_correction_factors(sport="PGA")
+            _cf = get_correction_factors(sport=_cal_sport)
             if _cf.get("n_slates", 0) > 0:
-                pool = apply_corrections(pool, _cf, sport="PGA")
-                status_container.write(f"📐 PGA calibration applied ({_cf['n_slates']} event(s))")
+                pool = apply_corrections(pool, _cf, sport=_cal_sport)
+                status_container.write(f"📐 {_cal_sport} calibration applied ({_cf['n_slates']} event(s))")
         except Exception:
             pass
 
@@ -692,7 +694,8 @@ def _load_pga_pool(
         slate.slate_date = slate_date_str
         slate.contest_type = contest_type_label
         slate.contest_name = contest_type_label
-        slate.is_showdown = False
+        _is_sd = _dg_slate == "showdown"
+        slate.is_showdown = _is_sd
         slate.roster_slots = DK_PGA_POS_SLOTS
         slate.salary_cap = DK_PGA_SALARY_CAP
         slate.player_pool = pool
@@ -706,7 +709,7 @@ def _load_pga_pool(
             "slots": DK_PGA_POS_SLOTS,
             "lineup_size": DK_PGA_LINEUP_SIZE,
             "salary_cap": DK_PGA_SALARY_CAP,
-            "is_showdown": False,
+            "is_showdown": _is_sd,
         }
 
         return pool
@@ -1411,6 +1414,98 @@ def main() -> None:
                             st.markdown(
                                 f"**PGA calibration**: {_pga_summary['n_slates']} event(s), "
                                 f"overall MAE {_pga_summary.get('overall_mae', '?'):.1f}"
+                            )
+                    except Exception:
+                        pass
+
+        # ── Calibrate Past PGA Showdown Events ─────────────────────────
+        with st.expander("📐 Calibrate Past Events (Showdown / Single-Round)", expanded=False):
+            st.caption(
+                "Backfill PGA **showdown** (single-round) calibration. "
+                "Uses per-round projections and stores corrections under PGA_SD."
+            )
+            _sd_dg_key = (
+                st.secrets.get("DATAGOLF_API_KEY")
+                or os.environ.get("DATAGOLF_API_KEY")
+                or "7e0b29081d2adaac7e3de0ed387c"
+            )
+            if not _sd_dg_key:
+                st.warning("DataGolf API key not configured.")
+            else:
+                from yak_core.datagolf import DataGolfClient as _DGC_SD
+                _sd_cal_dg = _DGC_SD(api_key=_sd_dg_key)
+
+                _sd_evt_cache_key = "_pga_sd_cal_event_list"
+                if _sd_evt_cache_key not in st.session_state:
+                    try:
+                        from yak_core.pga_calibration import get_pga_event_list
+                        st.session_state[_sd_evt_cache_key] = get_pga_event_list(_sd_cal_dg)
+                    except Exception as _sd_evt_exc:
+                        st.error(f"Could not fetch event list: {_sd_evt_exc}")
+                        st.session_state[_sd_evt_cache_key] = pd.DataFrame()
+
+                _sd_evt_df = st.session_state[_sd_evt_cache_key]
+                if _sd_evt_df.empty:
+                    st.info("No completed PGA events with DK data found.")
+                else:
+                    # Filter out events already calibrated for showdown
+                    try:
+                        from yak_core.calibration_feedback import _load_history as _lh_sd
+                        _sd_already_calibrated = set(_lh_sd(sport="PGA_SD").keys())
+                    except Exception:
+                        _sd_already_calibrated = set()
+
+                    if _sd_already_calibrated:
+                        _sd_evt_df_filtered = _sd_evt_df[
+                            ~_sd_evt_df["date"].astype(str).isin(_sd_already_calibrated)
+                        ].reset_index(drop=True)
+                    else:
+                        _sd_evt_df_filtered = _sd_evt_df
+
+                    if _sd_evt_df_filtered.empty:
+                        st.success("All available PGA events have been calibrated for showdown.")
+                    else:
+                        _sd_evt_options = [
+                            f"{row.get('event_name', 'Event')} ({row.get('date', '?')}) — ID {row['event_id']}"
+                            for _, row in _sd_evt_df_filtered.iterrows()
+                        ]
+                        _sd_sel_idx = st.selectbox(
+                            "Select event (Showdown)", range(len(_sd_evt_options)),
+                            format_func=lambda i: _sd_evt_options[i],
+                            key="_pga_sd_cal_event_sel",
+                        )
+                        if st.button("Load & Calibrate (Showdown)", key="_pga_sd_cal_go"):
+                            _sd_sel_row = _sd_evt_df_filtered.iloc[_sd_sel_idx]
+                            _sd_eid = int(_sd_sel_row["event_id"])
+                            _sd_yr = int(_sd_sel_row["calendar_year"])
+                            _sd_edate = str(_sd_sel_row.get("date", ""))
+                            with st.spinner(f"Calibrating showdown event {_sd_eid} ({_sd_yr})…"):
+                                try:
+                                    from yak_core.pga_calibration import calibrate_pga_showdown_event
+                                    _sd_cal_result = calibrate_pga_showdown_event(
+                                        _sd_cal_dg, event_id=_sd_eid, year=_sd_yr, slate_date=_sd_edate,
+                                    )
+                                    if "error" in _sd_cal_result:
+                                        st.warning(_sd_cal_result["error"])
+                                    else:
+                                        _sd_cal_mae = _sd_cal_result.get("overall", {}).get("mae", "?")
+                                        _sd_cal_n = _sd_cal_result.get("n_players_calibrated", 0)
+                                        st.success(
+                                            f"Calibrated {_sd_cal_n} players (showdown) — MAE: {_sd_cal_mae}"
+                                        )
+                                        # Clear cached event list so the dropdown refreshes
+                                        st.session_state.pop(_sd_evt_cache_key, None)
+                                except Exception as _sd_cal_exc:
+                                    st.error(f"Showdown calibration failed: {_sd_cal_exc}")
+
+                    # Show current PGA_SD calibration summary
+                    try:
+                        from yak_core.calibration_feedback import get_calibration_summary
+                        _pga_sd_summary = get_calibration_summary(sport="PGA_SD")
+                        if _pga_sd_summary.get("n_slates", 0) > 0:
+                            st.markdown(
+                                f"**PGA Showdown calibration**: {_pga_sd_summary['n_slates']} event(s), "
+                                f"overall MAE {_pga_sd_summary.get('overall_mae', '?'):.1f}"
                             )
                     except Exception:
                         pass
