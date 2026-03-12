@@ -1276,6 +1276,23 @@ def main() -> None:
 
     if _is_pga:
         st.caption("⛳ PGA pools are built from DataGolf (projections + strokes gained + course fit).")
+
+        # ── Manual Player Excludes ─────────────────────────────────────────
+        _exclude_key = "_lab_pga_manual_excludes"
+        if _exclude_key not in st.session_state:
+            st.session_state[_exclude_key] = ""
+        _exclude_input = st.text_input(
+            "Manual Withdrawals (comma-separated player names)",
+            key=_exclude_key,
+            placeholder="e.g. Collin Morikawa, Jordan Spieth",
+            help="Manually exclude players from the pool — useful when data sources haven't caught up with late withdrawals.",
+        )
+        _exclude_names = [
+            n.strip() for n in _exclude_input.split(",") if n.strip()
+        ]
+        if _exclude_names:
+            st.caption(f"🚫 Will exclude: {', '.join(_exclude_names)}")
+
         if not _already_loaded:
             if st.button("🚀 Load PGA Pool", key="_lab_load_pga_go", type="primary"):
                 with st.status("Ricky's loading the PGA pool…", expanded=True) as _load_status:
@@ -1289,6 +1306,20 @@ def main() -> None:
                         status_container=_load_status,
                     )
                     if pool_result is not None:
+                        # Apply manual excludes at load time
+                        if _exclude_names:
+                            _pre = len(pool_result)
+                            _lower_excludes = [n.lower() for n in _exclude_names]
+                            pool_result = pool_result[
+                                ~pool_result["player_name"].str.lower().isin(_lower_excludes)
+                            ].reset_index(drop=True)
+                            _removed = _pre - len(pool_result)
+                            if _removed:
+                                _load_status.write(f"🚫 Manually excluded {_removed} player(s): {', '.join(_exclude_names)}")
+                                # Update cached pool & slate
+                                st.session_state[_pool_loaded_key] = pool_result
+                                slate.player_pool = pool_result
+                                set_slate_state(slate)
                         _load_status.write("Computing edge metrics…")
                         try:
                             player_results = _build_player_level_sim_results(pool_result, sim.variance)
@@ -1327,6 +1358,21 @@ def main() -> None:
                 if st.button("🔄 Reload PGA Pool", key="_lab_force_reload_pga"):
                     st.session_state.pop(_pool_loaded_key, None)
                     st.rerun()
+            # Post-load manual exclude
+            if _exclude_names:
+                _current_pool = st.session_state.get(_pool_loaded_key)
+                if _current_pool is not None and "player_name" in _current_pool.columns:
+                    _lower_excludes = [n.lower() for n in _exclude_names]
+                    _in_pool = _current_pool["player_name"].str.lower().isin(_lower_excludes)
+                    if _in_pool.any():
+                        if st.button("🚫 Apply Excludes to Loaded Pool", key="_lab_pga_apply_excludes"):
+                            _filtered = _current_pool[~_in_pool].reset_index(drop=True)
+                            _removed_names = _current_pool.loc[_in_pool, "player_name"].tolist()
+                            st.session_state[_pool_loaded_key] = _filtered
+                            slate.player_pool = _filtered
+                            set_slate_state(slate)
+                            st.toast(f"Excluded: {', '.join(_removed_names)}")
+                            st.rerun()
 
         # ── Calibrate Past PGA Events ────────────────────────────────────
         with st.expander("📐 Calibrate Past Events", expanded=False):
