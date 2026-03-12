@@ -447,17 +447,17 @@
     "signals": {
       "high_leverage": {
         "n_flagged": 57,
-        "n_hit": 20,
-        "hit_rate": 0.351,
-        "avg_actual": 22.84,
-        "avg_proj": 24.32
+        "n_hit": 19,
+        "hit_rate": 0.333,
+        "avg_actual": 22.51,
+        "avg_proj": 24.34
       },
       "salary_value": {
         "n_flagged": 2,
         "n_hit": 0,
         "hit_rate": 0.0,
         "avg_actual": 4.25,
-        "avg_proj": 21.06
+        "avg_proj": 21.05
       }
     }
   },

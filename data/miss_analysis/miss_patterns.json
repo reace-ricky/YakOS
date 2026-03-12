@@ -1,11 +1,11 @@
 {
-  "computed_at": "2026-03-12T02:32:01.503493+00:00",
+  "computed_at": "2026-03-12T02:35:24.820846+00:00",
   "n_slates": 22,
   "n_player_slates": 3524,
   "classification": {
     "pop": 770,
-    "bust": 659,
-    "inline": 2095,
+    "bust": 660,
+    "inline": 2094,
     "pop_rate": 0.219,
     "bust_rate": 0.187
   },
@@ -28,7 +28,7 @@
     "65_8k": {
       "n": 418,
       "pop_rate": 0.16,
-      "bust_rate": 0.074,
+      "bust_rate": 0.077,
       "avg_residual": 0.4,
       "mae": 8.6
     },
@@ -243,9 +243,9 @@
     {
       "player": "Collin Murray-Boyles",
       "salary": 5700,
-      "proj": 29.1,
+      "proj": 29.0,
       "actual": 4.0,
-      "residual": -25.1,
+      "residual": -25.0,
       "ratio": 0.14,
       "context": [],
       "date": "2026-02-08"
@@ -253,7 +253,7 @@
   ],
   "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-12T02:32:01.503453+00:00",
+    "computed_at": "2026-03-12T02:35:24.820825+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
