@@ -74,7 +74,7 @@ def render_optimizer_tab(sport: str) -> None:
     from app.data_loader import load_published_data
 
     try:
-        meta, pool, _ea, edge_state, _lineups = load_published_data(sport)
+        meta, pool, edge_analysis, edge_state, _lineups = load_published_data(sport)
     except Exception as e:
         st.error(f"Could not load {sport} data: {e}")
         return
@@ -100,6 +100,17 @@ def render_optimizer_tab(sport: str) -> None:
     avail_cols = [c for c in display_cols if c in pool.columns]
     display_df = pool[avail_cols].copy()
     display_df = display_df.sort_values("salary", ascending=False).reset_index(drop=True)
+
+    # ── Emoji tag column from edge analysis ──
+    _TAG_EMOJI = {"core": "🎯", "leverage": "💎", "value": "💰", "fade": "👋"}
+    player_tag_map: dict[str, str] = {}
+    if edge_analysis:
+        for key, tag_name in [("core_plays", "core"), ("leverage_plays", "leverage"),
+                               ("value_plays", "value"), ("fade_candidates", "fade")]:
+            for p in edge_analysis.get(key, []):
+                player_tag_map[p.get("player_name", "")] = _TAG_EMOJI.get(tag_name, "")
+    if player_tag_map and "player_name" in display_df.columns:
+        display_df.insert(0, "edge", display_df["player_name"].map(player_tag_map).fillna(""))
 
     # Lock / Exclude via multiselect
     all_names = display_df["player_name"].tolist() if "player_name" in display_df.columns else []

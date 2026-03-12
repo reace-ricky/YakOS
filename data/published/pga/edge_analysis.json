@@ -7,10 +7,11 @@
     "Wave split: Early wave projects +0.2 pts avg (Early 42.0 vs Late 41.8)",
     "Core wave mix: 1 Early / 4 Late"
   ],
-  "recommendation": "5 core + 5 value plays from 122 total \u2014 Strong edge slate.",
+  "recommendation": "5 core plays anchored at $9,300\u2013$14,200. 5 value plays averaging 6.4 pts/$1K. 5 leverage plays at 5\u201313% ownership.",
   "core_plays": [
     {
       "player_name": "Scottie Scheffler",
+      "tag": "core",
       "proj": 75.5,
       "salary": 14200,
       "ownership": 23.6,
@@ -21,6 +22,7 @@
     },
     {
       "player_name": "Rory McIlroy",
+      "tag": "core",
       "proj": 64.6,
       "salary": 11700,
       "ownership": 12.1,
@@ -31,6 +33,7 @@
     },
     {
       "player_name": "Collin Morikawa",
+      "tag": "core",
       "proj": 62.4,
       "salary": 9800,
       "ownership": 25.0,
@@ -41,6 +44,7 @@
     },
     {
       "player_name": "Si Woo Kim",
+      "tag": "core",
       "proj": 62.0,
       "salary": 9300,
       "ownership": 23.7,
@@ -51,6 +55,7 @@
     },
     {
       "player_name": "Tommy Fleetwood",
+      "tag": "core",
       "proj": 58.2,
       "salary": 10300,
       "ownership": 15.2,
@@ -63,6 +68,7 @@
   "leverage_plays": [
     {
       "player_name": "Aaron Rai",
+      "tag": "leverage",
       "proj": 46.7,
       "salary": 7200,
       "ownership": 7.9,
@@ -73,6 +79,7 @@
     },
     {
       "player_name": "Ryan Gerard",
+      "tag": "leverage",
       "proj": 50.8,
       "salary": 7400,
       "ownership": 8.2,
@@ -83,6 +90,7 @@
     },
     {
       "player_name": "Joel Dahmen",
+      "tag": "leverage",
       "proj": 43.0,
       "salary": 6100,
       "ownership": 4.8,
@@ -93,6 +101,7 @@
     },
     {
       "player_name": "Christiaan Bezuidenhout",
+      "tag": "leverage",
       "proj": 47.1,
       "salary": 7000,
       "ownership": 6.0,
@@ -103,6 +112,7 @@
     },
     {
       "player_name": "Rickie Fowler",
+      "tag": "leverage",
       "proj": 52.2,
       "salary": 7400,
       "ownership": 12.8,
@@ -115,6 +125,7 @@
   "value_plays": [
     {
       "player_name": "Ricky Castillo",
+      "tag": "value",
       "proj": 44.2,
       "salary": 6200,
       "ownership": 5.2,
@@ -125,6 +136,7 @@
     },
     {
       "player_name": "Sungjae Im",
+      "tag": "value",
       "proj": 40.3,
       "salary": 6400,
       "ownership": 3.1,
@@ -135,6 +147,7 @@
     },
     {
       "player_name": "Haotong Li",
+      "tag": "value",
       "proj": 40.1,
       "salary": 6400,
       "ownership": 3.0,
@@ -145,6 +158,7 @@
     },
     {
       "player_name": "Austin Smotherman",
+      "tag": "value",
       "proj": 39.3,
       "salary": 6400,
       "ownership": 2.5,
@@ -155,6 +169,7 @@
     },
     {
       "player_name": "Taylor Moore",
+      "tag": "value",
       "proj": 37.7,
       "salary": 6200,
       "ownership": 1.0,
@@ -167,6 +182,7 @@
   "fade_candidates": [
     {
       "player_name": "Chris Gotterup",
+      "tag": "fade",
       "proj": 47.0,
       "salary": 9200,
       "ownership": 10.3,
@@ -177,6 +193,7 @@
     },
     {
       "player_name": "Jake Knapp",
+      "tag": "fade",
       "proj": 48.4,
       "salary": 7600,
       "ownership": 15.4,
@@ -187,6 +204,7 @@
     },
     {
       "player_name": "Ludvig Aberg",
+      "tag": "fade",
       "proj": 53.1,
       "salary": 8700,
       "ownership": 23.3,
@@ -197,6 +215,7 @@
     },
     {
       "player_name": "Xander Schauffele",
+      "tag": "fade",
       "proj": 56.9,
       "salary": 9600,
       "ownership": 14.0,
@@ -207,6 +226,7 @@
     },
     {
       "player_name": "Hideki Matsuyama",
+      "tag": "fade",
       "proj": 53.8,
       "salary": 9500,
       "ownership": 12.5,

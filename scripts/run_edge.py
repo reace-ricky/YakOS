@@ -55,11 +55,12 @@ def _classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
 
     is_pga = sport.upper() == "PGA"
 
-    def _to_list(frame):
+    def _to_list(frame, tag: str = ""):
         out = []
         for _, row in frame.iterrows():
             entry = {
                 "player_name": row.get("player_name", ""),
+                "tag": tag,
                 "proj": round(float(row.get("proj", 0)), 1),
                 "salary": int(row.get("salary", 0)),
                 "ownership": round(float(row.get("_own", 0)), 1),
@@ -99,10 +100,10 @@ def _classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
         fades = _fade_sal.nsmallest(5, "_edge") if not _fade_sal.empty else _fade_pool.nsmallest(5, "_edge")
 
     return {
-        "core_plays": _to_list(core),
-        "leverage_plays": _to_list(leverage),
-        "value_plays": _to_list(value),
-        "fade_candidates": _to_list(fades),
+        "core_plays": _to_list(core, tag="core"),
+        "leverage_plays": _to_list(leverage, tag="leverage"),
+        "value_plays": _to_list(value, tag="value"),
+        "fade_candidates": _to_list(fades, tag="fade"),
     }
 
 
@@ -185,14 +186,31 @@ def run_edge(sport: str, slate_date: str) -> pd.DataFrame:
     classified = _classify_plays(edge_df, sport=sport)
     bullets = _build_bullets(classified, edge_df, sport=sport)
 
-    # Recommendation summary
+    # Recommendation summary — actually useful context
     n_total = len(edge_df)
     n_core = len(classified["core_plays"])
     n_value = len(classified["value_plays"])
-    recommendation = (
-        f"{n_core} core + {n_value} value plays from {n_total} total — "
-        + ("Strong edge slate." if n_core >= 5 else "Selective slate.")
-    )
+    n_leverage = len(classified["leverage_plays"])
+
+    # Top core salary range
+    core_sals = [p["salary"] for p in classified["core_plays"]]
+    core_sal_range = f"${min(core_sals):,}–${max(core_sals):,}" if core_sals else ""
+
+    # Value avg pts/$1K
+    val_rates = [p["value"] for p in classified["value_plays"] if p["value"] > 0]
+    val_avg = f"{sum(val_rates)/len(val_rates):.1f}" if val_rates else "0"
+
+    # Leverage ownership range
+    lev_owns = [p["ownership"] for p in classified["leverage_plays"]]
+    lev_own_range = f"{min(lev_owns):.0f}–{max(lev_owns):.0f}%" if lev_owns else ""
+
+    rec_parts = []
+    rec_parts.append(f"{n_core} core plays anchored at {core_sal_range}")
+    if n_value:
+        rec_parts.append(f"{n_value} value plays averaging {val_avg} pts/$1K")
+    if n_leverage and lev_own_range:
+        rec_parts.append(f"{n_leverage} leverage plays at {lev_own_range} ownership")
+    recommendation = ". ".join(rec_parts) + "."
 
     # Edge state (tags and stacks info for lineup builder)
     edge_state = {

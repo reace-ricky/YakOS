@@ -168,11 +168,31 @@ def render_edge_tab(sport: str) -> None:
     bullets = edge_analysis.get("bullets", [])
 
     if rec:
-        st.markdown(f'<div class="rec-box">📋 <strong>{rec}</strong></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="rec-box">{rec}</div>', unsafe_allow_html=True)
 
-    if bullets:
-        bullet_items = "".join(f"<li>{b}</li>" for b in bullets)
-        st.markdown(f'<ul class="bullet-list">{bullet_items}</ul>', unsafe_allow_html=True)
+    # Emoji-tagged category lines (not generic bullets)
+    _TAG_EMOJI = {"core": "🎯", "leverage": "💎", "value": "💰", "fade": "👋"}
+    _TAG_LABEL = {"core": "Core", "leverage": "Leverage", "value": "Value", "fade": "Fade"}
+
+    tag_lines = []
+    for key in ["core_plays", "leverage_plays", "value_plays", "fade_candidates"]:
+        plays = edge_analysis.get(key, [])
+        if not plays:
+            continue
+        tag = plays[0].get("tag", key.split("_")[0])
+        emoji = _TAG_EMOJI.get(tag, "")
+        label = _TAG_LABEL.get(tag, tag.title())
+        names = ", ".join(p["player_name"] for p in plays)
+        tag_lines.append(f"{emoji} <strong>{label}</strong>: {names}")
+
+    # Wave bullets (PGA)
+    for b in bullets:
+        if "Wave" in b or "wave" in b:
+            tag_lines.append(f"⛳ {b}")
+
+    if tag_lines:
+        lines_html = "<br>".join(tag_lines)
+        st.markdown(f'<div style="margin-bottom:16px;line-height:1.8;">{lines_html}</div>', unsafe_allow_html=True)
 
     st.markdown("")  # spacer
 
