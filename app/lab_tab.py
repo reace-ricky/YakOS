@@ -400,6 +400,15 @@ def _run_edge(sport: str, slate_date: str, out_dir: Path) -> tuple:
     from yak_core.calibration_feedback import get_correction_factors
 
     pool = pd.read_parquet(out_dir / "slate_pool.parquet")
+
+    # Filter out excluded players (checkbox exclusions)
+    _excl_path = out_dir / "excluded_players.json"
+    if _excl_path.exists():
+        import json as _json
+        _excl_names = _json.loads(_excl_path.read_text())
+        if _excl_names:
+            pool = pool[~pool["player_name"].isin(_excl_names)].reset_index(drop=True)
+
     calibration_state = get_correction_factors(sport=sport.upper())
 
     edge_df = compute_edge_metrics(
@@ -413,10 +422,21 @@ def _run_edge(sport: str, slate_date: str, out_dir: Path) -> tuple:
 
     n_core = len(classified["core_plays"])
     n_value = len(classified["value_plays"])
-    recommendation = (
-        f"{n_core} core + {n_value} value plays from {len(edge_df)} total — "
-        + ("Strong edge slate." if n_core >= 5 else "Selective slate.")
-    )
+    n_leverage = len(classified["leverage_plays"])
+
+    core_sals = [p["salary"] for p in classified["core_plays"]]
+    core_sal_range = f"${min(core_sals):,}–${max(core_sals):,}" if core_sals else ""
+    val_rates = [p["value"] for p in classified["value_plays"] if p["value"] > 0]
+    val_avg = f"{sum(val_rates)/len(val_rates):.1f}" if val_rates else "0"
+    lev_owns = [p["ownership"] for p in classified["leverage_plays"]]
+    lev_own_range = f"{min(lev_owns):.0f}–{max(lev_owns):.0f}%" if lev_owns else ""
+
+    rec_parts = [f"{n_core} core plays anchored at {core_sal_range}"]
+    if n_value:
+        rec_parts.append(f"{n_value} value plays averaging {val_avg} pts/$1K")
+    if n_leverage and lev_own_range:
+        rec_parts.append(f"{n_leverage} leverage plays at {lev_own_range} ownership")
+    recommendation = ". ".join(rec_parts) + "."
 
     edge_state: Dict[str, Any] = {
         "sport": sport.upper(),

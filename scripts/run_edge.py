@@ -171,6 +171,17 @@ def run_edge(sport: str, slate_date: str) -> pd.DataFrame:
 
     print(f"[run_edge] Loaded {len(pool)} players from {pool_path}")
 
+    # Filter out excluded players (checkbox exclusions from Lab)
+    import os
+    _excl_path = os.path.join(out_dir, "excluded_players.json")
+    if os.path.exists(_excl_path):
+        with open(_excl_path) as _ef:
+            _excl_names = json.load(_ef)
+        if _excl_names:
+            pre = len(pool)
+            pool = pool[~pool["player_name"].isin(_excl_names)].reset_index(drop=True)
+            print(f"[run_edge] Excluded {pre - len(pool)} player(s): {_excl_names}")
+
     # Load calibration state for edge computation
     calibration_state = get_correction_factors(sport=sport.upper())
 
