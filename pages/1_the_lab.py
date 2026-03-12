@@ -1198,7 +1198,9 @@ def main() -> None:
     # ── Row 1: Sport + Date + Contest ─────────────────────────────────────
     col_sport, col_date, col_contest = st.columns([1, 1, 2])
     with col_sport:
-        sport = st.selectbox("Sport", ["NBA", "PGA"], index=0 if slate.sport == "NBA" else 1)
+        if "_lab_sport" not in st.session_state:
+            st.session_state["_lab_sport"] = slate.sport if slate.sport in ["NBA", "PGA"] else "NBA"
+        sport = st.selectbox("Sport", ["NBA", "PGA"], key="_lab_sport")
     with col_date:
         from zoneinfo import ZoneInfo
         _today = pd.Timestamp.now(tz=ZoneInfo("America/New_York")).strftime("%Y-%m-%d")

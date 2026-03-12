@@ -344,27 +344,31 @@ def main() -> None:
 
     _REVERSE_UI_MAP = {v: k for k, v in PGA_UI_CONTEST_MAP.items()}
     _lab_ui = _REVERSE_UI_MAP.get(slate.contest_name, "GPP") if slate.contest_name else "GPP"
-    _default_ui_idx = PGA_UI_CONTEST_LABELS.index(_lab_ui) if _lab_ui in PGA_UI_CONTEST_LABELS else 0
+    if "_pga_bp_contest" not in st.session_state or st.session_state["_pga_bp_contest"] not in PGA_UI_CONTEST_LABELS:
+        st.session_state["_pga_bp_contest"] = _lab_ui if _lab_ui in PGA_UI_CONTEST_LABELS else PGA_UI_CONTEST_LABELS[0]
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        _ui_contest = st.selectbox("Contest Type", PGA_UI_CONTEST_LABELS, index=_default_ui_idx, key="_pga_bp_contest")
+        _ui_contest = st.selectbox("Contest Type", PGA_UI_CONTEST_LABELS, key="_pga_bp_contest")
         contest_label = PGA_UI_CONTEST_MAP[_ui_contest]
         preset = CONTEST_PRESETS.get(contest_label, {})
     with col2:
         default_mode = _CONTEST_TO_BUILD_MODE.get(contest_label, "median")
+        if "_pga_bp_build_mode" not in st.session_state:
+            st.session_state["_pga_bp_build_mode"] = default_mode
         build_mode = st.selectbox(
             "Build Mode",
             ["floor", "median", "ceiling"],
-            index=["floor", "median", "ceiling"].index(default_mode),
             key="_pga_bp_build_mode",
         )
     with col3:
+        _default_archetype = preset.get("archetype", "Balanced")
+        _arch_keys = list(DFS_ARCHETYPES.keys())
+        if "_pga_bp_archetype" not in st.session_state or st.session_state["_pga_bp_archetype"] not in _arch_keys:
+            st.session_state["_pga_bp_archetype"] = _default_archetype if _default_archetype in DFS_ARCHETYPES else _arch_keys[0]
         archetype = st.selectbox(
             "Archetype",
-            list(DFS_ARCHETYPES.keys()),
-            index=list(DFS_ARCHETYPES.keys()).index(preset.get("archetype", "Balanced"))
-            if preset.get("archetype", "Balanced") in DFS_ARCHETYPES else 0,
+            _arch_keys,
             key="_pga_bp_archetype",
         )
 
@@ -500,15 +504,16 @@ def main() -> None:
 
     # ── View individual lineups ──────────────────────────────────────────
     if built_labels:
-        _default_view_idx = built_labels.index(contest_label) if contest_label in built_labels else 0
-        view_label = st.selectbox("View lineups for", built_labels, index=_default_view_idx, key="_pga_bp_view_label")
+        if "_pga_bp_view_label" not in st.session_state or st.session_state["_pga_bp_view_label"] not in built_labels:
+            st.session_state["_pga_bp_view_label"] = contest_label if contest_label in built_labels else built_labels[0]
+        view_label = st.selectbox("View lineups for", built_labels, key="_pga_bp_view_label")
         view_df = lu_state.lineups.get(view_label)
 
         if view_df is not None and not view_df.empty:
             n_lu = len(view_df["lineup_index"].unique()) if "lineup_index" in view_df.columns else 0
             st.caption(f"{n_lu} lineup(s)")
 
-            pipeline_df = sim.pipeline_output.get(contest_label) or sim.pipeline_output.get("GPP_20")
+            pipeline_df = sim.pipeline_output.get(view_label) or sim.pipeline_output.get("GPP_20")
 
             bb_df = lu_state.get_boom_bust(view_label)
 
