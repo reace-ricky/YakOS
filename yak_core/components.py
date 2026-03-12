@@ -196,7 +196,7 @@ def render_premium_lineup_card(
         if total_pown_pct < 1.5:
             total_pown_pct = total_pown_pct * 100.0
     else:
-        total_pown_pct = float(_own_normed.sum())
+        total_pown_pct = float(_own_normed.mean())
 
     yakos_rating = float(metrics.get("yakos_sim_rating") or 0.0)
     bucket = str(metrics.get("rating_bucket") or "-")
@@ -490,7 +490,7 @@ def render_lineup_card(
         if total_pown_pct < 1.5:
             total_pown_pct = total_pown_pct * 100.0
     else:
-        total_pown_pct = float(_own_normed_lg.sum())
+        total_pown_pct = float(_own_normed_lg.mean())
 
     yakos_rating = float(metrics.get("yakos_sim_rating") or 0.0)
     bucket = str(metrics.get("rating_bucket") or "-")

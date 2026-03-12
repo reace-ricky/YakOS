@@ -1122,7 +1122,7 @@ def run_sims_pipeline(
 
         # Lineup-level base metrics
         projection = sum(p_proj.get(p, 0) for p in players)
-        total_pown_raw = sum(p_own.get(p, 0) for p in players)
+        total_pown_raw = sum(p_own.get(p, 0) for p in players) / max(len(players), 1)
         total_pown_frac = total_pown_raw / 100.0  # convert pct to fraction
 
         lu_totals = all_lineup_totals.get(lu_idx, np.zeros(n_sims))
