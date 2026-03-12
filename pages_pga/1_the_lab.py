@@ -55,6 +55,40 @@ from yak_core.right_angle import (  # noqa: E402
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _filter_pool_by_wave(pool: pd.DataFrame, wave: str) -> pd.DataFrame:
+    """Filter pool to early or late wave using DataGolf's early_late_wave column.
+
+    Falls back to r1_teetime with an 11:30 cutoff if early_late_wave is missing.
+    """
+    if wave == "All Players" or pool.empty:
+        return pool
+
+    if "early_late_wave" in pool.columns and pool["early_late_wave"].notna().any():
+        col = pool["early_late_wave"].astype(str).str.strip().str.lower()
+        if wave == "Early Wave":
+            mask = col.isin(["early", "e"])
+        else:
+            mask = col.isin(["late", "l"])
+        filtered = pool[mask].reset_index(drop=True)
+        if not filtered.empty:
+            return filtered
+
+    # Fallback: split on r1_teetime with 11:30 cutoff
+    if "r1_teetime" in pool.columns and pool["r1_teetime"].notna().any():
+        times = pd.to_datetime(pool["r1_teetime"], format="%H:%M", errors="coerce")
+        cutoff = pd.to_datetime("11:30", format="%H:%M")
+        if wave == "Early Wave":
+            mask = times <= cutoff
+        else:
+            mask = times > cutoff
+        valid = mask.notna()
+        filtered = pool[mask & valid].reset_index(drop=True)
+        if not filtered.empty:
+            return filtered
+
+    return pool
+
+
 def _color_smash(val: float) -> str:
     if val >= 0.25:
         return "background-color: #1a472a; color: #90ee90"
@@ -228,6 +262,17 @@ with col_contest:
     contest_type_label = PGA_UI_CONTEST_MAP[_ui_contest]
     preset = CONTEST_PRESETS[contest_type_label]
 
+# Wave filter — target early/late tee-time waves (weather-impacted tournaments)
+_WAVE_OPTIONS = ["All Players", "Early Wave", "Late Wave"]
+_wave_selection = st.radio(
+    "🌊 Wave Filter",
+    _WAVE_OPTIONS,
+    index=_WAVE_OPTIONS.index(st.session_state.get("_pga_wave_filter", "All Players")),
+    horizontal=True,
+    key="_pga_wave_filter",
+    help="Filter by tee-time wave. Early/Late come from DataGolf. Useful for weather-impacted tournaments.",
+)
+
 # Sim controls
 col_nsims, _ = st.columns(2)
 with col_nsims:
@@ -259,6 +304,18 @@ if _date_changed or _contest_changed:
 st.session_state["_pga_hub_prev_date"] = slate_date_str
 st.session_state["_pga_hub_prev_contest"] = contest_type_label
 
+# Wave change invalidation — force reload so the filter is applied from the full pool
+_prev_wave = st.session_state.get("_pga_hub_prev_wave")
+_wave_changed = _prev_wave is not None and _prev_wave != _wave_selection
+if _wave_changed:
+    _stale_safe_w = contest_type_label.lower().replace(" ", "_").replace("/", "-").replace("-", "_")
+    for key in [
+        f"_pga_hub_pool_{slate_date_str}_{_stale_safe_w}",
+        f"_pga_hub_rules_{slate_date_str}_{_stale_safe_w}",
+    ]:
+        st.session_state.pop(key, None)
+st.session_state["_pga_hub_prev_wave"] = _wave_selection
+
 # ── PGA pool loading ─────────────────────────────────────────────────
 _pool_loaded_key = f"_pga_hub_pool_{slate_date_str}_{_contest_safe}"
 _already_loaded = st.session_state.get(_pool_loaded_key) is not None
@@ -277,6 +334,19 @@ if not _already_loaded:
                 status_container=_load_status,
             )
             if pool_result is not None:
+                # Apply wave filter before edge metrics
+                _wave = st.session_state.get("_pga_wave_filter", "All Players")
+                if _wave != "All Players":
+                    _pre_count = len(pool_result)
+                    pool_result = _filter_pool_by_wave(pool_result, _wave)
+                    _load_status.write(
+                        f"🌊 {_wave}: {len(pool_result)} of {_pre_count} players"
+                    )
+                    # Update slate and cache with filtered pool
+                    slate.player_pool = pool_result
+                    set_slate_state(slate)
+                    st.session_state[f"_pga_hub_pool_{slate_date_str}_{_contest_safe}"] = pool_result
+
                 _load_status.write("Computing edge metrics…")
                 try:
                     player_results = _build_player_level_sim_results(pool_result, sim.variance)
@@ -498,6 +568,12 @@ st.divider()
 st.subheader("🎲 Simulations")
 
 pool: pd.DataFrame = slate.player_pool if slate.player_pool is not None else pd.DataFrame()
+
+# Show active wave filter status
+if not pool.empty:
+    _active_wave_sim = st.session_state.get("_pga_wave_filter", "All Players")
+    if _active_wave_sim != "All Players":
+        st.caption(f"🌊 **{_active_wave_sim}** active — {len(pool)} players in pool")
 
 # Re-run edge metrics
 if not pool.empty:

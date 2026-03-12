@@ -400,9 +400,12 @@ def main() -> None:
     with col_excl:
         exclude_names = st.multiselect("Exclude", player_names, key="_pga_bp_exclude")
 
+    _active_wave = st.session_state.get("_pga_wave_filter", "All Players")
+    _wave_badge = f"  |  🌊 {_active_wave}" if _active_wave != "All Players" else ""
     st.caption(
         f"**{len(pool)} players**  |  "
         f"Cap: ${slate.salary_cap:,}"
+        f"{_wave_badge}"
     )
 
     st.divider()
