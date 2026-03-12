@@ -189,3 +189,22 @@ For any non-trivial change, aim to provide:
  
 - Before marking any PR ready: run python scripts/qa_regression.py AND manually verify the changed page loads correctly with a real slate date. If the QA script doesn't exist or doesn't pass, the PR is not done.
 
+
+---
+
+## Branch & Merge Rules (CRITICAL)
+
+- **Always rebase your branch on top of `origin/main` before opening a PR.**
+  Run `git fetch origin main && git rebase origin/main` before pushing.
+  This ensures your branch includes all direct commits to main and avoids
+  overwriting them during merge.
+
+- **Never force-push to main.**
+
+- **When creating a branch, always branch from the latest main:**
+  ```
+  git fetch origin main
+  git checkout -b copilot/my-feature origin/main
+  ```
+
+- PRs that fail to rebase cleanly must be updated before merge.
