@@ -53,17 +53,26 @@ def _classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
     df["_edge"] = _edge
     df["_val"] = _val
 
+    is_pga = sport.upper() == "PGA"
+
     def _to_list(frame):
         out = []
         for _, row in frame.iterrows():
-            out.append({
+            entry = {
                 "player_name": row.get("player_name", ""),
                 "proj": round(float(row.get("proj", 0)), 1),
                 "salary": int(row.get("salary", 0)),
                 "ownership": round(float(row.get("_own", 0)), 1),
                 "edge": round(float(row.get("_edge", 0)), 2),
                 "value": round(float(row.get("_val", 0)), 2),
-            })
+            }
+            # PGA wave data
+            if is_pga:
+                wave = row.get("early_late_wave")
+                entry["wave"] = "Early" if wave == 0 else "Late" if wave == 1 else "Unknown"
+                teetime = row.get("r1_teetime", "")
+                entry["r1_teetime"] = str(teetime) if pd.notna(teetime) else ""
+            out.append(entry)
         return out
 
     # Core (Chalk): top projected players, $7K+ salary
@@ -97,7 +106,7 @@ def _classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
     }
 
 
-def _build_bullets(classified: dict, edge_df: pd.DataFrame) -> list[str]:
+def _build_bullets(classified: dict, edge_df: pd.DataFrame, sport: str = "NBA") -> list[str]:
     """Generate human-readable analysis bullet points."""
     bullets = []
     n_core = len(classified["core_plays"])
@@ -116,6 +125,26 @@ def _build_bullets(classified: dict, edge_df: pd.DataFrame) -> list[str]:
         bullets.append(f"Leverage plays ({n_leverage}): {top_lev}")
     if n_fades:
         bullets.append(f"Fade candidates: {n_fades} players below edge threshold")
+
+    # PGA wave analysis
+    if sport.upper() == "PGA" and "early_late_wave" in edge_df.columns:
+        early = edge_df[edge_df["early_late_wave"] == 0]
+        late = edge_df[edge_df["early_late_wave"] == 1]
+        if len(early) > 0 and len(late) > 0:
+            early_avg = early["proj"].mean()
+            late_avg = late["proj"].mean()
+            diff = abs(early_avg - late_avg)
+            favored = "Early" if early_avg > late_avg else "Late"
+            bullets.append(
+                f"Wave split: {favored} wave projects +{diff:.1f} pts avg "
+                f"(Early {early_avg:.1f} vs Late {late_avg:.1f})"
+            )
+            # Core plays wave breakdown
+            core_waves = [p.get("wave", "?") for p in classified["core_plays"]]
+            n_early = core_waves.count("Early")
+            n_late = core_waves.count("Late")
+            if n_early > 0 or n_late > 0:
+                bullets.append(f"Core wave mix: {n_early} Early / {n_late} Late")
 
     # Signal convergence summary
     if "edge_score" in edge_df.columns:
@@ -154,7 +183,7 @@ def run_edge(sport: str, slate_date: str) -> pd.DataFrame:
 
     # Classify into 4-box
     classified = _classify_plays(edge_df, sport=sport)
-    bullets = _build_bullets(classified, edge_df)
+    bullets = _build_bullets(classified, edge_df, sport=sport)
 
     # Recommendation summary
     n_total = len(edge_df)
@@ -175,6 +204,19 @@ def run_edge(sport: str, slate_date: str) -> pd.DataFrame:
         "fade_names": [p["player_name"] for p in classified["fade_candidates"]],
         "calibration_slates": calibration_state.get("n_slates", 0),
     }
+
+    # PGA wave breakdown in edge state (for lineup builder wave-aware builds)
+    if sport.upper() == "PGA" and "early_late_wave" in edge_df.columns:
+        early_df = edge_df[edge_df["early_late_wave"] == 0]
+        late_df = edge_df[edge_df["early_late_wave"] == 1]
+        edge_state["wave_split"] = {
+            "early_count": int(len(early_df)),
+            "late_count": int(len(late_df)),
+            "early_avg_proj": round(float(early_df["proj"].mean()), 1) if len(early_df) > 0 else 0,
+            "late_avg_proj": round(float(late_df["proj"].mean()), 1) if len(late_df) > 0 else 0,
+            "early_players": early_df.nlargest(5, "proj")["player_name"].tolist(),
+            "late_players": late_df.nlargest(5, "proj")["player_name"].tolist(),
+        }
 
     # Edge analysis (pre-computed for consumers)
     edge_analysis = {
