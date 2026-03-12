@@ -528,5 +528,55 @@
         "mae": 14.11
       }
     }
+  },
+  "2025-09-14": {
+    "slate_date": "2025-09-14",
+    "overall": {
+      "mean_error": -7.13,
+      "mae": 22.43,
+      "rmse": 27.17,
+      "correlation": 0.5068,
+      "n_players": 51
+    },
+    "by_position": {
+      "G": {
+        "mean_error": -7.13,
+        "median_error": -3.05,
+        "n": 51,
+        "mae": 22.43
+      }
+    },
+    "by_salary_tier": {
+      "<6.5K": {
+        "mean_error": -18.17,
+        "median_error": -34.53,
+        "n": 3,
+        "mae": 28.99
+      },
+      "6.5-7.5K": {
+        "mean_error": -10.22,
+        "median_error": -9.75,
+        "n": 24,
+        "mae": 25.07
+      },
+      "7.5-8.5K": {
+        "mean_error": -13.87,
+        "median_error": -9.27,
+        "n": 10,
+        "mae": 26.2
+      },
+      "8.5-9.5K": {
+        "mean_error": 3.42,
+        "median_error": 6.07,
+        "n": 10,
+        "mae": 14.63
+      },
+      "9.5-10.5K": {
+        "mean_error": 6.95,
+        "median_error": -0.19,
+        "n": 3,
+        "mae": 9.11
+      }
+    }
   }
 }
