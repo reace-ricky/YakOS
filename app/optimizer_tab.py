@@ -1,0 +1,246 @@
+"""Tab 2: Optimizer (public).
+
+Displays the player pool and lets users build DFS lineups in-session
+using yak_core.lineups. Lineups are NOT persisted — only the Lab can publish.
+"""
+from __future__ import annotations
+
+import re
+from typing import Any, Dict, List
+
+import pandas as pd
+import streamlit as st
+
+
+def _slugify(label: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
+
+
+def _build_optimizer_cfg(
+    preset: dict,
+    sport: str,
+    num_lineups: int,
+    max_exposure: float,
+    lock: List[str],
+    exclude: List[str],
+) -> dict:
+    """Build optimizer config from a contest preset (mirrors scripts/build_lineups.py)."""
+    from yak_core.config import (
+        SALARY_CAP,
+        DK_POS_SLOTS,
+        DK_LINEUP_SIZE,
+        DK_PGA_SALARY_CAP,
+        DK_PGA_POS_SLOTS,
+        DK_PGA_LINEUP_SIZE,
+    )
+
+    is_pga = sport.upper() == "PGA"
+
+    cfg = {
+        "NUM_LINEUPS": num_lineups,
+        "SALARY_CAP": preset.get("salary_cap", DK_PGA_SALARY_CAP if is_pga else SALARY_CAP),
+        "MAX_EXPOSURE": max_exposure,
+        "MIN_SALARY_USED": preset.get("min_salary", preset.get("min_salary_used", 46000)),
+        "CONTEST_TYPE": preset.get("internal_contest", "gpp"),
+        "SPORT": sport.upper(),
+        "LOCK": lock,
+        "EXCLUDE": exclude,
+    }
+
+    if is_pga:
+        cfg["POS_SLOTS"] = preset.get("pos_slots", DK_PGA_POS_SLOTS)
+        cfg["LINEUP_SIZE"] = preset.get("lineup_size", DK_PGA_LINEUP_SIZE)
+        cfg["POS_CAPS"] = preset.get("pos_caps", {})
+    else:
+        cfg["POS_SLOTS"] = DK_POS_SLOTS
+        cfg["LINEUP_SIZE"] = DK_LINEUP_SIZE
+
+    cfg["GPP_MAX_PUNT_PLAYERS"] = preset.get("max_punt_players", 1 if is_pga else 2)
+    cfg["GPP_MIN_MID_PLAYERS"] = preset.get("min_mid_salary_players", 2 if is_pga else 3)
+    cfg["GPP_OWN_CAP"] = preset.get("own_cap", 5.0 if is_pga else 6.0)
+    cfg["GPP_MIN_LOW_OWN_PLAYERS"] = preset.get("min_low_own_players", 1)
+    cfg["GPP_LOW_OWN_THRESHOLD"] = preset.get("low_own_threshold", 0.40)
+    cfg["GPP_FORCE_GAME_STACK"] = preset.get("force_game_stack", not is_pga)
+
+    cfg["STACK_WEIGHT"] = preset.get("stack_weight", 0.0 if is_pga else 0.05)
+    cfg["VALUE_WEIGHT"] = preset.get("value_weight", 0.30 if is_pga else 0.05)
+    cfg["OWN_WEIGHT"] = preset.get("own_weight", 0.25 if is_pga else 0.10)
+
+    return cfg
+
+
+def render_optimizer_tab(sport: str) -> None:
+    """Render the Optimizer tab."""
+    from app.data_loader import load_published_data
+
+    try:
+        meta, pool, _ea, edge_state, _lineups = load_published_data(sport)
+    except Exception as e:
+        st.error(f"Could not load {sport} data: {e}")
+        return
+
+    if pool.empty:
+        st.info(f"No published {sport} pool found. Run the pipeline first.")
+        return
+
+    is_pga = sport.upper() == "PGA"
+
+    # ── Player pool table ──
+    st.markdown(f"### {sport} Player Pool ({len(pool)} players)")
+
+    display_cols = ["player_name", "pos", "team", "salary", "proj", "floor", "ceil", "ownership"]
+    if is_pga:
+        if "early_late_wave" in pool.columns:
+            pool["wave"] = pool["early_late_wave"].map({0: "Early", 1: "Late"}).fillna("")
+        if "wave" not in pool.columns:
+            pool["wave"] = ""
+        extra = ["wave", "r1_teetime"]
+        display_cols = display_cols + [c for c in extra if c in pool.columns]
+
+    avail_cols = [c for c in display_cols if c in pool.columns]
+    display_df = pool[avail_cols].copy()
+    display_df = display_df.sort_values("salary", ascending=False).reset_index(drop=True)
+
+    # Lock / Exclude via multiselect
+    all_names = display_df["player_name"].tolist() if "player_name" in display_df.columns else []
+
+    col_lock, col_excl = st.columns(2)
+    with col_lock:
+        locked = st.multiselect("Lock players", options=all_names, key=f"opt_lock_{sport}")
+    with col_excl:
+        excluded = st.multiselect("Exclude players", options=all_names, key=f"opt_excl_{sport}")
+
+    # Highlight locked/excluded in the display table
+    if locked or excluded:
+        def _row_status(name: str) -> str:
+            if name in locked:
+                return "LOCK"
+            if name in excluded:
+                return "EXCL"
+            return ""
+        display_df.insert(0, "status", display_df["player_name"].map(_row_status))
+
+    st.dataframe(display_df, use_container_width=True, hide_index=True, height=400)
+
+    # ── Build settings ──
+    st.markdown("---")
+    st.markdown("#### Build Settings")
+
+    from yak_core.config import CONTEST_PRESETS
+
+    if is_pga:
+        contest_options = ["PGA GPP", "PGA Cash", "PGA Showdown"]
+    else:
+        contest_options = ["GPP Main", "GPP Early", "Showdown", "Cash Main"]
+
+    contest_options = [c for c in contest_options if c in CONTEST_PRESETS]
+
+    col_contest, col_count, col_exp = st.columns(3)
+    with col_contest:
+        contest_label = st.selectbox("Contest type", contest_options, key=f"opt_contest_{sport}")
+    with col_count:
+        preset = CONTEST_PRESETS.get(contest_label, {})
+        default_n = preset.get("default_lineups", 20)
+        num_lineups = st.number_input("Lineups", min_value=1, max_value=150, value=min(default_n, 20), key=f"opt_nlu_{sport}")
+    with col_exp:
+        default_exp = preset.get("default_max_exposure", 0.35)
+        max_exposure = st.slider("Max exposure", 0.1, 1.0, default_exp, 0.05, key=f"opt_exp_{sport}")
+
+    # ── Build button ──
+    if st.button("Build Lineups", type="primary", key=f"opt_build_{sport}"):
+        is_showdown = (
+            preset.get("slate_type") == "Showdown Captain"
+            or "showdown" in contest_label.lower()
+        )
+
+        # Prepare pool
+        build_pool = pool.copy()
+        if "player_id" not in build_pool.columns:
+            build_pool["player_id"] = build_pool["player_name"].str.lower().str.replace(" ", "_")
+        if "ownership" not in build_pool.columns:
+            if "own_pct" in build_pool.columns:
+                build_pool["ownership"] = build_pool["own_pct"]
+            elif "own_proj" in build_pool.columns:
+                build_pool["ownership"] = build_pool["own_proj"]
+            else:
+                build_pool["ownership"] = 0.0
+        build_pool["ownership"] = pd.to_numeric(build_pool["ownership"], errors="coerce").fillna(0.0)
+
+        cfg = _build_optimizer_cfg(preset, sport, num_lineups, max_exposure, locked, excluded)
+
+        with st.spinner(f"Building {num_lineups} lineups..."):
+            try:
+                if is_showdown and not is_pga:
+                    from yak_core.lineups import build_showdown_lineups
+                    lineups_df, exposure_df = build_showdown_lineups(build_pool, cfg)
+                else:
+                    from yak_core.lineups import build_multiple_lineups_with_exposure
+                    lineups_df, exposure_df = build_multiple_lineups_with_exposure(build_pool, cfg)
+            except Exception as e:
+                st.error(f"Optimizer error: {e}")
+                return
+
+        if lineups_df.empty:
+            st.warning("Optimizer returned zero lineups. Try adjusting constraints.")
+            return
+
+        # Store results in session state
+        st.session_state[f"opt_lineups_{sport}"] = lineups_df
+        st.session_state[f"opt_exposure_{sport}"] = exposure_df
+        st.session_state[f"opt_contest_{sport}_result"] = contest_label
+        st.session_state[f"opt_is_showdown_{sport}"] = is_showdown
+        st.success(f"Built {lineups_df['lineup_index'].nunique() if 'lineup_index' in lineups_df.columns else 0} lineups!")
+
+    # ── Display results ──
+    lineups_df = st.session_state.get(f"opt_lineups_{sport}")
+    if lineups_df is not None and not lineups_df.empty:
+        st.markdown("---")
+        st.markdown("#### Lineups")
+
+        if "lineup_index" in lineups_df.columns:
+            for idx in sorted(lineups_df["lineup_index"].unique()):
+                lu = lineups_df[lineups_df["lineup_index"] == idx]
+                total_sal = int(pd.to_numeric(lu.get("salary", 0), errors="coerce").fillna(0).sum())
+                total_proj = float(pd.to_numeric(lu.get("proj", 0), errors="coerce").fillna(0).sum())
+                st.markdown(f"**Lineup {idx + 1}** — ${total_sal:,} sal | {total_proj:.1f} proj")
+                show_cols = ["player_name", "pos", "salary", "proj"]
+                if "slot" in lu.columns:
+                    show_cols = ["slot"] + show_cols
+                avail = [c for c in show_cols if c in lu.columns]
+                st.dataframe(lu[avail].reset_index(drop=True), use_container_width=True, hide_index=True)
+        else:
+            st.dataframe(lineups_df, use_container_width=True)
+
+        # ── Exposure table ──
+        exposure_df = st.session_state.get(f"opt_exposure_{sport}")
+        if exposure_df is not None and not exposure_df.empty:
+            st.markdown("#### Exposure")
+            st.dataframe(exposure_df, use_container_width=True, hide_index=True)
+
+        # ── DK CSV download ──
+        st.markdown("#### Export")
+        result_contest = st.session_state.get(f"opt_contest_{sport}_result", "")
+        result_showdown = st.session_state.get(f"opt_is_showdown_{sport}", False)
+
+        try:
+            if result_showdown and not is_pga:
+                from yak_core.lineups import to_dk_showdown_upload_format
+                dk_df = to_dk_showdown_upload_format(lineups_df)
+            elif is_pga:
+                from yak_core.lineups import to_dk_pga_upload_format
+                dk_df = to_dk_pga_upload_format(lineups_df)
+            else:
+                from yak_core.lineups import to_dk_upload_format
+                dk_df = to_dk_upload_format(lineups_df)
+
+            csv_data = dk_df.to_csv(index=False)
+            slug = _slugify(result_contest) if result_contest else "lineups"
+            st.download_button(
+                "Download DK CSV",
+                data=csv_data,
+                file_name=f"{sport.lower()}_{slug}_lineups.csv",
+                mime="text/csv",
+                key=f"opt_dl_{sport}",
+            )
+        except Exception as e:
+            st.warning(f"Could not format DK upload CSV: {e}")

@@ -1,17 +1,13 @@
-"""YakOS DFS Optimizer – multi-page shell.
+"""YakOS DFS Optimizer – single-page Streamlit app.
 
-Entry point for the Streamlit app.  Uses ``st.navigation`` to route between
-the pages:
+Entry point.  Uses ``st.tabs()`` for navigation:
+  - Edge Analysis (public)
+  - Optimizer (public)
+  - The Lab (admin)
+  - Dashboard (admin)
 
-  1. The Lab           – load slate, sims, calibration, edge analysis, learning status
-  2. Ricky's Edge      – signal-driven edge analysis + approval gate
-  3. Build & Publish   – build lineups, export CSV
-  4. Right Angle Ricky – public showcase
-
-All shared state lives in ``yak_core/state.py`` (SlateState,
-RickyEdgeState, LineupSetState, SimState).
+Sport toggle (NBA/PGA) and admin password gate live in the sidebar.
 """
-
 from __future__ import annotations
 
 import sys
@@ -31,41 +27,39 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Navigation ─────────────────────────────────────────────────────────────
-pg = st.navigation(
-    [
-        st.Page("pages/1_the_lab.py", title="The Lab", icon="🧪"),
-        st.Page("pages/2_ricky_edge.py", title="Ricky's Edge Analysis", icon="🎯"),
-        st.Page("pages/3_build_publish.py", title="Build & Publish", icon="🏗️"),
-        st.Page("pages/4_right_angle_ricky.py", title="Right Angle Ricky", icon="📐"),
-        st.Page("pages/5_right_angle_ricky_share.py", title="Right Angle Ricky (Share)", icon="📡"),
-    ]
-)
-pg.run()
+# ── Sidebar ───────────────────────────────────────────────────────────────
+sport = st.sidebar.radio("Sport", ["NBA", "PGA"], key="sport_toggle")
 
+from app.auth import check_admin_password
 
-def _merge_external_proj(base_df, source_name: str, rg_df=None, fp_df=None):
-  """Merge external projections into player pool, adding proj_fp column."""
-  import pandas as pd
-  out = base_df.copy()
-  out["proj_fp"] = out["proj"].copy()
-  if source_name == "RotoGrinders" and rg_df is not None:
-    ext = rg_df.rename(columns={"proj": "_proj_ext"})
-    merged = out.merge(ext[["player_name", "_proj_ext"]], on="player_name", how="left")
-    mask = merged["_proj_ext"].notna()
-    out.loc[mask.values, "proj_fp"] = merged.loc[mask, "_proj_ext"].values
-  elif source_name == "FantasyPros" and fp_df is not None:
-    ext = fp_df.rename(columns={"proj": "_proj_ext"})
-    merged = out.merge(ext[["player_name", "_proj_ext"]], on="player_name", how="left")
-    mask = merged["_proj_ext"].notna()
-    out.loc[mask.values, "proj_fp"] = merged.loc[mask, "_proj_ext"].values
-  elif source_name == "Blended" and rg_df is not None and fp_df is not None:
-    rg_ext = rg_df.rename(columns={"proj": "_proj_rg"})
-    fp_ext = fp_df.rename(columns={"proj": "_proj_fp"})
-    merged = out.merge(rg_ext[["player_name", "_proj_rg"]], on="player_name", how="left")
-    merged = merged.merge(fp_ext[["player_name", "_proj_fp"]], on="player_name", how="left")
-    both = merged["_proj_rg"].notna() & merged["_proj_fp"].notna()
-    rg_only = merged["_proj_rg"].notna() & merged["_proj_fp"].isna()
-    out.loc[both.values, "proj_fp"] = ((merged.loc[both, "_proj_rg"].values + merged.loc[both, "_proj_fp"].values) / 2)
-    out.loc[rg_only.values, "proj_fp"] = merged.loc[rg_only, "_proj_rg"].values
-  return out
+is_admin = check_admin_password()
+
+# ── Tabs ──────────────────────────────────────────────────────────────────
+if is_admin:
+    tab_edge, tab_optimizer, tab_lab, tab_dashboard = st.tabs(
+        ["Edge Analysis", "Optimizer", "The Lab", "Dashboard"]
+    )
+else:
+    tab_edge, tab_optimizer = st.tabs(["Edge Analysis", "Optimizer"])
+    tab_lab = None
+    tab_dashboard = None
+
+# ── Render tabs ───────────────────────────────────────────────────────────
+from app.edge_tab import render_edge_tab
+from app.optimizer_tab import render_optimizer_tab
+
+with tab_edge:
+    render_edge_tab(sport)
+
+with tab_optimizer:
+    render_optimizer_tab(sport)
+
+if is_admin and tab_lab is not None:
+    from app.lab_tab import render_lab_tab
+    from app.dashboard_tab import render_dashboard_tab
+
+    with tab_lab:
+        render_lab_tab(sport)
+
+    with tab_dashboard:
+        render_dashboard_tab(sport)
