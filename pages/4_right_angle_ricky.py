@@ -450,6 +450,163 @@ def _render_tab_analysis(slate, edge, lu_state, sim_state) -> None:
 # Tab 1 (PGA) — PGA Edge Analysis powered by breakout signals
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# PGA Info Cards — Course Conditions, Weather, Wave, History
+# ---------------------------------------------------------------------------
+
+def _render_info_card(title: str, body_html: str, color: str, icon: str = "") -> None:
+    """Render an informational card with colored left border."""
+    header = f"{icon} {title}" if icon else title
+    html = (
+        f"<div style='background:rgba(255,255,255,0.06);border-radius:10px;"
+        f"padding:14px;border-left:3px solid {color};margin-bottom:6px;'>"
+        f"<h4 style='font-size:13px;margin:0 0 8px 0;color:{color};'>{header}</h4>"
+        f"<div style='font-size:12px;color:rgba(255,255,255,0.85);line-height:1.6;'>"
+        f"{body_html}</div></div>"
+    )
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def _render_pga_info_cards(pool: pd.DataFrame) -> None:
+    """Render 2x2 grid of course conditions, weather, wave, and history cards."""
+    attrs = pool.attrs if hasattr(pool, "attrs") else {}
+    has_any = False
+
+    # ── Prepare data ──────────────────────────────────────────────────
+    course_name = attrs.get("course_name", "")
+    course_city = attrs.get("course_city", "")
+    weather = attrs.get("weather", {})
+    has_weather = bool(weather.get("current"))
+    has_wave = "early_late_wave" in pool.columns
+    has_history = "course_history" in pool.columns and pool["course_history"].notna().any()
+
+    # Course-fit demands from decomposition variance
+    fit_demands = []
+    fit_cols = {
+        "driving_dist_adj": "Driving Distance",
+        "driving_acc_adj": "Driving Accuracy",
+        "approach_fit": "Approach Play",
+        "short_game_fit": "Short Game",
+        "course_history": "Course History",
+    }
+    for col, label in fit_cols.items():
+        if col in pool.columns:
+            var = pool[col].dropna().var()
+            if var and var > 0:
+                fit_demands.append((label, var))
+    fit_demands.sort(key=lambda x: x[1], reverse=True)
+    has_course = bool(course_name) or bool(fit_demands)
+
+    if not (has_course or has_weather or has_wave or has_history):
+        return
+
+    # ── Row 1: Course Conditions + Weather ─────────────────────────────
+    r1c1, r1c2 = st.columns(2)
+    with r1c1:
+        if has_course:
+            has_any = True
+            lines = []
+            if course_name:
+                loc = f" — {course_city}" if course_city else ""
+                lines.append(f"<b>{course_name}</b>{loc}")
+            if fit_demands:
+                top3 = [f[0] for f in fit_demands[:3]]
+                lines.append(f"Key demands: {', '.join(top3)}")
+            _render_info_card("Course Conditions", "<br>".join(lines), "#3b82f6", "⛳")
+        else:
+            st.empty()
+
+    with r1c2:
+        if has_weather:
+            has_any = True
+            cur = weather["current"]
+            daily = weather.get("daily", [])
+            lines = []
+            cond = cur.get("conditions", "")
+            lines.append(
+                f"Now: {cur.get('temp_f', '')}\u00b0F, "
+                f"{cur.get('wind_mph', '')} mph {cur.get('wind_dir', '')} wind, "
+                f"{cur.get('humidity', '')}% humidity"
+                + (f" — {cond}" if cond else "")
+            )
+            if daily:
+                rows_html = (
+                    "<table style='width:100%;font-size:11px;margin-top:6px;"
+                    "border-collapse:collapse;'>"
+                    "<tr style='color:rgba(255,255,255,0.5);'>"
+                    "<td>Day</td><td>Hi</td><td>Wind</td><td>Rain</td></tr>"
+                )
+                for d in daily[:4]:
+                    dt = d.get('date', '')[-5:]  # MM-DD
+                    rows_html += (
+                        f"<tr><td>{dt}</td>"
+                        f"<td>{d.get('high_f', '')}\u00b0</td>"
+                        f"<td>{d.get('wind_mph', '')} mph {d.get('wind_dir', '')}</td>"
+                        f"<td>{d.get('precip_chance', '')}%</td></tr>"
+                    )
+                rows_html += "</table>"
+                lines.append(rows_html)
+            ws = weather.get("wind_summary", "")
+            si = weather.get("scoring_impact", "")
+            if ws:
+                lines.append(f"\U0001f4a8 {ws}")
+            if si:
+                lines.append(f"\U0001f3af {si}")
+            _render_info_card("Weather", "<br>".join(lines), "#f59e0b", "\u2600\ufe0f")
+        else:
+            st.empty()
+
+    # ── Row 2: Wave Advantage + Course History ─────────────────────────
+    r2c1, r2c2 = st.columns(2)
+    with r2c1:
+        if has_wave:
+            has_any = True
+            wave_col = pool["early_late_wave"].fillna("")
+            early = pool[wave_col.str.lower().str.contains("early", na=False)]
+            late = pool[wave_col.str.lower().str.contains("late", na=False)]
+            lines = []
+            lines.append(
+                f"Early wave: {len(early)} players | "
+                f"Late wave: {len(late)} players"
+            )
+            lines.append(
+                "Morning wave typically 0.15-0.30 strokes easier "
+                "(firmer greens, less wind)"
+            )
+            if not early.empty and "proj" in early.columns:
+                top_e = early.nlargest(3, "proj")
+                names_e = ", ".join(top_e["player_name"].tolist())
+                lines.append(f"Top early: {names_e}")
+            if not late.empty and "proj" in late.columns:
+                top_l = late.nlargest(3, "proj")
+                names_l = ", ".join(top_l["player_name"].tolist())
+                lines.append(f"Top late: {names_l}")
+            _render_info_card("Wave Advantage", "<br>".join(lines), "#06b6d4", "\U0001f30a")
+        else:
+            st.empty()
+
+    with r2c2:
+        if has_history:
+            has_any = True
+            ch = pool[["player_name", "course_history"]].dropna(subset=["course_history"])
+            top5 = ch.nlargest(5, "course_history")
+            lines = []
+            for _, r in top5.iterrows():
+                adj = float(r["course_history"])
+                sign = "+" if adj >= 0 else ""
+                lines.append(f"{r['player_name']} ({sign}{adj:.1f} strokes)")
+            _render_info_card(
+                "Course History Leaders",
+                "<br>".join(lines) if lines else "No course history data",
+                "#8b5cf6", "\U0001f4ca",
+            )
+        else:
+            st.empty()
+
+    if has_any:
+        st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+
+
 def _render_tab_analysis_pga(slate, lu_state, sim_state) -> None:
     """Tab 1 for PGA: 2x2 dashboard boxes (Core/Leverage/Value/Fade)
     matching the NBA Edge Analysis layout, then top PGA GPP lineup."""
@@ -463,16 +620,48 @@ def _render_tab_analysis_pga(slate, lu_state, sim_state) -> None:
     if not _analysis["pool"].empty:
         pool = _analysis["pool"]
 
+    # ── Course / Weather / Wave / History info cards ───────────────
+    _render_pga_info_cards(pool)
+
     # Compute PGA breakout signals
     signals_df = compute_pga_breakout_signals(pool)
     event_name = pool.attrs.get("event_name", "") if hasattr(pool, "attrs") else ""
     overview = generate_pga_slate_overview(pool, signals_df, event_name=event_name)
 
-    # Slate overview bullets
-    for bullet in overview["bullets"]:
-        st.markdown(f"- {bullet}")
+    # Slate overview bullets as styled callouts
+    _bullet_colors = [
+        ("\U0001f4aa", "#f7931e"),   # SG Total - orange
+        ("\U0001f3af", "#4ade80"),   # Course Fits - green
+        ("\U0001f4b0", "#3b82f6"),   # Value - blue
+        ("\U0001f50d", "#a855f7"),   # Leverage - purple
+    ]
+    for i, bullet in enumerate(overview["bullets"]):
+        color = _bullet_colors[i][1] if i < len(_bullet_colors) else "rgba(255,255,255,0.3)"
+        st.markdown(
+            f"<div style='padding:6px 10px;margin-bottom:4px;border-radius:6px;"
+            f"border-left:3px solid {color};background:rgba(255,255,255,0.04);"
+            f"font-size:13px;'>{bullet}</div>",
+            unsafe_allow_html=True,
+        )
     if overview["recommendation"]:
-        st.info(overview["recommendation"])
+        rec = overview["recommendation"]
+        # Color based on signal strength
+        if "thin" in rec.lower() or "balanced" in rec.lower():
+            _rec_bg = "rgba(239,68,68,0.12)"
+            _rec_border = "#ef4444"
+        elif "strong" in rec.lower() or "5+" in rec:
+            _rec_bg = "rgba(74,222,128,0.12)"
+            _rec_border = "#4ade80"
+        else:
+            _rec_bg = "rgba(59,130,246,0.12)"
+            _rec_border = "#3b82f6"
+        st.markdown(
+            f"<div style='padding:10px 14px;margin-top:6px;border-radius:8px;"
+            f"background:{_rec_bg};border:1px solid {_rec_border};"
+            f"font-size:13px;font-style:italic;color:rgba(255,255,255,0.9);'>"
+            f"{rec}</div>",
+            unsafe_allow_html=True,
+        )
 
     st.divider()
 
@@ -1051,6 +1240,16 @@ def main() -> None:
         key="_rar_sport_toggle",
     )
     _is_pga = sport == "PGA"
+
+    # Sport mismatch guard — don't show wrong sport's data
+    _slate_sport = slate.sport if slate.sport else "NBA"
+    if sport != _slate_sport:
+        _status_strip(slate)
+        st.info(
+            f"No {sport} slate loaded. Load a {sport} pool in "
+            f"**The Lab** first."
+        )
+        return
 
     edge = get_edge_state()
     lu_state = get_lineup_state()

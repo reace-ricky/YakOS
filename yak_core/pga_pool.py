@@ -197,6 +197,47 @@ def build_pga_pool(
     pool.attrs["sport"] = "PGA"
     pool.attrs["site"] = site
 
+    # ── 9. Course metadata & weather ─────────────────────────────────
+    try:
+        from .weather import fetch_tournament_weather
+        schedule_df = dg.get_schedule(tour="pga")
+        if not schedule_df.empty and event_name:
+            # Try matching by event_name substring
+            _ev_words = event_name.lower().split()
+            _match = schedule_df[
+                schedule_df.apply(
+                    lambda r: any(
+                        w in str(r.get("event_name", r.get("name", ""))).lower()
+                        for w in _ev_words if len(w) > 3
+                    ),
+                    axis=1,
+                )
+            ]
+            if _match.empty:
+                _match = schedule_df.head(1)  # fallback
+            if not _match.empty:
+                _row = _match.iloc[0]
+                # Column names vary — try common variants
+                lat = float(_row.get("latitude", _row.get("lat", 0)))
+                lon = float(_row.get("longitude", _row.get("lon", _row.get("lng", 0))))
+                course = str(_row.get("course", _row.get("course_name", "")))
+                city = str(_row.get("city", _row.get("location", "")))
+                country = str(_row.get("country", ""))
+
+                if course:
+                    pool.attrs["course_name"] = course
+                pool.attrs["course_city"] = city
+                pool.attrs["course_country"] = country
+                pool.attrs["course_lat"] = lat
+                pool.attrs["course_lon"] = lon
+
+                if lat and lon:
+                    weather = fetch_tournament_weather(lat, lon)
+                    pool.attrs["weather"] = weather
+                    print(f"[pga_pool] Weather loaded for {city} ({lat:.2f}, {lon:.2f})")
+    except Exception as e:
+        print(f"[pga_pool] Course metadata/weather enrichment failed: {e}")
+
     # Filter to players with salary and projection
     pool = pool[(pool["salary"] > 0) & (pool["proj"] > 0)].reset_index(drop=True)
 

@@ -195,6 +195,27 @@ class DataGolfClient:
             return self._to_df(data)
         return self._to_df(data.get("players", data.get("rankings", [])))
 
+    # ── Tour Schedule ───────────────────────────────────────────────
+
+    def get_schedule(
+        self,
+        tour: str = "pga",
+        season: Optional[int] = None,
+    ) -> pd.DataFrame:
+        """Tour schedule with event names, course names, location coordinates.
+
+        Useful for enriching slates with lat/long (for weather) and course
+        metadata.  Columns typically include event_name, course, city,
+        country, latitude, longitude, start_date, end_date.
+        """
+        params: Dict[str, Any] = {"tour": tour}
+        if season is not None:
+            params["season"] = season
+        data = self._get("/get-schedule", params)
+        if isinstance(data, list):
+            return pd.DataFrame(data)
+        return pd.DataFrame(data.get("schedule", data.get("events", [])))
+
     # ── Player List ─────────────────────────────────────────────────
 
     def get_player_list(self) -> pd.DataFrame:
