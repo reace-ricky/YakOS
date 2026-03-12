@@ -1,0 +1,33 @@
+{
+  "sport": "PGA",
+  "date": "2026-03-12",
+  "core_names": [
+    "Scottie Scheffler",
+    "Rory McIlroy",
+    "Collin Morikawa",
+    "Si Woo Kim",
+    "Tommy Fleetwood"
+  ],
+  "leverage_names": [
+    "Aaron Rai",
+    "Ryan Gerard",
+    "Joel Dahmen",
+    "Christiaan Bezuidenhout",
+    "Rickie Fowler"
+  ],
+  "value_names": [
+    "Ricky Castillo",
+    "Sungjae Im",
+    "Haotong Li",
+    "Austin Smotherman",
+    "Taylor Moore"
+  ],
+  "fade_names": [
+    "Chris Gotterup",
+    "Jake Knapp",
+    "Ludvig Aberg",
+    "Xander Schauffele",
+    "Hideki Matsuyama"
+  ],
+  "calibration_slates": 13
+}

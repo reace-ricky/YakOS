@@ -1,0 +1,178 @@
+{
+  "bullets": [
+    "Anchor studs (5): Scottie Scheffler, Rory McIlroy, Collin Morikawa, Si Woo Kim, Tommy Fleetwood",
+    "Value plays (5): Ricky Castillo, Sungjae Im, Haotong Li, Austin Smotherman, Taylor Moore",
+    "Leverage plays (5): Aaron Rai, Ryan Gerard, Joel Dahmen, Christiaan Bezuidenhout, Rickie Fowler",
+    "Fade candidates: 5 players below edge threshold"
+  ],
+  "recommendation": "5 core + 5 value plays from 122 total \u2014 Strong edge slate.",
+  "core_plays": [
+    {
+      "player_name": "Scottie Scheffler",
+      "proj": 75.5,
+      "salary": 14200,
+      "ownership": 23.6,
+      "edge": 0.62,
+      "value": 5.32
+    },
+    {
+      "player_name": "Rory McIlroy",
+      "proj": 64.6,
+      "salary": 11700,
+      "ownership": 12.1,
+      "edge": 0.54,
+      "value": 5.52
+    },
+    {
+      "player_name": "Collin Morikawa",
+      "proj": 62.4,
+      "salary": 9800,
+      "ownership": 25.0,
+      "edge": 0.67,
+      "value": 6.37
+    },
+    {
+      "player_name": "Si Woo Kim",
+      "proj": 62.0,
+      "salary": 9300,
+      "ownership": 23.7,
+      "edge": 0.7,
+      "value": 6.67
+    },
+    {
+      "player_name": "Tommy Fleetwood",
+      "proj": 58.2,
+      "salary": 10300,
+      "ownership": 15.2,
+      "edge": 0.6,
+      "value": 5.65
+    }
+  ],
+  "leverage_plays": [
+    {
+      "player_name": "Aaron Rai",
+      "proj": 46.7,
+      "salary": 7200,
+      "ownership": 7.9,
+      "edge": 0.65,
+      "value": 6.49
+    },
+    {
+      "player_name": "Ryan Gerard",
+      "proj": 50.8,
+      "salary": 7400,
+      "ownership": 8.2,
+      "edge": 0.63,
+      "value": 6.86
+    },
+    {
+      "player_name": "Joel Dahmen",
+      "proj": 43.0,
+      "salary": 6100,
+      "ownership": 4.8,
+      "edge": 0.63,
+      "value": 7.05
+    },
+    {
+      "player_name": "Christiaan Bezuidenhout",
+      "proj": 47.1,
+      "salary": 7000,
+      "ownership": 6.0,
+      "edge": 0.63,
+      "value": 6.73
+    },
+    {
+      "player_name": "Rickie Fowler",
+      "proj": 52.2,
+      "salary": 7400,
+      "ownership": 12.8,
+      "edge": 0.62,
+      "value": 7.05
+    }
+  ],
+  "value_plays": [
+    {
+      "player_name": "Ricky Castillo",
+      "proj": 44.2,
+      "salary": 6200,
+      "ownership": 5.2,
+      "edge": 0.55,
+      "value": 7.13
+    },
+    {
+      "player_name": "Sungjae Im",
+      "proj": 40.3,
+      "salary": 6400,
+      "ownership": 3.1,
+      "edge": 0.55,
+      "value": 6.3
+    },
+    {
+      "player_name": "Haotong Li",
+      "proj": 40.1,
+      "salary": 6400,
+      "ownership": 3.0,
+      "edge": 0.53,
+      "value": 6.27
+    },
+    {
+      "player_name": "Austin Smotherman",
+      "proj": 39.3,
+      "salary": 6400,
+      "ownership": 2.5,
+      "edge": 0.53,
+      "value": 6.14
+    },
+    {
+      "player_name": "Taylor Moore",
+      "proj": 37.7,
+      "salary": 6200,
+      "ownership": 1.0,
+      "edge": 0.47,
+      "value": 6.08
+    }
+  ],
+  "fade_candidates": [
+    {
+      "player_name": "Chris Gotterup",
+      "proj": 47.0,
+      "salary": 9200,
+      "ownership": 10.3,
+      "edge": 0.46,
+      "value": 5.11
+    },
+    {
+      "player_name": "Jake Knapp",
+      "proj": 48.4,
+      "salary": 7600,
+      "ownership": 15.4,
+      "edge": 0.53,
+      "value": 6.37
+    },
+    {
+      "player_name": "Ludvig Aberg",
+      "proj": 53.1,
+      "salary": 8700,
+      "ownership": 23.3,
+      "edge": 0.55,
+      "value": 6.11
+    },
+    {
+      "player_name": "Xander Schauffele",
+      "proj": 56.9,
+      "salary": 9600,
+      "ownership": 14.0,
+      "edge": 0.55,
+      "value": 5.92
+    },
+    {
+      "player_name": "Hideki Matsuyama",
+      "proj": 53.8,
+      "salary": 9500,
+      "ownership": 12.5,
+      "edge": 0.56,
+      "value": 5.66
+    }
+  ],
+  "signals_df_path": "signals.parquet"
+}
