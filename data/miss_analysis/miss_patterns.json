@@ -1,50 +1,50 @@
 {
-  "computed_at": "2026-03-12T03:39:44.045329+00:00",
+  "computed_at": "2026-03-12T03:40:12.331354+00:00",
   "n_slates": 22,
-  "n_player_slates": 3524,
+  "n_player_slates": 3565,
   "classification": {
-    "pop": 770,
-    "bust": 660,
-    "inline": 2094,
-    "pop_rate": 0.219,
-    "bust_rate": 0.187
+    "pop": 774,
+    "bust": 669,
+    "inline": 2122,
+    "pop_rate": 0.217,
+    "bust_rate": 0.188
   },
   "factor_breakdown": {},
   "bracket_breakdown": {
     "lt5k": {
-      "n": 1978,
+      "n": 1993,
       "pop_rate": 0.254,
-      "bust_rate": 0.252,
+      "bust_rate": 0.251,
       "avg_residual": -0.0,
       "mae": 7.1
     },
     "5_65k": {
-      "n": 736,
-      "pop_rate": 0.212,
-      "bust_rate": 0.143,
+      "n": 740,
+      "pop_rate": 0.211,
+      "bust_rate": 0.146,
       "avg_residual": 0.4,
       "mae": 8.9
     },
     "65_8k": {
-      "n": 418,
-      "pop_rate": 0.16,
-      "bust_rate": 0.077,
-      "avg_residual": 0.4,
+      "n": 423,
+      "pop_rate": 0.161,
+      "bust_rate": 0.078,
+      "avg_residual": 0.3,
       "mae": 8.6
     },
     "8_10k": {
-      "n": 307,
-      "pop_rate": 0.111,
-      "bust_rate": 0.065,
-      "avg_residual": -0.5,
+      "n": 313,
+      "pop_rate": 0.109,
+      "bust_rate": 0.07,
+      "avg_residual": -0.7,
       "mae": 9.5
     },
     "10k_plus": {
-      "n": 85,
-      "pop_rate": 0.118,
-      "bust_rate": 0.047,
-      "avg_residual": 0.7,
-      "mae": 9.9
+      "n": 96,
+      "pop_rate": 0.104,
+      "bust_rate": 0.052,
+      "avg_residual": -0.3,
+      "mae": 9.8
     }
   },
   "top_pops": [
@@ -161,6 +161,16 @@
       "date": "2026-02-05"
     },
     {
+      "player": "Anthony Black",
+      "salary": 12000,
+      "proj": 36.3,
+      "actual": 4.2,
+      "residual": -32.1,
+      "ratio": 0.12,
+      "context": [],
+      "date": "2026-03-07"
+    },
+    {
       "player": "Jalen Johnson",
       "salary": 10800,
       "proj": 44.5,
@@ -189,6 +199,16 @@
       "ratio": 0.35,
       "context": [],
       "date": "2026-03-02"
+    },
+    {
+      "player": "Anthony Black",
+      "salary": 8000,
+      "proj": 32.3,
+      "actual": 4.2,
+      "residual": -28.0,
+      "ratio": 0.13,
+      "context": [],
+      "date": "2026-03-07"
     },
     {
       "player": "Jaylon Tyson",
@@ -229,31 +249,11 @@
       "ratio": 0.3,
       "context": [],
       "date": "2026-02-01"
-    },
-    {
-      "player": "Jaylon Tyson",
-      "salary": 6600,
-      "proj": 30.4,
-      "actual": 5.2,
-      "residual": -25.2,
-      "ratio": 0.17,
-      "context": [],
-      "date": "2026-02-20"
-    },
-    {
-      "player": "Collin Murray-Boyles",
-      "salary": 5700,
-      "proj": 29.0,
-      "actual": 4.0,
-      "residual": -25.0,
-      "ratio": 0.14,
-      "context": [],
-      "date": "2026-02-08"
     }
   ],
   "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-12T03:39:44.045308+00:00",
+    "computed_at": "2026-03-12T03:40:12.331332+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
