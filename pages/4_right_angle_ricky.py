@@ -1249,11 +1249,34 @@ def main() -> None:
         lu_state = get_lineup_state()
         sim_state = get_sim_state()
 
-    # Sport mismatch guard — check whether the chosen sport has data
+    # Sport mismatch guard — check whether the chosen sport has data.
+    # Fallback: if no in-memory data, try loading from disk (published files).
     _has_data = (
         slate.player_pool is not None
         and not slate.player_pool.empty
     )
+    if not _has_data and _is_pga:
+        from yak_core.pga_state import _pga_load_slate, _pga_load_edge, _pga_load_all_published  # noqa: PLC0415
+        try:
+            if _pga_load_slate(slate):
+                _has_data = slate.player_pool is not None and not slate.player_pool.empty
+            _pga_load_edge(edge)
+            _disk_pub = _pga_load_all_published()
+            if _disk_pub:
+                lu_state.published_sets.update(_disk_pub)
+        except Exception:
+            pass
+    elif not _has_data and not _is_pga:
+        from yak_core.lineup_store import load_slate as _nba_load_slate, load_edge as _nba_load_edge, load_all_published as _nba_load_all  # noqa: PLC0415
+        try:
+            if _nba_load_slate(slate):
+                _has_data = slate.player_pool is not None and not slate.player_pool.empty
+            _nba_load_edge(edge)
+            _disk_pub = _nba_load_all()
+            if _disk_pub:
+                lu_state.published_sets.update(_disk_pub)
+        except Exception:
+            pass
     if not _has_data:
         _status_strip(slate)
         st.info(

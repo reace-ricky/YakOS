@@ -34,6 +34,7 @@ from yak_core.pga_state import (  # noqa: E402
     get_sim_state,
     get_lineup_state, set_lineup_state,
     pga_publish,
+    _pga_save_slate, _pga_save_edge,
 )
 from yak_core.lineups import (  # noqa: E402
     build_multiple_lineups_with_exposure,
@@ -500,9 +501,16 @@ def main() -> None:
                     try:
                         _eff_edge_df = compute_edge_metrics(pool, calibration_state=slate.calibration_state)
                         slate.edge_df = _eff_edge_df
-                        set_slate_state(slate)
                     except Exception:
                         pass
+                slate.published = True
+                slate.published_at = _pub_ts
+                set_slate_state(slate)
+                try:
+                    _pga_save_slate(slate)
+                    _pga_save_edge(edge)
+                except Exception:
+                    pass
                 st.success(f"Published **{len(built_labels)}** lineup sets to Edge Share.")
 
     # ── View individual lineups ──────────────────────────────────────────
@@ -731,7 +739,14 @@ def main() -> None:
                                     calibration_state=slate.calibration_state,
                                 )
                                 slate.edge_df = _eff_edge_df
-                                set_slate_state(slate)
+                            slate.published = True
+                            slate.published_at = _ts
+                            set_slate_state(slate)
+                            try:
+                                _pga_save_slate(slate)
+                                _pga_save_edge(edge)
+                            except Exception:
+                                pass
                             payload = publish_edge_and_lineups(slate, _publish_df)
                             st.session_state["_pga_friends_payload"] = payload
                             st.success(

@@ -264,10 +264,11 @@ with col_contest:
 
 # Wave filter — target early/late tee-time waves (weather-impacted tournaments)
 _WAVE_OPTIONS = ["All Players", "Early Wave", "Late Wave"]
+if "_pga_wave_filter" not in st.session_state:
+    st.session_state["_pga_wave_filter"] = "All Players"
 _wave_selection = st.radio(
     "🌊 Wave Filter",
     _WAVE_OPTIONS,
-    index=_WAVE_OPTIONS.index(st.session_state.get("_pga_wave_filter", "All Players")),
     horizontal=True,
     key="_pga_wave_filter",
     help="Filter by tee-time wave. Early/Late come from DataGolf. Useful for weather-impacted tournaments.",
