@@ -1,5 +1,5 @@
 {
-  "computed_at": "2026-03-12T02:26:54.622777+00:00",
+  "computed_at": "2026-03-12T02:32:01.503493+00:00",
   "n_slates": 22,
   "n_player_slates": 3524,
   "classification": {
@@ -13,14 +13,14 @@
   "bracket_breakdown": {
     "lt5k": {
       "n": 1978,
-      "pop_rate": 0.255,
+      "pop_rate": 0.254,
       "bust_rate": 0.252,
       "avg_residual": -0.0,
       "mae": 7.1
     },
     "5_65k": {
       "n": 736,
-      "pop_rate": 0.211,
+      "pop_rate": 0.212,
       "bust_rate": 0.143,
       "avg_residual": 0.4,
       "mae": 8.9
@@ -253,7 +253,7 @@
   ],
   "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-12T02:26:54.622740+00:00",
+    "computed_at": "2026-03-12T02:32:01.503453+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
