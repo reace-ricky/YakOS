@@ -37,8 +37,10 @@ _API = f"https://api.github.com/repos/{_OWNER}/{_REPO}"
 
 # Files we want to persist (relative to repo root)
 _FEEDBACK_FILES = [
-    "data/calibration_feedback/slate_errors.json",
-    "data/calibration_feedback/correction_factors.json",
+    "data/calibration_feedback/nba/slate_errors.json",
+    "data/calibration_feedback/nba/correction_factors.json",
+    "data/calibration_feedback/pga/slate_errors.json",
+    "data/calibration_feedback/pga/correction_factors.json",
     "data/edge_feedback/signal_history.json",
     "data/edge_feedback/signal_weights.json",
     "data/contest_results/history.json",
