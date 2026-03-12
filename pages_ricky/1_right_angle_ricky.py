@@ -1,20 +1,16 @@
-"""Right Angle Ricky -- the public-facing page for friends.
+"""Right Angle Ricky — standalone page for friends.
+
+Reads ALL data from disk (``data/published/`` for NBA,
+``data/publish_pga/`` for PGA) via the existing persistence helpers.
+Each browser session is fully independent — no shared state with the
+main YakOS app.
 
 Two tabs:
+  Tab 1 — Ricky's Edge Analysis  (4-box dashboard + published lineups)
+  Tab 2 — Optimizer              (data_editor pool table + build)
 
-  Tab 1 – Ricky's Edge Analysis
-    Dashboard-style slate overview: core plays, leverage plays,
-    value plays, fades, then top GPP / Cash / Showdown lineup
-    from Build & Publish.  No prop plays.
-
-  Tab 2 – Optimizer
-    FantasyPros-style optimizer with st.data_editor player pool
-    table, inline Lock / Exclude checkboxes, contest-type-first
-    flow, build settings, summary metrics, paged lineup cards,
-    DK CSV export.
-
-State read:  SlateState, RickyEdgeState, LineupSetState, SimState
-State written: None (fully read-only — friend lineups stored in session_state only)
+NEW: star/select players from Edge Analysis → auto-Lock in Optimizer;
+     Fade players → auto-Exclude in Optimizer.
 """
 
 from __future__ import annotations
@@ -34,13 +30,7 @@ _repo_root = str(Path(__file__).resolve().parent.parent)
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
-from yak_core.state import (  # noqa: E402
-    get_slate_state,
-    get_edge_state,
-    get_lineup_state,
-    set_lineup_state,
-    get_sim_state,
-)
+from yak_core.state import SlateState, RickyEdgeState, LineupSetState, SimState  # noqa: E402
 from yak_core.components import render_premium_lineup_card, render_lineup_cards_paged  # noqa: E402
 from yak_core.edge_metrics import (  # noqa: E402
     compute_ricky_confidence_for_contest,
@@ -58,7 +48,6 @@ from yak_core.right_angle import (  # noqa: E402
     apply_edge_adjustments,
     compute_breakout_candidates,
 )
-from yak_core.context import get_lab_analysis  # noqa: E402
 from yak_core.display_format import normalise_ownership, standard_player_format  # noqa: E402
 from yak_core.lineups import (  # noqa: E402
     build_multiple_lineups_with_exposure,
@@ -69,9 +58,24 @@ from yak_core.lineups import (  # noqa: E402
 )
 from yak_core.calibration import apply_archetype, DFS_ARCHETYPES  # noqa: E402
 from yak_core.edge import compute_edge_metrics  # noqa: E402
+from yak_core.lineup_store import (  # noqa: E402
+    load_all_published,
+    load_slate,
+    load_edge,
+    clear_published,
+)
+from yak_core.pga_state import (  # noqa: E402
+    _pga_load_all_published,
+    _pga_load_slate,
+    _pga_load_edge,
+    _pga_clear_published,
+)
+
+# ── Session-state key prefix (unique to standalone app) ──────────────
+_K = "_ricky_sa_"
 
 # ---------------------------------------------------------------------------
-# Contest display helpers
+# Contest display helpers (same as main app)
 # ---------------------------------------------------------------------------
 
 _CONTEST_ORDER = [UI_CONTEST_MAP[k] for k in UI_CONTEST_LABELS]
@@ -85,7 +89,6 @@ _CONTEST_TO_BUILD_MODE = {
 }
 _BUILD_MODE_PROJ_COL = {"floor": "floor", "median": "proj", "ceiling": "proj"}
 
-# NBA positions for filter tabs
 _NBA_POS_FILTERS = ["All", "PG", "SG", "SF", "PF", "C"]
 
 # ---------------------------------------------------------------------------
@@ -105,9 +108,172 @@ _RICKY_LINES = [
 
 
 def _ricky_quote() -> str:
-    seed = st.session_state.get("_ricky_seed", "default")
+    seed = st.session_state.get(f"{_K}seed", "default")
     idx = int(_hl.md5(str(seed).encode()).hexdigest(), 16) % len(_RICKY_LINES)
     return _RICKY_LINES[idx]
+
+
+# ---------------------------------------------------------------------------
+# Disk-based data loading (cached 60s)
+# ---------------------------------------------------------------------------
+
+@st.cache_data(ttl=60)
+def _load_nba_slate_data() -> Dict[str, Any]:
+    """Load NBA slate state from data/published/."""
+    slate = SlateState()
+    ok = load_slate(slate)
+    if not ok:
+        return {"ok": False, "slate_dict": {}, "pool": pd.DataFrame()}
+    return {
+        "ok": True,
+        "slate_dict": {
+            "sport": slate.sport, "site": slate.site,
+            "slate_date": slate.slate_date,
+            "contest_name": slate.contest_name,
+            "contest_type": slate.contest_type,
+            "is_showdown": slate.is_showdown,
+            "roster_slots": slate.roster_slots,
+            "lineup_size": slate.lineup_size,
+            "salary_cap": slate.salary_cap,
+            "captain_multiplier": slate.captain_multiplier,
+            "proj_source": slate.proj_source,
+            "published": slate.published,
+            "published_at": slate.published_at,
+            "active_layers": slate.active_layers,
+            "selected_games": slate.selected_games,
+            "calibration_state": slate.calibration_state,
+        },
+        "pool": slate.player_pool if slate.player_pool is not None else pd.DataFrame(),
+        "edge_df": slate.edge_df if slate.edge_df is not None else pd.DataFrame(),
+    }
+
+
+@st.cache_data(ttl=60)
+def _load_nba_edge_data() -> Dict[str, Any]:
+    """Load NBA edge state from data/published/."""
+    edge = RickyEdgeState()
+    ok = load_edge(edge)
+    if not ok:
+        return {"ok": False}
+    return {
+        "ok": True,
+        "player_tags": edge.player_tags,
+        "game_tags": edge.game_tags,
+        "stacks": edge.stacks,
+        "edge_labels": edge.edge_labels,
+        "slate_notes": edge.slate_notes,
+        "ricky_edge_check": edge.ricky_edge_check,
+        "edge_check_ts": edge.edge_check_ts,
+        "approved_not_with_pairs": edge.approved_not_with_pairs,
+        "auto_tags": edge.auto_tags,
+        "auto_tag_reasons": edge.auto_tag_reasons,
+        "confidence_scores": edge.confidence_scores,
+        "player_tags_manual": edge.player_tags_manual,
+        "edge_analysis_by_contest": edge.edge_analysis_by_contest,
+    }
+
+
+@st.cache_data(ttl=60)
+def _load_nba_lineups() -> Dict[str, Dict[str, Any]]:
+    return load_all_published()
+
+
+@st.cache_data(ttl=60)
+def _load_pga_slate_data() -> Dict[str, Any]:
+    """Load PGA slate state from data/publish_pga/."""
+    slate = SlateState(sport="PGA")
+    ok = _pga_load_slate(slate)
+    if not ok:
+        return {"ok": False, "slate_dict": {}, "pool": pd.DataFrame()}
+    return {
+        "ok": True,
+        "slate_dict": {
+            "sport": slate.sport, "site": slate.site,
+            "slate_date": slate.slate_date,
+            "contest_name": slate.contest_name,
+            "contest_type": slate.contest_type,
+            "is_showdown": slate.is_showdown,
+            "roster_slots": slate.roster_slots,
+            "lineup_size": slate.lineup_size,
+            "salary_cap": slate.salary_cap,
+            "captain_multiplier": slate.captain_multiplier,
+            "proj_source": slate.proj_source,
+            "published": slate.published,
+            "published_at": slate.published_at,
+            "active_layers": slate.active_layers,
+            "selected_games": slate.selected_games,
+            "calibration_state": slate.calibration_state,
+        },
+        "pool": slate.player_pool if slate.player_pool is not None else pd.DataFrame(),
+        "edge_df": slate.edge_df if slate.edge_df is not None else pd.DataFrame(),
+    }
+
+
+@st.cache_data(ttl=60)
+def _load_pga_edge_data() -> Dict[str, Any]:
+    """Load PGA edge state from data/publish_pga/."""
+    edge = RickyEdgeState()
+    ok = _pga_load_edge(edge)
+    if not ok:
+        return {"ok": False}
+    return {
+        "ok": True,
+        "player_tags": edge.player_tags,
+        "game_tags": edge.game_tags,
+        "stacks": edge.stacks,
+        "edge_labels": edge.edge_labels,
+        "slate_notes": edge.slate_notes,
+        "ricky_edge_check": edge.ricky_edge_check,
+        "edge_check_ts": edge.edge_check_ts,
+        "approved_not_with_pairs": edge.approved_not_with_pairs,
+        "auto_tags": edge.auto_tags,
+        "auto_tag_reasons": edge.auto_tag_reasons,
+        "confidence_scores": edge.confidence_scores,
+        "player_tags_manual": edge.player_tags_manual,
+        "edge_analysis_by_contest": edge.edge_analysis_by_contest,
+    }
+
+
+@st.cache_data(ttl=60)
+def _load_pga_lineups() -> Dict[str, Dict[str, Any]]:
+    return _pga_load_all_published()
+
+
+def _hydrate_slate(data: Dict[str, Any]) -> SlateState:
+    """Reconstruct a SlateState from cached dict data."""
+    slate = SlateState()
+    d = data.get("slate_dict", {})
+    for k, v in d.items():
+        if hasattr(slate, k):
+            setattr(slate, k, v)
+    pool = data.get("pool", pd.DataFrame())
+    if not pool.empty:
+        slate.player_pool = pool
+    edge_df = data.get("edge_df", pd.DataFrame())
+    if not edge_df.empty:
+        slate.edge_df = edge_df
+    return slate
+
+
+def _hydrate_edge(data: Dict[str, Any]) -> RickyEdgeState:
+    """Reconstruct a RickyEdgeState from cached dict data."""
+    edge = RickyEdgeState()
+    for k in (
+        "player_tags", "game_tags", "stacks", "edge_labels", "slate_notes",
+        "ricky_edge_check", "edge_check_ts", "approved_not_with_pairs",
+        "auto_tags", "auto_tag_reasons", "confidence_scores",
+        "player_tags_manual", "edge_analysis_by_contest",
+    ):
+        if k in data:
+            setattr(edge, k, data[k])
+    return edge
+
+
+def _hydrate_lineup_state(published: Dict[str, Dict[str, Any]]) -> LineupSetState:
+    """Reconstruct a LineupSetState from cached published data."""
+    ls = LineupSetState()
+    ls.published_sets = published
+    return ls
 
 
 # ---------------------------------------------------------------------------
@@ -117,31 +283,24 @@ def _ricky_quote() -> str:
 _ADMIN_PIN = st.secrets.get("ADMIN_PIN", "2018")
 
 
-def _render_admin_clear(key_suffix: str, slate, lu_state, sim_state) -> None:
-    """Pin-protected clear button. Only shows the wipe action after correct pin."""
+def _render_admin_clear(key_suffix: str, sport: str) -> None:
+    """Pin-protected clear button for standalone app."""
     with st.expander("\u2699\ufe0f Admin", expanded=False):
         pin = st.text_input(
             "Enter PIN to clear", type="password",
-            key=f"_rar_pin_{key_suffix}", max_chars=4,
+            key=f"{_K}pin_{key_suffix}", max_chars=4,
         )
         if pin and pin == _ADMIN_PIN:
             if st.button(
                 "\U0001f5d1\ufe0f Clear All Published Data",
-                key=f"_rar_clear_pub_{key_suffix}",
+                key=f"{_K}clear_pub_{key_suffix}",
                 type="secondary",
             ):
-                from yak_core.lineup_store import clear_published
-                from yak_core.state import set_slate_state, set_edge_state
-                clear_published()
-                lu_state.published_sets.clear()
-                set_lineup_state(lu_state)
-                slate.published = False
-                slate.player_pool = None
-                set_slate_state(slate)
-                edge_obj = get_edge_state()
-                edge_obj.ricky_edge_check = False
-                edge_obj.edge_analysis_by_contest.clear()
-                set_edge_state(edge_obj)
+                if sport == "PGA":
+                    _pga_clear_published()
+                else:
+                    clear_published()
+                st.cache_data.clear()
                 st.rerun()
         elif pin:
             st.error("Wrong PIN.")
@@ -151,8 +310,7 @@ def _render_admin_clear(key_suffix: str, slate, lu_state, sim_state) -> None:
 # Shared UI helpers
 # ---------------------------------------------------------------------------
 
-def _status_strip(slate) -> None:
-    """Compact one-line slate header."""
+def _status_strip(slate: SlateState) -> None:
     parts = []
     if slate.sport:
         parts.append(f"**{slate.sport}**")
@@ -164,12 +322,10 @@ def _status_strip(slate) -> None:
         st.caption(" \u00b7 ".join(parts))
 
 
-def _confidence_pills(edge) -> None:
-    """Render compact confidence pills across contests that have data."""
+def _confidence_pills(edge: RickyEdgeState) -> None:
     available = [c for c in _CONTEST_ORDER if c in edge.edge_analysis_by_contest]
     if not available:
         return
-
     cols = st.columns(len(available))
     for col, contest_label in zip(cols, available, strict=True):
         payload = edge.edge_analysis_by_contest[contest_label]
@@ -192,30 +348,18 @@ def _confidence_pills(edge) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tab 1 helpers — best lineup from Build & Publish
+# Tab 1 helpers — best lineup from published
 # ---------------------------------------------------------------------------
 
-def _get_best_lineup(lu_state, sim_state, contest_label: str) -> tuple:
-    """Return (lineup_rows_df, sim_metrics_dict, boom_bust_dict) for the #1 lineup."""
-    # Check published sets first, then fall back to built lineups
+def _get_best_lineup(lu_state: LineupSetState, contest_label: str) -> tuple:
     pub = lu_state.published_sets.get(contest_label)
-    if pub is not None:
-        pub_df = pub.get("lineups_df", pd.DataFrame())
-        boom_bust_df = pub.get("boom_bust_df")
-    else:
-        # Fall back to built (unpublished) lineups
-        pub_df = lu_state.lineups.get(contest_label, pd.DataFrame())
-        boom_bust_df = lu_state.get_boom_bust(contest_label) if hasattr(lu_state, "get_boom_bust") else None
-
+    if pub is None:
+        return None, None, None
+    pub_df = pub.get("lineups_df", pd.DataFrame())
+    boom_bust_df = pub.get("boom_bust_df")
     if pub_df is None or pub_df.empty:
         return None, None, None
 
-    pipeline_df = (
-        sim_state.pipeline_output.get(contest_label)
-        or sim_state.pipeline_output.get("GPP_20")
-    )
-
-    # Pick the best lineup — prefer highest boom_score
     best_idx = 0
     if boom_bust_df is not None and not boom_bust_df.empty and "lineup_index" in boom_bust_df.columns:
         if "boom_score" in boom_bust_df.columns:
@@ -227,34 +371,24 @@ def _get_best_lineup(lu_state, sim_state, contest_label: str) -> tuple:
 
     lu_rows = pub_df[pub_df["lineup_index"] == best_idx] if "lineup_index" in pub_df.columns else pub_df
 
-    sim_metrics = {}
-    if pipeline_df is not None and not pipeline_df.empty and "lineup_index" in pipeline_df.columns:
-        match = pipeline_df[pipeline_df["lineup_index"] == best_idx]
-        if not match.empty:
-            sim_metrics = match.iloc[0].to_dict()
-
     bb_row = None
     if boom_bust_df is not None and not boom_bust_df.empty and "lineup_index" in boom_bust_df.columns:
         bb_match = boom_bust_df[boom_bust_df["lineup_index"] == best_idx]
         if not bb_match.empty:
             bb_row = bb_match.iloc[0].to_dict()
 
-    return lu_rows, sim_metrics or None, bb_row
+    return lu_rows, None, bb_row
 
-
-# ===========================================================================
-# TAB 1 — RICKY'S EDGE ANALYSIS (Dashboard-style)
-# ===========================================================================
 
 # ---------------------------------------------------------------------------
-# HTML card renderer for the 4-box dashboard layout
+# HTML card renderer
 # ---------------------------------------------------------------------------
 
 _CARD_COLORS = {
-    "core": "#f7931e",       # orange
-    "leverage": "#a855f7",   # purple
-    "value": "#4ade80",      # green
-    "fade": "#ef4444",       # red
+    "core": "#f7931e",
+    "leverage": "#a855f7",
+    "value": "#4ade80",
+    "fade": "#ef4444",
 }
 
 
@@ -265,14 +399,6 @@ def _render_play_card(
     badge_label: str,
     stat_format: str = "proj_salary",
 ) -> None:
-    """Render a dashboard-style play card as HTML inside a Streamlit container.
-
-    stat_format:
-      'proj_salary' -> "48.9 pts | $9,400"
-      'value'       -> "$4,400 | 5.95 pts/$1K"
-      'proj_val'    -> "27.6 pts | 4.68 val"
-    """
-    # Badge text color — dark for bright backgrounds, white for dark ones
     _badge_text = {"#4ade80": "#000", "#f7931e": "#000"}
     badge_fg = _badge_text.get(color, "#fff")
 
@@ -322,39 +448,19 @@ def _render_play_card(
     st.markdown(html, unsafe_allow_html=True)
 
 
-def _render_tab_analysis(slate, edge, lu_state, sim_state) -> None:
-    """Tab 1: Dashboard-style — 4 play-type boxes (2x2) then
-    top GPP/Cash/Showdown lineups as rows."""
+# ---------------------------------------------------------------------------
+# Classify players into 4 buckets (NBA)
+# ---------------------------------------------------------------------------
 
-    has_pool = slate.player_pool is not None and not slate.player_pool.empty
-    if not has_pool:
-        st.info("No player pool available. Load a slate in The Lab first.")
-        return
+def _safe_col(frame: pd.DataFrame, name: str, default: float = 0) -> pd.Series:
+    if name in frame.columns:
+        return pd.to_numeric(frame[name], errors="coerce").fillna(default)
+    return pd.Series(default, index=frame.index)
 
-    pool = slate.player_pool.copy()
-    _analysis = get_lab_analysis()
-    if not _analysis["pool"].empty:
-        pool = _analysis["pool"]
 
-    # ── Compute signals ───────────────────────────────────────────────
-    signals_df = compute_ricky_signals(pool)
-    contest_type = slate.contest_name or "GPP"
-    overview = generate_slate_overview(pool, signals_df, contest_type=contest_type)
-
-    # Slate overview bullets + recommendation
-    for bullet in overview["bullets"]:
-        st.markdown(f"- {bullet}")
-    if overview["recommendation"]:
-        st.info(overview["recommendation"])
-
-    st.divider()
-
-    # ── Classify players into 4 buckets ───────────────────────────────
+def _classify_nba(signals_df: pd.DataFrame):
+    """Return (core, leverage, value, fades) DataFrames for NBA."""
     sdf = signals_df.copy()
-    def _safe_col(frame, name, default=0):
-        if name in frame.columns:
-            return pd.to_numeric(frame[name], errors="coerce").fillna(default)
-        return pd.Series(default, index=frame.index)
     _sal = _safe_col(sdf, "salary")
     _proj = _safe_col(sdf, "proj")
     _own_col = "ownership" if "ownership" in sdf.columns else "own_pct"
@@ -367,107 +473,75 @@ def _render_tab_analysis(slate, edge, lu_state, sim_state) -> None:
     sdf["_edge"] = _edge
     sdf["_val"] = _val
 
-    # Core (Chalk): top projected players, $7K+ salary
     core = sdf[sdf["_sal"] >= 7000].nlargest(5, "_proj")
     _used = set(core["player_name"].tolist())
 
-    # Leverage (GPP Gold): best edge, low ownership (<15%), not in core
     _lev_pool = sdf[(sdf["_own"] < 15) & (~sdf["player_name"].isin(_used))]
     leverage = _lev_pool.nlargest(5, "_edge")
     _used.update(leverage["player_name"].tolist())
 
-    # Value (Salary Savers): best pts/$1K, under $6.5K, not already used
     _val_pool = sdf[(sdf["_sal"] < 6500) & (sdf["_sal"] > 0) & (~sdf["player_name"].isin(_used))]
     value = _val_pool.nlargest(5, "_val")
     _used.update(value["player_name"].tolist())
 
-    # Fades: overvalued players — high ownership or high salary but weak edge
-    # Try high-own first; if too few, fall back to high-salary + low-edge
     _fade_pool = sdf[~sdf["player_name"].isin(_used)].copy()
     _fade_high_own = _fade_pool[_fade_pool["_own"] >= 10]
     if len(_fade_high_own) >= 3:
         fades = _fade_high_own.nsmallest(5, "_edge")
     else:
-        # Fallback: expensive players ($5K+) with weakest edge signal
         _fade_sal = _fade_pool[_fade_pool["_sal"] >= 5000]
         fades = _fade_sal.nsmallest(5, "_edge") if not _fade_sal.empty else _fade_pool.nsmallest(5, "_edge")
 
-    # ── 4-box layout (2x2) ────────────────────────────────────────────
-    row1_c1, row1_c2 = st.columns(2)
-    with row1_c1:
-        _render_play_card(
-            "CORE PLAYS (Chalk)", core, _CARD_COLORS["core"],
-            "CHALK", stat_format="proj_salary",
-        )
-    with row1_c2:
-        _render_play_card(
-            "LEVERAGE PLAYS (GPP Gold)", leverage, _CARD_COLORS["leverage"],
-            "UNDEROWNED", stat_format="proj_val",
-        )
+    return core, leverage, value, fades
 
-    st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
 
-    row2_c1, row2_c2 = st.columns(2)
-    with row2_c1:
-        _render_play_card(
-            "VALUE PLAYS (Salary Savers)", value, _CARD_COLORS["value"],
-            "VALUE", stat_format="value",
-        )
-    with row2_c2:
-        _render_play_card(
-            "FADE CANDIDATES", fades, _CARD_COLORS["fade"],
-            "FADE", stat_format="proj_salary",
-        )
+def _classify_pga(signals_df: pd.DataFrame):
+    """Return (core, leverage, value, fades) DataFrames for PGA."""
+    sdf = signals_df.copy()
+    _sal = _safe_col(sdf, "salary")
+    _proj = _safe_col(sdf, "proj")
+    _own_col = "ownership" if "ownership" in sdf.columns else "own_pct"
+    _own = normalise_ownership(_safe_col(sdf, _own_col))
+    _edge_col = "pga_edge_composite" if "pga_edge_composite" in sdf.columns else "edge_composite"
+    _edge = _safe_col(sdf, _edge_col)
+    _val = np.where(_sal > 0, _proj / (_sal / 1000), 0)
+    sdf["_sal"] = _sal
+    sdf["_proj"] = _proj
+    sdf["_own"] = _own
+    sdf["_edge"] = _edge
+    sdf["_val"] = _val
 
-    # ── Top lineups from Build & Publish (GPP / Cash / Showdown) ──────
-    _lineup_data = []
-    for contest_label in _CONTEST_ORDER:
-        lu_rows, sim_metrics, bb_row = _get_best_lineup(lu_state, sim_state, contest_label)
-        if lu_rows is not None and not lu_rows.empty:
-            short = _LABEL_SHORT.get(contest_label, contest_label)
-            _lineup_data.append((contest_label, short, lu_rows, sim_metrics, bb_row))
+    core = sdf[sdf["_sal"] >= 8000].nlargest(5, "_proj")
+    _used = set(core["player_name"].tolist())
 
-    if _lineup_data:
-        st.divider()
-        # Render lineups 2 per row to reduce dead space
-        for i in range(0, len(_lineup_data), 2):
-            chunk = _lineup_data[i:i + 2]
-            cols = st.columns(len(chunk))
-            for col, (contest_label, short, lu_rows, sim_metrics, bb_row) in zip(cols, chunk):
-                with col:
-                    render_premium_lineup_card(
-                        lineup_rows=lu_rows,
-                        sim_metrics=sim_metrics,
-                        lineup_label=f"Top {short}",
-                        salary_cap=slate.salary_cap,
-                        boom_bust_row=bb_row,
-                        compact=True,
-                    )
+    _lev_pool = sdf[(sdf["_own"] < 15) & (~sdf["player_name"].isin(_used))]
+    leverage = _lev_pool.nlargest(5, "_edge")
+    _used.update(leverage["player_name"].tolist())
 
-        _render_admin_clear("nba", slate, lu_state, sim_state)
+    _val_pool = sdf[(sdf["_sal"] < 7500) & (sdf["_sal"] > 0) & (~sdf["player_name"].isin(_used))]
+    value = _val_pool.nlargest(5, "_val")
+    _used.update(value["player_name"].tolist())
+
+    _fade_pool = sdf[~sdf["player_name"].isin(_used)].copy()
+    _fade_high_own = _fade_pool[_fade_pool["_own"] >= 10]
+    if len(_fade_high_own) >= 3:
+        fades = _fade_high_own.nsmallest(5, "_edge")
+    else:
+        _fade_sal = _fade_pool[_fade_pool["_sal"] >= 7000]
+        fades = _fade_sal.nsmallest(5, "_edge") if not _fade_sal.empty else _fade_pool.nsmallest(5, "_edge")
+
+    return core, leverage, value, fades
 
 
 # ---------------------------------------------------------------------------
-# Tab 1 (PGA) — PGA Edge Analysis powered by breakout signals
+# PGA info cards (course, weather, waves, history)
 # ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# PGA Info Cards — Course & Weather environment strip
-# ---------------------------------------------------------------------------
-
 
 def _render_pga_info_cards(pool: pd.DataFrame) -> None:
-    """Compact course-environment strip above the edge analysis.
-
-    Only renders cards that have meaningful data.  Cards are grouped
-    into a single row that flexes 1-4 columns depending on availability.
-    """
     attrs = pool.attrs if hasattr(pool, "attrs") else {}
+    cards: list[tuple[str, str, str]] = []
 
-    # ── Gather cards ──────────────────────────────────────────────
-    cards: list[tuple[str, str, str]] = []  # (title, body_html, color)
-
-    # 1. Course + Conditions (merged into one tight card)
+    # 1. Course
     course_name = attrs.get("course_name", "")
     course_city = attrs.get("course_city", "")
     fit_cols = {
@@ -489,7 +563,7 @@ def _render_pga_info_cards(pool: pd.DataFrame) -> None:
             body += f"<br><span style='color:rgba(255,255,255,0.5);font-size:11px;'>Key demands: {tags}</span>"
         cards.append(("⛳ Course", body, "#3b82f6"))
 
-    # 2. Weather (compact — current + wind note + rain flag)
+    # 2. Weather
     weather = attrs.get("weather", {})
     cur = weather.get("current", {})
     daily = weather.get("daily", [])
@@ -501,24 +575,22 @@ def _render_pga_info_cards(pool: pd.DataFrame) -> None:
         body = f"{temp}\u00b0F &middot; {wind} mph {wdir}"
         if cond:
             body += f" &middot; {cond}"
-        # Forecast mini-row: just Thu-Sun hi/wind/rain in one tight line
         if daily:
             rows = []
             for d in daily[:4]:
-                dt = d.get("date", "")[-5:]  # MM-DD
+                dt = d.get("date", "")[-5:]
                 hi = d.get("high_f", "")
                 dw = d.get("wind_mph", "")
                 rain = d.get("precip_chance", 0)
                 rain_flag = " \U0001f327\ufe0f" if int(rain or 0) >= 40 else ""
                 rows.append(f"{dt}: {hi}\u00b0 / {dw}mph{rain_flag}")
             body += "<br><span style='color:rgba(255,255,255,0.45);font-size:11px;'>" + " &nbsp;|&nbsp; ".join(rows) + "</span>"
-        # Scoring impact
         si = weather.get("scoring_impact", "")
         if si:
             body += f"<br><span style='font-size:11px;color:#f59e0b;'>{si}</span>"
         cards.append(("\u2600\ufe0f Weather", body, "#f59e0b"))
 
-    # 3. Wave split — only if there is actual wave data with players
+    # 3. Wave split
     if "early_late_wave" in pool.columns:
         wave_str = pool["early_late_wave"].astype(str).str.strip().str.lower()
         n_early = wave_str.str.contains("early", na=False).sum()
@@ -526,7 +598,6 @@ def _render_pga_info_cards(pool: pd.DataFrame) -> None:
         if n_early > 0 or n_late > 0:
             body = f"Early: {n_early} &middot; Late: {n_late}"
             body += "<br><span style='color:rgba(255,255,255,0.45);font-size:11px;'>AM wave typically 0.15-0.30 strokes easier</span>"
-            # Top projected per wave
             early_df = pool[wave_str.str.contains("early", na=False)]
             late_df = pool[wave_str.str.contains("late", na=False)]
             parts = []
@@ -540,10 +611,10 @@ def _render_pga_info_cards(pool: pd.DataFrame) -> None:
                 body += "<br><span style='font-size:11px;'>" + " &nbsp;|&nbsp; ".join(parts) + "</span>"
             cards.append(("\U0001f30a Waves", body, "#06b6d4"))
 
-    # 4. Course history — only if meaningful adjustments (> 0.2 strokes)
+    # 4. Course history
     if "course_history" in pool.columns:
         ch = pool[["player_name", "course_history"]].dropna(subset=["course_history"])
-        ch = ch[ch["course_history"].abs() >= 0.2]  # filter noise
+        ch = ch[ch["course_history"].abs() >= 0.2]
         if not ch.empty:
             top = ch.nlargest(4, "course_history")
             items = []
@@ -556,7 +627,6 @@ def _render_pga_info_cards(pool: pd.DataFrame) -> None:
     if not cards:
         return
 
-    # ── Render ────────────────────────────────────────────────────
     cols = st.columns(len(cards))
     for col, (title, body, color) in zip(cols, cards):
         with col:
@@ -572,37 +642,161 @@ def _render_pga_info_cards(pool: pd.DataFrame) -> None:
     st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
 
 
-def _render_tab_analysis_pga(slate, lu_state, sim_state) -> None:
-    """Tab 1 for PGA: 2x2 dashboard boxes (Core/Leverage/Value/Fade)
-    matching the NBA Edge Analysis layout, then top PGA GPP lineup."""
+# ---------------------------------------------------------------------------
+# Player star/select widget (NEW FEATURE)
+# ---------------------------------------------------------------------------
+
+def _render_player_star_select(
+    core: pd.DataFrame,
+    leverage: pd.DataFrame,
+    value: pd.DataFrame,
+    fades: pd.DataFrame,
+) -> None:
+    """Multiselect widget below the 4-box grid for starring players.
+
+    Updates ``_ricky_sa_starred_players`` and ``_ricky_sa_fade_players``
+    in session state.
+    """
+    # Collect candidate players (core + leverage + value — NOT fades)
+    candidate_names = []
+    for df in [core, leverage, value]:
+        if not df.empty and "player_name" in df.columns:
+            candidate_names.extend(df["player_name"].tolist())
+    candidate_names = list(dict.fromkeys(candidate_names))  # preserve order, dedupe
+
+    # Collect fade players
+    fade_names = []
+    if not fades.empty and "player_name" in fades.columns:
+        fade_names = fades["player_name"].tolist()
+
+    # Always store fade_players
+    st.session_state[f"{_K}fade_players"] = set(fade_names)
+
+    if not candidate_names:
+        return
+
+    prev_starred = st.session_state.get(f"{_K}starred_players", set())
+    # Filter previous starred to only include currently valid candidates
+    valid_prev = [p for p in prev_starred if p in candidate_names]
+
+    starred = st.multiselect(
+        "\u2b50 Select players for Optimizer",
+        options=candidate_names,
+        default=valid_prev,
+        key=f"{_K}star_multiselect",
+    )
+    st.session_state[f"{_K}starred_players"] = set(starred)
+
+    if starred:
+        st.caption(
+            f"\u2b50 {len(starred)} player{'s' if len(starred) != 1 else ''} "
+            f"selected for optimizer: {', '.join(starred)}"
+        )
+
+
+# ===========================================================================
+# TAB 1 — EDGE ANALYSIS (NBA)
+# ===========================================================================
+
+def _render_tab_analysis_nba(
+    slate: SlateState,
+    edge: RickyEdgeState,
+    lu_state: LineupSetState,
+) -> None:
     has_pool = slate.player_pool is not None and not slate.player_pool.empty
     if not has_pool:
-        st.info("No PGA slate loaded yet. Load a PGA pool in The Lab first.")
+        st.info("No player pool available. Publish a slate from the main app first.")
         return
 
     pool = slate.player_pool.copy()
-    _analysis = get_lab_analysis()
-    if not _analysis["pool"].empty:
-        pool = _analysis["pool"]
 
-    # ── Course / Weather / Wave / History info cards ───────────────
+    signals_df = compute_ricky_signals(pool)
+    contest_type = slate.contest_name or "GPP"
+    overview = generate_slate_overview(pool, signals_df, contest_type=contest_type)
+
+    for bullet in overview["bullets"]:
+        st.markdown(f"- {bullet}")
+    if overview["recommendation"]:
+        st.info(overview["recommendation"])
+
+    st.divider()
+
+    core, leverage, value, fades = _classify_nba(signals_df)
+
+    # 4-box layout
+    row1_c1, row1_c2 = st.columns(2)
+    with row1_c1:
+        _render_play_card("CORE PLAYS (Chalk)", core, _CARD_COLORS["core"], "CHALK", stat_format="proj_salary")
+    with row1_c2:
+        _render_play_card("LEVERAGE PLAYS (GPP Gold)", leverage, _CARD_COLORS["leverage"], "UNDEROWNED", stat_format="proj_val")
+
+    st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
+
+    row2_c1, row2_c2 = st.columns(2)
+    with row2_c1:
+        _render_play_card("VALUE PLAYS (Salary Savers)", value, _CARD_COLORS["value"], "VALUE", stat_format="value")
+    with row2_c2:
+        _render_play_card("FADE CANDIDATES", fades, _CARD_COLORS["fade"], "FADE", stat_format="proj_salary")
+
+    # NEW: Star/select players for optimizer
+    _render_player_star_select(core, leverage, value, fades)
+
+    # Published lineups
+    _lineup_data = []
+    for contest_label in _CONTEST_ORDER:
+        lu_rows, sim_metrics, bb_row = _get_best_lineup(lu_state, contest_label)
+        if lu_rows is not None and not lu_rows.empty:
+            short = _LABEL_SHORT.get(contest_label, contest_label)
+            _lineup_data.append((contest_label, short, lu_rows, sim_metrics, bb_row))
+
+    if _lineup_data:
+        st.divider()
+        for i in range(0, len(_lineup_data), 2):
+            chunk = _lineup_data[i:i + 2]
+            cols = st.columns(len(chunk))
+            for col, (contest_label, short, lu_rows, sim_metrics, bb_row) in zip(cols, chunk):
+                with col:
+                    render_premium_lineup_card(
+                        lineup_rows=lu_rows,
+                        sim_metrics=sim_metrics,
+                        lineup_label=f"Top {short}",
+                        salary_cap=slate.salary_cap,
+                        boom_bust_row=bb_row,
+                        compact=True,
+                    )
+
+        _render_admin_clear("nba", "NBA")
+
+
+# ===========================================================================
+# TAB 1 — EDGE ANALYSIS (PGA)
+# ===========================================================================
+
+def _render_tab_analysis_pga(
+    slate: SlateState,
+    lu_state: LineupSetState,
+) -> None:
+    has_pool = slate.player_pool is not None and not slate.player_pool.empty
+    if not has_pool:
+        st.info("No PGA slate loaded yet. Publish a PGA pool from the main app first.")
+        return
+
+    pool = slate.player_pool.copy()
+
     _render_pga_info_cards(pool)
 
-    # Compute PGA breakout signals
     signals_df = compute_pga_breakout_signals(pool)
     event_name = pool.attrs.get("event_name", "") if hasattr(pool, "attrs") else ""
     overview = generate_pga_slate_overview(pool, signals_df, event_name=event_name)
 
-    # Slate overview bullets as styled callouts
     _bullet_colors = [
-        ("\U0001f4aa", "#f7931e"),   # SG Total - orange
-        ("\U0001f3af", "#4ade80"),   # Course Fits - green
-        ("\U0001f4b0", "#3b82f6"),   # Value - blue
-        ("\U0001f50d", "#a855f7"),   # Leverage - purple
+        ("\U0001f4aa", "#f7931e"),
+        ("\U0001f3af", "#4ade80"),
+        ("\U0001f4b0", "#3b82f6"),
+        ("\U0001f50d", "#a855f7"),
     ]
     for i, bullet in enumerate(overview["bullets"]):
         color = _bullet_colors[i][1] if i < len(_bullet_colors) else "rgba(255,255,255,0.3)"
-        # Convert markdown **bold** → <b>bold</b> since we render raw HTML
         _html_bullet = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', bullet)
         st.markdown(
             f"<div style='padding:6px 10px;margin-bottom:4px;border-radius:6px;"
@@ -612,7 +806,6 @@ def _render_tab_analysis_pga(slate, lu_state, sim_state) -> None:
         )
     if overview["recommendation"]:
         rec = overview["recommendation"]
-        # Color based on signal strength
         if "thin" in rec.lower() or "balanced" in rec.lower():
             _rec_bg = "rgba(239,68,68,0.12)"
             _rec_border = "#ef4444"
@@ -632,80 +825,29 @@ def _render_tab_analysis_pga(slate, lu_state, sim_state) -> None:
 
     st.divider()
 
-    # ── Classify PGA players into 4 buckets ───────────────────────────
-    sdf = signals_df.copy()
-    def _safe_col_pga(frame, name, default=0):
-        if name in frame.columns:
-            return pd.to_numeric(frame[name], errors="coerce").fillna(default)
-        return pd.Series(default, index=frame.index)
-    _sal = _safe_col_pga(sdf, "salary")
-    _proj = _safe_col_pga(sdf, "proj")
-    _own_col = "ownership" if "ownership" in sdf.columns else "own_pct"
-    _own = normalise_ownership(_safe_col_pga(sdf, _own_col))
-    # Prefer PGA-specific edge composite, fall back to generic
-    _edge_col = "pga_edge_composite" if "pga_edge_composite" in sdf.columns else "edge_composite"
-    _edge = _safe_col_pga(sdf, _edge_col)
-    _val = np.where(_sal > 0, _proj / (_sal / 1000), 0)
-    sdf["_sal"] = _sal
-    sdf["_proj"] = _proj
-    sdf["_own"] = _own
-    sdf["_edge"] = _edge
-    sdf["_val"] = _val
+    core, leverage, value, fades = _classify_pga(signals_df)
 
-    # Core (Chalk): top projected players, $8K+ salary
-    core = sdf[sdf["_sal"] >= 8000].nlargest(5, "_proj")
-    _used = set(core["player_name"].tolist())
-
-    # Leverage (GPP Gold): best edge, low ownership (<15%), not in core
-    _lev_pool = sdf[(sdf["_own"] < 15) & (~sdf["player_name"].isin(_used))]
-    leverage = _lev_pool.nlargest(5, "_edge")
-    _used.update(leverage["player_name"].tolist())
-
-    # Value (Salary Savers): best pts/$1K, under $7.5K, not already used
-    _val_pool = sdf[(sdf["_sal"] < 7500) & (sdf["_sal"] > 0) & (~sdf["player_name"].isin(_used))]
-    value = _val_pool.nlargest(5, "_val")
-    _used.update(value["player_name"].tolist())
-
-    # Fades: high ownership but weak edge; fall back to high-salary + low-edge
-    _fade_pool = sdf[~sdf["player_name"].isin(_used)].copy()
-    _fade_high_own = _fade_pool[_fade_pool["_own"] >= 10]
-    if len(_fade_high_own) >= 3:
-        fades = _fade_high_own.nsmallest(5, "_edge")
-    else:
-        _fade_sal = _fade_pool[_fade_pool["_sal"] >= 7000]
-        fades = _fade_sal.nsmallest(5, "_edge") if not _fade_sal.empty else _fade_pool.nsmallest(5, "_edge")
-
-    # ── 4-box layout (2x2) ────────────────────────────────────────────
     row1_c1, row1_c2 = st.columns(2)
     with row1_c1:
-        _render_play_card(
-            "CORE PLAYS (Chalk)", core, _CARD_COLORS["core"],
-            "CHALK", stat_format="proj_salary",
-        )
+        _render_play_card("CORE PLAYS (Chalk)", core, _CARD_COLORS["core"], "CHALK", stat_format="proj_salary")
     with row1_c2:
-        _render_play_card(
-            "LEVERAGE PLAYS (GPP Gold)", leverage, _CARD_COLORS["leverage"],
-            "UNDEROWNED", stat_format="proj_val",
-        )
+        _render_play_card("LEVERAGE PLAYS (GPP Gold)", leverage, _CARD_COLORS["leverage"], "UNDEROWNED", stat_format="proj_val")
 
     st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
 
     row2_c1, row2_c2 = st.columns(2)
     with row2_c1:
-        _render_play_card(
-            "VALUE PLAYS (Salary Savers)", value, _CARD_COLORS["value"],
-            "VALUE", stat_format="value",
-        )
+        _render_play_card("VALUE PLAYS (Salary Savers)", value, _CARD_COLORS["value"], "VALUE", stat_format="value")
     with row2_c2:
-        _render_play_card(
-            "FADE CANDIDATES", fades, _CARD_COLORS["fade"],
-            "FADE", stat_format="proj_salary",
-        )
+        _render_play_card("FADE CANDIDATES", fades, _CARD_COLORS["fade"], "FADE", stat_format="proj_salary")
 
-    # ── Top PGA lineups from Build & Publish (GPP / Cash / Showdown) ───
+    # NEW: Star/select players for optimizer
+    _render_player_star_select(core, leverage, value, fades)
+
+    # PGA lineups
     _pga_lineup_data = []
     for _pga_cl in ["PGA GPP", "PGA Cash", "PGA Showdown"]:
-        lu_rows, sim_metrics, bb_row = _get_best_lineup(lu_state, sim_state, _pga_cl)
+        lu_rows, sim_metrics, bb_row = _get_best_lineup(lu_state, _pga_cl)
         if lu_rows is not None and not lu_rows.empty:
             _short = _LABEL_SHORT.get(_pga_cl, _pga_cl)
             _pga_lineup_data.append((_pga_cl, _short, lu_rows, sim_metrics, bb_row))
@@ -726,15 +868,14 @@ def _render_tab_analysis_pga(slate, lu_state, sim_state) -> None:
                         compact=True,
                     )
 
-        _render_admin_clear("pga", slate, lu_state, sim_state)
+        _render_admin_clear("pga", "PGA")
 
 
 # ===========================================================================
-# TAB 2 — OPTIMIZER (FantasyPros-style)
+# TAB 2 — OPTIMIZER
 # ===========================================================================
 
 def _extract_games(pool: pd.DataFrame) -> list[str]:
-    """Return sorted list of 'TEAM vs OPP' matchup strings."""
     opp_col = "opp" if "opp" in pool.columns else (
         "opponent" if "opponent" in pool.columns else None
     )
@@ -751,7 +892,6 @@ def _extract_games(pool: pd.DataFrame) -> list[str]:
 
 
 def _filter_pool_by_games(pool: pd.DataFrame, selected_games: list[str]) -> pd.DataFrame:
-    """Filter pool to only players in the selected games."""
     if not selected_games:
         return pool
     opp_col = "opp" if "opp" in pool.columns else (
@@ -775,10 +915,8 @@ def _build_pool_display(
     contest_label: str,
     pos_filter: str = "All",
 ) -> pd.DataFrame:
-    """Build the display DataFrame for the player pool table."""
     df = pool.copy()
 
-    # Merge edge metrics if available
     if edge_df is not None and not edge_df.empty:
         _edge_cols = ["player_name"]
         for c in ["edge_score", "edge_label", "smash_prob", "bust_prob",
@@ -789,31 +927,25 @@ def _build_pool_display(
             _sub = edge_df[_edge_cols].drop_duplicates(subset=["player_name"])
             df = df.merge(_sub, on="player_name", how="left")
 
-    # Compute Value column
-    def _safe_col_opt(frame, name, default=0):
-        if name in frame.columns:
-            return pd.to_numeric(frame[name], errors="coerce").fillna(default)
-        return pd.Series(default, index=frame.index)
-    _sal = _safe_col_opt(df, "salary")
-    _proj = _safe_col_opt(df, "proj")
+    _sal = _safe_col(df, "salary")
+    _proj = _safe_col(df, "proj")
     df["value"] = np.where(_sal > 0, _proj / (_sal / 1000.0), 0.0)
 
-    # Normalise ownership display
     _own_col_opt = "ownership" if "ownership" in df.columns else "own_pct"
-    _own = _safe_col_opt(df, _own_col_opt)
+    _own = _safe_col(df, _own_col_opt)
     df["own_display"] = _own
 
-    # Add Lock/Exclude boolean columns
-    _prev_lock = st.session_state.get("_rar_locked_players", set())
-    _prev_excl = st.session_state.get("_rar_excluded_players", set())
+    # Add Lock/Exclude from starred/fade players
+    _starred = st.session_state.get(f"{_K}starred_players", set())
+    _faded = st.session_state.get(f"{_K}fade_players", set())
+    _prev_lock = st.session_state.get(f"{_K}locked_players", _starred)
+    _prev_excl = st.session_state.get(f"{_K}excluded_players", _faded)
     df["Lock"] = df["player_name"].isin(_prev_lock)
     df["Exclude"] = df["player_name"].isin(_prev_excl)
 
-    # Position filter (NBA only)
     if sport == "NBA" and pos_filter != "All" and "pos" in df.columns:
         df = df[df["pos"].str.contains(pos_filter, case=False, na=False)].copy()
 
-    # Select and order columns based on sport + contest
     is_cash = "cash" in contest_label.lower()
     is_pga = sport == "PGA"
 
@@ -838,7 +970,6 @@ def _build_pool_display(
             "floor": "Floor", "own_display": "Own%", "value": "Value",
         }
     else:
-        # GPP / Showdown
         cols = ["Lock", "Exclude", "player_name", "team", "opp", "pos",
                 "salary", "proj", "own_display", "edge_score", "value",
                 "edge_label"]
@@ -853,7 +984,6 @@ def _build_pool_display(
     display = df[cols].copy()
     display = display.rename(columns={k: v for k, v in rename.items() if k in display.columns})
 
-    # Sort
     if "Edge" in display.columns and not is_cash:
         display = display.sort_values("Edge", ascending=False, na_position="last")
     elif "Proj" in display.columns:
@@ -862,12 +992,11 @@ def _build_pool_display(
     return display.reset_index(drop=True)
 
 
-def _render_tab_optimizer(slate) -> None:
-    """Tab 2: FantasyPros-style optimizer with data_editor pool table."""
-
-    if not slate.is_ready() or slate.player_pool is None or slate.player_pool.empty:
+def _render_tab_optimizer(slate: SlateState) -> None:
+    has_pool = slate.player_pool is not None and not slate.player_pool.empty
+    if not has_pool:
         st.info(
-            "No slate loaded yet. Ricky needs to load a slate in The Lab "
+            "No slate loaded yet. Publish a slate from the main app "
             "before you can build lineups."
         )
         return
@@ -875,7 +1004,7 @@ def _render_tab_optimizer(slate) -> None:
     pool = slate.player_pool.copy()
     sport = slate.sport or "NBA"
 
-    # ── 1. Contest type selector ──────────────────────────────────────
+    # 1. Contest type selector
     if sport == "PGA":
         _labels = PGA_UI_CONTEST_LABELS
         _label_map = PGA_UI_CONTEST_MAP
@@ -884,33 +1013,32 @@ def _render_tab_optimizer(slate) -> None:
         _label_map = UI_CONTEST_MAP
 
     _ui_contest = st.radio(
-        "Contest Type", _labels, horizontal=True, key="_rar_opt_contest",
+        "Contest Type", _labels, horizontal=True, key=f"{_K}opt_contest",
     )
     contest_label = _label_map[_ui_contest]
     preset = CONTEST_PRESETS.get(contest_label, {})
 
-    # ── 2. Build settings row ─────────────────────────────────────────
+    # 2. Build settings
     col_lu, col_exp, col_sal = st.columns(3)
     with col_lu:
         num_lineups = st.number_input(
             "# Lineups", min_value=1, max_value=150,
             value=int(preset.get("default_lineups", preset.get("num_lineups", 20))),
-            key="_rar_opt_num_lineups",
+            key=f"{_K}opt_num_lineups",
         )
     with col_exp:
         max_exp = st.slider(
             "Max Exposure", min_value=0.10, max_value=1.0, step=0.05,
             value=float(preset.get("default_max_exposure", preset.get("max_exposure", 0.50))),
-            key="_rar_opt_max_exp",
+            key=f"{_K}opt_max_exp",
         )
     with col_sal:
         min_salary = st.number_input(
             "Min Salary Used", min_value=40000, max_value=50000, step=500,
             value=int(preset.get("min_salary", preset.get("min_salary_used", 46000))),
-            key="_rar_opt_min_salary",
+            key=f"{_K}opt_min_salary",
         )
 
-    # Slate status bar
     _n_games = len(_extract_games(pool))
     _n_players = len(pool)
     _game_str = f"{_n_games} games" if _n_games else ""
@@ -919,7 +1047,7 @@ def _render_tab_optimizer(slate) -> None:
     _parts = [p for p in [_date_str, _game_str, f"{_n_players} players", _cap_str] if p]
     st.caption(f"\U0001f4cb {' \u00b7 '.join(_parts)}")
 
-    # ── Game filter (NBA only, expander) ──────────────────────────────
+    # Game filter (NBA only)
     all_games = _extract_games(pool)
     build_games: list[str] = []
     if all_games and sport == "NBA":
@@ -928,12 +1056,12 @@ def _render_tab_optimizer(slate) -> None:
         with st.expander(f"Games ({len(all_games)})", expanded=False):
             for _g in all_games:
                 _default_on = _g in _lab_games if _lab_games else _default_all
-                if st.checkbox(_g, value=_default_on, key=f"_rar_gf_{_g}"):
+                if st.checkbox(_g, value=_default_on, key=f"{_K}gf_{_g}"):
                     build_games.append(_g)
         if build_games and len(build_games) < len(all_games):
             pool = _filter_pool_by_games(pool, build_games)
 
-    # ── Compute edge metrics ──────────────────────────────────────────
+    # Compute edge metrics
     _edge_df = None
     try:
         _edge_df = compute_edge_metrics(
@@ -953,20 +1081,18 @@ def _render_tab_optimizer(slate) -> None:
     except Exception:
         _edge_overrides = {}
 
-    # ── 3. Player pool table ──────────────────────────────────────────
+    # 3. Player pool table
     st.divider()
 
-    # Position filter tabs (NBA only)
     pos_filter = "All"
     if sport == "NBA":
         pos_filter = st.radio(
             "Position", _NBA_POS_FILTERS, horizontal=True,
-            key="_rar_opt_pos_filter", label_visibility="collapsed",
+            key=f"{_K}opt_pos_filter", label_visibility="collapsed",
         )
 
     display_df = _build_pool_display(pool, _edge_df, sport, contest_label, pos_filter)
 
-    # Column configs for st.data_editor
     col_config: Dict[str, Any] = {
         "Lock": st.column_config.CheckboxColumn("\U0001f512", width="small", default=False),
         "Exclude": st.column_config.CheckboxColumn("\u2715", width="small", default=False),
@@ -992,17 +1118,16 @@ def _render_tab_optimizer(slate) -> None:
     if "Player" in display_df.columns:
         col_config["Player"] = st.column_config.TextColumn("Player", width="medium")
 
-    # Render editable table
     edited_df = st.data_editor(
         display_df,
         column_config=col_config,
         use_container_width=True,
         hide_index=True,
-        key="_rar_pool_editor",
+        key=f"{_K}pool_editor",
         height=min(600, 40 + len(display_df) * 35),
     )
 
-    # Extract lock / exclude selections
+    # Extract lock/exclude from editor
     _locked = set()
     _excluded = set()
     _name_col = "Player" if "Player" in edited_df.columns else "player_name"
@@ -1011,10 +1136,9 @@ def _render_tab_optimizer(slate) -> None:
             _locked = set(edited_df.loc[edited_df["Lock"] == True, _name_col].tolist())
         if "Exclude" in edited_df.columns:
             _excluded = set(edited_df.loc[edited_df["Exclude"] == True, _name_col].tolist())
-    st.session_state["_rar_locked_players"] = _locked
-    st.session_state["_rar_excluded_players"] = _excluded
+    st.session_state[f"{_K}locked_players"] = _locked
+    st.session_state[f"{_K}excluded_players"] = _excluded
 
-    # Lock/exclude summary
     _lock_excl_parts = []
     if _locked:
         _lock_excl_parts.append(f"\U0001f512 {len(_locked)} locked")
@@ -1026,12 +1150,11 @@ def _render_tab_optimizer(slate) -> None:
     if _lock_excl_parts:
         st.caption(" \u00b7 ".join(_lock_excl_parts))
 
-    # ── 4. Build button ───────────────────────────────────────────────
+    # 4. Build button
     st.divider()
 
     archetype = preset.get("archetype", "Balanced")
     _merged_exclude = list(_excluded | set(_auto_excl))
-
     is_showdown = contest_label == "Showdown" or slate.is_showdown
 
     _contest_type_map = {
@@ -1045,7 +1168,7 @@ def _render_tab_optimizer(slate) -> None:
     if "cash" in contest_label.lower() and "floor" in pool.columns:
         proj_col = "floor"
 
-    if st.button("\u26a1 Build Lineups", type="primary", key="_rar_opt_build", use_container_width=True):
+    if st.button("\u26a1 Build Lineups", type="primary", key=f"{_K}opt_build", use_container_width=True):
         _pool = pool.copy()
         if "player_id" not in _pool.columns:
             if "player_name" in _pool.columns:
@@ -1066,9 +1189,6 @@ def _render_tab_optimizer(slate) -> None:
             "LINEUP_SIZE": preset.get("lineup_size", DK_LINEUP_SIZE),
         }
 
-        # Inject PGA-specific optimizer settings from the preset so the
-        # optimizer uses the correct roster shape (6×G instead of NBA 8-slot)
-        # and appropriate GPP constraint defaults.
         if contest_label.startswith("PGA"):
             _pga_preset = CONTEST_PRESETS.get(contest_label, {})
             cfg["POS_SLOTS"] = _pga_preset.get("pos_slots", ["G"] * 6)
@@ -1081,7 +1201,6 @@ def _render_tab_optimizer(slate) -> None:
             cfg["GPP_LOW_OWN_THRESHOLD"] = _pga_preset.get("low_own_threshold", 0.40)
             cfg["GPP_FORCE_GAME_STACK"] = _pga_preset.get("force_game_stack", False)
 
-        # Inject per-player exposure caps from edge overrides
         if isinstance(_edge_overrides, dict):
             if _edge_overrides.get("max_exposure_players"):
                 cfg["PLAYER_MAX_EXPOSURE"] = _edge_overrides["max_exposure_players"]
@@ -1101,10 +1220,10 @@ def _render_tab_optimizer(slate) -> None:
                     lineups_df, expo_df = build_multiple_lineups_with_exposure(opt_pool, cfg)
 
             if lineups_df is not None and not lineups_df.empty:
-                st.session_state["_rar_friend_lineups"] = lineups_df
-                st.session_state["_rar_friend_expo"] = expo_df
-                st.session_state["_rar_friend_contest"] = contest_label
-                st.session_state["_rar_friend_is_showdown"] = is_showdown
+                st.session_state[f"{_K}friend_lineups"] = lineups_df
+                st.session_state[f"{_K}friend_expo"] = expo_df
+                st.session_state[f"{_K}friend_contest"] = contest_label
+                st.session_state[f"{_K}friend_is_showdown"] = is_showdown
                 n_built = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else 1
                 st.success(f"Built {n_built} lineups for **{_ui_contest}**.")
             else:
@@ -1112,8 +1231,8 @@ def _render_tab_optimizer(slate) -> None:
         except Exception as exc:
             st.error(f"Optimizer error: {exc}")
 
-    # ── 5. Lineup results ─────────────────────────────────────────────
-    friend_lineups = st.session_state.get("_rar_friend_lineups")
+    # 5. Lineup results
+    friend_lineups = st.session_state.get(f"{_K}friend_lineups")
     if friend_lineups is None or friend_lineups.empty:
         return
 
@@ -1121,7 +1240,6 @@ def _render_tab_optimizer(slate) -> None:
 
     n_lu = len(friend_lineups["lineup_index"].unique()) if "lineup_index" in friend_lineups.columns else 0
 
-    # Summary metrics
     if "proj" in friend_lineups.columns or "total_proj" in friend_lineups.columns:
         _sc1, _sc2, _sc3, _sc4 = st.columns(4)
         _sc1.metric("Lineups", n_lu)
@@ -1145,7 +1263,7 @@ def _render_tab_optimizer(slate) -> None:
             _sc4.metric("Top Lineup", f"{_lu_projs.max():.1f}")
 
     # Exposure table
-    expo_df = st.session_state.get("_rar_friend_expo")
+    expo_df = st.session_state.get(f"{_K}friend_expo")
     if expo_df is not None and not expo_df.empty:
         with st.expander("Player Exposures", expanded=False):
             _expo_fmt = standard_player_format(expo_df)
@@ -1159,13 +1277,13 @@ def _render_tab_optimizer(slate) -> None:
         lineups_df=friend_lineups,
         sim_results_df=None,
         salary_cap=slate.salary_cap,
-        nav_key="rar_friend",
+        nav_key=f"{_K}friend",
     )
 
     # DK CSV Export
     st.divider()
-    _is_sd = st.session_state.get("_rar_friend_is_showdown", False)
-    _friend_contest = st.session_state.get("_rar_friend_contest", "")
+    _is_sd = st.session_state.get(f"{_K}friend_is_showdown", False)
+    _friend_contest = st.session_state.get(f"{_K}friend_contest", "")
     try:
         if _is_sd:
             dk_csv = to_dk_showdown_upload_format(friend_lineups)
@@ -1182,7 +1300,7 @@ def _render_tab_optimizer(slate) -> None:
                 data=buf.getvalue(),
                 file_name="ricky_lineups.csv",
                 mime="text/csv",
-                key="_rar_dk_export",
+                key=f"{_K}dk_export",
             )
     except Exception as exc:
         st.caption(f"CSV export unavailable: {exc}")
@@ -1196,68 +1314,51 @@ def main() -> None:
     st.title("\U0001f4d0 Right Angle Ricky")
     st.caption(_ricky_quote())
 
-    # ── Sport toggle at top ───────────────────────────────────────────
-    # Only set initial index if the key doesn't already exist in session
-    # state — prevents the dynamic index from overriding user selection
-    # on every rerun.
-    slate = get_slate_state()
-    _detected_sport = slate.sport if slate.sport else "NBA"
-    if "_rar_sport_toggle" not in st.session_state:
-        st.session_state["_rar_sport_toggle"] = _detected_sport
+    # Sport toggle — session-state-first pattern (no dynamic index override)
+    if f"{_K}sport_toggle" not in st.session_state:
+        st.session_state[f"{_K}sport_toggle"] = "NBA"
     sport = st.radio(
         "Sport",
         ["NBA", "PGA"],
         horizontal=True,
-        key="_rar_sport_toggle",
+        key=f"{_K}sport_toggle",
     )
     _is_pga = sport == "PGA"
 
-    # When PGA is selected, load state from PGA-specific accessors
+    # Load data from disk based on sport
     if _is_pga:
-        from yak_core import pga_state as _pga_mod  # noqa: PLC0415
-        slate = _pga_mod.get_slate_state()
-        edge = _pga_mod.get_edge_state()
-        lu_state = _pga_mod.get_lineup_state()
-        sim_state = _pga_mod.get_sim_state()
+        slate_data = _load_pga_slate_data()
+        edge_data = _load_pga_edge_data()
+        published = _load_pga_lineups()
     else:
-        edge = get_edge_state()
-        lu_state = get_lineup_state()
-        sim_state = get_sim_state()
+        slate_data = _load_nba_slate_data()
+        edge_data = _load_nba_edge_data()
+        published = _load_nba_lineups()
 
-    # Sport mismatch guard — check whether the chosen sport has data
-    _has_data = (
-        slate.player_pool is not None
-        and not slate.player_pool.empty
-    )
-    if not _has_data:
-        _status_strip(slate)
+    if not slate_data.get("ok"):
         st.info(
-            f"No {sport} slate loaded. Load a {sport} pool in "
-            f"**The Lab** first."
+            f"No {sport} data published yet. Publish a slate from the "
+            f"main YakOS app and it will appear here automatically."
         )
         return
 
+    slate = _hydrate_slate(slate_data)
+    edge = _hydrate_edge(edge_data) if edge_data.get("ok") else RickyEdgeState()
+    lu_state = _hydrate_lineup_state(published)
+
     _status_strip(slate)
 
-    # Empty state
     has_edge = bool(edge.edge_analysis_by_contest)
-    has_lineups = any(
-        (lu_state.lineups.get(c) is not None and not lu_state.lineups[c].empty)
-        or c in lu_state.published_sets
-        for c in _CONTEST_ORDER
-    ) or "PGA GPP" in lu_state.lineups
+    has_lineups = bool(published)
     has_pool = slate.player_pool is not None and not slate.player_pool.empty
 
     if not has_edge and not has_lineups and not has_pool:
         if _is_pga:
-            st.info(
-                "No PGA pool loaded yet. Select **PGA** in **The Lab** and "
-                "load a pool from DataGolf."
-            )
+            st.info("No PGA data published yet. Publish from the main PGA app first.")
         else:
             st.info(
-                "Ricky's got nothing to show yet. Load a slate in **The Lab**, "
-                "approve in **Ricky's Edge Analysis**, and publish from **Build & Publish**."
+                "Ricky's got nothing to show yet. Publish a slate from the "
+                "main YakOS app."
             )
         return
 
@@ -1274,9 +1375,9 @@ def main() -> None:
 
     with tab_analysis:
         if _is_pga:
-            _render_tab_analysis_pga(slate, lu_state, sim_state)
+            _render_tab_analysis_pga(slate, lu_state)
         else:
-            _render_tab_analysis(slate, edge, lu_state, sim_state)
+            _render_tab_analysis_nba(slate, edge, lu_state)
 
     with tab_optimizer:
         _render_tab_optimizer(slate)
