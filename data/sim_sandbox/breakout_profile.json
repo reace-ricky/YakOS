@@ -1,14 +1,14 @@
 {
   "signals": {
-    "is_cheap": 0.8179,
-    "is_low_own": 0.7632,
-    "has_positive_correction": 1.2211,
-    "is_contrarian": 0.7557,
-    "is_volatile": 1.2706,
-    "is_value": 1.2617
+    "is_cheap": 0.8269,
+    "is_low_own": 0.7702,
+    "has_positive_correction": 1.2098,
+    "is_contrarian": 0.7505,
+    "is_volatile": 1.2574,
+    "is_value": 1.2662
   },
-  "n_slates": 33,
-  "n_breakouts": 1257,
-  "n_players": 3534,
-  "built_at": "2026-03-12T03:36:29.481587+00:00"
+  "n_slates": 34,
+  "n_breakouts": 1264,
+  "n_players": 3578,
+  "built_at": "2026-03-12T03:40:36.569484+00:00"
 }
