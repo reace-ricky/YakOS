@@ -35,12 +35,14 @@ def _collect_published_files(sport: str) -> list[str]:
     return sorted(repo_rel_files)
 
 
-def step_load(sport: str, date: str, site: str, slate: str) -> None:
+def step_load(sport: str, date: str, site: str, slate: str, rg_csv: str | None = None) -> None:
     """Run the pool loading step."""
     from load_pool import main as load_main
     argv = ["--sport", sport, "--date", date, "--site", site]
     if sport == "PGA":
         argv += ["--slate", slate]
+    if rg_csv:
+        argv += ["--rg-csv", rg_csv]
     load_main(argv)
 
 
@@ -101,6 +103,8 @@ def main(argv: list[str] | None = None) -> None:
                         help='Contest preset label (e.g. "GPP Main", "PGA GPP").')
     parser.add_argument("--count", type=int, default=None,
                         help="Override number of lineups.")
+    parser.add_argument("--rg-csv", default=None,
+                        help="Path to RotoGrinders CSV for NBA projection overlay.")
     parser.add_argument("--step", default=None,
                         choices=["load", "edge", "build", "commit"],
                         help="Run a single step instead of the full pipeline.")
@@ -112,7 +116,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.step:
         # Single step mode
         if args.step == "load":
-            step_load(sport, date, args.site, args.slate)
+            step_load(sport, date, args.site, args.slate, args.rg_csv)
         elif args.step == "edge":
             step_edge(sport, date)
         elif args.step == "build":
@@ -128,7 +132,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"{'='*60}")
 
         print(f"\n[1/4] Loading pool ...")
-        step_load(sport, date, args.site, args.slate)
+        step_load(sport, date, args.site, args.slate, args.rg_csv)
 
         print(f"\n[2/4] Running edge analysis ...")
         step_edge(sport, date)

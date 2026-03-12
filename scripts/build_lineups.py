@@ -146,6 +146,9 @@ def build_lineups(
         else:
             pool["ownership"] = 0.0
 
+    # Coerce ownership to float — Tank01 NBA may return None
+    pool["ownership"] = pd.to_numeric(pool["ownership"], errors="coerce").fillna(0.0)
+
     # Build optimizer config
     cfg = _build_optimizer_cfg(preset, sport, num_lineups, lock, exclude)
     n = cfg["NUM_LINEUPS"]
@@ -156,13 +159,7 @@ def build_lineups(
 
     if is_showdown and sport == "NBA":
         from yak_core.lineups import build_showdown_lineups
-        lineups_df = build_showdown_lineups(
-            pool,
-            num_lineups=n,
-            lock=lock,
-            exclude=exclude,
-        )
-        exposure_df = pd.DataFrame()
+        lineups_df, exposure_df = build_showdown_lineups(pool, cfg)
     else:
         lineups_df, exposure_df = build_multiple_lineups_with_exposure(pool, cfg)
 

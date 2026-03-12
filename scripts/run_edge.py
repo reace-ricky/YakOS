@@ -21,40 +21,79 @@ from _env import published_dir, today_str  # noqa: E402
 import pandas as pd
 
 
-def _classify_plays(edge_df: pd.DataFrame) -> dict:
-    """Classify players into Core / Leverage / Value / Fade buckets."""
-    core, leverage, value, fades = [], [], [], []
+def _classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
+    """Classify players into Core / Leverage / Value / Fade buckets.
 
-    for _, row in edge_df.iterrows():
-        name = row.get("player_name", "")
-        proj = float(row.get("proj", 0))
-        sal = int(row.get("salary", 0))
-        label = str(row.get("edge_label", "")).upper()
-        smash = float(row.get("smash_prob", 0))
-        lev = float(row.get("leverage", 0))
-        tag = str(row.get("pop_catalyst_tag", ""))
+    Uses the same logic as pages/4_right_angle_ricky.py:
+    - Core (Chalk): $7K+ salary, top 5 by projection
+    - Leverage (GPP Gold): ownership < 15%, top 5 by edge, not in core
+    - Value (Salary Savers): salary < $6.5K, top 5 by pts/$1K, not used
+    - Fades: high ownership with weakest edge
+    """
+    import numpy as np
 
-        entry = {
-            "player_name": name,
-            "proj": round(proj, 2),
-            "salary": sal,
-            "tag": tag or label,
-        }
+    def _safe_col(frame, name, default=0):
+        if name in frame.columns:
+            return pd.to_numeric(frame[name], errors="coerce").fillna(default)
+        return pd.Series(default, index=frame.index)
 
-        if label in ("CORE", "SMASH") or smash >= 0.20:
-            core.append(entry)
-        elif lev >= 1.3:
-            leverage.append(entry)
-        elif label in ("VALUE",) or (smash >= 0.10 and smash < 0.20):
-            value.append(entry)
-        else:
-            fades.append(entry)
+    df = sdf.copy()
+    _sal = _safe_col(df, "salary")
+    _proj = _safe_col(df, "proj")
+    _own_col = "ownership" if "ownership" in df.columns and df["ownership"].notna().any() else "own_pct"
+    _own = _safe_col(df, _own_col)
+    # Normalise ownership to 0-100 range
+    if _own.max() <= 1.0 and _own.max() > 0:
+        _own = _own * 100
+    _edge = _safe_col(df, "edge_composite") if "edge_composite" in df.columns else _safe_col(df, "edge_score")
+    _val = np.where(_sal > 0, _proj / (_sal / 1000), 0)
+    df["_sal"] = _sal
+    df["_proj"] = _proj
+    df["_own"] = _own
+    df["_edge"] = _edge
+    df["_val"] = _val
+
+    def _to_list(frame):
+        out = []
+        for _, row in frame.iterrows():
+            out.append({
+                "player_name": row.get("player_name", ""),
+                "proj": round(float(row.get("proj", 0)), 1),
+                "salary": int(row.get("salary", 0)),
+                "ownership": round(float(row.get("_own", 0)), 1),
+                "edge": round(float(row.get("_edge", 0)), 2),
+                "value": round(float(row.get("_val", 0)), 2),
+            })
+        return out
+
+    # Core (Chalk): top projected players, $7K+ salary
+    core = df[df["_sal"] >= 7000].nlargest(5, "_proj")
+    _used = set(core["player_name"].tolist())
+
+    # Leverage (GPP Gold): best edge, low ownership (<15%), not in core
+    _lev_pool = df[(df["_own"] < 15) & (~df["player_name"].isin(_used))]
+    leverage = _lev_pool.nlargest(5, "_edge")
+    _used.update(leverage["player_name"].tolist())
+
+    # Value (Salary Savers): best pts/$1K, under $6.5K, not already used
+    _val_pool = df[(df["_sal"] < 6500) & (df["_sal"] > 0) & (~df["player_name"].isin(_used))]
+    value = _val_pool.nlargest(5, "_val")
+    _used.update(value["player_name"].tolist())
+
+    # Fades: high ownership with weakest edge
+    _fade_pool = df[~df["player_name"].isin(_used)].copy()
+    _fade_high_own = _fade_pool[_fade_pool["_own"] >= 10]
+    if len(_fade_high_own) >= 3:
+        fades = _fade_high_own.nsmallest(5, "_edge")
+    else:
+        _fade_sal = _fade_pool[_fade_pool["_sal"] >= 5000]
+        fades = _fade_sal.nsmallest(5, "_edge") if not _fade_sal.empty else _fade_pool.nsmallest(5, "_edge")
 
     return {
-        "core_plays": sorted(core, key=lambda x: x["proj"], reverse=True),
-        "leverage_plays": sorted(leverage, key=lambda x: x["proj"], reverse=True),
-        "value_plays": sorted(value, key=lambda x: x["proj"], reverse=True),
-        "fade_candidates": sorted(fades, key=lambda x: x["proj"], reverse=True),
+        "core_plays": _to_list(core),
+        "leverage_plays": _to_list(leverage),
+        "value_plays": _to_list(value),
+        "fade_candidates": _to_list(fades),
     }
 
 
@@ -114,7 +153,7 @@ def run_edge(sport: str, slate_date: str) -> pd.DataFrame:
     )
 
     # Classify into 4-box
-    classified = _classify_plays(edge_df)
+    classified = _classify_plays(edge_df, sport=sport)
     bullets = _build_bullets(classified, edge_df)
 
     # Recommendation summary

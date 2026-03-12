@@ -20,6 +20,74 @@ from _env import published_dir, require_env, today_str  # noqa: E402
 import pandas as pd
 
 
+def _merge_rg_projections(pool: pd.DataFrame, rg_path: str) -> pd.DataFrame:
+    """Merge RotoGrinders CSV projections into the pool.
+
+    RG provides: FPTS (proj), FLOOR, CEIL, sim percentiles, POWN.
+    We overlay these onto the Tank01 pool matched by player name.
+    Tank01 players without an RG match keep their existing projections.
+    """
+    rg = pd.read_csv(rg_path)
+    print(f"[load_pool] RG projections: {len(rg)} players from {rg_path}")
+
+    # Normalise names for matching
+    rg["_join_name"] = rg["PLAYER"].str.strip().str.lower()
+    pool["_join_name"] = pool["player_name"].str.strip().str.lower()
+
+    # Build lookup dict from RG
+    rg_lookup = rg.set_index("_join_name")
+    matched = 0
+
+    for idx, row in pool.iterrows():
+        jn = row["_join_name"]
+        if jn not in rg_lookup.index:
+            continue
+        r = rg_lookup.loc[jn]
+        if isinstance(r, pd.DataFrame):
+            r = r.iloc[0]  # duplicate name, take first
+
+        matched += 1
+
+        # Projection: use RG FPTS as primary
+        rg_proj = float(r.get("FPTS", 0) or 0)
+        if rg_proj > 0:
+            pool.at[idx, "proj"] = rg_proj
+            pool.at[idx, "proj_source"] = "rotogrinders"
+
+        # Floor / Ceil
+        rg_floor = float(r.get("FLOOR", 0) or 0)
+        rg_ceil = float(r.get("CEIL", 0) or 0)
+        if rg_floor > 0:
+            pool.at[idx, "floor"] = rg_floor
+        if rg_ceil > 0:
+            pool.at[idx, "ceil"] = rg_ceil
+
+        # Ownership — RG POWN is like "12.5%" or "0%"
+        pown_str = str(r.get("POWN", "0%")).replace("%", "").strip()
+        try:
+            pown_val = float(pown_str)
+        except (ValueError, TypeError):
+            pown_val = 0.0
+        if pown_val > 0:
+            pool.at[idx, "ownership"] = pown_val
+            pool.at[idx, "own_proj"] = pown_val
+
+        # Sim percentiles (store for edge analysis)
+        for sim_col in ["SIM15TH", "SIM33RD", "SIM50TH", "SIM66TH", "SIM85TH", "SIM90TH", "SIM99TH"]:
+            val = r.get(sim_col)
+            if val is not None and not pd.isna(val):
+                pool.at[idx, sim_col.lower()] = float(val)
+
+        # Smash probability
+        smash_val = r.get("SMASH")
+        if smash_val is not None and not pd.isna(smash_val):
+            pool.at[idx, "smash_prob"] = float(smash_val)
+
+    pool.drop(columns=["_join_name"], inplace=True)
+    print(f"[load_pool] RG merge: {matched}/{len(pool)} players matched")
+    return pool
+
+
 def _load_nba_pool(slate_date: str, site: str) -> tuple[pd.DataFrame, dict]:
     """Load NBA pool via Tank01 live DFS endpoint."""
     from yak_core.config import (
@@ -67,7 +135,7 @@ def _load_nba_pool(slate_date: str, site: str) -> tuple[pd.DataFrame, dict]:
     if "ownership" not in pool.columns:
         pool["ownership"] = 0.0
 
-    meta = {
+    meta = {  # NOTE: rg_csv merge happens after this returns, in main()
         "sport": "NBA",
         "site": site,
         "date": slate_date,
@@ -123,6 +191,8 @@ def main(argv: list[str] | None = None) -> pd.DataFrame:
                         help="DFS site (default: DK).")
     parser.add_argument("--slate", default="main",
                         help="PGA slate type: main or showdown (default: main).")
+    parser.add_argument("--rg-csv", default=None,
+                        help="Path to RotoGrinders CSV to overlay projections (NBA only).")
     args = parser.parse_args(argv)
 
     slate_date = args.date or today_str()
@@ -130,6 +200,10 @@ def main(argv: list[str] | None = None) -> pd.DataFrame:
 
     if sport == "NBA":
         pool, meta = _load_nba_pool(slate_date, args.site)
+        # Overlay RotoGrinders projections if provided
+        if args.rg_csv:
+            pool = _merge_rg_projections(pool, args.rg_csv)
+            meta["proj_source"] = "rotogrinders+tank01"
     else:
         pool, meta = _load_pga_pool(slate_date, args.slate)
 
