@@ -177,6 +177,10 @@ def render_optimizer_tab(sport: str) -> None:
                 build_pool["ownership"] = 0.0
         build_pool["ownership"] = pd.to_numeric(build_pool["ownership"], errors="coerce").fillna(0.0)
 
+        # Apply lock/exclude directly on the pool
+        if excluded:
+            build_pool = build_pool[~build_pool["player_name"].isin(excluded)].reset_index(drop=True)
+
         cfg = _build_optimizer_cfg(preset, sport, num_lineups, max_exposure, locked, excluded)
 
         with st.spinner(f"Building {num_lineups} lineups..."):
