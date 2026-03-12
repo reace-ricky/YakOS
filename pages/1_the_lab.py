@@ -1290,6 +1290,8 @@ def main() -> None:
         _exclude_names = [
             n.strip() for n in _exclude_input.split(",") if n.strip()
         ]
+        # Persist to shared key so Ricky pages can read it
+        st.session_state["_pga_manual_excludes"] = _exclude_names
         if _exclude_names:
             st.caption(f"🚫 Will exclude: {', '.join(_exclude_names)}")
 
@@ -1358,21 +1360,20 @@ def main() -> None:
                 if st.button("🔄 Reload PGA Pool", key="_lab_force_reload_pga"):
                     st.session_state.pop(_pool_loaded_key, None)
                     st.rerun()
-            # Post-load manual exclude
+            # Post-load manual exclude — auto-apply on every rerun
             if _exclude_names:
                 _current_pool = st.session_state.get(_pool_loaded_key)
                 if _current_pool is not None and "player_name" in _current_pool.columns:
                     _lower_excludes = [n.lower() for n in _exclude_names]
                     _in_pool = _current_pool["player_name"].str.lower().isin(_lower_excludes)
                     if _in_pool.any():
-                        if st.button("🚫 Apply Excludes to Loaded Pool", key="_lab_pga_apply_excludes"):
-                            _filtered = _current_pool[~_in_pool].reset_index(drop=True)
-                            _removed_names = _current_pool.loc[_in_pool, "player_name"].tolist()
-                            st.session_state[_pool_loaded_key] = _filtered
-                            slate.player_pool = _filtered
-                            set_slate_state(slate)
-                            st.toast(f"Excluded: {', '.join(_removed_names)}")
-                            st.rerun()
+                        _filtered = _current_pool[~_in_pool].reset_index(drop=True)
+                        _removed_names = _current_pool.loc[_in_pool, "player_name"].tolist()
+                        st.session_state[_pool_loaded_key] = _filtered
+                        slate.player_pool = _filtered
+                        set_slate_state(slate)
+                        st.toast(f"Excluded: {', '.join(_removed_names)}")
+                        st.rerun()
 
         # ── Calibrate Past PGA Events ────────────────────────────────────
         with st.expander("📐 Calibrate Past Events", expanded=False):

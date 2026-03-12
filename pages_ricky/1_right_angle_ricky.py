@@ -710,6 +710,12 @@ def _render_tab_analysis_nba(
 
     pool = slate.player_pool.copy()
 
+    # ── Display-time manual exclude filter ────────────────────────────
+    _nba_excludes = st.session_state.get("_nba_manual_excludes", [])
+    if _nba_excludes and "player_name" in pool.columns:
+        _lower_ex = [n.lower() for n in _nba_excludes]
+        pool = pool[~pool["player_name"].str.lower().isin(_lower_ex)].reset_index(drop=True)
+
     signals_df = compute_ricky_signals(pool)
     contest_type = slate.contest_name or "GPP"
     overview = generate_slate_overview(pool, signals_df, contest_type=contest_type)
@@ -782,6 +788,12 @@ def _render_tab_analysis_pga(
         return
 
     pool = slate.player_pool.copy()
+
+    # ── Display-time manual exclude filter ────────────────────────────
+    _pga_excludes = st.session_state.get("_pga_manual_excludes", [])
+    if _pga_excludes and "player_name" in pool.columns:
+        _lower_ex = [n.lower() for n in _pga_excludes]
+        pool = pool[~pool["player_name"].str.lower().isin(_lower_ex)].reset_index(drop=True)
 
     _render_pga_info_cards(pool)
 

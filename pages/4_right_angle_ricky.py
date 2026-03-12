@@ -336,6 +336,12 @@ def _render_tab_analysis(slate, edge, lu_state, sim_state) -> None:
     if not _analysis["pool"].empty:
         pool = _analysis["pool"]
 
+    # ── Display-time manual exclude filter ────────────────────────────
+    _nba_excludes = st.session_state.get("_nba_manual_excludes", [])
+    if _nba_excludes and "player_name" in pool.columns:
+        _lower_ex = [n.lower() for n in _nba_excludes]
+        pool = pool[~pool["player_name"].str.lower().isin(_lower_ex)].reset_index(drop=True)
+
     # ── Compute signals ───────────────────────────────────────────────
     signals_df = compute_ricky_signals(pool)
     contest_type = slate.contest_name or "GPP"
@@ -584,6 +590,12 @@ def _render_tab_analysis_pga(slate, lu_state, sim_state) -> None:
     _analysis = get_lab_analysis()
     if not _analysis["pool"].empty:
         pool = _analysis["pool"]
+
+    # ── Display-time manual exclude filter ────────────────────────────
+    _pga_excludes = st.session_state.get("_pga_manual_excludes", [])
+    if _pga_excludes and "player_name" in pool.columns:
+        _lower_ex = [n.lower() for n in _pga_excludes]
+        pool = pool[~pool["player_name"].str.lower().isin(_lower_ex)].reset_index(drop=True)
 
     # ── Course / Weather / Wave / History info cards ───────────────
     _render_pga_info_cards(pool)
