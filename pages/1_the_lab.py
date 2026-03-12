@@ -1353,36 +1353,55 @@ def main() -> None:
                 if _evt_df.empty:
                     st.info("No completed PGA events with DK data found.")
                 else:
-                    _evt_options = [
-                        f"{row.get('event_name', 'Event')} ({row.get('date', '?')}) — ID {row['event_id']}"
-                        for _, row in _evt_df.iterrows()
-                    ]
-                    _sel_idx = st.selectbox(
-                        "Select event", range(len(_evt_options)),
-                        format_func=lambda i: _evt_options[i],
-                        key="_pga_cal_event_sel",
-                    )
-                    if st.button("Load & Calibrate", key="_pga_cal_go"):
-                        _sel_row = _evt_df.iloc[_sel_idx]
-                        _eid = int(_sel_row["event_id"])
-                        _yr = int(_sel_row["calendar_year"])
-                        _edate = str(_sel_row.get("date", ""))
-                        with st.spinner(f"Calibrating event {_eid} ({_yr})…"):
-                            try:
-                                from yak_core.pga_calibration import calibrate_pga_event
-                                _cal_result = calibrate_pga_event(
-                                    _cal_dg, event_id=_eid, year=_yr, slate_date=_edate,
-                                )
-                                if "error" in _cal_result:
-                                    st.warning(_cal_result["error"])
-                                else:
-                                    _cal_mae = _cal_result.get("overall", {}).get("mae", "?")
-                                    _cal_n = _cal_result.get("n_players_calibrated", 0)
-                                    st.success(
-                                        f"Calibrated {_cal_n} players — MAE: {_cal_mae}"
+                    # Filter out events that have already been calibrated
+                    try:
+                        from yak_core.calibration_feedback import _load_history as _lh
+                        _already_calibrated = set(_lh(sport="PGA").keys())
+                    except Exception:
+                        _already_calibrated = set()
+
+                    if _already_calibrated:
+                        _evt_df_filtered = _evt_df[
+                            ~_evt_df["date"].astype(str).isin(_already_calibrated)
+                        ].reset_index(drop=True)
+                    else:
+                        _evt_df_filtered = _evt_df
+
+                    if _evt_df_filtered.empty:
+                        st.success("All available PGA events have been calibrated.")
+                    else:
+                        _evt_options = [
+                            f"{row.get('event_name', 'Event')} ({row.get('date', '?')}) — ID {row['event_id']}"
+                            for _, row in _evt_df_filtered.iterrows()
+                        ]
+                        _sel_idx = st.selectbox(
+                            "Select event", range(len(_evt_options)),
+                            format_func=lambda i: _evt_options[i],
+                            key="_pga_cal_event_sel",
+                        )
+                        if st.button("Load & Calibrate", key="_pga_cal_go"):
+                            _sel_row = _evt_df_filtered.iloc[_sel_idx]
+                            _eid = int(_sel_row["event_id"])
+                            _yr = int(_sel_row["calendar_year"])
+                            _edate = str(_sel_row.get("date", ""))
+                            with st.spinner(f"Calibrating event {_eid} ({_yr})…"):
+                                try:
+                                    from yak_core.pga_calibration import calibrate_pga_event
+                                    _cal_result = calibrate_pga_event(
+                                        _cal_dg, event_id=_eid, year=_yr, slate_date=_edate,
                                     )
-                            except Exception as _cal_exc:
-                                st.error(f"Calibration failed: {_cal_exc}")
+                                    if "error" in _cal_result:
+                                        st.warning(_cal_result["error"])
+                                    else:
+                                        _cal_mae = _cal_result.get("overall", {}).get("mae", "?")
+                                        _cal_n = _cal_result.get("n_players_calibrated", 0)
+                                        st.success(
+                                            f"Calibrated {_cal_n} players — MAE: {_cal_mae}"
+                                        )
+                                        # Clear cached event list so the dropdown refreshes
+                                        st.session_state.pop(_evt_cache_key, None)
+                                except Exception as _cal_exc:
+                                    st.error(f"Calibration failed: {_cal_exc}")
 
                     # Show current PGA calibration summary
                     try:
@@ -1872,6 +1891,63 @@ def main() -> None:
                 "Sport", ["NBA", "PGA"], horizontal=True, key="_lab_sb_sport",
             )
 
+            # PGA: offer to backfill actuals into archives so sandbox can score them
+            if _sb_sport == "PGA":
+                _pga_archives = [
+                    f for f in os.listdir(os.path.join(YAKOS_ROOT, "data", "slate_archive"))
+                    if f.startswith("pga_") or ("pga" in f.lower() and f.endswith(".parquet"))
+                ] if os.path.isdir(os.path.join(YAKOS_ROOT, "data", "slate_archive")) else []
+                _pga_need_actuals = []
+                for _pf in _pga_archives:
+                    _pp = os.path.join(YAKOS_ROOT, "data", "slate_archive", _pf)
+                    if os.path.getsize(_pp) == 0:
+                        continue
+                    try:
+                        _pdf = pd.read_parquet(_pp)
+                        if "actual_fp" not in _pdf.columns or not _pdf["actual_fp"].notna().any():
+                            _pga_need_actuals.append(_pf)
+                    except Exception:
+                        pass
+                if _pga_need_actuals:
+                    st.caption(
+                        f"{len(_pga_need_actuals)} PGA archive(s) missing actuals. "
+                        "Backfill from DataGolf so the sandbox can score them."
+                    )
+                    if st.button("Backfill PGA Actuals", key="_lab_sb_backfill_pga"):
+                        _bf_dg_key = (
+                            st.secrets.get("DATAGOLF_API_KEY")
+                            or os.environ.get("DATAGOLF_API_KEY")
+                            or "7e0b29081d2adaac7e3de0ed387c"
+                        )
+                        if _bf_dg_key:
+                            from yak_core.datagolf import DataGolfClient as _BF_DGC
+                            from yak_core.pga_calibration import (
+                                get_pga_event_list as _bf_gel,
+                                calibrate_pga_event as _bf_cal,
+                            )
+                            _bf_dg = _BF_DGC(api_key=_bf_dg_key)
+                            with st.spinner("Fetching event list and backfilling actuals..."):
+                                try:
+                                    _bf_events = _bf_gel(_bf_dg)
+                                    _bf_count = 0
+                                    for _, _ev in _bf_events.iterrows():
+                                        _ev_date = str(_ev.get("date", ""))
+                                        # Only calibrate events whose archives need actuals
+                                        _matching = [f for f in _pga_need_actuals if _ev_date in f]
+                                        if _matching:
+                                            _bf_cal(
+                                                _bf_dg,
+                                                event_id=int(_ev["event_id"]),
+                                                year=int(_ev["calendar_year"]),
+                                                slate_date=_ev_date,
+                                            )
+                                            _bf_count += 1
+                                    st.success(f"Backfilled actuals for {_bf_count} event(s). Run Sandbox now.")
+                                except Exception as _bf_exc:
+                                    st.error(f"Backfill failed: {_bf_exc}")
+                        else:
+                            st.warning("DataGolf API key not configured.")
+
             if st.button("Run Sandbox", key="_lab_run_sandbox"):
                 with st.spinner(f"Scoring {_sb_sport} sims against archived slates..."):
                     _sb_result = run_sandbox(knobs=_sb_knobs, sport=_sb_sport)
@@ -2097,279 +2173,368 @@ def main() -> None:
     # =====================================================================
     # SECTION 4: CONTEST RESULTS & CALIBRATION (Blueprint Layer 4)
     # =====================================================================
-    st.subheader("🎯 Contest Results")
-    st.caption(
-        "Enter actual contest bands after each slate. "
-        "Ricky scores your lineups against these to track hit rates over time."
-    )
 
-    try:
-        from yak_core.contest_calibration import (
-            ContestResult, score_vs_bands, diagnose_miss,
-            save_contest_result, get_calibration_history, get_hit_rate_summary,
+    # ── PGA: Projections vs Actuals (replaces Contest Results for golf) ──
+    if sport == "PGA":
+        st.subheader("📊 PGA Projections vs Actuals")
+        st.caption(
+            "Compare DataGolf-based projections against actual DK fantasy points "
+            "from calibrated events. Shows how the model performs by salary tier."
         )
+        try:
+            from yak_core.calibration_feedback import _load_history as _pva_load
+            _pva_history = _pva_load(sport="PGA")
+            if not _pva_history:
+                st.info("No PGA calibration data yet. Calibrate past events above to see proj vs actuals.")
+            else:
+                _pva_dates = sorted(_pva_history.keys(), reverse=True)
 
-        # ── Input form ────────────────────────────────────────────────
-        with st.expander("Enter Contest Results", expanded=False):
-            _cr_c1, _cr_c2 = st.columns(2)
-            with _cr_c1:
-                _cr_date = st.text_input(
-                    "Slate Date", value=slate.slate_date if slate.is_ready() else "",
-                    key="_cr_date",
+                # Overall trend table
+                _pva_rows = []
+                for _d in _pva_dates:
+                    _rec = _pva_history[_d]
+                    _ov = _rec.get("overall", {})
+                    _pva_rows.append({
+                        "Event Date": _d,
+                        "Players": _ov.get("n_players", 0),
+                        "Mean Error": _ov.get("mean_error", 0),
+                        "MAE": _ov.get("mae", 0),
+                        "RMSE": _ov.get("rmse", 0),
+                        "Correlation": _ov.get("correlation", 0),
+                    })
+                _pva_df = pd.DataFrame(_pva_rows)
+
+                # KPI row
+                _pk1, _pk2, _pk3, _pk4 = st.columns(4)
+                _avg_mae = _pva_df["MAE"].mean()
+                _avg_corr = _pva_df["Correlation"].mean()
+                _avg_bias = _pva_df["Mean Error"].mean()
+                _pk1.metric("Events", len(_pva_dates))
+                _pk2.metric("Avg MAE", f"{_avg_mae:.1f} FP")
+                _pk3.metric("Avg Bias", f"{_avg_bias:+.1f} FP",
+                            help="Negative = model over-projects")
+                _pk4.metric("Avg Corr", f"{_avg_corr:.3f}",
+                            help="Projection-to-actual correlation (higher is better)")
+
+                # Per-event table
+                _pva_fmt = {
+                    "Mean Error": "{:+.1f}",
+                    "MAE": "{:.1f}",
+                    "RMSE": "{:.1f}",
+                    "Correlation": "{:.3f}",
+                }
+                st.dataframe(
+                    _pva_df.style.format(_pva_fmt),
+                    use_container_width=True, hide_index=True,
                 )
-                _cr_type = st.selectbox(
-                    "Contest Type", ["gpp", "cash", "showdown"], key="_cr_type",
-                )
-            with _cr_c2:
-                _cr_cash = st.number_input("Cash Line", min_value=0.0, step=5.0, key="_cr_cash")
-                _cr_entries = st.number_input("# Entries", min_value=0, step=100, key="_cr_entries")
 
-            _cr_winner = st.number_input("Winning Score", min_value=0.0, step=5.0, key="_cr_winner")
-            _cr_notes = st.text_input("Notes (optional)", key="_cr_notes")
+                # Per-salary-tier breakdown (aggregated across events)
+                with st.expander("Accuracy by Salary Tier", expanded=False):
+                    _tier_accum = {}
+                    for _d in _pva_dates:
+                        for _tier, _stats in _pva_history[_d].get("by_salary_tier", {}).items():
+                            if _tier not in _tier_accum:
+                                _tier_accum[_tier] = {"errors": [], "maes": [], "n": 0}
+                            _tier_accum[_tier]["errors"].append(_stats["mean_error"])
+                            _tier_accum[_tier]["maes"].append(_stats["mae"])
+                            _tier_accum[_tier]["n"] += _stats["n"]
 
-            if st.button("Save & Score", key="_cr_save", type="primary"):
-                if _cr_date and _cr_cash > 0:
-                    bands = ContestResult(
-                        slate_date=_cr_date,
-                        contest_type=_cr_type,
-                        cash_line=_cr_cash,
-                        winning_score=_cr_winner,
-                        num_entries=int(_cr_entries),
-                        notes=_cr_notes,
-                    )
-
-                    # Build lineups from the archived parquet and score them.
-                    # Previously relied on lineups being in session state, which
-                    # meant scores were always "—" unless you happened to have
-                    # the exact slate loaded.  Now we build on the fly.
-                    scores = None
-                    diag = None
-
-                    try:
-                        from yak_core.lineups import (
-                            build_player_pool,
-                            build_multiple_lineups_with_exposure,
-                        )
-                        from yak_core.config import merge_config as _cr_merge
-                        import glob as _cr_glob
-
-                        _cr_pattern = os.path.join(
-                            YAKOS_ROOT, "data", "slate_archive",
-                            f"{_cr_date}_{_cr_type}*.parquet",
-                        )
-                        _cr_files = sorted(_cr_glob.glob(_cr_pattern))
-                        if _cr_files:
-                            _cr_raw = pd.read_parquet(_cr_files[0])
-                            _cr_cfg = _cr_merge({
-                                "SLATE_DATE": _cr_date,
-                                "CONTEST_TYPE": _cr_type,
-                                "NUM_LINEUPS": 20,
-                                "MAX_EXPOSURE": 0.6,
-                                "PROJ_SOURCE": "parquet",
+                    if _tier_accum:
+                        _tier_rows = []
+                        for _t, _a in sorted(_tier_accum.items()):
+                            _tier_rows.append({
+                                "Salary Tier": _t,
+                                "Avg Bias": round(float(np.mean(_a["errors"])), 1),
+                                "Avg MAE": round(float(np.mean(_a["maes"])), 1),
+                                "Total Players": _a["n"],
                             })
-                            _cr_pool = build_player_pool(_cr_raw, _cr_cfg)
-                            for _cc in ["ceil", "floor", "ownership", "own_proj", "actual_fp", "leverage"]:
-                                if _cc in _cr_raw.columns and _cc not in _cr_pool.columns:
-                                    _cr_pool = _cr_pool.merge(
-                                        _cr_raw[["player_name", _cc]].drop_duplicates("player_name"),
-                                        on="player_name", how="left",
-                                    )
-
-                            _cr_lu_df, _ = build_multiple_lineups_with_exposure(_cr_pool, _cr_cfg)
-
-                            if not _cr_lu_df.empty and "actual_fp" in _cr_raw.columns:
-                                _actual_map = _cr_raw.set_index("player_name")["actual_fp"].to_dict()
-                                _cr_lu_df = _cr_lu_df.copy()
-                                _cr_lu_df["actual_fp"] = _cr_lu_df["player_name"].map(_actual_map).fillna(0)
-                                lu_actuals = _cr_lu_df.groupby("lineup_index")["actual_fp"].sum().tolist()
-                                scores = score_vs_bands(lu_actuals, bands)
-                                diag = diagnose_miss(_cr_lu_df, _cr_pool, bands)
-                    except Exception as _build_err:
-                        st.caption(f"Could not auto-build lineups: {_build_err}")
-
-                    save_contest_result(bands, scores=scores, diagnoses=diag)
-
-                    if scores:
-                        st.success(
-                            f"Saved {_cr_date} {_cr_type.upper()} — "
-                            f"Cash rate: {scores['cash_rate']*100:.0f}% "
-                            f"({scores['cashed']}/{scores['n_lineups']}) "
-                            f"| Best: {scores['best']} | Avg: {scores['avg']}"
+                        _tier_df = pd.DataFrame(_tier_rows)
+                        _tier_fmt = {"Avg Bias": "{:+.1f}", "Avg MAE": "{:.1f}"}
+                        st.dataframe(
+                            _tier_df.style.format(_tier_fmt),
+                            use_container_width=True, hide_index=True,
                         )
                     else:
-                        st.success(f"Saved {_cr_date} {_cr_type.upper()} bands (no archived slate found to score).")
-                    st.rerun()
-                else:
-                    st.warning("Need at least a date and cash line to save.")
+                        st.caption("No salary tier data available.")
 
-        # ── Bulk Entry ───────────────────────────────────────────────
-        with st.expander("⚡ Bulk Entry (enter multiple dates at once)", expanded=False):
-            import glob as _be_glob
+        except Exception as _pva_exc:
+            st.warning(f"PGA Projections vs Actuals unavailable: {_pva_exc}")
 
-            # Find all GPP archive dates
-            _be_pattern = os.path.join(YAKOS_ROOT, "data", "slate_archive", "*_gpp_*.parquet")
-            _be_archives = sorted(_be_glob.glob(_be_pattern))
-            _be_dates = sorted(set(
-                os.path.basename(f).split("_gpp")[0] for f in _be_archives
-            ))
+    # ── NBA: Contest Results ──────────────────────────────────────────────
+    else:
+        st.subheader("🎯 Contest Results")
+        st.caption(
+            "Enter actual contest bands after each slate. "
+            "Ricky scores your lineups against these to track hit rates over time."
+        )
 
-            # Filter out dates that already have results
-            _be_existing = _load_history() if '_load_history' in dir() else {}
-            try:
-                _be_existing = {}
-                _be_hist_path = os.path.join(YAKOS_ROOT, "data", "contest_results", "history.json")
-                if os.path.isfile(_be_hist_path):
-                    import json as _be_json
-                    with open(_be_hist_path) as _f:
-                        _be_existing = _be_json.load(_f)
-            except Exception:
-                pass
+        try:
+            from yak_core.contest_calibration import (
+                ContestResult, score_vs_bands, diagnose_miss,
+                save_contest_result, get_calibration_history, get_hit_rate_summary,
+            )
 
-            _be_done = {v.get("slate_date") for v in _be_existing.values()
-                        if v.get("contest_type") == "gpp" and v.get("scores")}
-            _be_pending = [d for d in _be_dates if d not in _be_done]
+            # ── Input form ────────────────────────────────────────────────
+            with st.expander("Enter Contest Results", expanded=False):
+                _cr_c1, _cr_c2 = st.columns(2)
+                with _cr_c1:
+                    _cr_date = st.text_input(
+                        "Slate Date", value=slate.slate_date if slate.is_ready() else "",
+                        key="_cr_date",
+                    )
+                    _cr_type = st.selectbox(
+                        "Contest Type", ["gpp", "cash", "showdown"], key="_cr_type",
+                    )
+                with _cr_c2:
+                    _cr_cash = st.number_input("Cash Line", min_value=0.0, step=5.0, key="_cr_cash")
+                    _cr_entries = st.number_input("# Entries", min_value=0, step=100, key="_cr_entries")
 
-            if not _be_pending:
-                st.success("All archived GPP dates have contest results entered.")
-            else:
-                st.caption(
-                    f"{len(_be_pending)} GPP date(s) need contest bands. "
-                    "Fill in what you have, leave zeros for dates you'll skip."
-                )
-                _be_df = pd.DataFrame({
-                    "Date": _be_pending,
-                    "Cash Line": [0.0] * len(_be_pending),
-                    "Winning Score": [0.0] * len(_be_pending),
-                    "Entries": [0] * len(_be_pending),
-                })
-                _be_edited = st.data_editor(
-                    _be_df,
-                    use_container_width=True,
-                    hide_index=True,
-                    disabled=["Date"],
-                    key="_be_table",
-                    column_config={
-                        "Date": st.column_config.TextColumn("Date", width="small"),
-                        "Cash Line": st.column_config.NumberColumn("Cash Line", min_value=0.0, step=5.0, format="%.1f"),
-                        "Winning Score": st.column_config.NumberColumn("Winning Score", min_value=0.0, step=5.0, format="%.1f"),
-                        "Entries": st.column_config.NumberColumn("Entries", min_value=0, step=100),
-                    },
-                )
+                _cr_winner = st.number_input("Winning Score", min_value=0.0, step=5.0, key="_cr_winner")
+                _cr_notes = st.text_input("Notes (optional)", key="_cr_notes")
 
-                if st.button("Save & Score All", key="_be_save", type="primary"):
-                    _be_saved = 0
-                    _be_msgs = []
-                    for _, row in _be_edited.iterrows():
-                        _be_d = str(row["Date"]).strip()
-                        _be_cl = float(row["Cash Line"])
-                        if _be_cl <= 0:
-                            continue  # skip rows with no cash line
-
-                        _be_bands = ContestResult(
-                            slate_date=_be_d,
-                            contest_type="gpp",
-                            cash_line=_be_cl,
-                            winning_score=float(row["Winning Score"]),
-                            num_entries=int(row["Entries"]),
+                if st.button("Save & Score", key="_cr_save", type="primary"):
+                    if _cr_date and _cr_cash > 0:
+                        bands = ContestResult(
+                            slate_date=_cr_date,
+                            contest_type=_cr_type,
+                            cash_line=_cr_cash,
+                            winning_score=_cr_winner,
+                            num_entries=int(_cr_entries),
+                            notes=_cr_notes,
                         )
 
-                        # Auto-build lineups & score
-                        _be_scores = None
-                        _be_diag = None
+                        # Build lineups from the archived parquet and score them.
+                        # Previously relied on lineups being in session state, which
+                        # meant scores were always "—" unless you happened to have
+                        # the exact slate loaded.  Now we build on the fly.
+                        scores = None
+                        diag = None
+
                         try:
                             from yak_core.lineups import (
-                                build_player_pool as _be_bpp,
-                                build_multiple_lineups_with_exposure as _be_bml,
+                                build_player_pool,
+                                build_multiple_lineups_with_exposure,
                             )
-                            from yak_core.config import merge_config as _be_mc
+                            from yak_core.config import merge_config as _cr_merge
+                            import glob as _cr_glob
 
-                            _be_pq = os.path.join(
+                            _cr_pattern = os.path.join(
                                 YAKOS_ROOT, "data", "slate_archive",
-                                f"{_be_d}_gpp_main.parquet",
+                                f"{_cr_date}_{_cr_type}*.parquet",
                             )
-                            if os.path.isfile(_be_pq):
-                                _be_raw = pd.read_parquet(_be_pq)
-                                _be_cfg = _be_mc({
-                                    "SLATE_DATE": _be_d,
-                                    "CONTEST_TYPE": "gpp",
+                            _cr_files = sorted(_cr_glob.glob(_cr_pattern))
+                            if _cr_files:
+                                _cr_raw = pd.read_parquet(_cr_files[0])
+                                _cr_cfg = _cr_merge({
+                                    "SLATE_DATE": _cr_date,
+                                    "CONTEST_TYPE": _cr_type,
                                     "NUM_LINEUPS": 20,
                                     "MAX_EXPOSURE": 0.6,
                                     "PROJ_SOURCE": "parquet",
                                 })
-                                _be_pool = _be_bpp(_be_raw, _be_cfg)
+                                _cr_pool = build_player_pool(_cr_raw, _cr_cfg)
                                 for _cc in ["ceil", "floor", "ownership", "own_proj", "actual_fp", "leverage"]:
-                                    if _cc in _be_raw.columns and _cc not in _be_pool.columns:
-                                        _be_pool = _be_pool.merge(
-                                            _be_raw[["player_name", _cc]].drop_duplicates("player_name"),
+                                    if _cc in _cr_raw.columns and _cc not in _cr_pool.columns:
+                                        _cr_pool = _cr_pool.merge(
+                                            _cr_raw[["player_name", _cc]].drop_duplicates("player_name"),
                                             on="player_name", how="left",
                                         )
-                                _be_lu, _ = _be_bml(_be_pool, _be_cfg)
-                                if not _be_lu.empty and "actual_fp" in _be_raw.columns:
-                                    _am = _be_raw.set_index("player_name")["actual_fp"].to_dict()
-                                    _be_lu = _be_lu.copy()
-                                    _be_lu["actual_fp"] = _be_lu["player_name"].map(_am).fillna(0)
-                                    _lu_acts = _be_lu.groupby("lineup_index")["actual_fp"].sum().tolist()
-                                    _be_scores = score_vs_bands(_lu_acts, _be_bands)
-                                    _be_diag = diagnose_miss(_be_lu, _be_pool, _be_bands)
-                        except Exception:
-                            pass
 
-                        save_contest_result(_be_bands, scores=_be_scores, diagnoses=_be_diag)
-                        _be_saved += 1
+                                _cr_lu_df, _ = build_multiple_lineups_with_exposure(_cr_pool, _cr_cfg)
 
-                        if _be_scores:
-                            _be_msgs.append(
-                                f"{_be_d}: Cash {_be_scores['cash_rate']*100:.0f}% "
-                                f"({_be_scores['cashed']}/{_be_scores['n_lineups']}) "
-                                f"Best={_be_scores['best']}"
+                                if not _cr_lu_df.empty and "actual_fp" in _cr_raw.columns:
+                                    _actual_map = _cr_raw.set_index("player_name")["actual_fp"].to_dict()
+                                    _cr_lu_df = _cr_lu_df.copy()
+                                    _cr_lu_df["actual_fp"] = _cr_lu_df["player_name"].map(_actual_map).fillna(0)
+                                    lu_actuals = _cr_lu_df.groupby("lineup_index")["actual_fp"].sum().tolist()
+                                    scores = score_vs_bands(lu_actuals, bands)
+                                    diag = diagnose_miss(_cr_lu_df, _cr_pool, bands)
+                        except Exception as _build_err:
+                            st.caption(f"Could not auto-build lineups: {_build_err}")
+
+                        save_contest_result(bands, scores=scores, diagnoses=diag)
+
+                        if scores:
+                            st.success(
+                                f"Saved {_cr_date} {_cr_type.upper()} — "
+                                f"Cash rate: {scores['cash_rate']*100:.0f}% "
+                                f"({scores['cashed']}/{scores['n_lineups']}) "
+                                f"| Best: {scores['best']} | Avg: {scores['avg']}"
                             )
                         else:
-                            _be_msgs.append(f"{_be_d}: Bands saved (no actuals to score)")
-
-                    if _be_saved:
-                        st.success(f"Saved {_be_saved} date(s):")
-                        for m in _be_msgs:
-                            st.write(m)
+                            st.success(f"Saved {_cr_date} {_cr_type.upper()} bands (no archived slate found to score).")
                         st.rerun()
                     else:
-                        st.warning("No rows had a cash line > 0.")
+                        st.warning("Need at least a date and cash line to save.")
 
-        # ── Hit Rate Summary ──────────────────────────────────────────
-        _hr = get_hit_rate_summary()
-        if _hr.get("n_slates", 0) > 0:
-            _hr_c1, _hr_c2 = st.columns(2)
-            _targets = _hr.get("targets", {})
-            with _hr_c1:
-                st.metric("Slates Tracked", _hr["n_slates"])
-            with _hr_c2:
-                _cr_val = _hr.get("avg_cash_rate", 0)
-                _cr_target = _targets.get("cash_rate", 0.7)
-                st.metric("Cash Rate", f"{_cr_val*100:.0f}%",
-                          delta=f"target: {_cr_target*100:.0f}%",
-                          delta_color="off")
+            # ── Bulk Entry ───────────────────────────────────────────────
+            with st.expander("⚡ Bulk Entry (enter multiple dates at once)", expanded=False):
+                import glob as _be_glob
 
-            # History table
-            _hist = get_calibration_history()
-            if _hist:
-                with st.expander(f"History ({len(_hist)} results)", expanded=False):
-                    _hist_rows = []
-                    for h in _hist:
-                        _s = h.get("scores", {})
-                        _hist_rows.append({
-                            "Date": h.get("slate_date", ""),
-                            "Type": h.get("contest_type", "").upper(),
-                            "Cash Line": h.get("cash_line", 0),
-                            "Cash Rate": f"{_s.get('cash_rate', 0)*100:.0f}%" if _s else "—",
-                            "Best": _s.get("best", "—") if _s else "—",
-                            "Avg": _s.get("avg", "—") if _s else "—",
-                            "Missed": h.get("n_missed", "—"),
-                        })
-                    st.dataframe(pd.DataFrame(_hist_rows), use_container_width=True, hide_index=True)
-        else:
-            st.info("No contest results entered yet. Enter bands above after each slate.")
+                # Find all GPP archive dates
+                _be_pattern = os.path.join(YAKOS_ROOT, "data", "slate_archive", "*_gpp_*.parquet")
+                _be_archives = sorted(_be_glob.glob(_be_pattern))
+                _be_dates = sorted(set(
+                    os.path.basename(f).split("_gpp")[0] for f in _be_archives
+                ))
 
-    except Exception as _cr_exc:
-        st.warning(f"Contest calibration unavailable: {_cr_exc}")
+                # Filter out dates that already have results
+                _be_existing = _load_history() if '_load_history' in dir() else {}
+                try:
+                    _be_existing = {}
+                    _be_hist_path = os.path.join(YAKOS_ROOT, "data", "contest_results", "history.json")
+                    if os.path.isfile(_be_hist_path):
+                        import json as _be_json
+                        with open(_be_hist_path) as _f:
+                            _be_existing = _be_json.load(_f)
+                except Exception:
+                    pass
+
+                _be_done = {v.get("slate_date") for v in _be_existing.values()
+                            if v.get("contest_type") == "gpp" and v.get("scores")}
+                _be_pending = [d for d in _be_dates if d not in _be_done]
+
+                if not _be_pending:
+                    st.success("All archived GPP dates have contest results entered.")
+                else:
+                    st.caption(
+                        f"{len(_be_pending)} GPP date(s) need contest bands. "
+                        "Fill in what you have, leave zeros for dates you'll skip."
+                    )
+                    _be_df = pd.DataFrame({
+                        "Date": _be_pending,
+                        "Cash Line": [0.0] * len(_be_pending),
+                        "Winning Score": [0.0] * len(_be_pending),
+                        "Entries": [0] * len(_be_pending),
+                    })
+                    _be_edited = st.data_editor(
+                        _be_df,
+                        use_container_width=True,
+                        hide_index=True,
+                        disabled=["Date"],
+                        key="_be_table",
+                        column_config={
+                            "Date": st.column_config.TextColumn("Date", width="small"),
+                            "Cash Line": st.column_config.NumberColumn("Cash Line", min_value=0.0, step=5.0, format="%.1f"),
+                            "Winning Score": st.column_config.NumberColumn("Winning Score", min_value=0.0, step=5.0, format="%.1f"),
+                            "Entries": st.column_config.NumberColumn("Entries", min_value=0, step=100),
+                        },
+                    )
+
+                    if st.button("Save & Score All", key="_be_save", type="primary"):
+                        _be_saved = 0
+                        _be_msgs = []
+                        for _, row in _be_edited.iterrows():
+                            _be_d = str(row["Date"]).strip()
+                            _be_cl = float(row["Cash Line"])
+                            if _be_cl <= 0:
+                                continue  # skip rows with no cash line
+
+                            _be_bands = ContestResult(
+                                slate_date=_be_d,
+                                contest_type="gpp",
+                                cash_line=_be_cl,
+                                winning_score=float(row["Winning Score"]),
+                                num_entries=int(row["Entries"]),
+                            )
+
+                            # Auto-build lineups & score
+                            _be_scores = None
+                            _be_diag = None
+                            try:
+                                from yak_core.lineups import (
+                                    build_player_pool as _be_bpp,
+                                    build_multiple_lineups_with_exposure as _be_bml,
+                                )
+                                from yak_core.config import merge_config as _be_mc
+
+                                _be_pq = os.path.join(
+                                    YAKOS_ROOT, "data", "slate_archive",
+                                    f"{_be_d}_gpp_main.parquet",
+                                )
+                                if os.path.isfile(_be_pq):
+                                    _be_raw = pd.read_parquet(_be_pq)
+                                    _be_cfg = _be_mc({
+                                        "SLATE_DATE": _be_d,
+                                        "CONTEST_TYPE": "gpp",
+                                        "NUM_LINEUPS": 20,
+                                        "MAX_EXPOSURE": 0.6,
+                                        "PROJ_SOURCE": "parquet",
+                                    })
+                                    _be_pool = _be_bpp(_be_raw, _be_cfg)
+                                    for _cc in ["ceil", "floor", "ownership", "own_proj", "actual_fp", "leverage"]:
+                                        if _cc in _be_raw.columns and _cc not in _be_pool.columns:
+                                            _be_pool = _be_pool.merge(
+                                                _be_raw[["player_name", _cc]].drop_duplicates("player_name"),
+                                                on="player_name", how="left",
+                                            )
+                                    _be_lu, _ = _be_bml(_be_pool, _be_cfg)
+                                    if not _be_lu.empty and "actual_fp" in _be_raw.columns:
+                                        _am = _be_raw.set_index("player_name")["actual_fp"].to_dict()
+                                        _be_lu = _be_lu.copy()
+                                        _be_lu["actual_fp"] = _be_lu["player_name"].map(_am).fillna(0)
+                                        _lu_acts = _be_lu.groupby("lineup_index")["actual_fp"].sum().tolist()
+                                        _be_scores = score_vs_bands(_lu_acts, _be_bands)
+                                        _be_diag = diagnose_miss(_be_lu, _be_pool, _be_bands)
+                            except Exception:
+                                pass
+
+                            save_contest_result(_be_bands, scores=_be_scores, diagnoses=_be_diag)
+                            _be_saved += 1
+
+                            if _be_scores:
+                                _be_msgs.append(
+                                    f"{_be_d}: Cash {_be_scores['cash_rate']*100:.0f}% "
+                                    f"({_be_scores['cashed']}/{_be_scores['n_lineups']}) "
+                                    f"Best={_be_scores['best']}"
+                                )
+                            else:
+                                _be_msgs.append(f"{_be_d}: Bands saved (no actuals to score)")
+
+                        if _be_saved:
+                            st.success(f"Saved {_be_saved} date(s):")
+                            for m in _be_msgs:
+                                st.write(m)
+                            st.rerun()
+                        else:
+                            st.warning("No rows had a cash line > 0.")
+
+            # ── Hit Rate Summary ──────────────────────────────────────────
+            _hr = get_hit_rate_summary()
+            if _hr.get("n_slates", 0) > 0:
+                _hr_c1, _hr_c2 = st.columns(2)
+                _targets = _hr.get("targets", {})
+                with _hr_c1:
+                    st.metric("Slates Tracked", _hr["n_slates"])
+                with _hr_c2:
+                    _cr_val = _hr.get("avg_cash_rate", 0)
+                    _cr_target = _targets.get("cash_rate", 0.7)
+                    st.metric("Cash Rate", f"{_cr_val*100:.0f}%",
+                              delta=f"target: {_cr_target*100:.0f}%",
+                              delta_color="off")
+
+                # History table
+                _hist = get_calibration_history()
+                if _hist:
+                    with st.expander(f"History ({len(_hist)} results)", expanded=False):
+                        _hist_rows = []
+                        for h in _hist:
+                            _s = h.get("scores", {})
+                            _hist_rows.append({
+                                "Date": h.get("slate_date", ""),
+                                "Type": h.get("contest_type", "").upper(),
+                                "Cash Line": h.get("cash_line", 0),
+                                "Cash Rate": f"{_s.get('cash_rate', 0)*100:.0f}%" if _s else "—",
+                                "Best": _s.get("best", "—") if _s else "—",
+                                "Avg": _s.get("avg", "—") if _s else "—",
+                                "Missed": h.get("n_missed", "—"),
+                            })
+                        st.dataframe(pd.DataFrame(_hist_rows), use_container_width=True, hide_index=True)
+            else:
+                st.info("No contest results entered yet. Enter bands above after each slate.")
+
+        except Exception as _cr_exc:
+            st.warning(f"Contest calibration unavailable: {_cr_exc}")
 
     # (Sections 5-6 removed: Learning Status, RCI, Edge Check Gate — not in calibration path)
 

@@ -186,7 +186,48 @@ def calibrate_pga_event(
     result["event_id"] = event_id
     result["year"] = year
 
+    # Backfill actual_fp into any matching PGA archive parquets so the
+    # Sim Sandbox can score PGA slates.
+    _backfill_actuals_into_archive(slate_date, actuals)
+
     return result
+
+
+def _backfill_actuals_into_archive(
+    slate_date: str,
+    actuals: pd.DataFrame,
+) -> None:
+    """Write actual_fp into PGA archive parquets matching *slate_date*.
+
+    This enables the Sim Sandbox to score PGA slates against real results.
+    Matches on player_name.  Only overwrites the parquet if new data was merged.
+    """
+    import glob as _glob
+
+    pattern = os.path.join(_ARCHIVE_DIR, f"{slate_date}_pga_*.parquet")
+    matches = _glob.glob(pattern)
+    if not matches:
+        # Also try the *_pga_gpp.parquet naming convention
+        pattern = os.path.join(_ARCHIVE_DIR, f"*{slate_date}*pga*.parquet")
+        matches = _glob.glob(pattern)
+
+    if not actuals.empty and "actual_fp" in actuals.columns and "player_name" in actuals.columns:
+        act_map = actuals.set_index("player_name")["actual_fp"].to_dict()
+    else:
+        return
+
+    for path in matches:
+        try:
+            df = pd.read_parquet(path)
+            if df.empty or "player_name" not in df.columns:
+                continue
+            if "actual_fp" in df.columns and df["actual_fp"].notna().any():
+                continue  # Already has actuals, skip
+            df["actual_fp"] = df["player_name"].map(act_map)
+            if df["actual_fp"].notna().sum() > 0:
+                df.to_parquet(path, index=False)
+        except Exception:
+            pass
 
 
 def _try_load_archived_pool(event_id: int, slate_date: str) -> Optional[pd.DataFrame]:
