@@ -369,6 +369,19 @@ def build_multiple_lineups_with_exposure(
         else:
             p["_slots"] = _eligible_slots(p.get("pos", ""))
 
+    # ── Normalize ownership to 0-1 decimal for constraint math ─────
+    # Pool stores ownership on 0-100 pct scale (24 = 24%), but GPP
+    # constraints (own_cap, low_own_threshold, gpp_score penalty) all
+    # expect 0-1 fractions.  Normalize here at the optimizer boundary
+    # so the pool DataFrame itself (used by display code) stays on
+    # 0-100 scale.
+    for p in players:
+        for _own_key in ("ownership", "own_proj", "own_pct", "proj_own"):
+            if _own_key in p:
+                _raw_own = float(p.get(_own_key, 0) or 0)
+                if _raw_own > 1.0:
+                    p[_own_key] = _raw_own / 100.0
+
     # ── Pre-compute per-player scores by contest type ──────────────
     if is_gpp:
         # GPP formula (v6 — backtested on 13 GPP slates 2026-02-02 → 2026-03-08):
