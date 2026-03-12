@@ -1,0 +1,178 @@
+{
+  "bullets": [
+    "Anchor studs (5): Nikola Jokic, Luka Doncic, Victor Wembanyama, Cade Cunningham, Jalen Johnson",
+    "Value plays (5): Danny Wolf, Olivier-Maxence Prosper, Rayan Rupert, Cam Spencer, Jaylen Wells",
+    "Leverage plays (5): Javon Small, Cooper Flagg, Gregory Jackson, Tyrese Maxey, Jaylen Brown",
+    "Fade candidates: 5 players below edge threshold"
+  ],
+  "recommendation": "5 core + 5 value plays from 315 total \u2014 Strong edge slate.",
+  "core_plays": [
+    {
+      "player_name": "Nikola Jokic",
+      "proj": 62.9,
+      "salary": 12500,
+      "ownership": 37.5,
+      "edge": 0.58,
+      "value": 5.03
+    },
+    {
+      "player_name": "Luka Doncic",
+      "proj": 60.9,
+      "salary": 12300,
+      "ownership": 0.0,
+      "edge": 0.57,
+      "value": 4.95
+    },
+    {
+      "player_name": "Victor Wembanyama",
+      "proj": 55.4,
+      "salary": 11000,
+      "ownership": 0.0,
+      "edge": 0.56,
+      "value": 5.04
+    },
+    {
+      "player_name": "Cade Cunningham",
+      "proj": 50.8,
+      "salary": 10900,
+      "ownership": 0.0,
+      "edge": 0.5,
+      "value": 4.66
+    },
+    {
+      "player_name": "Jalen Johnson",
+      "proj": 49.3,
+      "salary": 10800,
+      "ownership": 0.0,
+      "edge": 0.48,
+      "value": 4.57
+    }
+  ],
+  "leverage_plays": [
+    {
+      "player_name": "Javon Small",
+      "proj": 40.2,
+      "salary": 5500,
+      "ownership": 0.0,
+      "edge": 0.56,
+      "value": 7.3
+    },
+    {
+      "player_name": "Cooper Flagg",
+      "proj": 45.8,
+      "salary": 8500,
+      "ownership": 0.0,
+      "edge": 0.55,
+      "value": 5.39
+    },
+    {
+      "player_name": "Gregory Jackson",
+      "proj": 36.6,
+      "salary": 5800,
+      "ownership": 0.0,
+      "edge": 0.52,
+      "value": 6.31
+    },
+    {
+      "player_name": "Tyrese Maxey",
+      "proj": 43.4,
+      "salary": 10100,
+      "ownership": 0.0,
+      "edge": 0.51,
+      "value": 4.29
+    },
+    {
+      "player_name": "Jaylen Brown",
+      "proj": 45.3,
+      "salary": 9300,
+      "ownership": 0.0,
+      "edge": 0.5,
+      "value": 4.87
+    }
+  ],
+  "value_plays": [
+    {
+      "player_name": "Danny Wolf",
+      "proj": 32.2,
+      "salary": 4800,
+      "ownership": 0.0,
+      "edge": 0.5,
+      "value": 6.7
+    },
+    {
+      "player_name": "Olivier-Maxence Prosper",
+      "proj": 31.9,
+      "salary": 4900,
+      "ownership": 0.0,
+      "edge": 0.5,
+      "value": 6.5
+    },
+    {
+      "player_name": "Rayan Rupert",
+      "proj": 26.0,
+      "salary": 4300,
+      "ownership": 0.0,
+      "edge": 0.45,
+      "value": 6.04
+    },
+    {
+      "player_name": "Cam Spencer",
+      "proj": 29.6,
+      "salary": 5100,
+      "ownership": 0.0,
+      "edge": 0.46,
+      "value": 5.8
+    },
+    {
+      "player_name": "Jaylen Wells",
+      "proj": 27.1,
+      "salary": 4800,
+      "ownership": 0.0,
+      "edge": 0.44,
+      "value": 5.64
+    }
+  ],
+  "fade_candidates": [
+    {
+      "player_name": "Jevon Carter",
+      "proj": 18.1,
+      "salary": 4000,
+      "ownership": 24.9,
+      "edge": 0.34,
+      "value": 4.54
+    },
+    {
+      "player_name": "Tristan da Silva",
+      "proj": 22.6,
+      "salary": 4900,
+      "ownership": 15.9,
+      "edge": 0.36,
+      "value": 4.61
+    },
+    {
+      "player_name": "Wendell Carter Jr.",
+      "proj": 27.3,
+      "salary": 5300,
+      "ownership": 12.0,
+      "edge": 0.41,
+      "value": 5.15
+    },
+    {
+      "player_name": "Jalen Suggs",
+      "proj": 35.2,
+      "salary": 7100,
+      "ownership": 18.4,
+      "edge": 0.43,
+      "value": 4.96
+    },
+    {
+      "player_name": "Jamal Murray",
+      "proj": 40.6,
+      "salary": 9000,
+      "ownership": 15.2,
+      "edge": 0.45,
+      "value": 4.51
+    }
+  ],
+  "signals_df_path": "signals.parquet"
+}

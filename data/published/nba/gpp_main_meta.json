@@ -1,0 +1,12 @@
+{
+  "contest_label": "GPP Main",
+  "contest_type": "MME",
+  "num_lineups": 20,
+  "archetype": "Ceiling Hunter",
+  "salary_cap": 50000,
+  "min_salary_used": 46000,
+  "max_exposure": 0.35,
+  "lock": [],
+  "exclude": [],
+  "timestamp": "2026-03-12T21:40:29.737218+00:00"
+}

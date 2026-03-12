@@ -1,0 +1,33 @@
+{
+  "sport": "NBA",
+  "date": "2026-03-12",
+  "core_names": [
+    "Nikola Jokic",
+    "Luka Doncic",
+    "Victor Wembanyama",
+    "Cade Cunningham",
+    "Jalen Johnson"
+  ],
+  "leverage_names": [
+    "Javon Small",
+    "Cooper Flagg",
+    "Gregory Jackson",
+    "Tyrese Maxey",
+    "Jaylen Brown"
+  ],
+  "value_names": [
+    "Danny Wolf",
+    "Olivier-Maxence Prosper",
+    "Rayan Rupert",
+    "Cam Spencer",
+    "Jaylen Wells"
+  ],
+  "fade_names": [
+    "Jevon Carter",
+    "Tristan da Silva",
+    "Wendell Carter Jr.",
+    "Jalen Suggs",
+    "Jamal Murray"
+  ],
+  "calibration_slates": 15
+}

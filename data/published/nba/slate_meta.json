@@ -1,0 +1,19 @@
+{
+  "sport": "NBA",
+  "site": "DK",
+  "date": "2026-03-12",
+  "salary_cap": 50000,
+  "roster_slots": [
+    "PG",
+    "SG",
+    "SF",
+    "PF",
+    "C",
+    "G",
+    "F",
+    "UTIL"
+  ],
+  "lineup_size": 8,
+  "pool_size": 315,
+  "proj_source": "rotogrinders+tank01"
+}
