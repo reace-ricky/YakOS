@@ -54,5 +54,55 @@
         "mae": 46.59
       }
     }
+  },
+  "2026-02-08": {
+    "slate_date": "2026-02-08",
+    "overall": {
+      "mean_error": -11.2,
+      "mae": 22.25,
+      "rmse": 28.15,
+      "correlation": 0.5145,
+      "n_players": 95
+    },
+    "by_position": {
+      "G": {
+        "mean_error": -11.2,
+        "median_error": -3.85,
+        "n": 95,
+        "mae": 22.25
+      }
+    },
+    "by_salary_tier": {
+      "<6.5K": {
+        "mean_error": -11.1,
+        "median_error": -3.73,
+        "n": 21,
+        "mae": 20.28
+      },
+      "6.5-7.5K": {
+        "mean_error": -15.45,
+        "median_error": -5.73,
+        "n": 45,
+        "mae": 23.1
+      },
+      "7.5-8.5K": {
+        "mean_error": -6.48,
+        "median_error": 3.57,
+        "n": 15,
+        "mae": 25.99
+      },
+      "8.5-9.5K": {
+        "mean_error": -7.45,
+        "median_error": 1.8,
+        "n": 9,
+        "mae": 18.63
+      },
+      "9.5-10.5K": {
+        "mean_error": 5.82,
+        "median_error": 6.37,
+        "n": 4,
+        "mae": 21.42
+      }
+    }
   }
 }
