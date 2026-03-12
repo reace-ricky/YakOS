@@ -38,6 +38,7 @@ pg = st.navigation(
         st.Page("pages/2_ricky_edge.py", title="Ricky's Edge Analysis", icon="🎯"),
         st.Page("pages/3_build_publish.py", title="Build & Publish", icon="🏗️"),
         st.Page("pages/4_right_angle_ricky.py", title="Right Angle Ricky", icon="📐"),
+        st.Page("pages/5_right_angle_ricky_share.py", title="Right Angle Ricky (Share)", icon="📡"),
     ]
 )
 pg.run()
