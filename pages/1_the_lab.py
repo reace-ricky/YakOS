@@ -1290,6 +1290,17 @@ def main() -> None:
                             set_slate_state(slate)
                             set_sim_state(sim)
                             _load_status.write(f"✅ Pool loaded — {len(player_results)} players analyzed.")
+                            # Auto-archive PGA slate snapshot
+                            try:
+                                from yak_core.slate_archive import archive_slate
+                                archive_slate(
+                                    pool_result, slate_date_str,
+                                    contest_type=contest_type_label,
+                                    edge_df=_edge_df if '_edge_df' in dir() else None,
+                                )
+                                _load_status.write("💾 PGA slate archived for calibration.")
+                            except Exception:
+                                pass
                         except Exception as _edge_exc:
                             _load_status.write(f"⚠️ Edge metrics failed: {_edge_exc}")
                         _load_status.update(label="✅ PGA pool loaded", state="complete", expanded=False)
