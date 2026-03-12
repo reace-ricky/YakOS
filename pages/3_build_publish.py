@@ -211,10 +211,6 @@ def _build_lineups(
                 "tier_min_players": _eo.get("tier_min_players", {}),
                 "tier_max_players": _eo.get("tier_max_players", {}),
             }
-        # --- EXCLUDE: filter out excluded players before optimizer ---
-        _excl = [n.strip() for n in cfg.get("EXCLUDE", [])]
-        if _excl:
-            pool = pool[~pool["player_name"].isin(_excl)].reset_index(drop=True)
         _use_showdown = slate.is_showdown or contest_label == "Showdown"
         if _use_showdown:
             lineups_df, expo_df = build_showdown_lineups(pool, cfg)
