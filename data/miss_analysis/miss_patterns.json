@@ -1,5 +1,5 @@
 {
-  "computed_at": "2026-03-12T01:29:23.967723+00:00",
+  "computed_at": "2026-03-12T02:14:57.543993+00:00",
   "n_slates": 21,
   "n_player_slates": 3231,
   "classification": {
@@ -51,9 +51,9 @@
     {
       "player": "Bam Adebayo",
       "salary": 8400,
-      "proj": 41.7,
+      "proj": 41.6,
       "actual": 105.8,
-      "residual": 64.1,
+      "residual": 64.2,
       "ratio": 2.54,
       "context": [],
       "date": "2026-03-10"
@@ -64,7 +64,7 @@
       "proj": 11.0,
       "actual": 65.8,
       "residual": 54.7,
-      "ratio": 5.98,
+      "ratio": 5.97,
       "context": [],
       "date": "2026-03-10"
     },
@@ -253,7 +253,7 @@
   ],
   "suggestions": [],
   "context_corrections": {
-    "computed_at": "2026-03-12T01:29:23.967701+00:00",
+    "computed_at": "2026-03-12T02:14:57.543971+00:00",
     "strength": 0.5,
     "n_active": 0,
     "n_total": 6,
