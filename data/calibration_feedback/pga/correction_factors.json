@@ -1,0 +1,12 @@
+{
+  "n_slates": 1,
+  "dates_used": [
+    "2026-03-08"
+  ],
+  "overall_bias_correction": -0.9,
+  "by_position": {
+    "G": -0.9
+  },
+  "by_salary_tier": {},
+  "correction_strength": 0.5
+}
