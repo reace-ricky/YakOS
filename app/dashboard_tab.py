@@ -153,7 +153,8 @@ def render_dashboard_tab(sport: str) -> None:
     try:
         _render_contest_results(sport)
     except Exception as e:
-        st.error(f"Contest Results error: {e}")
+        import traceback
+        st.error(f"Contest Results error: {e}\n```\n{traceback.format_exc()}\n```")
 
     # ═══════════════════════════════════════════════════
     # Historical Backfill
@@ -162,7 +163,8 @@ def render_dashboard_tab(sport: str) -> None:
     try:
         _render_historical_backfill(sport)
     except Exception as e:
-        st.error(f"Historical Backfill error: {e}")
+        import traceback
+        st.error(f"Historical Backfill error: {e}\n```\n{traceback.format_exc()}\n```")
 
 
 # ── Contest Results Section ──────────────────────────────────────────────────
