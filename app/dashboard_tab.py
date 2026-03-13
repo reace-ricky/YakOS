@@ -150,13 +150,19 @@ def render_dashboard_tab(sport: str) -> None:
     # Contest Results
     # ═══════════════════════════════════════════════════
     st.markdown("---")
-    _render_contest_results(sport)
+    try:
+        _render_contest_results(sport)
+    except Exception as e:
+        st.error(f"Contest Results error: {e}")
 
     # ═══════════════════════════════════════════════════
     # Historical Backfill
     # ═══════════════════════════════════════════════════
     st.markdown("---")
-    _render_historical_backfill(sport)
+    try:
+        _render_historical_backfill(sport)
+    except Exception as e:
+        st.error(f"Historical Backfill error: {e}")
 
 
 # ── Contest Results Section ──────────────────────────────────────────────────
