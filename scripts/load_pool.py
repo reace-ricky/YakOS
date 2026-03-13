@@ -129,12 +129,6 @@ def _load_nba_pool(slate_date: str, site: str) -> tuple[pd.DataFrame, dict]:
         print(f"[load_pool] Applying calibration ({corrections['n_slates']} slates) ...")
         pool = apply_corrections(pool, corrections, sport="NBA")
 
-    # Normalise ownership column
-    if "own_proj" in pool.columns and "ownership" not in pool.columns:
-        pool["ownership"] = pool["own_proj"]
-    if "ownership" not in pool.columns:
-        pool["ownership"] = 0.0
-
     # ── Fetch schedule for matchup labels + opponent column ──
     import requests
     matchups: list[dict] = []
@@ -256,26 +250,12 @@ def main(argv: list[str] | None = None) -> pd.DataFrame:
     meta["pool_size"] = len(pool)
 
     # ── Ownership model ────────────────────────────────────────────────────
-    # Run YakOS ownership model for every player. Where RG provided real
-    # ownership data (> 0), keep it; fill the rest from the model.
-    from yak_core.ownership import salary_rank_ownership
-
-    rg_own = pd.to_numeric(pool.get("ownership", pd.Series(dtype=float)), errors="coerce").fillna(0.0)
-    has_rg = rg_own > 0
-    n_rg = int(has_rg.sum())
-
-    # Generate model ownership for full pool
-    # NBA uses 8 roster spots, PGA uses 6 — ownership sums scale accordingly
-    _lineup_size = 6 if sport == "PGA" else 8
-    pool = salary_rank_ownership(pool, col="_model_own", lineup_size=_lineup_size)
-
-    # Blend: keep RG where available, model everywhere else
-    pool["ownership"] = rg_own.where(has_rg, pool["_model_own"])
-    pool["own_proj"] = pool["ownership"]
-    pool["own_source"] = "yakos_model"
-    pool.loc[has_rg, "own_source"] = "rotogrinders"
-    pool.drop(columns=["_model_own"], inplace=True)
-    print(f"[load_pool] Ownership: {n_rg} RG + {len(pool) - n_rg} model = {len(pool)} total")
+    # Run YakOS ownership guard which handles all edge cases (None, all-zero,
+    # wrong scale). Where RG provided real ownership data (> 0), it is kept;
+    # the rest is filled from the salary-rank model via ensure_ownership().
+    from yak_core.ownership_guard import ensure_ownership
+    pool = ensure_ownership(pool, sport=sport)
+    print(f"[load_pool] Ownership: min={pool['ownership'].min():.1f}% max={pool['ownership'].max():.1f}% (via ensure_ownership)")
 
     # Write outputs
     out_dir = published_dir(sport)

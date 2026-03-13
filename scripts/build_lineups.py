@@ -95,6 +95,7 @@ def build_lineups(
     """Build lineups and write output files. Returns lineups DataFrame."""
     from yak_core.config import CONTEST_PRESETS
     from yak_core.lineups import build_multiple_lineups_with_exposure
+    from yak_core.ownership_guard import ensure_ownership
 
     sport = sport.upper()
     out_dir = published_dir(sport)
@@ -107,6 +108,9 @@ def build_lineups(
         sys.exit(f"ERROR: Pool not found at {pool_path}. Run load_pool.py first.")
 
     print(f"[build_lineups] Loaded {len(pool)} players from {pool_path}")
+
+    # Ensure valid ownership data before building lineups
+    pool = ensure_ownership(pool, sport=sport)
 
     # Resolve contest preset
     if contest_label not in CONTEST_PRESETS:
@@ -139,16 +143,6 @@ def build_lineups(
     # Ensure required columns
     if "player_id" not in pool.columns:
         pool["player_id"] = pool["player_name"].str.lower().str.replace(" ", "_")
-    if "ownership" not in pool.columns:
-        if "own_pct" in pool.columns:
-            pool["ownership"] = pool["own_pct"]
-        elif "own_proj" in pool.columns:
-            pool["ownership"] = pool["own_proj"]
-        else:
-            pool["ownership"] = 0.0
-
-    # Coerce ownership to float — Tank01 NBA may return None
-    pool["ownership"] = pd.to_numeric(pool["ownership"], errors="coerce").fillna(0.0)
 
     # Build optimizer config
     cfg = _build_optimizer_cfg(preset, sport, num_lineups, lock, exclude)
