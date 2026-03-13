@@ -331,6 +331,7 @@ def build_multiple_lineups_with_exposure(
 
     # ── Contest-type detection ──────────────────────────────────────
     contest_type = cfg.get("CONTEST_TYPE", "gpp").lower()
+    is_showdown_classic = contest_type in ("showdown",)
     is_gpp = contest_type in ("gpp", "mme", "sd", "captain")
     is_cash = contest_type in ("cash", "50/50", "double-up")
 
@@ -406,6 +407,21 @@ def build_multiple_lineups_with_exposure(
                 + ceil_ * 0.55
                 - own * 5.0
             )
+    elif is_showdown_classic:
+        # Showdown formula (single-round, no captain): ceiling-heavy with
+        # reduced ownership penalty.  Single-round contests have less field
+        # variance than 4-day GPPs, so ownership fading matters less and
+        # raw ceiling matters more.
+        # showdown_score = proj*0.25 + ceil*0.70 - own*2
+        for p in players:
+            proj  = float(p.get("proj", 0))
+            ceil_ = float(p.get("ceil", p.get("proj", 0)))
+            own   = float(p.get("ownership", p.get("own_proj", 0.5)))
+            p["_showdown_score"] = (
+                proj * 0.25
+                + ceil_ * 0.70
+                - own * 2.0
+            )
     elif is_cash:
         # Cash formula (blueprint): cash_score = floor*w1 + proj*w2
         # Floor is king — consistency beats upside in 50/50 & double-ups.
@@ -436,6 +452,13 @@ def build_multiple_lineups_with_exposure(
             # GPP: maximize H5_ForcedDiverse gpp_score
             prob += pulp.lpSum(
                 players[i]["_gpp_score"] * x[(i, s)]
+                for i in range(n)
+                for s in pos_slots
+            )
+        elif is_showdown_classic:
+            # Showdown (single-round, no captain): ceiling-heavy
+            prob += pulp.lpSum(
+                players[i]["_showdown_score"] * x[(i, s)]
                 for i in range(n)
                 for s in pos_slots
             )
@@ -599,7 +622,8 @@ def build_multiple_lineups_with_exposure(
         # ── GPP-specific constraints (H5_ForcedDiverse) ──────────────
         # Backtested on 3/8 slate: moved from 0 lineups above 280 to
         # multiple 280+ lineups.  Best single lineup hit 302.5.
-        if is_gpp:
+        # Also applied to showdown (single-round GPP-like contests).
+        if is_gpp or is_showdown_classic:
             # 1. Max punt players (salary < $4000) — avoid dead-weight filler
             _punt_idx = [i for i in range(n) if players[i].get("salary", 0) < 4000]
             if _punt_idx:
