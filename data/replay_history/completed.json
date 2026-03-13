@@ -14,6 +14,11 @@
       "completed_at": "2026-03-13T18:36:55.827159+00:00",
       "n_lineups": 5,
       "best_actual": 319.2
+    },
+    "2026-02-01_gpp_main": {
+      "completed_at": "2026-03-13T18:37:27.471247+00:00",
+      "n_lineups": 5,
+      "best_actual": 287.8
     }
   }
 }
