@@ -40,6 +40,13 @@ def load_published_data(sport: str) -> Tuple[
     pool_path = base / "slate_pool.parquet"
     if pool_path.exists():
         pool = pd.read_parquet(pool_path)
+        # Safety net: ensure ownership is valid even if parquet was saved with None values
+        if not pool.empty:
+            try:
+                from yak_core.ownership_guard import ensure_ownership
+                pool = ensure_ownership(pool, sport=sport)
+            except Exception:
+                pass  # Non-fatal — downstream code handles missing ownership gracefully
 
     ea_path = base / "edge_analysis.json"
     if ea_path.exists():
@@ -65,7 +72,14 @@ def load_fresh_pool(sport: str) -> pd.DataFrame:
     """Load pool without cache (for Lab tab after writes)."""
     pool_path = DATA_DIR / sport.lower() / "slate_pool.parquet"
     if pool_path.exists():
-        return pd.read_parquet(pool_path)
+        pool = pd.read_parquet(pool_path)
+        if not pool.empty:
+            try:
+                from yak_core.ownership_guard import ensure_ownership
+                pool = ensure_ownership(pool, sport=sport)
+            except Exception:
+                pass
+        return pool
     return pd.DataFrame()
 
 

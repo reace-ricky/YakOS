@@ -31,6 +31,15 @@ def _classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
     - Fades: high ownership with weakest edge
     """
     import numpy as np
+    # Ensure valid ownership data before classification — fixes the None/all-zeros bug
+    try:
+        import sys as _sys
+        import os as _os
+        _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+        from yak_core.ownership_guard import ensure_ownership
+        sdf = ensure_ownership(sdf, sport=sport)
+    except Exception as _eg:
+        print(f"[_classify_plays] ownership_guard unavailable: {_eg}")
 
     def _safe_col(frame, name, default=0):
         if name in frame.columns:
@@ -160,6 +169,7 @@ def run_edge(sport: str, slate_date: str) -> pd.DataFrame:
     """Run edge analysis and write outputs. Returns the edge DataFrame."""
     from yak_core.edge import compute_edge_metrics
     from yak_core.calibration_feedback import get_correction_factors
+    from yak_core.ownership_guard import ensure_ownership
 
     out_dir = published_dir(sport)
     pool_path = f"{out_dir}/slate_pool.parquet"
@@ -170,6 +180,9 @@ def run_edge(sport: str, slate_date: str) -> pd.DataFrame:
         sys.exit(f"ERROR: Pool not found at {pool_path}. Run load_pool.py first.")
 
     print(f"[run_edge] Loaded {len(pool)} players from {pool_path}")
+
+    # Ensure valid ownership before edge computation
+    pool = ensure_ownership(pool, sport=sport)
 
     # Filter out excluded players (checkbox exclusions from Lab)
     import os

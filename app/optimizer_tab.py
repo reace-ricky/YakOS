@@ -194,14 +194,14 @@ def render_optimizer_tab(sport: str) -> None:
         build_pool = pool.copy()
         if "player_id" not in build_pool.columns:
             build_pool["player_id"] = build_pool["player_name"].str.lower().str.replace(" ", "_")
-        if "ownership" not in build_pool.columns:
-            if "own_pct" in build_pool.columns:
-                build_pool["ownership"] = build_pool["own_pct"]
-            elif "own_proj" in build_pool.columns:
-                build_pool["ownership"] = build_pool["own_proj"]
-            else:
-                build_pool["ownership"] = 0.0
-        build_pool["ownership"] = pd.to_numeric(build_pool["ownership"], errors="coerce").fillna(0.0)
+        # Ensure valid ownership (handles None/all-zeros/wrong scale)
+        try:
+            from yak_core.ownership_guard import ensure_ownership
+            build_pool = ensure_ownership(build_pool, sport=sport)
+        except Exception:
+            build_pool["ownership"] = pd.to_numeric(
+                build_pool.get("ownership", 0), errors="coerce"
+            ).fillna(0.0)
 
         # Apply lock/exclude directly on the pool
         if excluded:
