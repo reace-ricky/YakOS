@@ -1,129 +1,480 @@
 """Tab 4: Dashboard (admin only).
 
-Displays calibration health, signal accuracy, published data status,
-post-slate feedback, contest results entry, and historical backfill controls.
+Visual command center: calibration trends, signal lift, contest band tracking,
+breakout identification, and operational controls.
 """
 from __future__ import annotations
 
+import json
 import os
 import time
+import traceback
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List
 
+import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+# ── Data Loading Helpers ─────────────────────────────────────────────────────
+
+def _load_json(path: Path) -> Any:
+    """Load a JSON file, returning empty dict on failure."""
+    if path.exists():
+        try:
+            return json.loads(path.read_text())
+        except Exception:
+            return {}
+    return {}
+
+
+def _load_all_dashboard_data(sport: str) -> Dict[str, Any]:
+    """Load every data source once at the top of the render cycle."""
+    sport_lower = sport.lower()
+
+    # Calibration slate errors (per-sport)
+    nba_errors = _load_json(REPO_ROOT / "data" / "calibration_feedback" / "nba" / "slate_errors.json")
+    pga_errors = _load_json(REPO_ROOT / "data" / "calibration_feedback" / "pga" / "slate_errors.json")
+    slate_errors = nba_errors if sport_lower == "nba" else pga_errors
+
+    # Signal data
+    signal_history = _load_json(REPO_ROOT / "data" / "edge_feedback" / "signal_history.json")
+    signal_weights = _load_json(REPO_ROOT / "data" / "edge_feedback" / "signal_weights.json")
+
+    # Contest results
+    contest_history = _load_json(REPO_ROOT / "data" / "contest_results" / "history.json")
+
+    # Breakout profile
+    breakout_profile = _load_json(REPO_ROOT / "data" / "sim_sandbox" / "breakout_profile.json")
+
+    # Cron state
+    cron_state = _load_json(Path("/home/user/workspace/cron_tracking/975719ad/state.json"))
+
+    return {
+        "slate_errors": slate_errors,
+        "signal_history": signal_history,
+        "signal_weights": signal_weights,
+        "contest_history": contest_history,
+        "breakout_profile": breakout_profile,
+        "cron_state": cron_state,
+        "sport": sport_lower,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Main Render
+# ══════════════════════════════════════════════════════════════════════════════
 
 def render_dashboard_tab(sport: str) -> None:
     """Render the Dashboard tab."""
     from app.data_loader import load_calibration_data, load_signal_history, published_dir, load_fresh_meta
 
-    # ═══════════════════════════════════════════════════
-    # Calibration Health
-    # ═══════════════════════════════════════════════════
-    st.markdown("### Calibration Health")
+    data = _load_all_dashboard_data(sport)
 
+    # ── Section 1: System Health ──────────────────────────────────────────
     try:
-        from yak_core.calibration_feedback import get_calibration_summary
-        summary = get_calibration_summary(sport=sport.upper())
+        _render_system_health(data)
     except Exception as e:
-        st.warning(f"Could not load calibration data: {e}")
-        summary = {"status": "no_data", "n_slates": 0}
+        st.error(f"System Health error: {e}\n```\n{traceback.format_exc()}\n```")
 
-    if summary.get("status") == "no_data":
-        st.info("No calibration data recorded yet.")
-    else:
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.metric("Slates tracked", summary.get("n_slates", 0))
-        with c2:
-            bias = summary.get("overall_bias", 0)
-            st.metric("Overall bias", f"{bias:+.2f}" if bias else "0.00")
-        with c3:
-            avg_mae = summary.get("avg_mae")
-            st.metric("Avg MAE", f"{avg_mae:.2f}" if avg_mae else "N/A")
-
-        dates = summary.get("dates", [])
-        if dates:
-            st.caption(f"Date range: {dates[-1]} → {dates[0]}")
-
-        # Position corrections
-        pos_corr = summary.get("position_corrections", [])
-        if pos_corr:
-            st.markdown("**Corrections by position:**")
-            st.dataframe(pd.DataFrame(pos_corr), use_container_width=True, hide_index=True)
-
-        # Salary tier corrections
-        tier_corr = summary.get("tier_corrections", [])
-        if tier_corr:
-            st.markdown("**Corrections by salary tier:**")
-            st.dataframe(pd.DataFrame(tier_corr), use_container_width=True, hide_index=True)
-
-    # ═══════════════════════════════════════════════════
-    # Signal Accuracy
-    # ═══════════════════════════════════════════════════
+    # ── Section 2: Calibration Trend ──────────────────────────────────────
     st.markdown("---")
-    st.markdown("### Signal Accuracy")
+    try:
+        _render_calibration_trend(data)
+    except Exception as e:
+        st.error(f"Calibration Trend error: {e}\n```\n{traceback.format_exc()}\n```")
 
-    signal_history = load_signal_history()
+    # ── Section 3: Breakout Identification ────────────────────────────────
+    st.markdown("---")
+    try:
+        _render_breakout_identification(data)
+    except Exception as e:
+        st.error(f"Breakout Identification error: {e}\n```\n{traceback.format_exc()}\n```")
+
+    # ── Section 4: Contest Band Tracking ──────────────────────────────────
+    st.markdown("---")
+    try:
+        _render_contest_band_tracking(data)
+    except Exception as e:
+        st.error(f"Contest Band Tracking error: {e}\n```\n{traceback.format_exc()}\n```")
+
+    # ── Section 5: Signal Accuracy Trend ──────────────────────────────────
+    st.markdown("---")
+    try:
+        _render_signal_accuracy_trend(data)
+    except Exception as e:
+        st.error(f"Signal Accuracy Trend error: {e}\n```\n{traceback.format_exc()}\n```")
+
+    # ── Section 6: Published Data Status ──────────────────────────────────
+    st.markdown("---")
+    try:
+        _render_published_data_status(sport)
+    except Exception as e:
+        st.error(f"Published Data Status error: {e}\n```\n{traceback.format_exc()}\n```")
+
+    # ── Post-Slate Feedback ───────────────────────────────────────────────
+    st.markdown("---")
+    try:
+        _render_post_slate_feedback(sport)
+    except Exception as e:
+        st.error(f"Post-Slate Feedback error: {e}\n```\n{traceback.format_exc()}\n```")
+
+    # ── Contest Results (entry form) ──────────────────────────────────────
+    st.markdown("---")
+    try:
+        _render_contest_results(sport)
+    except Exception as e:
+        st.error(f"Contest Results error: {e}\n```\n{traceback.format_exc()}\n```")
+
+    # ── Historical Backfill ───────────────────────────────────────────────
+    st.markdown("---")
+    try:
+        _render_historical_backfill(sport)
+    except Exception as e:
+        st.error(f"Historical Backfill error: {e}\n```\n{traceback.format_exc()}\n```")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Section 1: System Health
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _render_system_health(data: Dict[str, Any]) -> None:
+    st.markdown("### System Health")
+
+    slate_errors = data["slate_errors"]
+    signal_weights = data["signal_weights"]
+
+    sorted_dates = sorted(slate_errors.keys())
+
+    # Projection Accuracy: rolling MAE from recent 5 vs prior 5
+    recent_mae = None
+    prior_mae = None
+    mae_delta = None
+    if len(sorted_dates) >= 2:
+        recent_5 = sorted_dates[-5:]
+        prior_5 = sorted_dates[-10:-5] if len(sorted_dates) >= 10 else sorted_dates[:max(1, len(sorted_dates) - 5)]
+        recent_maes = [slate_errors[d].get("overall", {}).get("mae", 0) for d in recent_5 if slate_errors[d].get("overall", {}).get("mae") is not None]
+        prior_maes = [slate_errors[d].get("overall", {}).get("mae", 0) for d in prior_5 if slate_errors[d].get("overall", {}).get("mae") is not None]
+        if recent_maes:
+            recent_mae = sum(recent_maes) / len(recent_maes)
+        if prior_maes:
+            prior_mae = sum(prior_maes) / len(prior_maes)
+        if recent_mae is not None and prior_mae is not None:
+            mae_delta = recent_mae - prior_mae  # negative = improving
+
+    # Signal weighted hit rate
+    sig_stats = signal_weights.get("signal_stats", {})
+    weighted_rates = [s.get("weighted_hit_rate", 0) for s in sig_stats.values() if s.get("weighted_hit_rate")]
+    overall_hit_rate = sum(weighted_rates) / len(weighted_rates) if weighted_rates else None
+
+    # Slates calibrated
+    n_slates = len(sorted_dates)
+    # Delta: slates added in last 7 days
+    cutoff = (date.today() - timedelta(days=7)).isoformat()
+    slates_this_week = sum(1 for d in sorted_dates if d >= cutoff)
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if recent_mae is not None:
+            st.metric(
+                "Projection Accuracy (MAE)",
+                f"{recent_mae:.2f}",
+                delta=f"{mae_delta:+.2f}" if mae_delta is not None else None,
+                delta_color="inverse",  # lower MAE is better
+            )
+        else:
+            st.metric("Projection Accuracy (MAE)", "N/A")
+    with c2:
+        if overall_hit_rate is not None:
+            st.metric(
+                "Signal Hit Rate",
+                f"{overall_hit_rate:.1%}",
+                delta=f"target: 35%",
+                delta_color="off",
+            )
+        else:
+            st.metric("Signal Hit Rate", "N/A")
+    with c3:
+        st.metric(
+            "Slates Calibrated",
+            n_slates,
+            delta=f"+{slates_this_week} this week" if slates_this_week else None,
+            delta_color="normal",
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Section 2: Calibration Trend
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _render_calibration_trend(data: Dict[str, Any]) -> None:
+    st.markdown("### Projection Accuracy Over Time")
+
+    slate_errors = data["slate_errors"]
+    sport = data["sport"]
+
+    if not slate_errors:
+        st.info("No calibration data available.")
+        return
+
+    rows = []
+    for d in sorted(slate_errors.keys()):
+        overall = slate_errors[d].get("overall", {})
+        mae = overall.get("mae")
+        if mae is not None:
+            rows.append({"date": d, "MAE": mae})
+
+    if not rows:
+        st.info("No MAE data available.")
+        return
+
+    df = pd.DataFrame(rows)
+    df["date"] = pd.to_datetime(df["date"])
+
+    target_mae = 6.0 if sport == "nba" else 25.0
+
+    # MAE line
+    mae_line = alt.Chart(df).mark_line(point=True, color="#4C78A8").encode(
+        x=alt.X("date:T", title="Date"),
+        y=alt.Y("MAE:Q", title="MAE", scale=alt.Scale(zero=False)),
+        tooltip=["date:T", "MAE:Q"],
+    )
+
+    # Target line
+    target_df = pd.DataFrame([{"target": target_mae}])
+    target_rule = alt.Chart(target_df).mark_rule(
+        color="green", strokeDash=[6, 3], strokeWidth=2
+    ).encode(
+        y="target:Q",
+    )
+
+    target_label = alt.Chart(target_df).mark_text(
+        align="left", dx=5, dy=-8, color="green", fontSize=11
+    ).encode(
+        y="target:Q",
+        text=alt.value(f"Target: {target_mae}"),
+    )
+
+    chart = (mae_line + target_rule + target_label).properties(
+        height=300,
+    ).interactive()
+
+    st.altair_chart(chart, use_container_width=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Section 3: Breakout Identification
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _render_breakout_identification(data: Dict[str, Any]) -> None:
+    st.markdown("### Breakout Identification")
+
+    left, right = st.columns(2)
+
+    # ── Left: Signal Lift Chart ───────────────────────────────────────────
+    with left:
+        st.markdown("**Signal Lift**")
+        breakout = data["breakout_profile"]
+        signals = breakout.get("signals", {})
+
+        if not signals:
+            st.info("No breakout signal data.")
+        else:
+            lift_rows = []
+            for sig, lift in signals.items():
+                lift_rows.append({
+                    "signal": sig,
+                    "lift": lift,
+                    "works": "Above baseline" if lift > 1.0 else "Below baseline",
+                })
+
+            lift_df = pd.DataFrame(lift_rows)
+
+            bars = alt.Chart(lift_df).mark_bar().encode(
+                x=alt.X("lift:Q", title="Lift (1.0 = baseline)", scale=alt.Scale(domain=[0.5, 1.5])),
+                y=alt.Y("signal:N", sort="-x", title=""),
+                color=alt.Color(
+                    "works:N",
+                    scale=alt.Scale(domain=["Above baseline", "Below baseline"], range=["#2ca02c", "#d62728"]),
+                    legend=None,
+                ),
+                tooltip=["signal:N", "lift:Q"],
+            )
+
+            baseline = alt.Chart(pd.DataFrame([{"x": 1.0}])).mark_rule(
+                color="black", strokeWidth=2
+            ).encode(x="x:Q")
+
+            chart = (bars + baseline).properties(height=250)
+            st.altair_chart(chart, use_container_width=True)
+
+            n_slates = breakout.get("n_slates", 0)
+            n_breakouts = breakout.get("n_breakouts", 0)
+            st.caption(f"{n_breakouts} breakouts across {n_slates} slates")
+
+    # ── Right: Breakout Precision / Recall ────────────────────────────────
+    with right:
+        st.markdown("**Breakout Precision / Recall**")
+        cron = data["cron_state"]
+        nba_cron = cron.get("nba", {})
+
+        precision = nba_cron.get("breakout_precision")
+        recall = nba_cron.get("breakout_recall")
+
+        if precision is not None:
+            prec_pct = precision * 100
+            prec_delta = prec_pct - 60.0  # target = 60%
+            st.metric(
+                "Precision",
+                f"{prec_pct:.1f}%",
+                delta=f"{prec_delta:+.1f}% vs 60% target",
+                delta_color="normal",
+            )
+        else:
+            st.metric("Precision", "N/A")
+
+        if recall is not None:
+            rec_pct = recall * 100
+            rec_delta = rec_pct - 50.0  # target = 50%
+            st.metric(
+                "Recall",
+                f"{rec_pct:.1f}%",
+                delta=f"{rec_delta:+.1f}% vs 50% target",
+                delta_color="normal",
+            )
+        else:
+            st.metric("Recall", "N/A")
+
+        last_run = cron.get("last_run_utc", "")
+        if last_run:
+            st.caption(f"Last cron run: {last_run}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Section 4: Contest Band Tracking
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _render_contest_band_tracking(data: Dict[str, Any]) -> None:
+    st.markdown("### Contest Band Tracking")
+
+    contest_history = data["contest_history"]
+    if not contest_history:
+        st.info("No contest results recorded yet.")
+        return
+
+    # Build chart data
+    rows = []
+    for key, entry in contest_history.items():
+        d = entry.get("slate_date", key.split("_")[0])
+        cash_line = entry.get("cash_line", 0)
+        winning = entry.get("winning_score", 0)
+        scores = entry.get("scores", {})
+        best = scores.get("best", 0)
+        avg = scores.get("avg", 0)
+
+        rows.append({
+            "date": d,
+            "Cash Line": cash_line,
+            "Winning Score": winning,
+        })
+        if best and best > 0:
+            rows[-1]["Best Lineup"] = best
+        if avg and avg > 0:
+            rows[-1]["Avg Lineup"] = avg
+
+    df = pd.DataFrame(rows)
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.sort_values("date")
+
+    # Melt for multi-line chart
+    value_cols = [c for c in ["Cash Line", "Winning Score", "Best Lineup", "Avg Lineup"] if c in df.columns]
+    melted = df.melt(id_vars=["date"], value_vars=value_cols, var_name="Metric", value_name="Score")
+    melted = melted[melted["Score"] > 0]
+
+    if melted.empty:
+        st.info("No scoreable contest data yet.")
+        return
+
+    color_scale = alt.Scale(
+        domain=["Cash Line", "Winning Score", "Best Lineup", "Avg Lineup"],
+        range=["#2ca02c", "#ff7f0e", "#1f77b4", "#9467bd"],
+    )
+
+    chart = alt.Chart(melted).mark_line(point=True).encode(
+        x=alt.X("date:T", title="Date"),
+        y=alt.Y("Score:Q", title="Score", scale=alt.Scale(zero=False)),
+        color=alt.Color("Metric:N", scale=color_scale),
+        tooltip=["date:T", "Metric:N", "Score:Q"],
+    ).properties(height=300).interactive()
+
+    st.altair_chart(chart, use_container_width=True)
+
+    # Compact contest results table below
+    table_rows = []
+    for key, entry in sorted(contest_history.items(), reverse=True):
+        sc = entry.get("scores", {})
+        table_rows.append({
+            "date": entry.get("slate_date", ""),
+            "type": entry.get("contest_type", ""),
+            "cash_line": entry.get("cash_line", 0),
+            "winning": entry.get("winning_score", 0),
+            "entries": entry.get("num_entries", 0),
+            "cash_rate": sc.get("cash_rate", ""),
+        })
+    if table_rows:
+        st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True, height=200)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Section 5: Signal Accuracy Trend
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _render_signal_accuracy_trend(data: Dict[str, Any]) -> None:
+    st.markdown("### Signal Hit Rates Over Time")
+
+    signal_history = data["signal_history"]
     if not signal_history:
-        st.info("No signal history data found.")
-    else:
-        # signal_history is date-keyed: {"2026-03-11": {slate_date, contest_type, n_players, signals: {...}}, ...}
-        sorted_dates = sorted(signal_history.keys(), reverse=True)
-        recent_dates = sorted_dates[:10]
+        st.info("No signal history data.")
+        return
 
-        if recent_dates:
-            rows = []
-            for d in recent_dates:
-                entry = signal_history[d]
-                signals = entry.get("signals", {})
-                total_flagged = sum(s.get("n_flagged", 0) for s in signals.values())
-                total_hit = sum(s.get("n_hit", 0) for s in signals.values())
-                hit_rate = round(total_hit / total_flagged, 3) if total_flagged > 0 else 0.0
-                contest = entry.get("contest_type", "")
-                sport_label = "PGA" if "pga" in contest.lower() else "NBA"
-                rows.append({
-                    "date": entry.get("slate_date", d),
-                    "sport": sport_label,
-                    "signals_flagged": total_flagged,
-                    "hit_rate": hit_rate,
-                })
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    rows = []
+    for d in sorted(signal_history.keys()):
+        entry = signal_history[d]
+        signals = entry.get("signals", {})
+        for sig_name, sig_data in signals.items():
+            hr = sig_data.get("hit_rate")
+            if hr is not None:
+                rows.append({"date": d, "signal": sig_name, "hit_rate": hr})
 
-        # Per-signal breakdown from signal_weights.json (pre-computed aggregates)
-        weights_path = Path(__file__).resolve().parent.parent / "data" / "edge_feedback" / "signal_weights.json"
-        signal_weights: Dict[str, Any] = {}
-        if weights_path.exists():
-            try:
-                import json as _json
-                signal_weights = _json.loads(weights_path.read_text())
-            except Exception:
-                pass
+    if not rows:
+        st.info("No hit rate data available.")
+        return
 
-        sig_stats = signal_weights.get("signal_stats", {})
-        if sig_stats:
-            st.markdown("**Per-signal breakdown:**")
-            sig_rows = []
-            weights = signal_weights.get("weights", {})
-            for sig_name, stats in sig_stats.items():
-                sig_rows.append({
-                    "signal": sig_name,
-                    "total_flagged": stats.get("total_flagged", 0),
-                    "total_hit": stats.get("total_hit", 0),
-                    "hit_rate": stats.get("weighted_hit_rate", 0),
-                    "slates_active": stats.get("n_slates_active", 0),
-                    "weight": weights.get(sig_name, 0),
-                })
-            st.dataframe(pd.DataFrame(sig_rows), use_container_width=True, hide_index=True)
-            st.caption(f"Based on {signal_weights.get('n_slates', 0)} slates")
+    df = pd.DataFrame(rows)
+    df["date"] = pd.to_datetime(df["date"])
 
-    # ═══════════════════════════════════════════════════
-    # Published Data Status
-    # ═══════════════════════════════════════════════════
-    st.markdown("---")
+    chart = alt.Chart(df).mark_line(point=True).encode(
+        x=alt.X("date:T", title="Date"),
+        y=alt.Y("hit_rate:Q", title="Hit Rate", scale=alt.Scale(domain=[0, 1])),
+        color=alt.Color("signal:N", title="Signal"),
+        tooltip=["date:T", "signal:N", "hit_rate:Q"],
+    ).properties(height=300).interactive()
+
+    st.altair_chart(chart, use_container_width=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Section 6a: Published Data Status (kept from original)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _render_published_data_status(sport: str) -> None:
+    from app.data_loader import published_dir, load_fresh_meta
+
     st.markdown("### Published Data Status")
 
     for s in ["NBA", "PGA"]:
@@ -146,10 +497,12 @@ def render_dashboard_tab(sport: str) -> None:
         else:
             st.caption(f"{s}: No published data")
 
-    # ═══════════════════════════════════════════════════
-    # Post-Slate Feedback
-    # ═══════════════════════════════════════════════════
-    st.markdown("---")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Section 6b: Post-Slate Feedback (kept from original)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _render_post_slate_feedback(sport: str) -> None:
     st.markdown("### Post-Slate Feedback")
 
     feedback_date = st.text_input("Slate date", value=date.today().isoformat(), key=f"dash_fb_date_{sport}")
@@ -167,28 +520,10 @@ def render_dashboard_tab(sport: str) -> None:
             except Exception as e:
                 st.error(f"Post-slate error: {e}")
 
-    # ═══════════════════════════════════════════════════
-    # Contest Results
-    # ═══════════════════════════════════════════════════
-    st.markdown("---")
-    try:
-        _render_contest_results(sport)
-    except Exception as e:
-        import traceback
-        st.error(f"Contest Results error: {e}\n```\n{traceback.format_exc()}\n```")
 
-    # ═══════════════════════════════════════════════════
-    # Historical Backfill
-    # ═══════════════════════════════════════════════════
-    st.markdown("---")
-    try:
-        _render_historical_backfill(sport)
-    except Exception as e:
-        import traceback
-        st.error(f"Historical Backfill error: {e}\n```\n{traceback.format_exc()}\n```")
-
-
-# ── Contest Results Section ──────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Contest Results Section (PRESERVED — has user-active forms)
+# ══════════════════════════════════════════════════════════════════════════════
 
 def _render_contest_results(sport: str) -> None:
     """Contest band entry form and history table."""
@@ -253,31 +588,10 @@ def _render_contest_results(sport: str) -> None:
         if scores and scores.get("n_lineups", 0) > 0:
             st.json(scores)
 
-    # History table
-    try:
-        from yak_core.contest_calibration import get_calibration_history
-        history = get_calibration_history()
-        if history:
-            rows = []
-            for r in history:
-                sc = r.get("scores", {})
-                rows.append({
-                    "date": r.get("slate_date", ""),
-                    "type": r.get("contest_type", ""),
-                    "cash_line": r.get("cash_line", 0),
-                    "top_10": r.get("top_15_score", 0),
-                    "winning": r.get("winning_score", 0),
-                    "entries": r.get("num_entries", 0),
-                    "cash_rate": sc.get("cash_rate", ""),
-                })
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-        else:
-            st.caption("No contest results recorded yet.")
-    except Exception as e:
-        st.caption(f"Could not load contest history: {e}")
 
-
-# ── Historical Backfill Section ──────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Historical Backfill Section (PRESERVED — has user-active forms)
+# ══════════════════════════════════════════════════════════════════════════════
 
 def _render_historical_backfill(sport: str) -> None:
     """PGA and NBA backfill controls."""
