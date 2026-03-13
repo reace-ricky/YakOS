@@ -201,25 +201,32 @@ def render_lab_tab(sport: str) -> None:
         preset = CONTEST_PRESETS.get(contest_label, {})
         num_lineups = st.number_input("Lineups", min_value=1, max_value=150, value=1, key=f"lab_nlu_{sport}")
 
-    # ── Showdown game picker (NBA only) ──
+    # ── Matchup picker (NBA Showdown + Cash) ──
     showdown_teams: list[str] = []
     is_nba_showdown = (
         not is_pga
         and (preset.get("slate_type") == "Showdown Captain" or "showdown" in contest_label.lower())
     )
-    if is_nba_showdown:
+    is_nba_matchup_contest = (
+        not is_pga
+        and (is_nba_showdown or "cash" in contest_label.lower())
+    )
+    if is_nba_matchup_contest:
         _meta_path = out_dir / "slate_meta.json"
         _sd_meta = json.loads(_meta_path.read_text()) if _meta_path.exists() else {}
         matchups = _sd_meta.get("matchups", [])
         if matchups:
-            matchup_labels = [m["label"] for m in matchups]
+            # Cash games can be full-slate or single-game
+            matchup_options = [m["label"] for m in matchups]
+            if not is_nba_showdown:
+                matchup_options = ["Full Slate"] + matchup_options
             selected_matchup = st.selectbox(
-                "Showdown matchup", options=matchup_labels, key=f"lab_sd_matchup_{sport}"
+                "Matchup", options=matchup_options, key=f"lab_sd_matchup_{sport}"
             )
-            # Extract the two teams from the selected matchup
-            sel = next((m for m in matchups if m["label"] == selected_matchup), None)
-            if sel:
-                showdown_teams = [sel["away"], sel["home"]]
+            if selected_matchup != "Full Slate":
+                sel = next((m for m in matchups if m["label"] == selected_matchup), None)
+                if sel:
+                    showdown_teams = [sel["away"], sel["home"]]
         else:
             st.warning("No matchup data found. Re-run Load Pool to fetch the schedule.")
 
@@ -247,7 +254,7 @@ def render_lab_tab(sport: str) -> None:
                 try:
                     lineups_df = _build_lineups(
                         sport, contest_label, num_lineups, lock_list, exclude_list, out_dir,
-                        showdown_teams=showdown_teams if is_nba_showdown else None,
+                        showdown_teams=showdown_teams if showdown_teams else None,
                     )
                     n_built = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else 0
                     st.success(f"Built {n_built} lineups for {contest_label}")

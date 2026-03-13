@@ -420,8 +420,10 @@ def _render_contest_band_tracking(data: Dict[str, Any]) -> None:
         st.info("No contest results recorded yet.")
         return
 
-    # Build chart data
-    rows = []
+    # Separate GPP and cash contests — they have fundamentally different
+    # score distributions and should not be plotted on the same chart.
+    gpp_rows = []
+    cash_rows = []
     for key, entry in contest_history.items():
         d = entry.get("slate_date", key.split("_")[0])
         cash_line = entry.get("cash_line", 0)
@@ -429,43 +431,45 @@ def _render_contest_band_tracking(data: Dict[str, Any]) -> None:
         scores = entry.get("scores", {})
         best = scores.get("best", 0)
         avg = scores.get("avg", 0)
+        ctype = entry.get("contest_type", "gpp").lower()
 
-        rows.append({
-            "date": d,
-            "Cash Line": cash_line,
-            "Winning Score": winning,
-        })
+        row = {"date": d, "Cash Line": cash_line, "Winning Score": winning}
         if best and best > 0:
-            rows[-1]["Best Lineup"] = best
+            row["Best Lineup"] = best
         if avg and avg > 0:
-            rows[-1]["Avg Lineup"] = avg
+            row["Avg Lineup"] = avg
 
-    df = pd.DataFrame(rows)
-    df["date"] = pd.to_datetime(df["date"])
-    df = df.sort_values("date")
-
-    # Melt for multi-line chart
-    value_cols = [c for c in ["Cash Line", "Winning Score", "Best Lineup", "Avg Lineup"] if c in df.columns]
-    melted = df.melt(id_vars=["date"], value_vars=value_cols, var_name="Metric", value_name="Score")
-    melted = melted[melted["Score"] > 0]
-
-    if melted.empty:
-        st.info("No scoreable contest data yet.")
-        return
+        if ctype in ("cash", "50/50", "double_up"):
+            cash_rows.append(row)
+        else:
+            gpp_rows.append(row)
 
     color_scale = alt.Scale(
         domain=["Cash Line", "Winning Score", "Best Lineup", "Avg Lineup"],
         range=["#2ca02c", "#ff7f0e", "#1f77b4", "#9467bd"],
     )
 
-    chart = alt.Chart(melted).mark_line(point=True).encode(
-        x=alt.X("date:T", title="Date"),
-        y=alt.Y("Score:Q", title="Score", scale=alt.Scale(zero=False)),
-        color=alt.Color("Metric:N", scale=color_scale),
-        tooltip=["date:T", "Metric:N", "Score:Q"],
-    ).properties(height=300).interactive()
+    def _band_chart(rows: list, title: str) -> None:
+        if not rows:
+            return
+        df = pd.DataFrame(rows)
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.sort_values("date")
+        value_cols = [c for c in ["Cash Line", "Winning Score", "Best Lineup", "Avg Lineup"] if c in df.columns]
+        melted = df.melt(id_vars=["date"], value_vars=value_cols, var_name="Metric", value_name="Score")
+        melted = melted[melted["Score"] > 0]
+        if melted.empty:
+            return
+        chart = alt.Chart(melted).mark_line(point=True).encode(
+            x=alt.X("date:T", title="Date"),
+            y=alt.Y("Score:Q", title="Score", scale=alt.Scale(zero=False)),
+            color=alt.Color("Metric:N", scale=color_scale),
+            tooltip=["date:T", "Metric:N", "Score:Q"],
+        ).properties(height=250, title=title).interactive()
+        st.altair_chart(chart, use_container_width=True)
 
-    st.altair_chart(chart, use_container_width=True)
+    _band_chart(gpp_rows, "GPP Contests")
+    _band_chart(cash_rows, "Cash Contests")
 
     # Compact contest results table below
     table_rows = []
