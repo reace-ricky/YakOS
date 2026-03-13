@@ -53,6 +53,7 @@ def run_nba_calibration(slate_date: str) -> dict:
     Returns a summary dict.
     """
     from yak_core.calibration_feedback import record_slate_errors
+    from yak_core.edge_feedback import record_edge_outcomes
     from yak_core.live import fetch_actuals_from_api
     from yak_core.outcome_logger import log_slate_outcomes
     from yak_core.sim_sandbox import score_player_breakout
@@ -199,6 +200,16 @@ def run_nba_calibration(slate_date: str) -> dict:
         log.error("Outcome logging failed: %s", e)
         result["outcome_error"] = str(e)
 
+    # 10. Record edge signal accuracy
+    try:
+        edge_result = record_edge_outcomes(slate_date, pool, contest_type="GPP Main")
+        if "error" not in edge_result:
+            log.info("Edge feedback recorded for %s", slate_date)
+        else:
+            log.warning("Edge feedback skipped: %s", edge_result["error"])
+    except Exception as e:
+        log.warning("Edge feedback recording failed (non-fatal): %s", e)
+
     # Breakout accuracy
     if "breakout_score" in pool.columns and "actual_fp" in pool.columns:
         bo_pool = pool[pool["actual_fp"].notna() & (pool["actual_fp"] > 0)].copy()
@@ -245,6 +256,7 @@ def run_pga_calibration(slate_date: str) -> dict:
     Returns a summary dict.
     """
     from yak_core.calibration_feedback import record_slate_errors
+    from yak_core.edge_feedback import record_edge_outcomes
     from yak_core.outcome_logger import log_slate_outcomes
     from yak_core.sim_sandbox import score_player_breakout
 
@@ -383,6 +395,16 @@ def run_pga_calibration(slate_date: str) -> dict:
     except Exception as e:
         log.error("PGA outcome logging failed: %s", e)
         result["outcome_error"] = str(e)
+
+    # 9. Record edge signal accuracy
+    try:
+        edge_result = record_edge_outcomes(slate_date, pool, contest_type="PGA GPP")
+        if "error" not in edge_result:
+            log.info("PGA edge feedback recorded for %s", slate_date)
+        else:
+            log.warning("PGA edge feedback skipped: %s", edge_result["error"])
+    except Exception as e:
+        log.warning("PGA edge feedback recording failed (non-fatal): %s", e)
 
     result["n_players_calibrated"] = len(calibration_pool)
     return result

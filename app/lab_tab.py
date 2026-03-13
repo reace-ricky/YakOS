@@ -274,6 +274,12 @@ def render_lab_tab(sport: str) -> None:
             except Exception as e:
                 st.error(f"Publish error: {e}")
 
+    # ═══════════════════════════════════════════════════
+    # Section 4: Historical Replay
+    # ═══════════════════════════════════════════════════
+    st.markdown("---")
+    _render_historical_replay(sport)
+
 
 # ═══════════════════════════════════════════════════════════════
 # Internal helpers
@@ -730,3 +736,220 @@ def _publish_to_github(sport: str, out_dir: Path) -> dict:
         files=files,
         commit_message=f"Publish {sport} slate from Lab",
     )
+
+
+# ═══════════════════════════════════════════════════════════════
+# Historical Replay
+# ═══════════════════════════════════════════════════════════════
+
+def _render_historical_replay(sport: str) -> None:
+    """Historical Replay: pick a past slate, run optimizer, score against actuals."""
+    import re
+    import numpy as np
+
+    archive_dir = Path(__file__).resolve().parent.parent / "data" / "slate_archive"
+    if not archive_dir.exists():
+        return
+
+    # Scan available slate archives
+    archive_files = sorted(archive_dir.glob("*.parquet"))
+    if not archive_files:
+        return
+
+    with st.expander("\U0001f4dc Historical Replay"):
+        # Parse filenames: 2026-03-01_gpp_main.parquet → date=2026-03-01, contest=gpp_main
+        slate_options = []
+        for f in archive_files:
+            fname = f.stem  # e.g. "2026-03-01_gpp_main"
+            parts = fname.split("_", 1)
+            if len(parts) < 2:
+                continue
+            slate_date = parts[0]
+            contest_slug = parts[1]
+            # Sport detection: "pga" in slug → PGA, else NBA
+            file_sport = "PGA" if "pga" in contest_slug.lower() else "NBA"
+            if file_sport != sport.upper():
+                continue
+            label = f"{slate_date} — {contest_slug.replace('_', ' ').title()}"
+            slate_options.append({"label": label, "path": f, "date": slate_date, "slug": contest_slug})
+
+        if not slate_options:
+            st.info(f"No archived {sport.upper()} slates found.")
+            return
+
+        labels = [s["label"] for s in slate_options]
+        selected_idx = st.selectbox("Select a historical slate", range(len(labels)),
+                                    format_func=lambda i: labels[i], key=f"replay_slate_{sport}")
+        selected = slate_options[selected_idx]
+
+        # Load the archive
+        try:
+            pool = pd.read_parquet(selected["path"])
+        except Exception as e:
+            st.error(f"Failed to load archive: {e}")
+            return
+
+        has_actuals = "actual_fp" in pool.columns and pool["actual_fp"].notna().any()
+
+        # Show pool table
+        preview_cols = ["player_name", "pos", "salary", "proj"]
+        if has_actuals:
+            preview_cols.append("actual_fp")
+        if "edge_score" in pool.columns:
+            preview_cols.append("edge_score")
+        avail = [c for c in preview_cols if c in pool.columns]
+        st.markdown(f"**Pool:** {len(pool)} players | Date: {selected['date']}")
+        st.dataframe(
+            pool[avail].sort_values("salary", ascending=False).head(50),
+            use_container_width=True, hide_index=True, height=300,
+        )
+
+        # Player exclusion multiselect
+        all_players = sorted(pool["player_name"].unique().tolist())
+        excluded = st.multiselect("Exclude players", all_players, key=f"replay_excl_{sport}")
+
+        # Lineup count
+        n_lineups = st.number_input("Number of lineups", min_value=1, max_value=50, value=5,
+                                    key=f"replay_nlu_{sport}")
+
+        if st.button("Build Replay Lineups", key=f"replay_build_{sport}"):
+            with st.spinner("Building lineups from historical pool..."):
+                try:
+                    replay_pool = pool.copy()
+                    if excluded:
+                        replay_pool = replay_pool[~replay_pool["player_name"].isin(excluded)].reset_index(drop=True)
+
+                    # Ensure required columns
+                    if "player_id" not in replay_pool.columns:
+                        replay_pool["player_id"] = replay_pool["player_name"].str.lower().str.replace(" ", "_")
+                    if "ownership" not in replay_pool.columns:
+                        if "own_proj" in replay_pool.columns:
+                            replay_pool["ownership"] = replay_pool["own_proj"]
+                        else:
+                            replay_pool["ownership"] = 0.0
+                    replay_pool["ownership"] = pd.to_numeric(replay_pool["ownership"], errors="coerce").fillna(0.0)
+
+                    # Determine contest preset
+                    from yak_core.config import (
+                        CONTEST_PRESETS, SALARY_CAP, DK_POS_SLOTS, DK_LINEUP_SIZE,
+                        DK_PGA_SALARY_CAP, DK_PGA_POS_SLOTS, DK_PGA_LINEUP_SIZE,
+                    )
+                    from yak_core.lineups import build_multiple_lineups_with_exposure
+
+                    is_pga = sport.upper() == "PGA"
+                    slug = selected["slug"]
+
+                    # Map archive slug to a contest preset
+                    slug_to_preset = {
+                        "gpp_main": "GPP Main",
+                        "gpp_early": "GPP Early",
+                        "cash_main": "Cash Main",
+                        "showdown": "Showdown",
+                        "pga_gpp": "PGA GPP",
+                        "pga_cash": "PGA Cash",
+                        "pga_showdown": "PGA Showdown",
+                    }
+                    preset_key = slug_to_preset.get(slug, "PGA GPP" if is_pga else "GPP Main")
+                    preset = CONTEST_PRESETS.get(preset_key, {})
+
+                    cfg = {
+                        "NUM_LINEUPS": n_lineups,
+                        "SALARY_CAP": preset.get("salary_cap", DK_PGA_SALARY_CAP if is_pga else SALARY_CAP),
+                        "MAX_EXPOSURE": preset.get("default_max_exposure", 0.35),
+                        "MIN_SALARY_USED": preset.get("min_salary", preset.get("min_salary_used", 46000)),
+                        "CONTEST_TYPE": preset.get("internal_contest", "gpp"),
+                        "SPORT": sport.upper(),
+                        "LOCK": [],
+                        "EXCLUDE": [],
+                    }
+                    if is_pga:
+                        cfg["POS_SLOTS"] = preset.get("pos_slots", DK_PGA_POS_SLOTS)
+                        cfg["LINEUP_SIZE"] = preset.get("lineup_size", DK_PGA_LINEUP_SIZE)
+                        cfg["POS_CAPS"] = preset.get("pos_caps", {})
+                    else:
+                        cfg["POS_SLOTS"] = DK_POS_SLOTS
+                        cfg["LINEUP_SIZE"] = DK_LINEUP_SIZE
+
+                    cfg["GPP_MAX_PUNT_PLAYERS"] = preset.get("max_punt_players", 1 if is_pga else 2)
+                    cfg["GPP_MIN_MID_PLAYERS"] = preset.get("min_mid_salary_players", 2 if is_pga else 3)
+                    cfg["GPP_OWN_CAP"] = preset.get("own_cap", 5.0 if is_pga else 6.0)
+                    cfg["GPP_MIN_LOW_OWN_PLAYERS"] = preset.get("min_low_own_players", 1)
+                    cfg["GPP_LOW_OWN_THRESHOLD"] = preset.get("low_own_threshold", 0.40)
+                    cfg["GPP_FORCE_GAME_STACK"] = preset.get("force_game_stack", not is_pga)
+                    cfg["STACK_WEIGHT"] = preset.get("stack_weight", 0.0 if is_pga else 0.05)
+                    cfg["VALUE_WEIGHT"] = preset.get("value_weight", 0.30 if is_pga else 0.05)
+                    cfg["OWN_WEIGHT"] = preset.get("own_weight", 0.25 if is_pga else 0.10)
+
+                    lineups_df, _ = build_multiple_lineups_with_exposure(replay_pool, cfg)
+
+                    if lineups_df.empty or "lineup_index" not in lineups_df.columns:
+                        st.warning("Optimizer returned no lineups.")
+                        return
+
+                    n_built = lineups_df["lineup_index"].nunique()
+                    st.success(f"Built {n_built} replay lineups")
+
+                    # Score against actuals
+                    if has_actuals:
+                        actual_map = pool.set_index("player_name")["actual_fp"].to_dict()
+                        lineups_df["actual_fp"] = lineups_df["player_name"].map(actual_map)
+                        lineups_df["error"] = lineups_df["actual_fp"] - lineups_df["proj"]
+
+                        # Per-lineup summary
+                        lu_summary = lineups_df.groupby("lineup_index").agg(
+                            proj_total=("proj", "sum"),
+                            actual_total=("actual_fp", "sum"),
+                        ).reset_index()
+                        lu_summary["diff"] = (lu_summary["actual_total"] - lu_summary["proj_total"]).round(1)
+                        lu_summary["proj_total"] = lu_summary["proj_total"].round(1)
+                        lu_summary["actual_total"] = lu_summary["actual_total"].round(1)
+
+                        st.markdown("**Lineup Scores: Projected vs Actual**")
+                        st.dataframe(lu_summary, use_container_width=True, hide_index=True)
+
+                        # Summary stats
+                        avg_actual = lu_summary["actual_total"].mean()
+                        best_actual = lu_summary["actual_total"].max()
+                        avg_proj = lu_summary["proj_total"].mean()
+
+                        c1, c2, c3 = st.columns(3)
+                        with c1:
+                            st.metric("Avg Lineup Score", f"{avg_actual:.1f}")
+                        with c2:
+                            st.metric("Best Lineup", f"{best_actual:.1f}")
+                        with c3:
+                            st.metric("Avg Proj Total", f"{avg_proj:.1f}")
+
+                        # Check cash rate against contest bands
+                        try:
+                            history_path = Path(__file__).resolve().parent.parent / "data" / "contest_results" / "history.json"
+                            if history_path.exists():
+                                contest_history = json.loads(history_path.read_text())
+                                for cr in contest_history:
+                                    if cr.get("slate_date") == selected["date"]:
+                                        cash_line = cr.get("cash_line", 0)
+                                        if cash_line > 0:
+                                            n_cashed = int((lu_summary["actual_total"] >= cash_line).sum())
+                                            st.markdown(
+                                                f"**Cash line:** {cash_line:.1f} | "
+                                                f"**Cashed:** {n_cashed}/{n_built} lineups"
+                                            )
+                                        break
+                        except Exception:
+                            pass
+
+                        # Per-player breakdown for best lineup
+                        best_idx = lu_summary.loc[lu_summary["actual_total"].idxmax(), "lineup_index"]
+                        best_lu = lineups_df[lineups_df["lineup_index"] == best_idx].copy()
+                        detail_cols = ["player_name", "salary", "proj", "actual_fp", "error"]
+                        detail_avail = [c for c in detail_cols if c in best_lu.columns]
+                        st.markdown(f"**Best Lineup Detail (#{int(best_idx)}):**")
+                        st.dataframe(best_lu[detail_avail], use_container_width=True, hide_index=True)
+                    else:
+                        # No actuals — just show projected lineups
+                        show_cols = ["lineup_index", "player_name", "pos", "salary", "proj"]
+                        avail = [c for c in show_cols if c in lineups_df.columns]
+                        st.dataframe(lineups_df[avail].head(60), use_container_width=True, hide_index=True)
+
+                except Exception as e:
+                    st.error(f"Replay error: {e}")

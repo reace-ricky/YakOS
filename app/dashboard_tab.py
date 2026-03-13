@@ -71,33 +71,54 @@ def render_dashboard_tab(sport: str) -> None:
     if not signal_history:
         st.info("No signal history data found.")
     else:
-        slates = signal_history.get("slates", [])
-        if isinstance(slates, list) and slates:
-            recent = slates[-10:]
+        # signal_history is date-keyed: {"2026-03-11": {slate_date, contest_type, n_players, signals: {...}}, ...}
+        sorted_dates = sorted(signal_history.keys(), reverse=True)
+        recent_dates = sorted_dates[:10]
+
+        if recent_dates:
             rows = []
-            for s in recent:
+            for d in recent_dates:
+                entry = signal_history[d]
+                signals = entry.get("signals", {})
+                total_flagged = sum(s.get("n_flagged", 0) for s in signals.values())
+                total_hit = sum(s.get("n_hit", 0) for s in signals.values())
+                hit_rate = round(total_hit / total_flagged, 3) if total_flagged > 0 else 0.0
+                contest = entry.get("contest_type", "")
+                sport_label = "PGA" if "pga" in contest.lower() else "NBA"
                 rows.append({
-                    "date": s.get("date", ""),
-                    "sport": s.get("sport", ""),
-                    "signals_flagged": s.get("n_flagged", s.get("signals_flagged", 0)),
-                    "hit_rate": s.get("hit_rate", 0),
+                    "date": entry.get("slate_date", d),
+                    "sport": sport_label,
+                    "signals_flagged": total_flagged,
+                    "hit_rate": hit_rate,
                 })
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-        # Per-signal breakdown
-        by_signal = signal_history.get("by_signal", {})
-        if by_signal:
+        # Per-signal breakdown from signal_weights.json (pre-computed aggregates)
+        weights_path = Path(__file__).resolve().parent.parent / "data" / "edge_feedback" / "signal_weights.json"
+        signal_weights: Dict[str, Any] = {}
+        if weights_path.exists():
+            try:
+                import json as _json
+                signal_weights = _json.loads(weights_path.read_text())
+            except Exception:
+                pass
+
+        sig_stats = signal_weights.get("signal_stats", {})
+        if sig_stats:
             st.markdown("**Per-signal breakdown:**")
             sig_rows = []
-            for sig_name, sig_data in by_signal.items():
+            weights = signal_weights.get("weights", {})
+            for sig_name, stats in sig_stats.items():
                 sig_rows.append({
                     "signal": sig_name,
-                    "n_flagged": sig_data.get("n_flagged", 0),
-                    "avg_actual": round(sig_data.get("avg_actual", 0), 1),
-                    "avg_proj": round(sig_data.get("avg_proj", 0), 1),
-                    "hit_rate": round(sig_data.get("hit_rate", 0), 2),
+                    "total_flagged": stats.get("total_flagged", 0),
+                    "total_hit": stats.get("total_hit", 0),
+                    "hit_rate": stats.get("weighted_hit_rate", 0),
+                    "slates_active": stats.get("n_slates_active", 0),
+                    "weight": weights.get(sig_name, 0),
                 })
             st.dataframe(pd.DataFrame(sig_rows), use_container_width=True, hide_index=True)
+            st.caption(f"Based on {signal_weights.get('n_slates', 0)} slates")
 
     # ═══════════════════════════════════════════════════
     # Published Data Status
