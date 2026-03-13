@@ -1,219 +1,217 @@
 {
   "bullets": [
-    "Anchor studs (5): Scottie Scheffler, Si Woo Kim, Rory McIlroy, Russell Henley, Cameron Young",
-    "Value plays (5): Ricky Castillo, Sungjae Im, Haotong Li, Taylor Moore, Austin Smotherman",
-    "Leverage plays (5): Aaron Rai, Joel Dahmen, Christiaan Bezuidenhout, Ryan Gerard, Max McGreevy",
-    "Fade candidates: 5 players below edge threshold",
-    "Wave split: Early wave projects +0.5 pts avg (Early 56.8 vs Late 56.3)",
-    "Core wave mix: 2 Early / 3 Late"
+    "Anchor studs (5): Min Woo Lee, Cameron Young, Ludvig Aberg, Russell Henley, Matt Fitzpatrick",
+    "Value plays (5): S.H. Kim, Chandler Phillips, Chad Ramey, Zecheng Dou, Karl Vilips",
+    "Leverage plays (5): David Ford, Joel Dahmen, Max McGreevy, Andrew Putnam, Aaron Rai",
+    "Fade candidates: 5 players below edge threshold"
   ],
-  "recommendation": "5 core plays anchored at $8,100\u2013$14,200. 5 value plays averaging 8.8 pts/$1K. 5 leverage plays at 3\u20138% ownership.",
+  "recommendation": "5 core plays anchored at $8,300\u2013$9,400. 5 value plays averaging 4.8 pts/$1K. 5 leverage plays at 0\u20130% ownership.",
   "core_plays": [
     {
-      "player_name": "Scottie Scheffler",
-      "proj": 84.5,
-      "salary": 14200,
-      "ownership": 23.7,
-      "edge": 0.64,
-      "value": 5.95,
-      "wave": "Late",
-      "r1_teetime": "8:52 am"
-    },
-    {
-      "player_name": "Si Woo Kim",
-      "proj": 77.0,
-      "salary": 9300,
-      "ownership": 23.9,
-      "edge": 0.74,
-      "value": 8.28,
-      "wave": "Late",
-      "r1_teetime": "8:40 am"
-    },
-    {
-      "player_name": "Rory McIlroy",
-      "proj": 73.6,
-      "salary": 11700,
-      "ownership": 12.2,
-      "edge": 0.56,
-      "value": 6.29,
-      "wave": "Early",
-      "r1_teetime": "2:12 pm"
-    },
-    {
-      "player_name": "Russell Henley",
-      "proj": 73.2,
-      "salary": 9000,
-      "ownership": 20.2,
-      "edge": 0.72,
-      "value": 8.13,
-      "wave": "Late",
-      "r1_teetime": "9:04 am"
+      "player_name": "Min Woo Lee",
+      "proj": 31.3,
+      "salary": 8300,
+      "ownership": 0.0,
+      "edge": 0.43,
+      "value": 3.77,
+      "wave": "Unknown",
+      "r1_teetime": "2026-03-12 14:24"
     },
     {
       "player_name": "Cameron Young",
-      "proj": 71.3,
-      "salary": 8100,
-      "ownership": 17.3,
-      "edge": 0.63,
-      "value": 8.81,
-      "wave": "Early",
-      "r1_teetime": "2:24 pm"
+      "proj": 31.2,
+      "salary": 8800,
+      "ownership": 0.0,
+      "edge": 0.43,
+      "value": 3.55,
+      "wave": "Unknown",
+      "r1_teetime": "2026-03-12 14:24"
+    },
+    {
+      "player_name": "Ludvig Aberg",
+      "proj": 31.0,
+      "salary": 9300,
+      "ownership": 0.0,
+      "edge": 0.4,
+      "value": 3.33,
+      "wave": "Unknown",
+      "r1_teetime": "2026-03-12 08:40"
+    },
+    {
+      "player_name": "Russell Henley",
+      "proj": 30.9,
+      "salary": 9400,
+      "ownership": 0.0,
+      "edge": 0.51,
+      "value": 3.29,
+      "wave": "Unknown",
+      "r1_teetime": "2026-03-12 09:04"
+    },
+    {
+      "player_name": "Matt Fitzpatrick",
+      "proj": 30.9,
+      "salary": 9000,
+      "ownership": 0.0,
+      "edge": 0.45,
+      "value": 3.43,
+      "wave": "Unknown",
+      "r1_teetime": "2026-03-12 09:04"
     }
   ],
   "leverage_plays": [
     {
-      "player_name": "Aaron Rai",
-      "proj": 61.7,
-      "salary": 7200,
-      "ownership": 8.0,
-      "edge": 0.71,
-      "value": 8.57,
-      "wave": "Early",
-      "r1_teetime": "2:36 pm"
+      "player_name": "David Ford",
+      "proj": 36.4,
+      "salary": 6000,
+      "ownership": 0.0,
+      "edge": 0.61,
+      "value": 6.06,
+      "wave": "Unknown",
+      "r1_teetime": "2026-03-12 13:48"
     },
     {
       "player_name": "Joel Dahmen",
-      "proj": 58.0,
+      "proj": 29.2,
       "salary": 6100,
-      "ownership": 4.8,
-      "edge": 0.68,
-      "value": 9.51,
-      "wave": "Early",
-      "r1_teetime": "1:24 pm"
-    },
-    {
-      "player_name": "Christiaan Bezuidenhout",
-      "proj": 62.1,
-      "salary": 7000,
-      "ownership": 6.1,
-      "edge": 0.68,
-      "value": 8.88,
-      "wave": "Late",
-      "r1_teetime": "8:04 am"
-    },
-    {
-      "player_name": "Ryan Gerard",
-      "proj": 65.8,
-      "salary": 7400,
-      "ownership": 8.2,
-      "edge": 0.68,
-      "value": 8.89,
-      "wave": "Late",
-      "r1_teetime": "8:28 am"
+      "ownership": 0.0,
+      "edge": 0.58,
+      "value": 4.79,
+      "wave": "Unknown",
+      "r1_teetime": "2026-03-12 13:24"
     },
     {
       "player_name": "Max McGreevy",
-      "proj": 59.1,
+      "proj": 29.5,
       "salary": 6500,
-      "ownership": 3.0,
-      "edge": 0.67,
-      "value": 9.09,
-      "wave": "Early",
-      "r1_teetime": "2:48 pm"
+      "ownership": 0.0,
+      "edge": 0.55,
+      "value": 4.54,
+      "wave": "Unknown",
+      "r1_teetime": "2026-03-12 14:48"
+    },
+    {
+      "player_name": "Andrew Putnam",
+      "proj": 28.6,
+      "salary": 6300,
+      "ownership": 0.0,
+      "edge": 0.55,
+      "value": 4.53,
+      "wave": "Unknown",
+      "r1_teetime": "2026-03-12 13:00"
+    },
+    {
+      "player_name": "Aaron Rai",
+      "proj": 29.5,
+      "salary": 7400,
+      "ownership": 0.0,
+      "edge": 0.55,
+      "value": 3.99,
+      "wave": "Unknown",
+      "r1_teetime": "2026-03-12 14:36"
     }
   ],
   "value_plays": [
     {
-      "player_name": "Ricky Castillo",
-      "proj": 59.2,
-      "salary": 6200,
-      "ownership": 5.3,
-      "edge": 0.61,
-      "value": 9.55,
-      "wave": "Late",
-      "r1_teetime": "8:28 am"
+      "player_name": "S.H. Kim",
+      "proj": 29.0,
+      "salary": 6000,
+      "ownership": 0.0,
+      "edge": 0.47,
+      "value": 4.83,
+      "wave": "Unknown",
+      "r1_teetime": "2026-03-12 14:48"
     },
     {
-      "player_name": "Sungjae Im",
-      "proj": 55.3,
-      "salary": 6400,
-      "ownership": 3.1,
-      "edge": 0.61,
-      "value": 8.64,
-      "wave": "Late",
-      "r1_teetime": "9:16 am"
+      "player_name": "Chandler Phillips",
+      "proj": 28.8,
+      "salary": 6000,
+      "ownership": 0.0,
+      "edge": 0.47,
+      "value": 4.79,
+      "wave": "Unknown",
+      "r1_teetime": "2026-03-12 07:52"
     },
     {
-      "player_name": "Haotong Li",
-      "proj": 55.1,
-      "salary": 6400,
-      "ownership": 3.0,
-      "edge": 0.59,
-      "value": 8.62,
-      "wave": "Late",
-      "r1_teetime": "9:28 am"
+      "player_name": "Chad Ramey",
+      "proj": 28.8,
+      "salary": 6000,
+      "ownership": 0.0,
+      "edge": 0.48,
+      "value": 4.79,
+      "wave": "Unknown",
+      "r1_teetime": "2026-03-12 13:24"
     },
     {
-      "player_name": "Taylor Moore",
-      "proj": 52.7,
-      "salary": 6200,
-      "ownership": 1.0,
-      "edge": 0.54,
-      "value": 8.5,
-      "wave": "Early",
-      "r1_teetime": "1:24 pm"
+      "player_name": "Zecheng Dou",
+      "proj": 29.1,
+      "salary": 6100,
+      "ownership": 0.0,
+      "edge": 0.42,
+      "value": 4.77,
+      "wave": "Unknown",
+      "r1_teetime": "2026-03-12 09:28"
     },
     {
-      "player_name": "Austin Smotherman",
-      "proj": 54.3,
-      "salary": 6400,
-      "ownership": 2.5,
-      "edge": 0.59,
-      "value": 8.48,
-      "wave": "Early",
-      "r1_teetime": "2:48 pm"
+      "player_name": "Karl Vilips",
+      "proj": 28.5,
+      "salary": 6000,
+      "ownership": 0.0,
+      "edge": 0.4,
+      "value": 4.75,
+      "wave": "Unknown",
+      "r1_teetime": "2026-03-12 14:36"
     }
   ],
   "fade_candidates": [
     {
+      "player_name": "Aldrich Potgieter",
+      "proj": 28.9,
+      "salary": 6600,
+      "ownership": 0.0,
+      "edge": 0.34,
+      "value": 4.38,
+      "wave": "Unknown",
+      "r1_teetime": "2026-03-12 09:16"
+    },
+    {
+      "player_name": "Danny Walker",
+      "proj": 28.2,
+      "salary": 6000,
+      "ownership": 0.0,
+      "edge": 0.35,
+      "value": 4.7,
+      "wave": "Unknown",
+      "r1_teetime": "2026-03-12 08:04"
+    },
+    {
       "player_name": "Chris Gotterup",
-      "proj": 62.0,
-      "salary": 9200,
-      "ownership": 10.4,
-      "edge": 0.51,
-      "value": 6.74,
-      "wave": "Early",
-      "r1_teetime": "2:24 pm"
+      "proj": 30.4,
+      "salary": 9100,
+      "ownership": 0.0,
+      "edge": 0.36,
+      "value": 3.35,
+      "wave": "Unknown",
+      "r1_teetime": "2026-03-12 14:24"
     },
     {
-      "player_name": "Jake Knapp",
-      "proj": 63.4,
+      "player_name": "Cam Davis",
+      "proj": 28.0,
+      "salary": 6000,
+      "ownership": 0.0,
+      "edge": 0.36,
+      "value": 4.67,
+      "wave": "Unknown",
+      "r1_teetime": "2026-03-12 08:16"
+    },
+    {
+      "player_name": "Justin Thomas",
+      "proj": 29.8,
       "salary": 7600,
-      "ownership": 15.5,
-      "edge": 0.58,
-      "value": 8.35,
-      "wave": "Late",
-      "r1_teetime": "9:16 am"
-    },
-    {
-      "player_name": "Xander Schauffele",
-      "proj": 67.8,
-      "salary": 9600,
-      "ownership": 14.1,
-      "edge": 0.58,
-      "value": 7.06,
-      "wave": "Early",
-      "r1_teetime": "2:12 pm"
-    },
-    {
-      "player_name": "Ludvig Aberg",
-      "proj": 68.2,
-      "salary": 8700,
-      "ownership": 23.5,
-      "edge": 0.6,
-      "value": 7.83,
-      "wave": "Late",
-      "r1_teetime": "8:40 am"
-    },
-    {
-      "player_name": "Adam Scott",
-      "proj": 64.6,
-      "salary": 7300,
-      "ownership": 11.7,
-      "edge": 0.61,
-      "value": 8.85,
-      "wave": "Early",
-      "r1_teetime": "1:36 pm"
+      "ownership": 0.0,
+      "edge": 0.37,
+      "value": 3.92,
+      "wave": "Unknown",
+      "r1_teetime": "2026-03-12 08:52"
     }
   ],
   "signals_df_path": "signals.parquet"
