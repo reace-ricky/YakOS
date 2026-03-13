@@ -190,14 +190,30 @@ def _render_system_health(data: Dict[str, Any]) -> None:
     c1, c2, c3 = st.columns(3)
     with c1:
         if recent_mae is not None:
-            label = "Model MAE (recalibrated)" if recal_mae is not None else "Projection Accuracy (MAE)"
-            delta_str = f"{mae_delta:+.2f} vs raw" if recal_mae is not None and mae_delta is not None else (f"{mae_delta:+.2f}" if mae_delta is not None else None)
-            st.metric(
-                label,
-                f"{recent_mae:.2f}",
-                delta=delta_str,
-                delta_color="inverse",  # lower MAE is better
-            )
+            if recal_mae is not None:
+                # Show corrected MAE with raw MAE comparison
+                # improvement > 0 means corrections helped (lower MAE = better)
+                raw_mae_val = recal_summary.get("raw_mae")
+                if raw_mae_val is not None and recal_improvement is not None:
+                    if recal_improvement > 0:
+                        delta_str = f"-{abs(recal_improvement):.2f} vs raw ({raw_mae_val:.1f})"
+                    else:
+                        delta_str = f"+{abs(recal_improvement):.2f} vs raw ({raw_mae_val:.1f})"
+                else:
+                    delta_str = None
+                st.metric(
+                    "Model MAE (recalibrated)",
+                    f"{recent_mae:.2f}",
+                    delta=delta_str,
+                    delta_color="inverse",  # negative delta = green (lower MAE is better)
+                )
+            else:
+                st.metric(
+                    "Projection Accuracy (MAE)",
+                    f"{recent_mae:.2f}",
+                    delta=f"{mae_delta:+.2f}" if mae_delta is not None else None,
+                    delta_color="inverse",
+                )
         else:
             st.metric("Model MAE (recalibrated)", "N/A")
     with c2:
