@@ -177,13 +177,37 @@
   "2026-03-10_cash": {
     "slate_date": "2026-03-10",
     "contest_type": "cash",
-    "cash_line": 327.0,
-    "top_15_score": 0,
+    "cash_line": 327.75,
+    "top_15_score": 0.0,
     "top_1_score": 0,
-    "winning_score": 347.0,
-    "num_entries": 11,
+    "winning_score": 347.5,
+    "num_entries": 34,
     "notes": "",
-    "recorded_at": "2026-03-11T12:14:00.152572+00:00"
+    "recorded_at": "2026-03-13T14:20:41.154300+00:00",
+    "scores": {
+      "n_lineups": 21,
+      "cashed": 0,
+      "top_15": 0,
+      "top_1": 0,
+      "won": 0,
+      "cash_rate": 0.0,
+      "top_15_rate": 0.0,
+      "top_1_rate": 0.0,
+      "best": 0.0,
+      "avg": 0.0,
+      "median": 0.0,
+      "bands": {
+        "slate_date": "2026-03-10",
+        "contest_type": "cash",
+        "cash_line": 327.75,
+        "top_15_score": 0.0,
+        "top_1_score": 0,
+        "winning_score": 347.5,
+        "num_entries": 34,
+        "notes": "",
+        "recorded_at": "2026-03-13T14:20:41.154300+00:00"
+      }
+    }
   },
   "2026-03-10_gpp": {
     "slate_date": "2026-03-10",
