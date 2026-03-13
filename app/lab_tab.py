@@ -343,7 +343,51 @@ def render_lab_tab(sport: str) -> None:
                 st.error(f"Publish error: {e}")
 
     # ═══════════════════════════════════════════════════
-    # Section 4: Historical Replay
+    # Section 4: Manage Published Lineups
+    # ═══════════════════════════════════════════════════
+    st.markdown("---")
+    st.markdown("### Manage Lineups")
+
+    # Discover published lineup files
+    lineup_files = sorted(out_dir.glob("*_lineups.parquet"))
+    if lineup_files:
+        lineup_info = []
+        for lf in lineup_files:
+            slug = lf.stem.replace("_lineups", "")
+            meta_file = out_dir / f"{slug}_meta.json"
+            meta_data = {}
+            if meta_file.exists():
+                try:
+                    meta_data = json.loads(meta_file.read_text())
+                except Exception:
+                    pass
+            try:
+                ldf = pd.read_parquet(lf)
+                n_lu = int(ldf["lineup_index"].nunique()) if "lineup_index" in ldf.columns else 0
+            except Exception:
+                n_lu = 0
+            label = slug.replace("_", " ").title()
+            built_at = meta_data.get("built_at", "")
+            lineup_info.append({
+                "slug": slug, "label": label, "n_lineups": n_lu,
+                "built_at": built_at, "path": lf,
+            })
+
+        # Display each lineup set with a delete button
+        for info in lineup_info:
+            col_info, col_del = st.columns([4, 1])
+            with col_info:
+                ts = f" — {info['built_at']}" if info["built_at"] else ""
+                st.markdown(f"**{info['label']}** ({info['n_lineups']} lineups{ts})")
+            with col_del:
+                if st.button("🗑️ Delete", key=f"del_{sport}_{info['slug']}"):
+                    _delete_lineup_set(out_dir, info["slug"])
+                    st.rerun()
+    else:
+        st.caption("No published lineups.")
+
+    # ═══════════════════════════════════════════════════
+    # Section 5: Historical Replay
     # ═══════════════════════════════════════════════════
     st.markdown("---")
     _render_historical_replay(sport)
@@ -352,6 +396,19 @@ def render_lab_tab(sport: str) -> None:
 # ═══════════════════════════════════════════════════════════════
 # Internal helpers
 # ═══════════════════════════════════════════════════════════════
+
+def _delete_lineup_set(out_dir: Path, slug: str) -> None:
+    """Delete a published lineup set (lineups + exposure + meta)."""
+    suffixes = ["_lineups.parquet", "_exposure.parquet", "_meta.json"]
+    deleted = []
+    for suffix in suffixes:
+        fp = out_dir / f"{slug}{suffix}"
+        if fp.exists():
+            fp.unlink()
+            deleted.append(fp.name)
+    if deleted:
+        st.toast(f"Deleted: {', '.join(deleted)}")
+
 
 def _get_secret(key: str) -> str:
     """Try to get a secret from Streamlit secrets."""
