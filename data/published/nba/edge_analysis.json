@@ -1,177 +1,177 @@
 {
   "bullets": [
-    "Anchor studs (5): Nikola Jokic, Luka Doncic, Victor Wembanyama, Shai Gilgeous-Alexander, Giannis Antetokounmpo",
-    "Value plays (5): Justin Champagnie, Josh Minott, Tim Hardaway Jr., Lindy Waters III, Isaac Okoro",
-    "Leverage plays (5): Jalen Johnson, Tyrese Maxey, Cade Cunningham, Joel Embiid, Jalen Williams",
+    "Anchor studs (5): Cade Cunningham, Anthony Edwards, Kawhi Leonard, Donovan Mitchell, Jalen Brunson",
+    "Value plays (5): Derrick Jones Jr., AJ Lawson, Landry Shamet, Jamison Battle, Dennis Schroder",
+    "Leverage plays (5): Karl-Anthony Towns, Josh Giddey, Alperen Sengun, Pascal Siakam, Stephen Curry",
     "Fade candidates: 5 players below edge threshold"
   ],
-  "recommendation": "5 core plays anchored at $10,500\u2013$12,500. 5 value plays averaging 4.8 pts/$1K. 5 leverage plays at 5\u20135% ownership.",
+  "recommendation": "5 core plays anchored at $9,100\u2013$10,900. 5 value plays averaging 4.8 pts/$1K. 5 leverage plays at 5\u20135% ownership.",
   "core_plays": [
     {
-      "player_name": "Nikola Jokic",
-      "proj": 52.5,
-      "salary": 12500,
+      "player_name": "Cade Cunningham",
+      "proj": 45.2,
+      "salary": 10900,
       "ownership": 5.0,
       "edge": 0.61,
-      "value": 4.2
+      "value": 4.15
     },
     {
-      "player_name": "Luka Doncic",
-      "proj": 49.2,
-      "salary": 12300,
+      "player_name": "Anthony Edwards",
+      "proj": 41.4,
+      "salary": 9500,
       "ownership": 5.0,
-      "edge": 0.58,
-      "value": 4.0
+      "edge": 0.59,
+      "value": 4.36
     },
     {
-      "player_name": "Victor Wembanyama",
-      "proj": 48.6,
-      "salary": 11000,
+      "player_name": "Kawhi Leonard",
+      "proj": 40.0,
+      "salary": 9700,
       "ownership": 5.0,
-      "edge": 0.6,
-      "value": 4.42
+      "edge": 0.56,
+      "value": 4.12
     },
     {
-      "player_name": "Shai Gilgeous-Alexander",
-      "proj": 46.8,
-      "salary": 11200,
+      "player_name": "Donovan Mitchell",
+      "proj": 39.7,
+      "salary": 9500,
+      "ownership": 5.0,
+      "edge": 0.56,
+      "value": 4.18
+    },
+    {
+      "player_name": "Jalen Brunson",
+      "proj": 39.6,
+      "salary": 9100,
       "ownership": 5.0,
       "edge": 0.57,
-      "value": 4.17
-    },
-    {
-      "player_name": "Giannis Antetokounmpo",
-      "proj": 45.4,
-      "salary": 10500,
-      "ownership": 5.0,
-      "edge": 0.57,
-      "value": 4.32
+      "value": 4.35
     }
   ],
   "leverage_plays": [
     {
-      "player_name": "Jalen Johnson",
-      "proj": 44.1,
-      "salary": 10800,
+      "player_name": "Karl-Anthony Towns",
+      "proj": 39.3,
+      "salary": 9000,
       "ownership": 5.0,
-      "edge": 0.54,
-      "value": 4.09
+      "edge": 0.56,
+      "value": 4.37
     },
     {
-      "player_name": "Tyrese Maxey",
-      "proj": 42.3,
-      "salary": 10100,
+      "player_name": "Josh Giddey",
+      "proj": 37.5,
+      "salary": 8900,
       "ownership": 5.0,
-      "edge": 0.54,
-      "value": 4.18
+      "edge": 0.55,
+      "value": 4.22
     },
     {
-      "player_name": "Cade Cunningham",
-      "proj": 43.6,
-      "salary": 10900,
+      "player_name": "Alperen Sengun",
+      "proj": 37.1,
+      "salary": 8700,
       "ownership": 5.0,
       "edge": 0.54,
-      "value": 4.0
+      "value": 4.27
     },
     {
-      "player_name": "Joel Embiid",
-      "proj": 40.7,
-      "salary": 9600,
+      "player_name": "Pascal Siakam",
+      "proj": 35.0,
+      "salary": 8000,
+      "ownership": 5.0,
+      "edge": 0.54,
+      "value": 4.38
+    },
+    {
+      "player_name": "Stephen Curry",
+      "proj": 36.7,
+      "salary": 9200,
       "ownership": 5.0,
       "edge": 0.53,
-      "value": 4.24
-    },
-    {
-      "player_name": "Jalen Williams",
-      "proj": 37.3,
-      "salary": 8200,
-      "ownership": 5.0,
-      "edge": 0.52,
-      "value": 4.55
+      "value": 3.99
     }
   ],
   "value_plays": [
     {
-      "player_name": "Justin Champagnie",
-      "proj": 22.8,
-      "salary": 4600,
-      "ownership": 5.0,
-      "edge": 0.43,
-      "value": 4.96
-    },
-    {
-      "player_name": "Josh Minott",
-      "proj": 15.4,
-      "salary": 3200,
-      "ownership": 5.0,
-      "edge": 0.38,
-      "value": 4.81
-    },
-    {
-      "player_name": "Tim Hardaway Jr.",
-      "proj": 23.1,
+      "player_name": "Derrick Jones Jr.",
+      "proj": 23.4,
       "salary": 4800,
+      "ownership": 5.0,
+      "edge": 0.46,
+      "value": 4.88
+    },
+    {
+      "player_name": "AJ Lawson",
+      "proj": 14.5,
+      "salary": 3000,
+      "ownership": 5.0,
+      "edge": 0.39,
+      "value": 4.83
+    },
+    {
+      "player_name": "Landry Shamet",
+      "proj": 19.7,
+      "salary": 4100,
       "ownership": 5.0,
       "edge": 0.43,
       "value": 4.8
     },
     {
-      "player_name": "Lindy Waters III",
+      "player_name": "Jamison Battle",
       "proj": 14.4,
       "salary": 3000,
       "ownership": 5.0,
-      "edge": 0.37,
-      "value": 4.79
+      "edge": 0.38,
+      "value": 4.8
     },
     {
-      "player_name": "Isaac Okoro",
-      "proj": 19.4,
-      "salary": 4100,
+      "player_name": "Dennis Schroder",
+      "proj": 21.5,
+      "salary": 4500,
       "ownership": 5.0,
-      "edge": 0.4,
-      "value": 4.72
+      "edge": 0.44,
+      "value": 4.78
     }
   ],
   "fade_candidates": [
     {
-      "player_name": "Gregory Jackson",
-      "proj": 19.6,
-      "salary": 5800,
-      "ownership": 5.0,
-      "edge": 0.34,
-      "value": 3.37
-    },
-    {
-      "player_name": "Cam Spencer",
-      "proj": 18.6,
-      "salary": 5100,
-      "ownership": 5.0,
-      "edge": 0.35,
-      "value": 3.65
-    },
-    {
-      "player_name": "Devin Vassell",
-      "proj": 19.1,
-      "salary": 5200,
-      "ownership": 5.0,
-      "edge": 0.35,
-      "value": 3.68
-    },
-    {
-      "player_name": "Guerschon Yabusele",
-      "proj": 19.4,
-      "salary": 5100,
-      "ownership": 5.0,
-      "edge": 0.36,
-      "value": 3.8
-    },
-    {
-      "player_name": "Mark Williams",
-      "proj": 20.8,
+      "player_name": "Cedric Coward",
+      "proj": 19.3,
       "salary": 5600,
       "ownership": 5.0,
       "edge": 0.36,
-      "value": 3.71
+      "value": 3.45
+    },
+    {
+      "player_name": "Guerschon Yabusele",
+      "proj": 18.7,
+      "salary": 5200,
+      "ownership": 5.0,
+      "edge": 0.36,
+      "value": 3.59
+    },
+    {
+      "player_name": "Brandon Williams",
+      "proj": 19.5,
+      "salary": 5500,
+      "ownership": 5.0,
+      "edge": 0.37,
+      "value": 3.54
+    },
+    {
+      "player_name": "Royce O'Neale",
+      "proj": 19.5,
+      "salary": 5200,
+      "ownership": 5.0,
+      "edge": 0.38,
+      "value": 3.75
+    },
+    {
+      "player_name": "Taylor Hendricks",
+      "proj": 19.8,
+      "salary": 5200,
+      "ownership": 5.0,
+      "edge": 0.39,
+      "value": 3.81
     }
   ],
   "signals_df_path": "signals.parquet"
