@@ -195,8 +195,8 @@ def render_lab_tab(sport: str) -> None:
 
     if is_pga:
         # PGA contest types depend on the day:
-        # Thursday = round 1 (4-day tournament options available)
-        # Friday–Sunday = single-round showdown only
+        # Thursday = round 1 → 4-day GPP available + single-round Cash/Showdown
+        # Fri-Sun = single-round only (Cash + Showdown)
         try:
             _parsed_date = datetime.strptime(slate_date, "%Y-%m-%d")
             is_thursday = _parsed_date.weekday() == 3  # 0=Mon, 3=Thu
@@ -205,7 +205,7 @@ def render_lab_tab(sport: str) -> None:
         if is_thursday:
             contest_options = ["PGA GPP", "PGA Cash", "PGA Showdown"]
         else:
-            contest_options = ["PGA Showdown"]
+            contest_options = ["PGA Cash", "PGA Showdown"]
     else:
         contest_options = ["GPP Main", "GPP Early", "Showdown", "Cash Main"]
     contest_options = [c for c in contest_options if c in CONTEST_PRESETS]

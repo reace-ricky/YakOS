@@ -378,11 +378,11 @@ PGA_CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "ownership_contest_type": "gpp",
     },
     "PGA Cash": {
-        "description": "PGA cash / double-up — 6 golfers, safe floor (4-day)",
+        "description": "PGA cash / double-up — 6 golfers, safe floor (single round)",
         "slate_type": "Classic",
         "archetype": "Balanced",
         "internal_contest": "CASH",
-        "projection_slate": "main",
+        "projection_slate": "showdown",
         "projection_style": "floor",
         "volatility": "low",
         "correlation_mode": None,
