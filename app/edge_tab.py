@@ -8,6 +8,8 @@ Displays the pre-computed edge analysis from data/published/{sport}/:
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Dict, List
 
 import pandas as pd
@@ -138,6 +140,28 @@ def _render_edge_box(key: str, players: List[Dict], is_pga: bool) -> None:
     st.markdown(box_html, unsafe_allow_html=True)
 
 
+def _lineup_display_label(slug: str, sport: str) -> str:
+    """Build a user-facing label for a lineup slug.
+
+    For game-keyed showdown slugs like ``showdown_cle_dal``, read the
+    companion meta JSON to recover the team abbreviations and render
+    a label like ``Showdown — CLE vs DAL``.  Falls back to title-casing
+    the slug.
+    """
+    from app.data_loader import DATA_DIR
+
+    meta_path = DATA_DIR / sport.lower() / f"{slug}_meta.json"
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text())
+            teams = meta.get("showdown_teams")
+            if teams and len(teams) == 2:
+                return f"Showdown — {teams[0].upper()} vs {teams[1].upper()}"
+        except Exception:
+            pass
+    return slug.replace("_", " ").title()
+
+
 def render_edge_tab(sport: str) -> None:
     """Render Ricky's Edge Analysis tab."""
     from app.data_loader import load_published_data
@@ -234,8 +258,8 @@ def render_edge_tab(sport: str) -> None:
     if lineups:
         st.markdown("---")
         st.markdown("### 📋 Published Lineups")
-        for contest_slug, ldf in lineups.items():
-            label = contest_slug.replace("_", " ").title()
+        for contest_slug, ldf in sorted(lineups.items()):
+            label = _lineup_display_label(contest_slug, sport)
             n_lu = ldf["lineup_index"].nunique() if "lineup_index" in ldf.columns else 0
             with st.expander(f"{label} — {n_lu} lineups"):
                 if "lineup_index" not in ldf.columns:
