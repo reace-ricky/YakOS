@@ -255,7 +255,7 @@ def render_lab_tab(sport: str) -> None:
                 if result.get("status") == "ok":
                     st.success(f"Published! SHA: {result.get('sha', 'N/A')}")
                 else:
-                    st.error(f"Publish failed: {result.get('error', 'unknown')}")
+                    st.error(f"Publish failed: {result.get('reason', 'unknown')}")
             except Exception as e:
                 st.error(f"Publish error: {e}")
 
@@ -693,14 +693,23 @@ def _build_lineups(
 
 def _publish_to_github(sport: str, out_dir: Path) -> dict:
     """Publish all files in out_dir to GitHub."""
+    from yak_core.config import YAKOS_ROOT
     from yak_core.github_persistence import sync_feedback_to_github
+
+    root = Path(YAKOS_ROOT)
 
     # Collect all files in published dir for this sport
     files = []
     for f in out_dir.iterdir():
         if f.is_file():
-            rel = str(f.relative_to(Path(out_dir).parent.parent.parent))
+            try:
+                rel = str(f.relative_to(root))
+            except ValueError:
+                continue
             files.append(rel)
+
+    if not files:
+        return {"status": "error", "reason": "No files found to publish"}
 
     return sync_feedback_to_github(
         files=files,
