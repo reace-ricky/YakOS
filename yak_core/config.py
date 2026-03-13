@@ -417,10 +417,10 @@ PGA_CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "ownership_contest_type": "cash",
     },
     "PGA Showdown": {
-        "description": "PGA single-round Showdown — 6 golfers, one round only",
+        "description": "PGA single-round GPP — 6 golfers, ceiling-weighted (one round)",
         "slate_type": "Classic",
         "archetype": "Ceiling Hunter",
-        "internal_contest": "SD",
+        "internal_contest": "GPP",  # Uses GPP formula: proj*0.35 + ceil*0.55 - own*5
         "projection_slate": "showdown",
         "projection_style": "ceil",
         "volatility": "high",

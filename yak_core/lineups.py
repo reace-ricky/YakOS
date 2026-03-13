@@ -331,8 +331,8 @@ def build_multiple_lineups_with_exposure(
 
     # ── Contest-type detection ──────────────────────────────────────
     contest_type = cfg.get("CONTEST_TYPE", "gpp").lower()
-    is_gpp = contest_type == "gpp"
-    is_cash = contest_type == "cash"
+    is_gpp = contest_type in ("gpp", "mme", "sd", "captain")
+    is_cash = contest_type in ("cash", "50/50", "double-up")
 
     # GPP constraint knobs — overridable via cfg; defaults come from DEFAULT_CONFIG
     # (single source of truth in config.py — do NOT add numeric literals here)
