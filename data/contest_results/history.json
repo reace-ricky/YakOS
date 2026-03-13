@@ -38,14 +38,14 @@
     "slate_date": "2026-02-04",
     "contest_type": "gpp",
     "cash_line": 309.0,
-    "top_15_score": 0,
+    "top_15_score": 324.0,
     "top_1_score": 0,
-    "winning_score": 387.75,
-    "num_entries": 11890,
+    "winning_score": 373.75,
+    "num_entries": 14863,
     "notes": "",
-    "recorded_at": "2026-03-11T13:56:52.959817+00:00",
+    "recorded_at": "2026-03-13T14:08:47.952089+00:00",
     "scores": {
-      "n_lineups": 20,
+      "n_lineups": 21,
       "cashed": 0,
       "top_15": 0,
       "top_1": 0,
@@ -53,26 +53,21 @@
       "cash_rate": 0.0,
       "top_15_rate": 0.0,
       "top_1_rate": 0.0,
-      "best": 303.0,
-      "avg": 265.0,
-      "median": 265.4,
+      "best": 0.0,
+      "avg": 0.0,
+      "median": 0.0,
       "bands": {
         "slate_date": "2026-02-04",
         "contest_type": "gpp",
         "cash_line": 309.0,
-        "top_15_score": 0,
+        "top_15_score": 324.0,
         "top_1_score": 0,
-        "winning_score": 387.75,
-        "num_entries": 11890,
+        "winning_score": 373.75,
+        "num_entries": 14863,
         "notes": "",
-        "recorded_at": "2026-03-11T13:56:52.959817+00:00"
+        "recorded_at": "2026-03-13T14:08:47.952089+00:00"
       }
-    },
-    "miss_summary": {
-      "projection_miss": 18,
-      "construction_miss": 5
-    },
-    "n_missed": 20
+    }
   },
   "2026-02-02_gpp": {
     "slate_date": "2026-02-02",
