@@ -9,7 +9,6 @@
   "core_plays": [
     {
       "player_name": "Nikola Jokic",
-      "tag": "core",
       "proj": 62.9,
       "salary": 12500,
       "ownership": 37.5,
@@ -18,7 +17,6 @@
     },
     {
       "player_name": "Luka Doncic",
-      "tag": "core",
       "proj": 60.9,
       "salary": 12300,
       "ownership": 9.8,
@@ -27,7 +25,6 @@
     },
     {
       "player_name": "Victor Wembanyama",
-      "tag": "core",
       "proj": 55.4,
       "salary": 11000,
       "ownership": 10.2,
@@ -36,7 +33,6 @@
     },
     {
       "player_name": "Cade Cunningham",
-      "tag": "core",
       "proj": 50.8,
       "salary": 10900,
       "ownership": 8.6,
@@ -45,7 +41,6 @@
     },
     {
       "player_name": "Jalen Johnson",
-      "tag": "core",
       "proj": 49.3,
       "salary": 10800,
       "ownership": 8.3,
@@ -56,7 +51,6 @@
   "leverage_plays": [
     {
       "player_name": "Javon Small",
-      "tag": "leverage",
       "proj": 40.2,
       "salary": 5500,
       "ownership": 9.8,
@@ -65,7 +59,6 @@
     },
     {
       "player_name": "Cooper Flagg",
-      "tag": "leverage",
       "proj": 45.8,
       "salary": 8500,
       "ownership": 9.4,
@@ -74,7 +67,6 @@
     },
     {
       "player_name": "Gregory Jackson",
-      "tag": "leverage",
       "proj": 36.6,
       "salary": 5800,
       "ownership": 8.7,
@@ -83,7 +75,6 @@
     },
     {
       "player_name": "Tyrese Maxey",
-      "tag": "leverage",
       "proj": 43.4,
       "salary": 10100,
       "ownership": 7.3,
@@ -92,7 +83,6 @@
     },
     {
       "player_name": "Jaylen Brown",
-      "tag": "leverage",
       "proj": 45.3,
       "salary": 9300,
       "ownership": 8.7,
@@ -103,7 +93,6 @@
   "value_plays": [
     {
       "player_name": "Danny Wolf",
-      "tag": "value",
       "proj": 32.2,
       "salary": 4800,
       "ownership": 7.9,
@@ -112,7 +101,6 @@
     },
     {
       "player_name": "Olivier-Maxence Prosper",
-      "tag": "value",
       "proj": 31.9,
       "salary": 4900,
       "ownership": 7.8,
@@ -121,7 +109,6 @@
     },
     {
       "player_name": "Rayan Rupert",
-      "tag": "value",
       "proj": 26.0,
       "salary": 4300,
       "ownership": 6.3,
@@ -130,7 +117,6 @@
     },
     {
       "player_name": "Cam Spencer",
-      "tag": "value",
       "proj": 29.6,
       "salary": 5100,
       "ownership": 7.6,
@@ -139,7 +125,6 @@
     },
     {
       "player_name": "Jaylen Wells",
-      "tag": "value",
       "proj": 27.1,
       "salary": 4800,
       "ownership": 6.7,
@@ -150,7 +135,6 @@
   "fade_candidates": [
     {
       "player_name": "Jevon Carter",
-      "tag": "fade",
       "proj": 18.1,
       "salary": 4000,
       "ownership": 24.9,
@@ -159,7 +143,6 @@
     },
     {
       "player_name": "Tristan da Silva",
-      "tag": "fade",
       "proj": 22.6,
       "salary": 4900,
       "ownership": 15.9,
@@ -168,7 +151,6 @@
     },
     {
       "player_name": "Wendell Carter Jr.",
-      "tag": "fade",
       "proj": 27.3,
       "salary": 5300,
       "ownership": 12.0,
@@ -177,7 +159,6 @@
     },
     {
       "player_name": "Jalen Suggs",
-      "tag": "fade",
       "proj": 35.2,
       "salary": 7100,
       "ownership": 18.4,
@@ -186,7 +167,6 @@
     },
     {
       "player_name": "Jamal Murray",
-      "tag": "fade",
       "proj": 40.6,
       "salary": 9000,
       "ownership": 15.2,
