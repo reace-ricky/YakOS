@@ -1,12 +1,5 @@
 {
   "contest_label": "PGA GPP",
-  "contest_type": "MME",
-  "num_lineups": 20,
-  "archetype": "Ceiling Hunter",
-  "salary_cap": 50000,
-  "min_salary_used": 46000,
-  "max_exposure": 0.6,
-  "lock": [],
-  "exclude": [],
-  "timestamp": "2026-03-12T21:42:30.453791+00:00"
+  "num_lineups": 1,
+  "timestamp": "2026-03-13T00:46:48.023010+00:00"
 }
