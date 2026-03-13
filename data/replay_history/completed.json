@@ -4,6 +4,11 @@
       "completed_at": "2026-03-13T15:43:32.106037+00:00",
       "n_lineups": 5,
       "best_actual": null
+    },
+    "2026-01-29_gpp_main": {
+      "completed_at": "2026-03-13T15:46:55.597723+00:00",
+      "n_lineups": 5,
+      "best_actual": 298.0
     }
   }
 }
