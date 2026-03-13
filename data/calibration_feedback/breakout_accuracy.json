@@ -1,0 +1,209 @@
+{
+  "2026-01-29_NBA": {
+    "slate_date": "2026-01-29",
+    "sport": "NBA",
+    "n_predicted": 52,
+    "n_actual": 71,
+    "n_correct": 38,
+    "precision": 0.731,
+    "recall": 0.535
+  },
+  "2026-01-31_NBA": {
+    "slate_date": "2026-01-31",
+    "sport": "NBA",
+    "n_predicted": 30,
+    "n_actual": 49,
+    "n_correct": 17,
+    "precision": 0.567,
+    "recall": 0.347
+  },
+  "2026-02-01_NBA": {
+    "slate_date": "2026-02-01",
+    "sport": "NBA",
+    "n_predicted": 51,
+    "n_actual": 51,
+    "n_correct": 27,
+    "precision": 0.529,
+    "recall": 0.529
+  },
+  "2026-02-02_NBA": {
+    "slate_date": "2026-02-02",
+    "sport": "NBA",
+    "n_predicted": 16,
+    "n_actual": 36,
+    "n_correct": 11,
+    "precision": 0.688,
+    "recall": 0.306
+  },
+  "2026-02-03_NBA": {
+    "slate_date": "2026-02-03",
+    "sport": "NBA",
+    "n_predicted": 66,
+    "n_actual": 80,
+    "n_correct": 38,
+    "precision": 0.576,
+    "recall": 0.475
+  },
+  "2026-02-04_NBA": {
+    "slate_date": "2026-02-04",
+    "sport": "NBA",
+    "n_predicted": 52,
+    "n_actual": 72,
+    "n_correct": 33,
+    "precision": 0.635,
+    "recall": 0.458
+  },
+  "2026-02-05_NBA": {
+    "slate_date": "2026-02-05",
+    "sport": "NBA",
+    "n_predicted": 49,
+    "n_actual": 63,
+    "n_correct": 37,
+    "precision": 0.755,
+    "recall": 0.587
+  },
+  "2026-02-08_NBA": {
+    "slate_date": "2026-02-08",
+    "sport": "NBA",
+    "n_predicted": 23,
+    "n_actual": 28,
+    "n_correct": 13,
+    "precision": 0.565,
+    "recall": 0.464
+  },
+  "2026-02-20_NBA": {
+    "slate_date": "2026-02-20",
+    "sport": "NBA",
+    "n_predicted": 16,
+    "n_actual": 22,
+    "n_correct": 9,
+    "precision": 0.562,
+    "recall": 0.409
+  },
+  "2026-02-22_NBA": {
+    "slate_date": "2026-02-22",
+    "sport": "NBA",
+    "n_predicted": 34,
+    "n_actual": 49,
+    "n_correct": 20,
+    "precision": 0.588,
+    "recall": 0.408
+  },
+  "2026-02-23_NBA": {
+    "slate_date": "2026-02-23",
+    "sport": "NBA",
+    "n_predicted": 11,
+    "n_actual": 31,
+    "n_correct": 9,
+    "precision": 0.818,
+    "recall": 0.29
+  },
+  "2026-02-24_NBA": {
+    "slate_date": "2026-02-24",
+    "sport": "NBA",
+    "n_predicted": 54,
+    "n_actual": 90,
+    "n_correct": 34,
+    "precision": 0.63,
+    "recall": 0.378
+  },
+  "2026-02-27_NBA": {
+    "slate_date": "2026-02-27",
+    "sport": "NBA",
+    "n_predicted": 23,
+    "n_actual": 52,
+    "n_correct": 12,
+    "precision": 0.522,
+    "recall": 0.231
+  },
+  "2026-03-01_NBA": {
+    "slate_date": "2026-03-01",
+    "sport": "NBA",
+    "n_predicted": 44,
+    "n_actual": 60,
+    "n_correct": 29,
+    "precision": 0.659,
+    "recall": 0.483
+  },
+  "2026-03-02_NBA": {
+    "slate_date": "2026-03-02",
+    "sport": "NBA",
+    "n_predicted": 7,
+    "n_actual": 23,
+    "n_correct": 4,
+    "precision": 0.571,
+    "recall": 0.174
+  },
+  "2026-03-04_NBA": {
+    "slate_date": "2026-03-04",
+    "sport": "NBA",
+    "n_predicted": 11,
+    "n_actual": 20,
+    "n_correct": 7,
+    "precision": 0.636,
+    "recall": 0.35
+  },
+  "2026-03-05_NBA": {
+    "slate_date": "2026-03-05",
+    "sport": "NBA",
+    "n_predicted": 27,
+    "n_actual": 61,
+    "n_correct": 16,
+    "precision": 0.593,
+    "recall": 0.262
+  },
+  "2026-03-06_NBA": {
+    "slate_date": "2026-03-06",
+    "sport": "NBA",
+    "n_predicted": 23,
+    "n_actual": 61,
+    "n_correct": 15,
+    "precision": 0.652,
+    "recall": 0.246
+  },
+  "2026-03-07_NBA": {
+    "slate_date": "2026-03-07",
+    "sport": "NBA",
+    "n_predicted": 16,
+    "n_actual": 19,
+    "n_correct": 6,
+    "precision": 0.375,
+    "recall": 0.316
+  },
+  "2026-03-08_NBA": {
+    "slate_date": "2026-03-08",
+    "sport": "NBA",
+    "n_predicted": 14,
+    "n_actual": 57,
+    "n_correct": 12,
+    "precision": 0.857,
+    "recall": 0.211
+  },
+  "2026-03-09_NBA": {
+    "slate_date": "2026-03-09",
+    "sport": "NBA",
+    "n_predicted": 43,
+    "n_actual": 55,
+    "n_correct": 30,
+    "precision": 0.698,
+    "recall": 0.545
+  },
+  "2026-03-10_NBA": {
+    "slate_date": "2026-03-10",
+    "sport": "NBA",
+    "n_predicted": 47,
+    "n_actual": 58,
+    "n_correct": 31,
+    "precision": 0.66,
+    "recall": 0.534
+  },
+  "2026-03-11_NBA": {
+    "slate_date": "2026-03-11",
+    "sport": "NBA",
+    "n_predicted": 40,
+    "n_actual": 56,
+    "n_correct": 25,
+    "precision": 0.625,
+    "recall": 0.446
+  }
+}

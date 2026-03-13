@@ -52,8 +52,8 @@ def _load_all_dashboard_data(sport: str) -> Dict[str, Any]:
     # Breakout profile
     breakout_profile = _load_json(REPO_ROOT / "data" / "sim_sandbox" / "breakout_profile.json")
 
-    # Cron state
-    cron_state = _load_json(Path("/home/user/workspace/cron_tracking/975719ad/state.json"))
+    # Breakout accuracy (persisted by nightly calibration)
+    breakout_accuracy = _load_json(REPO_ROOT / "data" / "calibration_feedback" / "breakout_accuracy.json")
 
     return {
         "slate_errors": slate_errors,
@@ -61,7 +61,7 @@ def _load_all_dashboard_data(sport: str) -> Dict[str, Any]:
         "signal_weights": signal_weights,
         "contest_history": contest_history,
         "breakout_profile": breakout_profile,
-        "cron_state": cron_state,
+        "breakout_accuracy": breakout_accuracy,
         "sport": sport_lower,
     }
 
@@ -320,39 +320,50 @@ def _render_breakout_identification(data: Dict[str, Any]) -> None:
     # ── Right: Breakout Precision / Recall ────────────────────────────────
     with right:
         st.markdown("**Breakout Precision / Recall**")
-        cron = data["cron_state"]
-        nba_cron = cron.get("nba", {})
+        ba_history = data.get("breakout_accuracy", {})
 
-        precision = nba_cron.get("breakout_precision")
-        recall = nba_cron.get("breakout_recall")
+        # Compute rolling precision/recall from all entries for the current sport
+        sport_entries = [
+            v for v in ba_history.values()
+            if isinstance(v, dict) and v.get("sport", "NBA").upper() == sport.upper()
+        ]
 
-        if precision is not None:
-            prec_pct = precision * 100
-            prec_delta = prec_pct - 60.0  # target = 60%
-            st.metric(
-                "Precision",
-                f"{prec_pct:.1f}%",
-                delta=f"{prec_delta:+.1f}% vs 60% target",
-                delta_color="normal",
-            )
+        if sport_entries:
+            total_pred = sum(e.get("n_predicted", 0) for e in sport_entries)
+            total_actual = sum(e.get("n_actual", 0) for e in sport_entries)
+            total_correct = sum(e.get("n_correct", 0) for e in sport_entries)
+            precision = total_correct / total_pred if total_pred > 0 else None
+            recall = total_correct / total_actual if total_actual > 0 else None
+
+            if precision is not None:
+                prec_pct = precision * 100
+                prec_delta = prec_pct - 60.0  # target = 60%
+                st.metric(
+                    "Precision",
+                    f"{prec_pct:.1f}%",
+                    delta=f"{prec_delta:+.1f}% vs 60% target",
+                    delta_color="normal",
+                )
+            else:
+                st.metric("Precision", "N/A")
+
+            if recall is not None:
+                rec_pct = recall * 100
+                rec_delta = rec_pct - 50.0  # target = 50%
+                st.metric(
+                    "Recall",
+                    f"{rec_pct:.1f}%",
+                    delta=f"{rec_delta:+.1f}% vs 50% target",
+                    delta_color="normal",
+                )
+            else:
+                st.metric("Recall", "N/A")
+
+            st.caption(f"Across {len(sport_entries)} calibrated slates")
         else:
             st.metric("Precision", "N/A")
-
-        if recall is not None:
-            rec_pct = recall * 100
-            rec_delta = rec_pct - 50.0  # target = 50%
-            st.metric(
-                "Recall",
-                f"{rec_pct:.1f}%",
-                delta=f"{rec_delta:+.1f}% vs 50% target",
-                delta_color="normal",
-            )
-        else:
             st.metric("Recall", "N/A")
-
-        last_run = cron.get("last_run_utc", "")
-        if last_run:
-            st.caption(f"Last cron run: {last_run}")
+            st.caption("Run nightly calibration to populate")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

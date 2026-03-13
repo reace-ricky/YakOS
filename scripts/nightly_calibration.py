@@ -410,6 +410,42 @@ def run_pga_calibration(slate_date: str) -> dict:
     return result
 
 
+# ── Breakout Accuracy Persistence ──────────────────────────────────────────
+
+def _persist_breakout_accuracy(results: list[dict], slate_date: str) -> None:
+    """Write breakout accuracy stats to a repo-level JSON file.
+
+    The Dashboard reads this to display precision/recall gauges.
+    Accumulates a rolling history keyed by date.
+    """
+    accuracy_path = os.path.join(YAKOS_ROOT, "data", "calibration_feedback", "breakout_accuracy.json")
+    os.makedirs(os.path.dirname(accuracy_path), exist_ok=True)
+
+    history = {}
+    if os.path.isfile(accuracy_path):
+        try:
+            with open(accuracy_path) as f:
+                history = json.load(f)
+        except Exception:
+            history = {}
+
+    for r in results:
+        ba = r.get("breakout_accuracy")
+        if ba:
+            sport = r.get("sport", "NBA")
+            key = f"{slate_date}_{sport}"
+            history[key] = {
+                "slate_date": slate_date,
+                "sport": sport,
+                **ba,
+            }
+
+    if history:
+        with open(accuracy_path, "w") as f:
+            json.dump(history, f, indent=2)
+        log.info("Breakout accuracy persisted: %d entries", len(history))
+
+
 # ── GitHub Sync ────────────────────────────────────────────────────────────
 
 def sync_to_github(sports: list[str]) -> dict:
@@ -421,6 +457,7 @@ def sync_to_github(sports: list[str]) -> dict:
         "data/calibration_feedback/nba/correction_factors.json",
         "data/calibration_feedback/pga/slate_errors.json",
         "data/calibration_feedback/pga/correction_factors.json",
+        "data/calibration_feedback/breakout_accuracy.json",
         "data/edge_feedback/signal_history.json",
         "data/edge_feedback/signal_weights.json",
     ]
@@ -483,6 +520,9 @@ def main():
         if pga_result["status"] == "ok":
             active_sports.append("PGA")
         log.info("PGA result: %s", pga_result)
+
+    # Persist breakout accuracy to repo data so the Dashboard can read it
+    _persist_breakout_accuracy(results, slate_date)
 
     # Sync to GitHub
     if active_sports:
