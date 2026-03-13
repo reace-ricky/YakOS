@@ -134,7 +134,11 @@ def run_nba_calibration(slate_date: str) -> dict:
         result["reason"] = "No valid data"
         return result
 
-    # 5. Record slate errors
+    # 5. Use raw projections for calibration to avoid compounding corrections
+    if "proj_pre_correction" in calibration_pool.columns:
+        calibration_pool["proj"] = calibration_pool["proj_pre_correction"]
+        log.info("Using proj_pre_correction for NBA calibration (avoiding correction compounding)")
+
     try:
         cal_result = record_slate_errors(slate_date, calibration_pool, sport="NBA")
         log.info("Calibration recorded: %s", cal_result)
@@ -351,7 +355,11 @@ def run_pga_calibration(slate_date: str) -> dict:
         result["reason"] = "No valid data"
         return result
 
-    # 5. Record slate errors
+    # 5. Use raw projections for calibration to avoid compounding corrections
+    if "proj_pre_correction" in calibration_pool.columns:
+        calibration_pool["proj"] = calibration_pool["proj_pre_correction"]
+        log.info("Using proj_pre_correction for PGA calibration (avoiding correction compounding)")
+
     try:
         cal_result = record_slate_errors(slate_date, calibration_pool, sport="PGA")
         log.info("PGA calibration recorded: %s", cal_result)
