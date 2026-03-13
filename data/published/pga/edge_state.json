@@ -1,19 +1,19 @@
 {
   "sport": "PGA",
-  "date": "2026-03-12",
+  "date": "2026-03-13",
   "core_names": [
-    "Min Woo Lee",
     "Cameron Young",
     "Ludvig Aberg",
     "Russell Henley",
-    "Matt Fitzpatrick"
+    "Matt Fitzpatrick",
+    "Robert MacIntyre"
   ],
   "leverage_names": [
     "David Ford",
     "Joel Dahmen",
     "Max McGreevy",
-    "Andrew Putnam",
-    "Aaron Rai"
+    "Aaron Rai",
+    "Andrew Putnam"
   ],
   "value_names": [
     "S.H. Kim",
@@ -23,11 +23,11 @@
     "Karl Vilips"
   ],
   "fade_names": [
+    "Justin Thomas",
     "Aldrich Potgieter",
+    "Brooks Koepka",
     "Danny Walker",
-    "Chris Gotterup",
-    "Cam Davis",
-    "Justin Thomas"
+    "Chris Gotterup"
   ],
-  "calibration_slates": 5
+  "calibration_slates": 7
 }

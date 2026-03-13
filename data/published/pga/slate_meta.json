@@ -1,8 +1,8 @@
 {
   "sport": "PGA",
   "site": "DK",
-  "date": "2026-03-12",
-  "slate": "main",
+  "date": "2026-03-13",
+  "slate": "showdown",
   "salary_cap": 50000,
   "roster_slots": [
     "G",
