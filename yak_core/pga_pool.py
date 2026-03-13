@@ -66,6 +66,11 @@ def build_pga_pool(
     # ceil ≈ proj + 1.04 * std_dev  (~85th percentile)
     # floor ≈ proj - 1.04 * std_dev (~15th percentile)
     Z_85 = 1.036
+
+    # Showdown slates may lack std_dev — derive from proj when missing
+    if "std_dev" not in pool.columns or pool["std_dev"].isna().all():
+        pool["std_dev"] = (pool["proj"] * 0.20).round(2)
+
     pool["ceil"] = (pool["proj"] + Z_85 * pool["std_dev"]).round(2)
     pool["floor"] = (pool["proj"] - Z_85 * pool["std_dev"]).clip(lower=0).round(2)
 
