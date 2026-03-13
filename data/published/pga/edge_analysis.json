@@ -1,113 +1,113 @@
 {
   "bullets": [
-    "Anchor studs (5): Scottie Scheffler, Rory McIlroy, Si Woo Kim, Tommy Fleetwood, Russell Henley",
+    "Anchor studs (5): Scottie Scheffler, Rory McIlroy, Si Woo Kim, Min Woo Lee, Tommy Fleetwood",
     "Value plays (5): Ricky Castillo, Sungjae Im, Haotong Li, Austin Smotherman, Taylor Moore",
-    "Leverage plays (5): Aaron Rai, Ryan Gerard, Joel Dahmen, Christiaan Bezuidenhout, Rickie Fowler",
+    "Leverage plays (5): Aaron Rai, Ryan Gerard, Christiaan Bezuidenhout, Joel Dahmen, Rickie Fowler",
     "Fade candidates: 5 players below edge threshold",
-    "Wave split: Early wave projects +0.5 pts avg (Early 42.0 vs Late 41.4)",
-    "Core wave mix: 1 Early / 4 Late"
+    "Wave split: Early wave projects +0.5 pts avg (Early 46.4 vs Late 45.9)",
+    "Core wave mix: 2 Early / 3 Late"
   ],
-  "recommendation": "5 core plays anchored at $9,000\u2013$14,200. 5 value plays averaging 6.4 pts/$1K. 5 leverage plays at 5\u201313% ownership.",
+  "recommendation": "5 core plays anchored at $7,500\u2013$14,200. 5 value plays averaging 7.1 pts/$1K. 5 leverage plays at 5\u201313% ownership.",
   "core_plays": [
     {
       "player_name": "Scottie Scheffler",
-      "proj": 75.5,
+      "proj": 78.5,
       "salary": 14200,
       "ownership": 23.7,
-      "edge": 0.62,
-      "value": 5.32,
+      "edge": 0.63,
+      "value": 5.53,
       "wave": "Late",
       "r1_teetime": "8:52 am"
     },
     {
       "player_name": "Rory McIlroy",
-      "proj": 64.6,
+      "proj": 67.6,
       "salary": 11700,
       "ownership": 12.2,
-      "edge": 0.54,
-      "value": 5.52,
+      "edge": 0.55,
+      "value": 5.78,
       "wave": "Early",
       "r1_teetime": "2:12 pm"
     },
     {
       "player_name": "Si Woo Kim",
-      "proj": 62.0,
+      "proj": 65.1,
       "salary": 9300,
       "ownership": 23.9,
       "edge": 0.7,
-      "value": 6.67,
+      "value": 7.0,
       "wave": "Late",
       "r1_teetime": "8:40 am"
     },
     {
-      "player_name": "Tommy Fleetwood",
-      "proj": 58.2,
-      "salary": 10300,
-      "ownership": 15.3,
-      "edge": 0.6,
-      "value": 5.65,
-      "wave": "Late",
-      "r1_teetime": "8:52 am"
+      "player_name": "Min Woo Lee",
+      "proj": 61.5,
+      "salary": 7500,
+      "ownership": 18.9,
+      "edge": 0.62,
+      "value": 8.2,
+      "wave": "Early",
+      "r1_teetime": "2:24 pm"
     },
     {
-      "player_name": "Russell Henley",
-      "proj": 58.2,
-      "salary": 9000,
-      "ownership": 20.2,
-      "edge": 0.68,
-      "value": 6.46,
+      "player_name": "Tommy Fleetwood",
+      "proj": 61.3,
+      "salary": 10300,
+      "ownership": 15.3,
+      "edge": 0.61,
+      "value": 5.95,
       "wave": "Late",
-      "r1_teetime": "9:04 am"
+      "r1_teetime": "8:52 am"
     }
   ],
   "leverage_plays": [
     {
       "player_name": "Aaron Rai",
-      "proj": 46.7,
+      "proj": 52.0,
       "salary": 7200,
       "ownership": 8.0,
-      "edge": 0.65,
-      "value": 6.49,
+      "edge": 0.68,
+      "value": 7.22,
       "wave": "Early",
       "r1_teetime": "2:36 pm"
     },
     {
       "player_name": "Ryan Gerard",
-      "proj": 50.8,
+      "proj": 56.1,
       "salary": 7400,
       "ownership": 8.2,
-      "edge": 0.63,
-      "value": 6.86,
+      "edge": 0.65,
+      "value": 7.58,
       "wave": "Late",
       "r1_teetime": "8:28 am"
     },
     {
-      "player_name": "Joel Dahmen",
-      "proj": 43.0,
-      "salary": 6100,
-      "ownership": 4.8,
-      "edge": 0.63,
-      "value": 7.05,
-      "wave": "Early",
-      "r1_teetime": "1:24 pm"
-    },
-    {
       "player_name": "Christiaan Bezuidenhout",
-      "proj": 47.1,
+      "proj": 52.4,
       "salary": 7000,
       "ownership": 6.1,
-      "edge": 0.63,
-      "value": 6.73,
+      "edge": 0.65,
+      "value": 7.49,
       "wave": "Late",
       "r1_teetime": "8:04 am"
     },
     {
+      "player_name": "Joel Dahmen",
+      "proj": 47.2,
+      "salary": 6100,
+      "ownership": 4.8,
+      "edge": 0.65,
+      "value": 7.74,
+      "wave": "Early",
+      "r1_teetime": "1:24 pm"
+    },
+    {
       "player_name": "Rickie Fowler",
-      "proj": 52.2,
+      "proj": 57.4,
       "salary": 7400,
       "ownership": 12.9,
-      "edge": 0.62,
-      "value": 7.05,
+      "edge": 0.64,
+      "value": 7.76,
       "wave": "Early",
       "r1_teetime": "2:00 pm"
     }
@@ -115,51 +115,51 @@
   "value_plays": [
     {
       "player_name": "Ricky Castillo",
-      "proj": 44.2,
+      "proj": 48.4,
       "salary": 6200,
       "ownership": 5.3,
-      "edge": 0.55,
-      "value": 7.13,
+      "edge": 0.57,
+      "value": 7.81,
       "wave": "Late",
       "r1_teetime": "8:28 am"
     },
     {
       "player_name": "Sungjae Im",
-      "proj": 40.3,
+      "proj": 44.5,
       "salary": 6400,
       "ownership": 3.1,
-      "edge": 0.55,
-      "value": 6.3,
+      "edge": 0.57,
+      "value": 6.96,
       "wave": "Late",
       "r1_teetime": "9:16 am"
     },
     {
       "player_name": "Haotong Li",
-      "proj": 40.1,
+      "proj": 44.4,
       "salary": 6400,
       "ownership": 3.0,
-      "edge": 0.53,
-      "value": 6.27,
+      "edge": 0.55,
+      "value": 6.93,
       "wave": "Late",
       "r1_teetime": "9:28 am"
     },
     {
       "player_name": "Austin Smotherman",
-      "proj": 39.3,
+      "proj": 43.5,
       "salary": 6400,
       "ownership": 2.5,
-      "edge": 0.53,
-      "value": 6.14,
+      "edge": 0.55,
+      "value": 6.8,
       "wave": "Early",
       "r1_teetime": "2:48 pm"
     },
     {
       "player_name": "Taylor Moore",
-      "proj": 37.7,
+      "proj": 41.9,
       "salary": 6200,
       "ownership": 1.0,
-      "edge": 0.47,
-      "value": 6.08,
+      "edge": 0.49,
+      "value": 6.76,
       "wave": "Early",
       "r1_teetime": "1:24 pm"
     }
@@ -167,51 +167,51 @@
   "fade_candidates": [
     {
       "player_name": "Chris Gotterup",
-      "proj": 47.0,
+      "proj": 50.0,
       "salary": 9200,
       "ownership": 10.4,
       "edge": 0.46,
-      "value": 5.11,
+      "value": 5.44,
       "wave": "Early",
       "r1_teetime": "2:24 pm"
     },
     {
       "player_name": "Jake Knapp",
-      "proj": 48.4,
+      "proj": 51.5,
       "salary": 7600,
       "ownership": 15.5,
-      "edge": 0.53,
-      "value": 6.37,
+      "edge": 0.54,
+      "value": 6.77,
       "wave": "Late",
       "r1_teetime": "9:16 am"
     },
     {
       "player_name": "Ludvig Aberg",
-      "proj": 53.1,
+      "proj": 56.2,
       "salary": 8700,
       "ownership": 23.5,
       "edge": 0.55,
-      "value": 6.11,
+      "value": 6.46,
       "wave": "Late",
       "r1_teetime": "8:40 am"
     },
     {
       "player_name": "Xander Schauffele",
-      "proj": 56.9,
+      "proj": 59.9,
       "salary": 9600,
       "ownership": 14.1,
-      "edge": 0.55,
-      "value": 5.92,
+      "edge": 0.56,
+      "value": 6.24,
       "wave": "Early",
       "r1_teetime": "2:12 pm"
     },
     {
       "player_name": "Hideki Matsuyama",
-      "proj": 53.8,
+      "proj": 56.8,
       "salary": 9500,
       "ownership": 12.6,
-      "edge": 0.56,
-      "value": 5.66,
+      "edge": 0.57,
+      "value": 5.98,
       "wave": "Early",
       "r1_teetime": "2:12 pm"
     }

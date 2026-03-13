@@ -1,18 +1,18 @@
 {
   "sport": "PGA",
-  "date": "2026-03-13",
+  "date": "2026-03-12",
   "core_names": [
     "Scottie Scheffler",
     "Rory McIlroy",
     "Si Woo Kim",
-    "Tommy Fleetwood",
-    "Russell Henley"
+    "Min Woo Lee",
+    "Tommy Fleetwood"
   ],
   "leverage_names": [
     "Aaron Rai",
     "Ryan Gerard",
-    "Joel Dahmen",
     "Christiaan Bezuidenhout",
+    "Joel Dahmen",
     "Rickie Fowler"
   ],
   "value_names": [
@@ -29,18 +29,18 @@
     "Xander Schauffele",
     "Hideki Matsuyama"
   ],
-  "calibration_slates": 13,
+  "calibration_slates": 14,
   "wave_split": {
     "early_count": 62,
     "late_count": 59,
-    "early_avg_proj": 42.0,
-    "late_avg_proj": 41.4,
+    "early_avg_proj": 46.4,
+    "late_avg_proj": 45.9,
     "early_players": [
       "Rory McIlroy",
+      "Min Woo Lee",
       "Xander Schauffele",
       "Cameron Young",
-      "Min Woo Lee",
-      "Hideki Matsuyama"
+      "Rickie Fowler"
     ],
     "late_players": [
       "Scottie Scheffler",
