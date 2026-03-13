@@ -302,8 +302,9 @@ def _get_secret(key: str) -> str:
 
 def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
     """Load NBA pool via Tank01 (mirrors scripts/load_pool._load_nba_pool)."""
+    import requests
     from yak_core.config import DEFAULT_CONFIG, DK_LINEUP_SIZE, DK_POS_SLOTS, SALARY_CAP, merge_config
-    from yak_core.live import fetch_live_opt_pool
+    from yak_core.live import fetch_live_opt_pool, _TANK01_HOST
     from yak_core.projections import apply_projections
     from yak_core.calibration_feedback import get_correction_factors, apply_corrections
 
@@ -331,6 +332,43 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
     if "ownership" not in pool.columns:
         pool["ownership"] = 0.0
 
+    # Fetch schedule to build matchups and fill opponent column
+    matchups = []
+    try:
+        clean_date = slate_date.replace("-", "")
+        resp = requests.get(
+            f"https://{_TANK01_HOST}/getNBAGamesForDate",
+            headers={"x-rapidapi-key": api_key, "x-rapidapi-host": _TANK01_HOST},
+            params={"gameDate": clean_date},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        games_data = resp.json()
+        games_body = games_data.get("body", games_data) if isinstance(games_data, dict) else games_data
+        games_list = games_body if isinstance(games_body, list) else []
+
+        opp_map = {}  # team -> opponent
+        for g in games_list:
+            if not isinstance(g, dict):
+                continue
+            away = str(g.get("away", "")).upper()
+            home = str(g.get("home", "")).upper()
+            game_id = g.get("gameID", "")
+            if away and home:
+                opp_map[away] = home
+                opp_map[home] = away
+                matchups.append({
+                    "away": away, "home": home,
+                    "game_id": game_id,
+                    "label": f"{away} @ {home}",
+                })
+
+        # Fill opponent column from schedule
+        if opp_map and "team" in pool.columns:
+            pool["opponent"] = pool["team"].map(opp_map).fillna(pool.get("opponent", ""))
+    except Exception:
+        pass  # Non-fatal — matchups just won't be available
+
     meta = {
         "sport": "NBA",
         "site": "DK",
@@ -340,6 +378,7 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
         "lineup_size": DK_LINEUP_SIZE,
         "pool_size": len(pool),
         "proj_source": cfg.get("PROJ_SOURCE", "salary_implied"),
+        "matchups": matchups,
     }
     return pool, meta
 
