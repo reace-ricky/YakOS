@@ -14,6 +14,10 @@ on:
           - "GPP Late"
           - "Showdown"
           - "Cash Main"
+      matchup:
+        description: "Showdown matchup teams (e.g. CLE DAL). Required for Showdown contest."
+        required: false
+        type: string
       count:
         description: "Number of lineups (blank = preset default)"
         required: false
@@ -59,6 +63,9 @@ jobs:
         run: |
           cd scripts
           CMD="python publish.py --sport NBA --contest '${{ inputs.contest }}'"
+          if [ -n "${{ inputs.matchup }}" ]; then
+            CMD="$CMD --matchup ${{ inputs.matchup }}"
+          fi
           if [ -n "${{ inputs.count }}" ]; then
             CMD="$CMD --count ${{ inputs.count }}"
           fi

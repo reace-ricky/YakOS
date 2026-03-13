@@ -52,12 +52,14 @@ def step_edge(sport: str, date: str) -> None:
     edge_main(["--sport", sport, "--date", date])
 
 
-def step_build(sport: str, contest: str, count: int | None) -> None:
+def step_build(sport: str, contest: str, count: int | None, matchup: list[str] | None = None) -> None:
     """Run the lineup building step."""
     from build_lineups import main as build_main
     argv = ["--sport", sport, "--contest", contest]
     if count is not None:
         argv += ["--count", str(count)]
+    if matchup:
+        argv += ["--matchup"] + matchup
     build_main(argv)
 
 
@@ -105,6 +107,8 @@ def main(argv: list[str] | None = None) -> None:
                         help="Override number of lineups.")
     parser.add_argument("--rg-csv", default=None,
                         help="Path to RotoGrinders CSV for NBA projection overlay.")
+    parser.add_argument("--matchup", nargs=2, default=None, metavar="TEAM",
+                        help="Two team abbreviations for Showdown matchup (e.g. CLE DAL).")
     parser.add_argument("--step", default=None,
                         choices=["load", "edge", "build", "commit"],
                         help="Run a single step instead of the full pipeline.")
@@ -122,7 +126,8 @@ def main(argv: list[str] | None = None) -> None:
         elif args.step == "build":
             if not args.contest:
                 sys.exit("ERROR: --contest is required for --step build")
-            step_build(sport, args.contest, args.count)
+            matchup = [t.upper() for t in args.matchup] if args.matchup else None
+            step_build(sport, args.contest, args.count, matchup)
         elif args.step == "commit":
             step_commit(sport, date)
     else:
@@ -137,9 +142,10 @@ def main(argv: list[str] | None = None) -> None:
         print(f"\n[2/4] Running edge analysis ...")
         step_edge(sport, date)
 
+        matchup = [t.upper() for t in args.matchup] if args.matchup else None
         if args.contest:
             print(f"\n[3/4] Building lineups ({args.contest}) ...")
-            step_build(sport, args.contest, args.count)
+            step_build(sport, args.contest, args.count, matchup)
         else:
             print(f"\n[3/4] Skipping lineup build (no --contest specified)")
 
