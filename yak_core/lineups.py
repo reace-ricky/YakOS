@@ -342,6 +342,9 @@ def build_multiple_lineups_with_exposure(
     gpp_min_low_own      = int(cfg.get("GPP_MIN_LOW_OWN_PLAYERS", DEFAULT_CONFIG["GPP_MIN_LOW_OWN_PLAYERS"]))
     gpp_low_own_thresh   = float(cfg.get("GPP_LOW_OWN_THRESHOLD", DEFAULT_CONFIG["GPP_LOW_OWN_THRESHOLD"]))
     gpp_force_game_stack = bool(cfg.get("GPP_FORCE_GAME_STACK",  DEFAULT_CONFIG["GPP_FORCE_GAME_STACK"]))
+    gpp_min_game_stack   = int(cfg.get("GPP_MIN_GAME_STACK",    DEFAULT_CONFIG.get("GPP_MIN_GAME_STACK", 3)))
+    gpp_min_team_stack   = int(cfg.get("GPP_MIN_TEAM_STACK",    DEFAULT_CONFIG.get("GPP_MIN_TEAM_STACK", 0)))
+    gpp_force_bring_back = bool(cfg.get("GPP_FORCE_BRING_BACK", DEFAULT_CONFIG.get("GPP_FORCE_BRING_BACK", False)))
 
     # ── Sport-aware roster shape ───────────────────────────────────
     # PGA (and other uniform-slot sports) pass POS_SLOTS via cfg;
@@ -634,36 +637,71 @@ def build_multiple_lineups_with_exposure(
                         x[(i, s)] for i in _low_own_idx for s in pos_slots
                     ) >= gpp_min_low_own
 
-            # 5. Game stacking — correlated upside (3+ players from one game)
+            # 5. Correlation stacking — game stack, team stack, and bring-back
             #    Only enforced when opponent data is clean (no blank opponents).
             #    Archived slates sometimes have missing opponent for some teams,
             #    which creates degenerate game-key groups and infeasibility.
             if gpp_force_game_stack:
-                _games: Dict[tuple, list] = {}
+                _games: Dict[tuple, list] = {}      # game_key → player indices
+                _teams: Dict[str, list] = {}         # team → player indices
+                _team_to_game: Dict[str, tuple] = {} # team → game_key
                 _has_blank_opp = False
                 for i in range(n):
+                    team = players[i].get("team", "")
                     opp = players[i].get("opponent", players[i].get("opp", ""))
                     if not opp or not str(opp).strip():
                         _has_blank_opp = True
-                    gk = tuple(sorted([
-                        players[i].get("team", ""),
-                        str(opp or ""),
-                    ]))
+                    gk = tuple(sorted([team, str(opp or "")]))
                     _games.setdefault(gk, []).append(i)
-                # Skip game stack if any player has blank opponent data
+                    _teams.setdefault(team, []).append(i)
+                    _team_to_game[team] = gk
+                # Skip all stacking if any player has blank opponent data
                 if not _has_blank_opp:
+                    # --- 5a. Game stack: min N players from one game ---
                     _gs_vars = {}
                     for gk, indices in _games.items():
-                        if len(indices) >= 3:
+                        if len(indices) >= gpp_min_game_stack:
                             gv = pulp.LpVariable(
                                 f"gs_{gk[0]}_{gk[1]}_{lu_num}", cat="Binary"
                             )
                             _gs_vars[gk] = gv
                             prob += pulp.lpSum(
                                 x[(i, s)] for i in indices for s in pos_slots
-                            ) >= 3 * gv
+                            ) >= gpp_min_game_stack * gv
                     if _gs_vars:
                         prob += pulp.lpSum(_gs_vars.values()) >= 1
+
+                    # --- 5b. Team stack: min N players from one team ---
+                    if gpp_min_team_stack >= 2:
+                        _ts_vars = {}
+                        for tm, indices in _teams.items():
+                            if len(indices) >= gpp_min_team_stack:
+                                tv = pulp.LpVariable(
+                                    f"ts_{tm}_{lu_num}", cat="Binary"
+                                )
+                                _ts_vars[tm] = tv
+                                prob += pulp.lpSum(
+                                    x[(i, s)] for i in indices for s in pos_slots
+                                ) >= gpp_min_team_stack * tv
+                        if _ts_vars:
+                            prob += pulp.lpSum(_ts_vars.values()) >= 1
+
+                    # --- 5c. Bring-back: if we stack a team, include 1 opponent ---
+                    #     For each team T with a team-stack indicator, if the stack
+                    #     is active (tv=1), require >=1 player from the opponent.
+                    #     We pair this with the team stack vars so the bring-back
+                    #     only fires for the team that's actually stacked.
+                    if gpp_force_bring_back and gpp_min_team_stack >= 2:
+                        for tm, tv in _ts_vars.items():
+                            gk = _team_to_game.get(tm)
+                            if not gk:
+                                continue
+                            opp_team = gk[0] if gk[1] == tm else gk[1]
+                            opp_indices = _teams.get(opp_team, [])
+                            if opp_indices:
+                                prob += pulp.lpSum(
+                                    x[(i, s)] for i in opp_indices for s in pos_slots
+                                ) >= tv  # if tv=1, need >=1 opponent player
 
         prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=solver_time_limit))
         if prob.status != 1:

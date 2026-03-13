@@ -131,6 +131,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "GPP_MIN_LOW_OWN_PLAYERS": 1,   # min players below GPP_LOW_OWN_THRESHOLD
     "GPP_LOW_OWN_THRESHOLD": 0.45,  # ownership threshold for "low-owned"
     "GPP_FORCE_GAME_STACK": True,   # require 3+ players from one game
+    "GPP_MIN_GAME_STACK": 3,        # min players from stacked game
+    "GPP_MIN_TEAM_STACK": 2,        # min players from same team (0=disabled)
+    "GPP_FORCE_BRING_BACK": True,   # require 1 player from opposing team in stacked game
     # Cash-specific knobs (floor-weighted scoring)
     # Only active when CONTEST_TYPE == "cash"
     "CASH_FLOOR_WEIGHT": 0.6,        # weight on floor in cash_score
@@ -182,6 +185,9 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "min_low_own_players": 1,
         "low_own_threshold": 0.40,
         "force_game_stack": True,
+        "min_game_stack": 3,
+        "min_team_stack": 2,
+        "force_bring_back": True,
         # Correlation rules
         "not_with_auto": True,
         "max_per_team": 2,
@@ -219,6 +225,9 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "min_low_own_players": 1,
         "low_own_threshold": 0.40,
         "force_game_stack": True,
+        "min_game_stack": 3,
+        "min_team_stack": 2,
+        "force_bring_back": True,
         # Correlation rules
         "not_with_auto": True,
         "max_per_team": 2,
@@ -256,6 +265,9 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "min_low_own_players": 1,
         "low_own_threshold": 0.40,
         "force_game_stack": True,
+        "min_game_stack": 3,
+        "min_team_stack": 2,
+        "force_bring_back": True,
         # Correlation rules
         "not_with_auto": True,
         "max_per_team": 2,
