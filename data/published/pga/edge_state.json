@@ -1,12 +1,12 @@
 {
   "sport": "PGA",
-  "date": "2026-03-12",
+  "date": "2026-03-13",
   "core_names": [
     "Scottie Scheffler",
     "Rory McIlroy",
-    "Collin Morikawa",
     "Si Woo Kim",
-    "Tommy Fleetwood"
+    "Tommy Fleetwood",
+    "Russell Henley"
   ],
   "leverage_names": [
     "Aaron Rai",
@@ -32,9 +32,9 @@
   "calibration_slates": 13,
   "wave_split": {
     "early_count": 62,
-    "late_count": 60,
+    "late_count": 59,
     "early_avg_proj": 42.0,
-    "late_avg_proj": 41.8,
+    "late_avg_proj": 41.4,
     "early_players": [
       "Rory McIlroy",
       "Xander Schauffele",
@@ -44,10 +44,10 @@
     ],
     "late_players": [
       "Scottie Scheffler",
-      "Collin Morikawa",
       "Si Woo Kim",
       "Tommy Fleetwood",
-      "Russell Henley"
+      "Russell Henley",
+      "Matt Fitzpatrick"
     ]
   }
 }
