@@ -210,12 +210,25 @@ def render_lab_tab(sport: str) -> None:
         contest_options = ["GPP Main", "GPP Early", "Showdown", "Cash Main"]
     contest_options = [c for c in contest_options if c in CONTEST_PRESETS]
 
+    # Display labels for contest types (internal key → user-facing label)
+    _contest_display = {
+        "PGA GPP": "PGA GPP (Full Tournament)",
+    }
+
     col_c, col_n = st.columns(2)
     with col_c:
-        contest_label = st.selectbox("Contest type", contest_options, key=f"lab_contest_{sport}")
+        contest_label = st.selectbox(
+            "Contest type", contest_options,
+            format_func=lambda x: _contest_display.get(x, x),
+            key=f"lab_contest_{sport}",
+        )
     with col_n:
         preset = CONTEST_PRESETS.get(contest_label, {})
         num_lineups = st.number_input("Lineups", min_value=1, max_value=150, value=1, key=f"lab_nlu_{sport}")
+
+    # Show context banner for PGA full tournament
+    if is_pga and contest_label == "PGA GPP":
+        st.info("Full tournament lineup (4 rounds). Projections use multi-day model.")
 
     # ── Matchup picker (NBA Showdown + Cash) ──
     showdown_teams: list[str] = []
