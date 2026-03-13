@@ -91,7 +91,9 @@ def render_optimizer_tab(sport: str) -> None:
     display_cols = ["player_name", "pos", "team", "salary", "proj", "floor", "ceil", "ownership"]
     if is_pga:
         if "early_late_wave" in pool.columns:
-            pool["wave"] = pool["early_late_wave"].map({0: "Early", 1: "Late"}).fillna("")
+            pool["wave"] = pool["early_late_wave"].map(
+                {0: "Early", 1: "Late", "Early": "Early", "Late": "Late"}
+            ).fillna("")
         if "wave" not in pool.columns:
             pool["wave"] = ""
         extra = ["wave", "r1_teetime"]

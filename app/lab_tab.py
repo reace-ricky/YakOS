@@ -89,7 +89,15 @@ def render_lab_tab(sport: str) -> None:
         if is_pga:
             preview_cols += ["wave", "r1_teetime"]
             if "early_late_wave" in pool.columns and "wave" not in pool.columns:
-                pool["wave"] = pool["early_late_wave"].map({0: "Early", 1: "Late"}).fillna("")
+                pool["wave"] = pool["early_late_wave"].map(
+                    {0: "Early", 1: "Late", "Early": "Early", "Late": "Late"}
+                ).fillna("")
+        # Coerce r1_teetime to string to avoid [object Object] from dicts/Timestamps
+        if "r1_teetime" in pool.columns:
+            pool["r1_teetime"] = pool["r1_teetime"].apply(
+                lambda v: v.get("1", v.get(1, next(iter(v.values()), "")))
+                if isinstance(v, dict) else ("" if pd.isna(v) else str(v))
+            )
         avail = [c for c in preview_cols if c in pool.columns]
         display_pool = pool[avail].copy().sort_values("salary", ascending=False).reset_index(drop=True)
 
@@ -449,8 +457,8 @@ def _run_edge(sport: str, slate_date: str, out_dir: Path) -> tuple:
     }
 
     if sport.upper() == "PGA" and "early_late_wave" in edge_df.columns:
-        early_df = edge_df[edge_df["early_late_wave"] == 0]
-        late_df = edge_df[edge_df["early_late_wave"] == 1]
+        early_df = edge_df[edge_df["early_late_wave"].isin([0, "Early"])]
+        late_df = edge_df[edge_df["early_late_wave"].isin([1, "Late"])]
         edge_state["wave_split"] = {
             "early_count": int(len(early_df)),
             "late_count": int(len(late_df)),
@@ -515,7 +523,7 @@ def _classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
             }
             if is_pga:
                 wave = row.get("early_late_wave")
-                entry["wave"] = "Early" if wave == 0 else "Late" if wave == 1 else "Unknown"
+                entry["wave"] = "Early" if wave in (0, "Early") else "Late" if wave in (1, "Late") else "Unknown"
                 teetime = row.get("r1_teetime", "")
                 entry["r1_teetime"] = str(teetime) if pd.notna(teetime) else ""
             out.append(entry)
@@ -569,8 +577,8 @@ def _build_bullets(classified: dict, edge_df: pd.DataFrame, sport: str = "NBA") 
         bullets.append(f"Fade candidates: {n_fades} players below edge threshold")
 
     if sport.upper() == "PGA" and "early_late_wave" in edge_df.columns:
-        early = edge_df[edge_df["early_late_wave"] == 0]
-        late = edge_df[edge_df["early_late_wave"] == 1]
+        early = edge_df[edge_df["early_late_wave"].isin([0, "Early"])]
+        late = edge_df[edge_df["early_late_wave"].isin([1, "Late"])]
         if len(early) > 0 and len(late) > 0:
             early_avg = early["proj"].mean()
             late_avg = late["proj"].mean()

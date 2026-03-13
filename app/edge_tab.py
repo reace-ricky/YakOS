@@ -251,7 +251,9 @@ def render_edge_tab(sport: str) -> None:
                         display_cols = ["slot", "player_name", "salary", "proj", "wave", "r1_teetime"]
                         if "wave" not in lu.columns and "early_late_wave" in lu.columns:
                             lu = lu.copy()
-                            lu["wave"] = lu["early_late_wave"].map({0: "Early", 1: "Late"})
+                            lu["wave"] = lu["early_late_wave"].map(
+                                {0: "Early", 1: "Late", "Early": "Early", "Late": "Late"}
+                            )
                     avail = [c for c in display_cols if c in lu.columns]
                     st.dataframe(
                         lu[avail].reset_index(drop=True),

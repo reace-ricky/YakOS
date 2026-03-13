@@ -200,6 +200,13 @@ def build_pga_pool(
                 print(f"[pga_pool] Mapped '{_alt}' → 'r1_teetime'")
                 break
 
+    # Flatten r1_teetime if it contains dicts (e.g. {"1": "8:52 am", ...})
+    if "r1_teetime" in pool.columns:
+        pool["r1_teetime"] = pool["r1_teetime"].apply(
+            lambda v: v.get("1", v.get(1, next(iter(v.values()), "")))
+            if isinstance(v, dict) else ("" if pd.isna(v) else str(v))
+        )
+
     # Derive early_late_wave from r1_teetime if not already populated
     if ("early_late_wave" not in pool.columns or pool["early_late_wave"].isna().all()) \
             and "r1_teetime" in pool.columns and pool["r1_teetime"].notna().any():
