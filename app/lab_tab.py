@@ -390,8 +390,12 @@ def render_lab_tab(sport: str) -> None:
                 n_lu = int(ldf["lineup_index"].nunique()) if "lineup_index" in ldf.columns else 0
             except Exception:
                 n_lu = 0
-            label = slug.replace("_", " ").title()
-            built_at = meta_data.get("built_at", "")
+            matchup = meta_data.get("matchup", "")
+            if matchup:
+                label = f"Showdown — {matchup}"
+            else:
+                label = slug.replace("_", " ").title()
+            built_at = meta_data.get("built_at", meta_data.get("timestamp", ""))
             lineup_info.append({
                 "slug": slug, "label": label, "n_lineups": n_lu,
                 "built_at": built_at, "path": lf,
@@ -882,12 +886,17 @@ def _build_lineups(
     else:
         lineups_df, exposure_df = build_multiple_lineups_with_exposure(pool, cfg)
 
-    # Write outputs
+    # Write outputs — key showdown files by matchup so multiple games coexist
     slug = re.sub(r"[^a-z0-9]+", "_", contest_label.lower()).strip("_")
+    if showdown_teams and len(showdown_teams) == 2:
+        teams_suffix = "_".join(t.lower() for t in sorted(showdown_teams))
+        slug = f"{slug}_{teams_suffix}"
     lineups_df.to_parquet(str(out_dir / f"{slug}_lineups.parquet"), index=False)
 
+    matchup_label = " vs ".join(sorted(showdown_teams)) if showdown_teams else ""
     build_meta = {
         "contest_label": contest_label,
+        "matchup": matchup_label,
         "num_lineups": int(lineups_df["lineup_index"].nunique()) if "lineup_index" in lineups_df.columns else 0,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

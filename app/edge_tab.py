@@ -234,8 +234,27 @@ def render_edge_tab(sport: str) -> None:
     if lineups:
         st.markdown("---")
         st.markdown("### 📋 Published Lineups")
+
+        # Load matchup labels from per-contest meta files for better display
+        from app.data_loader import DATA_DIR
+        _contest_meta_dir = DATA_DIR / sport.lower()
+
         for contest_slug, ldf in lineups.items():
-            label = contest_slug.replace("_", " ").title()
+            # Try to read matchup from the contest's meta file
+            _meta_file = _contest_meta_dir / f"{contest_slug}_meta.json"
+            _matchup_label = ""
+            if _meta_file.exists():
+                try:
+                    import json as _json
+                    _cmeta = _json.loads(_meta_file.read_text())
+                    _matchup_label = _cmeta.get("matchup", "")
+                except Exception:
+                    pass
+
+            if _matchup_label:
+                label = f"Showdown — {_matchup_label}"
+            else:
+                label = contest_slug.replace("_", " ").title()
             n_lu = ldf["lineup_index"].nunique() if "lineup_index" in ldf.columns else 0
             with st.expander(f"{label} — {n_lu} lineups"):
                 if "lineup_index" not in ldf.columns:
