@@ -1,14 +1,17 @@
 """Tab 4: Dashboard (admin only).
 
 Displays calibration health, signal accuracy, published data status,
-and post-slate feedback controls.
+post-slate feedback, contest results entry, and historical backfill controls.
 """
 from __future__ import annotations
 
-from datetime import date
+import os
+import time
+from datetime import date, timedelta
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -143,6 +146,390 @@ def render_dashboard_tab(sport: str) -> None:
             except Exception as e:
                 st.error(f"Post-slate error: {e}")
 
+    # ═══════════════════════════════════════════════════
+    # Contest Results
+    # ═══════════════════════════════════════════════════
+    st.markdown("---")
+    _render_contest_results(sport)
+
+    # ═══════════════════════════════════════════════════
+    # Historical Backfill
+    # ═══════════════════════════════════════════════════
+    st.markdown("---")
+    _render_historical_backfill(sport)
+
+
+# ── Contest Results Section ──────────────────────────────────────────────────
+
+def _render_contest_results(sport: str) -> None:
+    """Contest band entry form and history table."""
+    st.markdown("### Contest Results")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        cr_date = st.date_input("Contest date", value=date.today(), key=f"cr_date_{sport}")
+    with c2:
+        cr_type = st.selectbox("Contest type", ["GPP", "Cash", "Showdown"], key=f"cr_type_{sport}")
+
+    c3, c4 = st.columns(2)
+    with c3:
+        cash_line = st.number_input("Cash Line", min_value=0.0, step=0.5, key=f"cr_cash_{sport}")
+        top_10 = st.number_input("Top 10% Score", min_value=0.0, step=0.5, key=f"cr_top10_{sport}")
+    with c4:
+        winning = st.number_input("Winning Score", min_value=0.0, step=0.5, key=f"cr_win_{sport}")
+        entries = st.number_input("Entry Count", min_value=0, step=1, key=f"cr_entries_{sport}")
+
+    notes = st.text_input("Notes", key=f"cr_notes_{sport}")
+
+    if st.button("Save Contest Result", key=f"cr_save_{sport}"):
+        if cash_line <= 0:
+            st.warning("Cash line must be > 0")
+            return
+
+        from yak_core.contest_calibration import (
+            ContestResult, save_contest_result, score_vs_bands,
+        )
+        from app.data_loader import published_dir
+
+        cr = ContestResult(
+            slate_date=str(cr_date),
+            contest_type=cr_type.lower(),
+            cash_line=cash_line,
+            top_15_score=top_10,
+            top_1_score=0,
+            winning_score=winning,
+            num_entries=entries,
+            notes=notes,
+        )
+
+        # Check for published lineups to auto-score
+        scores = None
+        p_dir = published_dir(sport)
+        lineup_files = list(p_dir.glob("*_lineups.parquet")) if p_dir.exists() else []
+        if lineup_files:
+            try:
+                all_actuals = []
+                for lf in lineup_files:
+                    ldf = pd.read_parquet(lf)
+                    if "actual_fp" in ldf.columns and "lineup_index" in ldf.columns:
+                        lu_totals = ldf.groupby("lineup_index")["actual_fp"].sum()
+                        all_actuals.extend(lu_totals.dropna().tolist())
+                if all_actuals:
+                    scores = score_vs_bands(all_actuals, cr)
+            except Exception:
+                pass
+
+        save_contest_result(cr, scores=scores)
+        st.success(f"Saved contest result for {cr_date} ({cr_type})")
+        if scores and scores.get("n_lineups", 0) > 0:
+            st.json(scores)
+
+    # History table
+    try:
+        from yak_core.contest_calibration import get_calibration_history
+        history = get_calibration_history()
+        if history:
+            rows = []
+            for r in history:
+                sc = r.get("scores", {})
+                rows.append({
+                    "date": r.get("slate_date", ""),
+                    "type": r.get("contest_type", ""),
+                    "cash_line": r.get("cash_line", 0),
+                    "top_10": r.get("top_15_score", 0),
+                    "winning": r.get("winning_score", 0),
+                    "entries": r.get("num_entries", 0),
+                    "cash_rate": sc.get("cash_rate", ""),
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        else:
+            st.caption("No contest results recorded yet.")
+    except Exception as e:
+        st.caption(f"Could not load contest history: {e}")
+
+
+# ── Historical Backfill Section ──────────────────────────────────────────────
+
+def _render_historical_backfill(sport: str) -> None:
+    """PGA and NBA backfill controls."""
+    st.markdown("### Historical Backfill")
+    st.caption("Calibrate against historical slates to build the curve faster.")
+
+    if sport.upper() == "PGA":
+        _render_pga_backfill()
+    else:
+        _render_nba_backfill()
+
+
+def _render_pga_backfill() -> None:
+    """PGA Historical Events backfill UI."""
+    st.markdown("**PGA Historical Events**")
+
+    dg_key = _resolve_datagolf_key()
+    if not dg_key:
+        st.warning("DATAGOLF_API_KEY not found in secrets or environment.")
+        return
+
+    if st.button("Load Events", key="pga_load_events"):
+        with st.spinner("Fetching events from DataGolf..."):
+            try:
+                from yak_core.datagolf import DataGolfClient
+                from yak_core.pga_calibration import get_pga_event_list
+                dg = DataGolfClient(dg_key)
+                events = get_pga_event_list(dg)
+                if events.empty:
+                    st.warning("No PGA events found.")
+                    return
+                st.session_state["pga_events"] = events
+            except Exception as e:
+                st.error(f"Failed to load events: {e}")
+                return
+
+    events = st.session_state.get("pga_events")
+    if events is None or (isinstance(events, pd.DataFrame) and events.empty):
+        return
+
+    display_cols = [c for c in ["event_name", "date", "calendar_year", "event_id",
+                                "dk_salaries", "dk_ownerships"] if c in events.columns]
+    edit_df = events[display_cols].copy()
+    edit_df.insert(0, "select", False)
+
+    edited = st.data_editor(edit_df, use_container_width=True, hide_index=True,
+                            key="pga_event_editor")
+    selected = edited[edited["select"]].copy()
+
+    if st.button("Run PGA Backfill", key="pga_run_backfill") and not selected.empty:
+        from yak_core.datagolf import DataGolfClient
+        from yak_core.pga_calibration import calibrate_pga_event
+        from yak_core.outcome_logger import log_slate_outcomes
+
+        dg = DataGolfClient(dg_key)
+        progress = st.progress(0.0)
+        results = []
+        n = len(selected)
+
+        for i, (_, row) in enumerate(selected.iterrows()):
+            eid = int(row["event_id"])
+            yr = int(row.get("calendar_year", 2025))
+            evt_date = str(row.get("date", f"{yr}-{eid:03d}"))
+            evt_name = row.get("event_name", f"Event {eid}")
+
+            try:
+                cal = calibrate_pga_event(dg, eid, yr, slate_date=evt_date)
+                status = "error" if "error" in cal else "ok"
+                mae = cal.get("calibration", {}).get("overall", {}).get("mae", 0) if status == "ok" else 0
+                n_players = cal.get("n_players_calibrated", 0)
+
+                # Log outcomes if calibration succeeded
+                if status == "ok" and n_players > 0:
+                    try:
+                        from yak_core.pga_calibration import fetch_pga_actuals, _build_pool_from_actuals_and_preds
+                        actuals = fetch_pga_actuals(dg, eid, yr)
+                        pool = _build_pool_from_actuals_and_preds(dg, actuals, eid, yr)
+                        if not pool.empty and "actual_fp" in pool.columns:
+                            log_slate_outcomes(evt_date, pool, sport="PGA")
+                    except Exception:
+                        pass
+
+                results.append({
+                    "event": evt_name, "date": evt_date,
+                    "MAE": round(mae, 2) if mae else "N/A",
+                    "n_players": n_players, "status": status,
+                    "detail": cal.get("error", ""),
+                })
+            except Exception as e:
+                results.append({
+                    "event": evt_name, "date": evt_date,
+                    "MAE": "N/A", "n_players": 0,
+                    "status": "error", "detail": str(e),
+                })
+
+            progress.progress((i + 1) / n)
+            time.sleep(1)
+
+        st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+
+
+def _render_nba_backfill() -> None:
+    """NBA Historical Slates backfill UI."""
+    st.markdown("**NBA Historical Slates**")
+
+    rapid_key = _resolve_rapidapi_key()
+    if not rapid_key:
+        st.warning("RAPIDAPI_KEY not found in secrets or environment.")
+        return
+
+    c1, c2 = st.columns(2)
+    with c1:
+        start = st.date_input("Start date", value=date.today() - timedelta(days=30),
+                              key="nba_bf_start")
+    with c2:
+        end = st.date_input("End date", value=date.today() - timedelta(days=1),
+                            key="nba_bf_end")
+
+    if st.button("Run NBA Backfill", key="nba_run_backfill"):
+        _run_nba_backfill(rapid_key, start, end)
+
+
+def _run_nba_backfill(api_key: str, start_date: date, end_date: date) -> None:
+    """Execute NBA backfill for a date range."""
+    from yak_core.live import fetch_live_dfs, fetch_actuals_from_api
+    from yak_core.calibration_feedback import record_slate_errors
+    from yak_core.outcome_logger import log_slate_outcomes
+
+    cfg = {"RAPIDAPI_KEY": api_key}
+    dates = []
+    d = start_date
+    while d <= end_date:
+        dates.append(d)
+        d += timedelta(days=1)
+
+    if not dates:
+        st.warning("No dates in range.")
+        return
+
+    progress = st.progress(0.0)
+    status_text = st.empty()
+    results = []
+
+    for i, d in enumerate(dates):
+        date_str = d.isoformat()
+        date_key = d.strftime("%Y%m%d")
+        status_text.text(f"Processing {date_str}...")
+
+        try:
+            # 1. Fetch projections (salary + proj)
+            proj_df = fetch_live_dfs(date_key, cfg)
+            if proj_df is None or proj_df.empty:
+                results.append({"date": date_str, "status": "skipped", "detail": "No DFS data"})
+                progress.progress((i + 1) / len(dates))
+                time.sleep(1)
+                continue
+
+            # 2. Fetch actuals
+            actuals = fetch_actuals_from_api(date_key, cfg)
+            if actuals is None or actuals.empty:
+                results.append({"date": date_str, "status": "skipped", "detail": "No actuals"})
+                progress.progress((i + 1) / len(dates))
+                time.sleep(1)
+                continue
+
+            # 3. Merge projections + actuals
+            pool = proj_df.copy()
+            act_map = actuals.set_index("player_name")["actual_fp"].to_dict()
+            pool["actual_fp"] = pool["player_name"].map(act_map)
+            matched = pool["actual_fp"].notna().sum()
+
+            if matched == 0:
+                results.append({"date": date_str, "status": "skipped", "detail": "No matches"})
+                progress.progress((i + 1) / len(dates))
+                time.sleep(1)
+                continue
+
+            # Ensure required columns
+            if "pos" not in pool.columns:
+                pool["pos"] = "G"
+            pool["salary"] = pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0)
+            pool["proj"] = pd.to_numeric(pool.get("proj", 0), errors="coerce").fillna(0)
+            pool["actual_fp"] = pd.to_numeric(pool["actual_fp"], errors="coerce")
+
+            valid = pool[
+                pool["actual_fp"].notna() & (pool["actual_fp"] > 0)
+                & pool["proj"].notna() & pool["salary"].notna()
+            ].copy()
+
+            if valid.empty:
+                results.append({"date": date_str, "status": "skipped", "detail": "No valid data"})
+                progress.progress((i + 1) / len(dates))
+                time.sleep(1)
+                continue
+
+            # 4. Compute edge metrics for richer outcome logging
+            try:
+                from yak_core.edge import compute_edge_metrics
+                edge_df = compute_edge_metrics(valid, sport="NBA")
+                edge_cols = ["player_name", "edge_score", "edge_label", "smash_prob",
+                             "bust_prob", "leverage", "ceil", "floor"]
+                edge_cols = [c for c in edge_cols if c in edge_df.columns]
+                if "player_name" in edge_cols:
+                    valid = valid.merge(
+                        edge_df[edge_cols].drop_duplicates("player_name"),
+                        on="player_name", how="left", suffixes=("", "_edge"),
+                    )
+                    for col in ["edge_score", "edge_label", "smash_prob", "bust_prob",
+                                "leverage", "ceil", "floor"]:
+                        ecol = f"{col}_edge"
+                        if ecol in valid.columns:
+                            valid[col] = valid[ecol].combine_first(valid.get(col, pd.Series()))
+                            valid.drop(columns=[ecol], inplace=True)
+            except Exception:
+                pass
+
+            # 5. Compute ownership estimate
+            try:
+                from yak_core.ownership import salary_rank_ownership
+                valid = salary_rank_ownership(valid, col="own_pct")
+            except Exception:
+                if "own_pct" not in valid.columns:
+                    valid["own_pct"] = 0.0
+
+            # 6. Record calibration errors
+            cal_result = record_slate_errors(date_str, valid, sport="NBA")
+
+            # 7. Log outcomes
+            outcomes = log_slate_outcomes(date_str, valid, sport="NBA")
+
+            mae = cal_result.get("overall", {}).get("mae", 0) if isinstance(cal_result, dict) else 0
+            corr = cal_result.get("overall", {}).get("correlation", 0) if isinstance(cal_result, dict) else 0
+
+            results.append({
+                "date": date_str,
+                "MAE": round(mae, 2) if mae else "N/A",
+                "correlation": round(corr, 3) if corr else "N/A",
+                "n_players": len(valid),
+                "status": "ok",
+                "detail": "",
+            })
+
+        except Exception as e:
+            err_msg = str(e)
+            # Skip gracefully for no-games dates
+            if "NoGamesScheduled" in err_msg or "no games" in err_msg.lower():
+                results.append({"date": date_str, "status": "skipped", "detail": "No games"})
+            else:
+                results.append({"date": date_str, "status": "error", "detail": err_msg[:100]})
+
+        progress.progress((i + 1) / len(dates))
+        time.sleep(1)
+
+    status_text.text("Backfill complete.")
+    if results:
+        st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _resolve_rapidapi_key() -> str:
+    """Resolve RapidAPI key from secrets or environment."""
+    key = os.environ.get("RAPIDAPI_KEY") or os.environ.get("TANK01_RAPIDAPI_KEY", "")
+    if not key:
+        try:
+            key = st.secrets.get("RAPIDAPI_KEY", "")
+        except Exception:
+            pass
+    return key
+
+
+def _resolve_datagolf_key() -> str:
+    """Resolve DataGolf API key from secrets or environment."""
+    key = os.environ.get("DATAGOLF_API_KEY", "")
+    if not key:
+        try:
+            key = st.secrets.get("DATAGOLF_API_KEY", "")
+        except Exception:
+            pass
+    return key
+
 
 def _run_post_slate(sport: str, slate_date: str) -> Dict[str, Any]:
     """Run post-slate feedback loop.
@@ -165,17 +552,11 @@ def _run_post_slate(sport: str, slate_date: str) -> Dict[str, Any]:
     try:
         if sport.upper() == "NBA":
             from yak_core.live import fetch_actuals_from_api
-            import os
-            api_key = os.environ.get("RAPIDAPI_KEY") or os.environ.get("TANK01_RAPIDAPI_KEY", "")
-            if not api_key:
-                try:
-                    api_key = st.secrets.get("RAPIDAPI_KEY", "")
-                except Exception:
-                    pass
+            api_key = _resolve_rapidapi_key()
             if not api_key:
                 return {"status": "error", "message": "Missing RAPIDAPI_KEY for fetching actuals"}
 
-            actuals = fetch_actuals_from_api(slate_date, api_key)
+            actuals = fetch_actuals_from_api(slate_date, {"RAPIDAPI_KEY": api_key})
             if actuals.empty:
                 return {"status": "error", "message": f"No actuals available for {slate_date}"}
 

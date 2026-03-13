@@ -9,7 +9,7 @@ Storage: data/outcome_log/{sport}/outcomes.parquet
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
@@ -32,6 +32,7 @@ OUTCOME_COLUMNS = [
     "edge_label", "smash_prob", "bust_prob", "did_smash", "did_bust",
     "breakout_score", "did_breakout", "pop_catalyst_score",
     "pop_catalyst_tag", "leverage", "ceil", "floor", "salary_tier",
+    "cash_line", "top_10_score", "winning_score",
 ]
 
 
@@ -55,6 +56,7 @@ def log_slate_outcomes(
     slate_date: str,
     pool_df: pd.DataFrame,
     sport: str = "NBA",
+    contest_bands: Optional[dict] = None,
 ) -> pd.DataFrame:
     """Compute binary outcomes and append to the outcome parquet.
 
@@ -69,6 +71,10 @@ def log_slate_outcomes(
         pop_catalyst_tag, leverage, ceil, floor.
     sport : str
         Sport key (NBA, PGA, etc.).
+    contest_bands : dict, optional
+        If provided, should contain keys ``cash_line``, ``top_10_score``,
+        ``winning_score``.  Values are stored per-player (same value for all
+        players on that slate) for downstream analysis.
 
     Returns
     -------
@@ -129,6 +135,16 @@ def log_slate_outcomes(
 
     # Salary tier
     df["salary_tier"] = df["salary"].apply(lambda s: _salary_tier(s, sport))
+
+    # Contest bands (same value for all players on the slate)
+    if contest_bands:
+        df["cash_line"] = float(contest_bands.get("cash_line", 0))
+        df["top_10_score"] = float(contest_bands.get("top_10_score", 0))
+        df["winning_score"] = float(contest_bands.get("winning_score", 0))
+    else:
+        df["cash_line"] = 0.0
+        df["top_10_score"] = 0.0
+        df["winning_score"] = 0.0
 
     # Assemble final record
     df["slate_date"] = slate_date
@@ -245,3 +261,57 @@ def compute_calibration_curve(
     ).reset_index(drop=True)
 
     return result
+
+
+def compute_band_analysis(sport: str) -> Dict[str, Any]:
+    """Analyse lineup performance against contest bands.
+
+    Reads the outcome history and, for slates that have contest bands recorded,
+    computes:
+      - What % of slates had a lineup that would have cashed
+      - Average gap between best lineup score and cash line
+      - Trend over time (are we getting closer?)
+
+    Parameters
+    ----------
+    sport : str
+        Sport key.
+
+    Returns
+    -------
+    dict
+        Keys: ``n_slates_with_bands``, ``cash_hit_pct``, ``avg_cash_gap``,
+        ``trend`` (list of {date, gap} dicts, oldest first).
+    """
+    from yak_core.config import YAKOS_ROOT as _root
+
+    df = get_outcome_history(sport)
+    if df.empty or "cash_line" not in df.columns:
+        return {"n_slates_with_bands": 0}
+
+    # Only slates with a nonzero cash_line
+    df["cash_line"] = pd.to_numeric(df["cash_line"], errors="coerce").fillna(0)
+    banded = df[df["cash_line"] > 0].copy()
+    if banded.empty:
+        return {"n_slates_with_bands": 0}
+
+    # Per-slate: best player actual_fp vs cash line
+    slate_stats = (
+        banded.groupby("slate_date")
+        .agg(best_actual=("actual_fp", "max"), cash_line=("cash_line", "first"))
+        .reset_index()
+    )
+    slate_stats["gap"] = slate_stats["best_actual"] - slate_stats["cash_line"]
+    slate_stats["cashed"] = slate_stats["gap"] >= 0
+    slate_stats = slate_stats.sort_values("slate_date")
+
+    n = len(slate_stats)
+    return {
+        "n_slates_with_bands": n,
+        "cash_hit_pct": round(float(slate_stats["cashed"].mean()), 3) if n else 0,
+        "avg_cash_gap": round(float(slate_stats["gap"].mean()), 1) if n else 0,
+        "trend": [
+            {"date": row["slate_date"], "gap": round(float(row["gap"]), 1)}
+            for _, row in slate_stats.iterrows()
+        ],
+    }

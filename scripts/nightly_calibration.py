@@ -173,9 +173,26 @@ def run_nba_calibration(slate_date: str) -> dict:
         except Exception as e:
             log.warning("Could not load edge signals: %s", e)
 
-    # 8. Log structured outcomes
+    # 8. Check for contest bands for this date
+    contest_bands = None
     try:
-        outcomes = log_slate_outcomes(slate_date, pool, sport="NBA")
+        from yak_core.contest_calibration import get_calibration_history
+        all_results = get_calibration_history()
+        for cr in all_results:
+            if cr.get("slate_date") == slate_date:
+                contest_bands = {
+                    "cash_line": cr.get("cash_line", 0),
+                    "top_10_score": cr.get("top_1_score", 0),
+                    "winning_score": cr.get("winning_score", 0),
+                }
+                log.info("Found contest bands for %s: %s", slate_date, contest_bands)
+                break
+    except Exception as e:
+        log.warning("Could not check contest bands: %s", e)
+
+    # 9. Log structured outcomes (with contest bands if available)
+    try:
+        outcomes = log_slate_outcomes(slate_date, pool, sport="NBA", contest_bands=contest_bands)
         log.info("Logged %d outcome records", len(outcomes))
         result["n_outcomes"] = len(outcomes)
     except Exception as e:
@@ -341,9 +358,26 @@ def run_pga_calibration(slate_date: str) -> dict:
         log.warning("PGA breakout scoring failed (non-fatal): %s", e)
         pool["breakout_score"] = 0.0
 
-    # 7. Log structured outcomes
+    # 7. Check for contest bands for this date
+    pga_contest_bands = None
     try:
-        outcomes = log_slate_outcomes(slate_date, pool, sport="PGA")
+        from yak_core.contest_calibration import get_calibration_history
+        all_results = get_calibration_history()
+        for cr in all_results:
+            if cr.get("slate_date") == slate_date:
+                pga_contest_bands = {
+                    "cash_line": cr.get("cash_line", 0),
+                    "top_10_score": cr.get("top_1_score", 0),
+                    "winning_score": cr.get("winning_score", 0),
+                }
+                log.info("Found PGA contest bands for %s: %s", slate_date, pga_contest_bands)
+                break
+    except Exception as e:
+        log.warning("Could not check PGA contest bands: %s", e)
+
+    # 8. Log structured outcomes (with contest bands if available)
+    try:
+        outcomes = log_slate_outcomes(slate_date, pool, sport="PGA", contest_bands=pga_contest_bands)
         log.info("Logged %d PGA outcome records", len(outcomes))
         result["n_outcomes"] = len(outcomes)
     except Exception as e:
