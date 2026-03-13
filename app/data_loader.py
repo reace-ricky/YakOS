@@ -56,6 +56,11 @@ def load_published_data(sport: str) -> Tuple[
     return meta, pool, edge_analysis, edge_state, lineups
 
 
+def invalidate_published_cache() -> None:
+    """Clear the Streamlit cache for load_published_data so the Edge tab picks up new data."""
+    load_published_data.clear()
+
+
 def load_fresh_pool(sport: str) -> pd.DataFrame:
     """Load pool without cache (for Lab tab after writes)."""
     pool_path = DATA_DIR / sport.lower() / "slate_pool.parquet"
