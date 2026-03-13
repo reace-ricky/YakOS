@@ -70,12 +70,14 @@ POS_MULTIPLIER = {
 # Legacy salary-rank model (kept as ultra-fast fallback)
 # ---------------------------------------------------------------------------
 
-def salary_rank_ownership(pool_df: pd.DataFrame, col: str = "ownership") -> pd.DataFrame:
+def salary_rank_ownership(
+    pool_df: pd.DataFrame, col: str = "ownership", lineup_size: int = 8,
+) -> pd.DataFrame:
     """Add estimated ownership column using the YakOS multi-signal model.
 
     Computes ownership from projection rank, value rank (proj / salary),
-    and ceiling rank, then normalises the distribution to sum to ~800%
-    (8 roster spots × 100%).  This replaces the old quadratic salary-rank
+    and ceiling rank, then normalises the distribution to sum to
+    ``lineup_size × 100%``.  This replaces the old quadratic salary-rank
     heuristic which produced unrealistic 2-5% values for everyone.
 
     Positional scarcity and vegas environment adjustments are applied when
@@ -87,6 +89,8 @@ def salary_rank_ownership(pool_df: pd.DataFrame, col: str = "ownership") -> pd.D
     pool_df : DataFrame with at least a 'salary' column.  Better results
               when 'proj', 'ceil', 'pos', 'vegas_total', 'spread' are present.
     col : name of the output ownership column.
+    lineup_size : number of roster spots (8 for NBA, 6 for PGA).  Controls
+                  the target ownership sum (lineup_size × 100%).
 
     Returns
     -------
@@ -187,9 +191,9 @@ def salary_rank_ownership(pool_df: pd.DataFrame, col: str = "ownership") -> pd.D
         raw_curved = raw_curved * blowout_penalty
 
     # ── Normalize to target sum ───────────────────────────────────────
-    # 8 roster spots × 100% = 800% total ownership across the pool.
-    _ROSTER_SPOTS = 8
-    target_sum = _ROSTER_SPOTS * 100.0
+    # lineup_size roster spots × 100% = total ownership across the pool.
+    # NBA = 8 × 100% = 800%, PGA = 6 × 100% = 600%.
+    target_sum = lineup_size * 100.0
     current_sum = raw_curved.sum()
     if current_sum > 0:
         scaled = raw_curved * (target_sum / current_sum)

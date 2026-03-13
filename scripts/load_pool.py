@@ -265,7 +265,9 @@ def main(argv: list[str] | None = None) -> pd.DataFrame:
     n_rg = int(has_rg.sum())
 
     # Generate model ownership for full pool
-    pool = salary_rank_ownership(pool, col="_model_own")
+    # NBA uses 8 roster spots, PGA uses 6 — ownership sums scale accordingly
+    _lineup_size = 6 if sport == "PGA" else 8
+    pool = salary_rank_ownership(pool, col="_model_own", lineup_size=_lineup_size)
 
     # Blend: keep RG where available, model everywhere else
     pool["ownership"] = rg_own.where(has_rg, pool["_model_own"])
