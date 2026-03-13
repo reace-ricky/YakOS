@@ -1,0 +1,394 @@
+{
+  "sport": "NBA",
+  "slates_processed": 35,
+  "final_correction_factors": {
+    "n_slates": 15,
+    "dates_used": [
+      "2026-03-11",
+      "2026-03-10",
+      "2026-03-09",
+      "2026-03-08",
+      "2026-03-07",
+      "2026-03-06",
+      "2026-03-05",
+      "2026-03-04",
+      "2026-03-02",
+      "2026-03-01",
+      "2026-02-27",
+      "2026-02-24",
+      "2026-02-23",
+      "2026-02-22",
+      "2026-02-20"
+    ],
+    "overall_bias_correction": 0.28,
+    "by_position": {
+      "C": 0.83,
+      "PF": -0.38,
+      "PG": -0.12,
+      "SF": 1.01,
+      "SG": 0.08
+    },
+    "by_salary_tier": {
+      "<4K": -0.04,
+      "4-5K": 1.27,
+      "5-6K": -0.35,
+      "6-7K": 1.1,
+      "7-8K": 0.91,
+      "8-9K": 0.94,
+      "9K+": 0.28
+    },
+    "correction_strength": 0.5
+  },
+  "per_slate": [
+    {
+      "slate": "2026-01-29_gpp_main.parquet",
+      "date": "2026-01-29",
+      "n_players": 154,
+      "raw_mae": 7.08,
+      "mean_error": 1.1,
+      "mae": 7.08,
+      "overall_bias_after": 0.55,
+      "slates_in_model": 1
+    },
+    {
+      "slate": "2026-01-31_gpp_main.parquet",
+      "date": "2026-01-31",
+      "n_players": 97,
+      "raw_mae": 7.88,
+      "mean_error": 2.38,
+      "mae": 7.88,
+      "overall_bias_after": 0.9,
+      "slates_in_model": 2
+    },
+    {
+      "slate": "2026-02-01_gpp_main.parquet",
+      "date": "2026-02-01",
+      "n_players": 131,
+      "raw_mae": 6.96,
+      "mean_error": 0.12,
+      "mae": 6.96,
+      "overall_bias_after": 0.57,
+      "slates_in_model": 3
+    },
+    {
+      "slate": "2026-02-02_gpp_main.parquet",
+      "date": "2026-02-02",
+      "n_players": 75,
+      "raw_mae": 6.95,
+      "mean_error": 0.11,
+      "mae": 6.95,
+      "overall_bias_after": 0.41,
+      "slates_in_model": 4
+    },
+    {
+      "slate": "2026-02-03_gpp_main.parquet",
+      "date": "2026-02-03",
+      "n_players": 161,
+      "raw_mae": 7.93,
+      "mean_error": 2.18,
+      "mae": 7.93,
+      "overall_bias_after": 0.59,
+      "slates_in_model": 5
+    },
+    {
+      "slate": "2026-02-04_gpp_main.parquet",
+      "date": "2026-02-04",
+      "n_players": 138,
+      "raw_mae": 7.53,
+      "mean_error": 2.51,
+      "mae": 7.53,
+      "overall_bias_after": 0.75,
+      "slates_in_model": 6
+    },
+    {
+      "slate": "2026-02-05_gpp_main.parquet",
+      "date": "2026-02-05",
+      "n_players": 115,
+      "raw_mae": 8.9,
+      "mean_error": 2.29,
+      "mae": 8.9,
+      "overall_bias_after": 0.84,
+      "slates_in_model": 7
+    },
+    {
+      "slate": "2026-02-08_gpp_main.parquet",
+      "date": "2026-02-08",
+      "n_players": 67,
+      "raw_mae": 9.24,
+      "mean_error": -0.54,
+      "mae": 9.24,
+      "overall_bias_after": 0.61,
+      "slates_in_model": 8
+    },
+    {
+      "slate": "2026-02-20_cash_main.parquet",
+      "date": "2026-02-20",
+      "n_players": 143,
+      "raw_mae": 8.75,
+      "mean_error": 2.51,
+      "mae": 8.75,
+      "overall_bias_after": 0.74,
+      "slates_in_model": 9
+    },
+    {
+      "slate": "2026-02-20_showdown.parquet",
+      "date": "2026-02-20",
+      "n_players": 42,
+      "raw_mae": 9.56,
+      "mean_error": -1.1,
+      "mae": 9.56,
+      "overall_bias_after": 0.38,
+      "slates_in_model": 9
+    },
+    {
+      "slate": "2026-02-22_gpp_main.parquet",
+      "date": "2026-02-22",
+      "n_players": 110,
+      "raw_mae": 7.7,
+      "mean_error": 0.71,
+      "mae": 7.7,
+      "overall_bias_after": 0.38,
+      "slates_in_model": 10
+    },
+    {
+      "slate": "2026-02-23_cash_main.parquet",
+      "date": "2026-02-23",
+      "n_players": 57,
+      "raw_mae": 8.64,
+      "mean_error": 2.64,
+      "mae": 8.64,
+      "overall_bias_after": 0.55,
+      "slates_in_model": 11
+    },
+    {
+      "slate": "2026-02-23_gpp_main.parquet",
+      "date": "2026-02-23",
+      "n_players": 57,
+      "raw_mae": 8.46,
+      "mean_error": 2.46,
+      "mae": 8.46,
+      "overall_bias_after": 0.53,
+      "slates_in_model": 11
+    },
+    {
+      "slate": "2026-02-24_cash_main.parquet",
+      "date": "2026-02-24",
+      "n_players": 170,
+      "raw_mae": 8.38,
+      "mean_error": 0.52,
+      "mae": 8.38,
+      "overall_bias_after": 0.48,
+      "slates_in_model": 12
+    },
+    {
+      "slate": "2026-02-24_gpp_main.parquet",
+      "date": "2026-02-24",
+      "n_players": 170,
+      "raw_mae": 8.38,
+      "mean_error": 0.51,
+      "mae": 8.38,
+      "overall_bias_after": 0.48,
+      "slates_in_model": 12
+    },
+    {
+      "slate": "2026-02-27_gpp_main.parquet",
+      "date": "2026-02-27",
+      "n_players": 107,
+      "raw_mae": 7.86,
+      "mean_error": 1.67,
+      "mae": 7.86,
+      "overall_bias_after": 0.54,
+      "slates_in_model": 13
+    },
+    {
+      "slate": "2026-03-01_gpp_main.parquet",
+      "date": "2026-03-01",
+      "n_players": 124,
+      "raw_mae": 7.53,
+      "mean_error": 0.71,
+      "mae": 7.53,
+      "overall_bias_after": 0.51,
+      "slates_in_model": 14
+    },
+    {
+      "slate": "2026-03-02_cash_main.parquet",
+      "date": "2026-03-02",
+      "n_players": 78,
+      "raw_mae": 7.54,
+      "mean_error": 0.5,
+      "mae": 7.54,
+      "overall_bias_after": 0.47,
+      "slates_in_model": 15
+    },
+    {
+      "slate": "2026-03-02_gpp_main.parquet",
+      "date": "2026-03-02",
+      "n_players": 78,
+      "raw_mae": 7.54,
+      "mean_error": 0.5,
+      "mae": 7.54,
+      "overall_bias_after": 0.47,
+      "slates_in_model": 15
+    },
+    {
+      "slate": "2026-03-02_showdown.parquet",
+      "date": "2026-03-02",
+      "n_players": 42,
+      "raw_mae": 7.99,
+      "mean_error": -0.0,
+      "mae": 7.99,
+      "overall_bias_after": 0.43,
+      "slates_in_model": 15
+    },
+    {
+      "slate": "2026-03-04_gpp_main.parquet",
+      "date": "2026-03-04",
+      "n_players": 48,
+      "raw_mae": 6.48,
+      "mean_error": -1.17,
+      "mae": 6.48,
+      "overall_bias_after": 0.26,
+      "slates_in_model": 15
+    },
+    {
+      "slate": "2026-03-05_cash_main.parquet",
+      "date": "2026-03-05",
+      "n_players": 118,
+      "raw_mae": 8.99,
+      "mean_error": 0.69,
+      "mae": 8.99,
+      "overall_bias_after": 0.26,
+      "slates_in_model": 15
+    },
+    {
+      "slate": "2026-03-05_gpp_main.parquet",
+      "date": "2026-03-05",
+      "n_players": 118,
+      "raw_mae": 8.95,
+      "mean_error": 0.65,
+      "mae": 8.95,
+      "overall_bias_after": 0.26,
+      "slates_in_model": 15
+    },
+    {
+      "slate": "2026-03-06_cash_main.parquet",
+      "date": "2026-03-06",
+      "n_players": 124,
+      "raw_mae": 7.25,
+      "mean_error": 0.14,
+      "mae": 7.25,
+      "overall_bias_after": 0.23,
+      "slates_in_model": 15
+    },
+    {
+      "slate": "2026-03-06_gpp_main.parquet",
+      "date": "2026-03-06",
+      "n_players": 124,
+      "raw_mae": 7.23,
+      "mean_error": 0.16,
+      "mae": 7.23,
+      "overall_bias_after": 0.23,
+      "slates_in_model": 15
+    },
+    {
+      "slate": "2026-03-07_cash_main.parquet",
+      "date": "2026-03-07",
+      "n_players": 96,
+      "raw_mae": 7.33,
+      "mean_error": 1.8,
+      "mae": 7.33,
+      "overall_bias_after": 0.34,
+      "slates_in_model": 15
+    },
+    {
+      "slate": "2026-03-07_gpp_main.parquet",
+      "date": "2026-03-07",
+      "n_players": 96,
+      "raw_mae": 7.54,
+      "mean_error": 1.95,
+      "mae": 7.54,
+      "overall_bias_after": 0.36,
+      "slates_in_model": 15
+    },
+    {
+      "slate": "2026-03-07_showdown.parquet",
+      "date": "2026-03-07",
+      "n_players": 44,
+      "raw_mae": 7.39,
+      "mean_error": -3.9,
+      "mae": 7.39,
+      "overall_bias_after": -0.13,
+      "slates_in_model": 15
+    },
+    {
+      "slate": "2026-03-08_cash_main.parquet",
+      "date": "2026-03-08",
+      "n_players": 107,
+      "raw_mae": 7.51,
+      "mean_error": 1.29,
+      "mae": 7.51,
+      "overall_bias_after": -0.02,
+      "slates_in_model": 15
+    },
+    {
+      "slate": "2026-03-08_gpp_main.parquet",
+      "date": "2026-03-08",
+      "n_players": 107,
+      "raw_mae": 7.51,
+      "mean_error": 1.29,
+      "mae": 7.51,
+      "overall_bias_after": -0.02,
+      "slates_in_model": 15
+    },
+    {
+      "slate": "2026-03-09_cash_main.parquet",
+      "date": "2026-03-09",
+      "n_players": 100,
+      "raw_mae": 9.08,
+      "mean_error": 3.41,
+      "mae": 9.08,
+      "overall_bias_after": 0.25,
+      "slates_in_model": 15
+    },
+    {
+      "slate": "2026-03-09_gpp_main.parquet",
+      "date": "2026-03-09",
+      "n_players": 100,
+      "raw_mae": 9.2,
+      "mean_error": 3.56,
+      "mae": 9.2,
+      "overall_bias_after": 0.26,
+      "slates_in_model": 15
+    },
+    {
+      "slate": "2026-03-10_cash_main.parquet",
+      "date": "2026-03-10",
+      "n_players": 140,
+      "raw_mae": 8.52,
+      "mean_error": 0.86,
+      "mae": 8.52,
+      "overall_bias_after": 0.28,
+      "slates_in_model": 15
+    },
+    {
+      "slate": "2026-03-10_gpp_main.parquet",
+      "date": "2026-03-10",
+      "n_players": 140,
+      "raw_mae": 8.52,
+      "mean_error": 0.86,
+      "mae": 8.52,
+      "overall_bias_after": 0.28,
+      "slates_in_model": 15
+    },
+    {
+      "slate": "2026-03-11_gpp_main.parquet",
+      "date": "2026-03-11",
+      "n_players": 129,
+      "raw_mae": 7.51,
+      "mean_error": 0.52,
+      "mae": 7.51,
+      "overall_bias_after": 0.28,
+      "slates_in_model": 15
+    }
+  ]
+}

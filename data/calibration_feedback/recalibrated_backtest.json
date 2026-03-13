@@ -1,10 +1,9 @@
 {
-  "computed_at": "2026-03-13T15:19:53.305291+00:00",
+  "computed_at": "2026-03-13T15:34:18.218416+00:00",
   "correction_factors_used": {
     "nba": {
       "n_slates": 15,
       "dates_used": [
-        "2026-03-12",
         "2026-03-11",
         "2026-03-10",
         "2026-03-09",
@@ -13,29 +12,30 @@
         "2026-03-06",
         "2026-03-05",
         "2026-03-04",
-        "2026-03-03",
         "2026-03-02",
         "2026-03-01",
-        "2026-02-28",
         "2026-02-27",
-        "2026-02-26"
+        "2026-02-24",
+        "2026-02-23",
+        "2026-02-22",
+        "2026-02-20"
       ],
-      "overall_bias_correction": 3.0,
+      "overall_bias_correction": 0.28,
       "by_position": {
-        "C": 3.0,
-        "PF": 3.0,
-        "PG": 3.0,
-        "SF": 3.0,
-        "SG": 3.0
+        "C": 0.83,
+        "PF": -0.38,
+        "PG": -0.12,
+        "SF": 1.01,
+        "SG": 0.08
       },
       "by_salary_tier": {
-        "<4K": 3.0,
-        "4-5K": 3.0,
-        "5-6K": 3.0,
-        "6-7K": 3.0,
-        "7-8K": 3.0,
-        "8-9K": 3.0,
-        "9K+": 3.0
+        "<4K": -0.04,
+        "4-5K": 1.27,
+        "5-6K": -0.35,
+        "6-7K": 1.1,
+        "7-8K": 0.91,
+        "8-9K": 0.94,
+        "9K+": 0.28
       },
       "correction_strength": 0.5
     },
@@ -78,12 +78,12 @@
       "contest": "gpp_main",
       "n_players": 154,
       "raw_mae": 7.08,
-      "corrected_mae": 9.52,
+      "corrected_mae": 7.07,
       "raw_bias": 1.1,
-      "corrected_bias": -6.4,
-      "improvement": -2.44,
-      "rmse": 11.31,
-      "correlation": 0.7978
+      "corrected_bias": 0.2,
+      "improvement": 0.01,
+      "rmse": 9.23,
+      "correlation": 0.8011
     },
     {
       "date": "2026-01-31",
@@ -91,12 +91,12 @@
       "contest": "gpp_main",
       "n_players": 97,
       "raw_mae": 7.88,
-      "corrected_mae": 9.19,
+      "corrected_mae": 8.0,
       "raw_bias": 2.38,
-      "corrected_bias": -5.12,
-      "improvement": -1.31,
-      "rmse": 10.97,
-      "correlation": 0.7299
+      "corrected_bias": 1.47,
+      "improvement": -0.12,
+      "rmse": 10.04,
+      "correlation": 0.7114
     },
     {
       "date": "2026-02-01",
@@ -104,12 +104,12 @@
       "contest": "gpp_main",
       "n_players": 131,
       "raw_mae": 6.96,
-      "corrected_mae": 9.75,
+      "corrected_mae": 7.15,
       "raw_bias": 0.12,
-      "corrected_bias": -7.38,
-      "improvement": -2.78,
-      "rmse": 11.47,
-      "correlation": 0.7338
+      "corrected_bias": -0.66,
+      "improvement": -0.19,
+      "rmse": 8.88,
+      "correlation": 0.73
     },
     {
       "date": "2026-02-02",
@@ -117,12 +117,12 @@
       "contest": "gpp_main",
       "n_players": 75,
       "raw_mae": 6.95,
-      "corrected_mae": 9.52,
+      "corrected_mae": 6.94,
       "raw_bias": 0.11,
-      "corrected_bias": -7.39,
-      "improvement": -2.56,
-      "rmse": 11.18,
-      "correlation": 0.7984
+      "corrected_bias": -0.74,
+      "improvement": 0.01,
+      "rmse": 8.52,
+      "correlation": 0.7902
     },
     {
       "date": "2026-02-03",
@@ -130,12 +130,12 @@
       "contest": "gpp_main",
       "n_players": 161,
       "raw_mae": 7.93,
-      "corrected_mae": 9.32,
+      "corrected_mae": 7.87,
       "raw_bias": 2.18,
-      "corrected_bias": -5.32,
-      "improvement": -1.38,
-      "rmse": 11.22,
-      "correlation": 0.6933
+      "corrected_bias": 1.38,
+      "improvement": 0.07,
+      "rmse": 9.99,
+      "correlation": 0.694
     },
     {
       "date": "2026-02-04",
@@ -143,12 +143,12 @@
       "contest": "gpp_main",
       "n_players": 138,
       "raw_mae": 7.53,
-      "corrected_mae": 9.04,
+      "corrected_mae": 7.58,
       "raw_bias": 2.51,
-      "corrected_bias": -4.99,
-      "improvement": -1.5,
-      "rmse": 10.77,
-      "correlation": 0.7423
+      "corrected_bias": 1.66,
+      "improvement": -0.04,
+      "rmse": 9.74,
+      "correlation": 0.7389
     },
     {
       "date": "2026-02-05",
@@ -156,12 +156,12 @@
       "contest": "gpp_main",
       "n_players": 115,
       "raw_mae": 8.9,
-      "corrected_mae": 9.48,
+      "corrected_mae": 8.82,
       "raw_bias": 2.29,
-      "corrected_bias": -5.21,
-      "improvement": -0.58,
-      "rmse": 12.3,
-      "correlation": 0.6691
+      "corrected_bias": 1.48,
+      "improvement": 0.08,
+      "rmse": 11.37,
+      "correlation": 0.6607
     },
     {
       "date": "2026-02-08",
@@ -169,12 +169,12 @@
       "contest": "gpp_main",
       "n_players": 67,
       "raw_mae": 9.24,
-      "corrected_mae": 12.05,
+      "corrected_mae": 9.35,
       "raw_bias": -0.54,
-      "corrected_bias": -8.04,
-      "improvement": -2.81,
-      "rmse": 13.99,
-      "correlation": 0.5728
+      "corrected_bias": -1.3,
+      "improvement": -0.11,
+      "rmse": 11.55,
+      "correlation": 0.5759
     },
     {
       "date": "2026-02-20",
@@ -182,12 +182,12 @@
       "contest": "cash_main",
       "n_players": 143,
       "raw_mae": 8.75,
-      "corrected_mae": 9.54,
+      "corrected_mae": 8.62,
       "raw_bias": 2.51,
-      "corrected_bias": -4.99,
-      "improvement": -0.79,
-      "rmse": 11.69,
-      "correlation": 0.5698
+      "corrected_bias": 1.6,
+      "improvement": 0.13,
+      "rmse": 10.68,
+      "correlation": 0.5731
     },
     {
       "date": "2026-02-20",
@@ -195,12 +195,12 @@
       "contest": "showdown",
       "n_players": 42,
       "raw_mae": 9.56,
-      "corrected_mae": 11.62,
+      "corrected_mae": 9.55,
       "raw_bias": -1.1,
-      "corrected_bias": -8.6,
-      "improvement": -2.06,
-      "rmse": 14.3,
-      "correlation": 0.6445
+      "corrected_bias": -1.97,
+      "improvement": 0.01,
+      "rmse": 11.48,
+      "correlation": 0.6524
     },
     {
       "date": "2026-02-22",
@@ -208,12 +208,12 @@
       "contest": "gpp_main",
       "n_players": 110,
       "raw_mae": 7.7,
-      "corrected_mae": 9.72,
+      "corrected_mae": 7.67,
       "raw_bias": 0.71,
-      "corrected_bias": -6.79,
-      "improvement": -2.03,
-      "rmse": 11.46,
-      "correlation": 0.7506
+      "corrected_bias": -0.17,
+      "improvement": 0.03,
+      "rmse": 9.15,
+      "correlation": 0.7554
     },
     {
       "date": "2026-02-23",
@@ -221,12 +221,12 @@
       "contest": "cash_main",
       "n_players": 57,
       "raw_mae": 8.64,
-      "corrected_mae": 9.25,
+      "corrected_mae": 8.37,
       "raw_bias": 2.64,
-      "corrected_bias": -4.86,
-      "improvement": -0.61,
-      "rmse": 11.15,
-      "correlation": 0.7031
+      "corrected_bias": 1.65,
+      "improvement": 0.27,
+      "rmse": 10.1,
+      "correlation": 0.7079
     },
     {
       "date": "2026-02-23",
@@ -234,12 +234,12 @@
       "contest": "gpp_main",
       "n_players": 57,
       "raw_mae": 8.46,
-      "corrected_mae": 9.15,
+      "corrected_mae": 8.19,
       "raw_bias": 2.46,
-      "corrected_bias": -5.04,
-      "improvement": -0.69,
-      "rmse": 11.09,
-      "correlation": 0.7143
+      "corrected_bias": 1.48,
+      "improvement": 0.27,
+      "rmse": 9.93,
+      "correlation": 0.7185
     },
     {
       "date": "2026-02-24",
@@ -247,12 +247,12 @@
       "contest": "cash_main",
       "n_players": 170,
       "raw_mae": 8.38,
-      "corrected_mae": 10.37,
+      "corrected_mae": 8.39,
       "raw_bias": 0.52,
-      "corrected_bias": -6.98,
-      "improvement": -2.0,
-      "rmse": 12.47,
-      "correlation": 0.5809
+      "corrected_bias": -0.4,
+      "improvement": -0.01,
+      "rmse": 10.31,
+      "correlation": 0.5879
     },
     {
       "date": "2026-02-24",
@@ -260,12 +260,12 @@
       "contest": "gpp_main",
       "n_players": 170,
       "raw_mae": 8.38,
-      "corrected_mae": 10.38,
+      "corrected_mae": 8.39,
       "raw_bias": 0.51,
-      "corrected_bias": -6.99,
-      "improvement": -2.0,
-      "rmse": 12.48,
-      "correlation": 0.5807
+      "corrected_bias": -0.4,
+      "improvement": -0.01,
+      "rmse": 10.31,
+      "correlation": 0.5877
     },
     {
       "date": "2026-02-27",
@@ -273,12 +273,12 @@
       "contest": "gpp_main",
       "n_players": 107,
       "raw_mae": 7.86,
-      "corrected_mae": 9.55,
+      "corrected_mae": 7.96,
       "raw_bias": 1.67,
-      "corrected_bias": -5.83,
-      "improvement": -1.69,
-      "rmse": 11.57,
-      "correlation": 0.7736
+      "corrected_bias": 0.85,
+      "improvement": -0.1,
+      "rmse": 10.06,
+      "correlation": 0.7699
     },
     {
       "date": "2026-03-01",
@@ -286,12 +286,12 @@
       "contest": "gpp_main",
       "n_players": 124,
       "raw_mae": 7.53,
-      "corrected_mae": 9.84,
+      "corrected_mae": 7.48,
       "raw_bias": 0.71,
-      "corrected_bias": -6.79,
-      "improvement": -2.32,
-      "rmse": 11.78,
-      "correlation": 0.7175
+      "corrected_bias": -0.05,
+      "improvement": 0.04,
+      "rmse": 9.62,
+      "correlation": 0.7184
     },
     {
       "date": "2026-03-02",
@@ -299,12 +299,12 @@
       "contest": "cash_main",
       "n_players": 78,
       "raw_mae": 7.54,
-      "corrected_mae": 10.32,
+      "corrected_mae": 7.73,
       "raw_bias": 0.5,
-      "corrected_bias": -7.0,
-      "improvement": -2.78,
-      "rmse": 12.39,
-      "correlation": 0.6675
+      "corrected_bias": -0.33,
+      "improvement": -0.19,
+      "rmse": 10.33,
+      "correlation": 0.6616
     },
     {
       "date": "2026-03-02",
@@ -312,12 +312,12 @@
       "contest": "gpp_main",
       "n_players": 78,
       "raw_mae": 7.54,
-      "corrected_mae": 10.32,
+      "corrected_mae": 7.73,
       "raw_bias": 0.5,
-      "corrected_bias": -7.0,
-      "improvement": -2.78,
-      "rmse": 12.39,
-      "correlation": 0.6675
+      "corrected_bias": -0.33,
+      "improvement": -0.19,
+      "rmse": 10.33,
+      "correlation": 0.6616
     },
     {
       "date": "2026-03-02",
@@ -325,12 +325,12 @@
       "contest": "showdown",
       "n_players": 42,
       "raw_mae": 7.99,
-      "corrected_mae": 11.8,
+      "corrected_mae": 8.16,
       "raw_bias": -0.0,
-      "corrected_bias": -7.5,
-      "improvement": -3.82,
-      "rmse": 13.68,
-      "correlation": 0.513
+      "corrected_bias": -0.67,
+      "improvement": -0.17,
+      "rmse": 11.35,
+      "correlation": 0.526
     },
     {
       "date": "2026-03-04",
@@ -338,12 +338,12 @@
       "contest": "gpp_main",
       "n_players": 48,
       "raw_mae": 6.48,
-      "corrected_mae": 9.94,
+      "corrected_mae": 6.35,
       "raw_bias": -1.17,
-      "corrected_bias": -8.67,
-      "improvement": -3.46,
-      "rmse": 11.7,
-      "correlation": 0.8032
+      "corrected_bias": -1.91,
+      "improvement": 0.13,
+      "rmse": 7.85,
+      "correlation": 0.8163
     },
     {
       "date": "2026-03-05",
@@ -351,12 +351,12 @@
       "contest": "cash_main",
       "n_players": 118,
       "raw_mae": 8.99,
-      "corrected_mae": 10.64,
+      "corrected_mae": 8.89,
       "raw_bias": 0.69,
-      "corrected_bias": -6.81,
-      "improvement": -1.64,
-      "rmse": 13.1,
-      "correlation": 0.666
+      "corrected_bias": -0.2,
+      "improvement": 0.1,
+      "rmse": 11.04,
+      "correlation": 0.6772
     },
     {
       "date": "2026-03-05",
@@ -364,12 +364,12 @@
       "contest": "gpp_main",
       "n_players": 118,
       "raw_mae": 8.95,
-      "corrected_mae": 10.63,
+      "corrected_mae": 8.84,
       "raw_bias": 0.65,
-      "corrected_bias": -6.85,
-      "improvement": -1.69,
-      "rmse": 13.09,
-      "correlation": 0.6693
+      "corrected_bias": -0.24,
+      "improvement": 0.1,
+      "rmse": 11.0,
+      "correlation": 0.6802
     },
     {
       "date": "2026-03-06",
@@ -377,12 +377,12 @@
       "contest": "cash_main",
       "n_players": 124,
       "raw_mae": 7.25,
-      "corrected_mae": 10.01,
+      "corrected_mae": 7.24,
       "raw_bias": 0.14,
-      "corrected_bias": -7.36,
-      "improvement": -2.76,
-      "rmse": 12.12,
-      "correlation": 0.7488
+      "corrected_bias": -0.74,
+      "improvement": 0.01,
+      "rmse": 9.56,
+      "correlation": 0.7546
     },
     {
       "date": "2026-03-06",
@@ -390,12 +390,12 @@
       "contest": "gpp_main",
       "n_players": 124,
       "raw_mae": 7.23,
-      "corrected_mae": 9.99,
+      "corrected_mae": 7.18,
       "raw_bias": 0.16,
-      "corrected_bias": -7.34,
-      "improvement": -2.76,
-      "rmse": 12.1,
-      "correlation": 0.7498
+      "corrected_bias": -0.71,
+      "improvement": 0.05,
+      "rmse": 9.53,
+      "correlation": 0.7562
     },
     {
       "date": "2026-03-07",
@@ -403,12 +403,12 @@
       "contest": "cash_main",
       "n_players": 96,
       "raw_mae": 7.33,
-      "corrected_mae": 9.19,
+      "corrected_mae": 7.23,
       "raw_bias": 1.8,
-      "corrected_bias": -5.7,
-      "improvement": -1.85,
-      "rmse": 10.8,
-      "correlation": 0.7231
+      "corrected_bias": 1.09,
+      "improvement": 0.11,
+      "rmse": 9.22,
+      "correlation": 0.7239
     },
     {
       "date": "2026-03-07",
@@ -416,12 +416,12 @@
       "contest": "gpp_main",
       "n_players": 96,
       "raw_mae": 7.54,
-      "corrected_mae": 9.24,
+      "corrected_mae": 7.43,
       "raw_bias": 1.95,
-      "corrected_bias": -5.55,
-      "improvement": -1.69,
-      "rmse": 10.86,
-      "correlation": 0.7109
+      "corrected_bias": 1.24,
+      "improvement": 0.11,
+      "rmse": 9.41,
+      "correlation": 0.7111
     },
     {
       "date": "2026-03-07",
@@ -429,12 +429,12 @@
       "contest": "showdown",
       "n_players": 44,
       "raw_mae": 7.39,
-      "corrected_mae": 11.98,
+      "corrected_mae": 7.55,
       "raw_bias": -3.9,
-      "corrected_bias": -11.4,
-      "improvement": -4.58,
-      "rmse": 14.95,
-      "correlation": 0.7575
+      "corrected_bias": -4.68,
+      "improvement": -0.16,
+      "rmse": 10.64,
+      "correlation": 0.7624
     },
     {
       "date": "2026-03-08",
@@ -442,12 +442,12 @@
       "contest": "cash_main",
       "n_players": 107,
       "raw_mae": 7.51,
-      "corrected_mae": 9.38,
+      "corrected_mae": 7.28,
       "raw_bias": 1.29,
-      "corrected_bias": -6.21,
-      "improvement": -1.87,
-      "rmse": 11.66,
-      "correlation": 0.706
+      "corrected_bias": 0.44,
+      "improvement": 0.23,
+      "rmse": 9.81,
+      "correlation": 0.7116
     },
     {
       "date": "2026-03-08",
@@ -455,12 +455,12 @@
       "contest": "gpp_main",
       "n_players": 107,
       "raw_mae": 7.51,
-      "corrected_mae": 9.38,
+      "corrected_mae": 7.28,
       "raw_bias": 1.29,
-      "corrected_bias": -6.21,
-      "improvement": -1.87,
-      "rmse": 11.66,
-      "correlation": 0.706
+      "corrected_bias": 0.44,
+      "improvement": 0.23,
+      "rmse": 9.81,
+      "correlation": 0.7116
     },
     {
       "date": "2026-03-09",
@@ -468,12 +468,12 @@
       "contest": "cash_main",
       "n_players": 100,
       "raw_mae": 9.08,
-      "corrected_mae": 9.29,
+      "corrected_mae": 8.83,
       "raw_bias": 3.41,
-      "corrected_bias": -4.09,
-      "improvement": -0.21,
-      "rmse": 11.48,
-      "correlation": 0.6729
+      "corrected_bias": 2.59,
+      "improvement": 0.25,
+      "rmse": 11.0,
+      "correlation": 0.6756
     },
     {
       "date": "2026-03-09",
@@ -481,12 +481,12 @@
       "contest": "gpp_main",
       "n_players": 100,
       "raw_mae": 9.2,
-      "corrected_mae": 9.33,
+      "corrected_mae": 8.95,
       "raw_bias": 3.56,
-      "corrected_bias": -3.94,
-      "improvement": -0.13,
-      "rmse": 11.53,
-      "correlation": 0.6771
+      "corrected_bias": 2.74,
+      "improvement": 0.25,
+      "rmse": 11.13,
+      "correlation": 0.6801
     },
     {
       "date": "2026-03-10",
@@ -494,12 +494,12 @@
       "contest": "cash_main",
       "n_players": 140,
       "raw_mae": 8.52,
-      "corrected_mae": 10.57,
+      "corrected_mae": 8.59,
       "raw_bias": 0.86,
-      "corrected_bias": -6.64,
-      "improvement": -2.05,
-      "rmse": 13.55,
-      "correlation": 0.6707
+      "corrected_bias": -0.06,
+      "improvement": -0.06,
+      "rmse": 11.75,
+      "correlation": 0.6743
     },
     {
       "date": "2026-03-10",
@@ -507,12 +507,12 @@
       "contest": "gpp_main",
       "n_players": 140,
       "raw_mae": 8.52,
-      "corrected_mae": 10.57,
+      "corrected_mae": 8.59,
       "raw_bias": 0.86,
-      "corrected_bias": -6.64,
-      "improvement": -2.05,
-      "rmse": 13.55,
-      "correlation": 0.6707
+      "corrected_bias": -0.06,
+      "improvement": -0.06,
+      "rmse": 11.75,
+      "correlation": 0.6743
     },
     {
       "date": "2026-03-11",
@@ -520,12 +520,12 @@
       "contest": "gpp_main",
       "n_players": 129,
       "raw_mae": 7.51,
-      "corrected_mae": 9.79,
+      "corrected_mae": 7.47,
       "raw_bias": 0.52,
-      "corrected_bias": -6.98,
-      "improvement": -2.28,
-      "rmse": 11.85,
-      "correlation": 0.7468
+      "corrected_bias": -0.27,
+      "improvement": 0.04,
+      "rmse": 9.51,
+      "correlation": 0.752
     }
   ],
   "summary": {
@@ -533,10 +533,10 @@
       "n_slates": 35,
       "n_players_total": 3707,
       "raw_mae": 7.99,
-      "corrected_mae": 9.9,
+      "corrected_mae": 7.96,
       "raw_bias": 1.12,
-      "corrected_bias": -6.38,
-      "improvement": -1.91
+      "corrected_bias": 0.27,
+      "improvement": 0.03
     }
   }
 }
