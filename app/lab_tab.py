@@ -342,6 +342,11 @@ def render_lab_tab(sport: str) -> None:
                         showdown_teams=showdown_teams if showdown_teams else None,
                     )
                     n_built = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else 0
+
+                    # Invalidate Edge tab cache so it picks up new lineups immediately
+                    from app.data_loader import invalidate_published_cache
+                    invalidate_published_cache()
+
                     st.success(f"Built {n_built} lineups for {contest_label}")
 
                     # Preview
@@ -360,6 +365,9 @@ def render_lab_tab(sport: str) -> None:
             try:
                 result = _publish_to_github(sport, out_dir)
                 if result.get("status") == "ok":
+                    # Invalidate Edge tab cache so published data is visible immediately
+                    from app.data_loader import invalidate_published_cache
+                    invalidate_published_cache()
                     st.success(f"Published! SHA: {result.get('sha', 'N/A')}")
                 else:
                     st.error(f"Publish failed: {result.get('reason', 'unknown')}")
@@ -410,6 +418,8 @@ def render_lab_tab(sport: str) -> None:
             with col_del:
                 if st.button("🗑️ Delete", key=f"del_{sport}_{info['slug']}"):
                     _delete_lineup_set(out_dir, info["slug"])
+                    from app.data_loader import invalidate_published_cache
+                    invalidate_published_cache()
                     st.rerun()
     else:
         st.caption("No published lineups.")

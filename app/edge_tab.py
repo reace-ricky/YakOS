@@ -140,10 +140,15 @@ def _render_edge_box(key: str, players: List[Dict], is_pga: bool) -> None:
 
 def render_edge_tab(sport: str) -> None:
     """Render Ricky's Edge Analysis tab."""
-    from app.data_loader import load_published_data
+    from app.data_loader import invalidate_published_cache, load_published_data
 
     # Inject CSS once
     st.markdown(_CARD_CSS, unsafe_allow_html=True)
+
+    # Manual refresh button so user can force-reload after new lineups are built
+    if st.button("🔄 Refresh", key=f"edge_refresh_{sport}"):
+        invalidate_published_cache()
+        st.rerun()
 
     try:
         meta, pool, edge_analysis, edge_state, lineups = load_published_data(sport)
