@@ -92,7 +92,7 @@ def render_dashboard_tab(sport: str) -> None:
     # ── Section 3: Breakout Identification ────────────────────────────────
     st.markdown("---")
     try:
-        _render_breakout_identification(data)
+        _render_breakout_identification(data, sport)
     except Exception as e:
         st.error(f"Breakout Identification error: {e}\n```\n{traceback.format_exc()}\n```")
 
@@ -271,7 +271,7 @@ def _render_calibration_trend(data: Dict[str, Any]) -> None:
 # Section 3: Breakout Identification
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _render_breakout_identification(data: Dict[str, Any]) -> None:
+def _render_breakout_identification(data: Dict[str, Any], sport: str = "NBA") -> None:
     st.markdown("### Breakout Identification")
 
     left, right = st.columns(2)
