@@ -1,0 +1,62 @@
+{
+  "sport": "PGA",
+  "events_processed": 5,
+  "final_correction_factors": {
+    "n_slates": 5,
+    "dates_used": [
+      "2026-03-11",
+      "2026-03-04",
+      "2026-02-08",
+      "2026-02-05",
+      "2026-01-31"
+    ],
+    "overall_bias_correction": 3.0,
+    "by_position": {
+      "G": 3.0
+    },
+    "by_salary_tier": {
+      "<6.5K": 3.0,
+      "6.5-7.5K": 3.0,
+      "7.5-8.5K": 3.0,
+      "8.5-9.5K": 3.0
+    },
+    "correction_strength": 0.5
+  },
+  "per_event": [
+    {
+      "event": "The American Express",
+      "date": "2026-01-31",
+      "n_matched": 97,
+      "raw_mae": 38.03,
+      "mean_error": 36.82
+    },
+    {
+      "event": "Farmers Insurance Open",
+      "date": "2026-02-05",
+      "n_matched": 89,
+      "raw_mae": 26.87,
+      "mean_error": 15.14
+    },
+    {
+      "event": "WM Phoenix Open",
+      "date": "2026-02-08",
+      "n_matched": 95,
+      "raw_mae": 25.69,
+      "mean_error": 11.52
+    },
+    {
+      "event": "Cognizant Classic",
+      "date": "2026-03-04",
+      "n_matched": 62,
+      "raw_mae": 28.73,
+      "mean_error": 19.82
+    },
+    {
+      "event": "Arnold Palmer Invitational",
+      "date": "2026-03-11",
+      "n_matched": 70,
+      "raw_mae": 20.73,
+      "mean_error": 2.46
+    }
+  ]
+}
