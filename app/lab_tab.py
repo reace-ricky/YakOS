@@ -56,10 +56,9 @@ def render_lab_tab(sport: str) -> None:
     if not is_pga:
         rg_file = st.file_uploader("RotoGrinders CSV (optional)", type=["csv"], key=f"lab_rg_{sport}")
 
-    if is_pga:
-        pga_slate = st.selectbox("PGA slate", ["main", "showdown"], key=f"lab_pga_slate_{sport}")
-
     if st.button("Load Pool", key=f"lab_load_{sport}"):
+        # PGA: auto-detect slate from contest type (set later) or default
+        pga_slate = "showdown"  # default for PGA; overridden below if meta exists
         with st.spinner("Loading pool..."):
             try:
                 if is_pga:
@@ -101,10 +100,16 @@ def render_lab_tab(sport: str) -> None:
                 ).fillna("")
         # Coerce r1_teetime to string to avoid [object Object] from dicts/Timestamps
         if "r1_teetime" in pool.columns:
-            pool["r1_teetime"] = pool["r1_teetime"].apply(
-                lambda v: v.get("1", v.get(1, next(iter(v.values()), "")))
-                if isinstance(v, dict) else ("" if pd.isna(v) else str(v))
-            )
+            def _preview_teetime(v):
+                if isinstance(v, dict):
+                    return v.get("teetime", v.get("1", v.get(1, next(iter(v.values()), ""))))
+                try:
+                    if pd.isna(v):
+                        return ""
+                except (ValueError, TypeError):
+                    pass
+                return str(v)
+            pool["r1_teetime"] = pool["r1_teetime"].apply(_preview_teetime)
         avail = [c for c in preview_cols if c in pool.columns]
         display_pool = pool[avail].copy().sort_values("salary", ascending=False).reset_index(drop=True)
 
@@ -189,7 +194,18 @@ def render_lab_tab(sport: str) -> None:
     from yak_core.config import CONTEST_PRESETS
 
     if is_pga:
-        contest_options = ["PGA GPP", "PGA Cash", "PGA Showdown"]
+        # PGA contest types depend on the day:
+        # Thursday = round 1 (4-day tournament options available)
+        # Friday–Sunday = single-round showdown only
+        try:
+            _parsed_date = datetime.strptime(slate_date, "%Y-%m-%d")
+            is_thursday = _parsed_date.weekday() == 3  # 0=Mon, 3=Thu
+        except (ValueError, TypeError):
+            is_thursday = False
+        if is_thursday:
+            contest_options = ["PGA GPP", "PGA Cash", "PGA Showdown"]
+        else:
+            contest_options = ["PGA Showdown"]
     else:
         contest_options = ["GPP Main", "GPP Early", "Showdown", "Cash Main"]
     contest_options = [c for c in contest_options if c in CONTEST_PRESETS]
@@ -247,9 +263,41 @@ def render_lab_tab(sport: str) -> None:
     if st.button("Build Lineups", key=f"lab_build_{sport}"):
         if is_nba_showdown and len(showdown_teams) != 2:
             st.warning("Pick exactly 2 teams for Showdown.")
-        elif not pool_path.exists():
-            st.warning("Load a pool first.")
         else:
+            # Auto-load pool if missing or stale (different date)
+            _needs_load = not pool_path.exists()
+            if not _needs_load:
+                _meta_path = out_dir / "slate_meta.json"
+                if _meta_path.exists():
+                    _cur_meta = json.loads(_meta_path.read_text())
+                    if _cur_meta.get("date") != slate_date:
+                        _needs_load = True
+                    # PGA: also reload if slate type changed (main vs showdown)
+                    if is_pga:
+                        _needed_slate = preset.get("projection_slate", "showdown")
+                        if _cur_meta.get("slate") != _needed_slate:
+                            _needs_load = True
+
+            if _needs_load:
+                with st.spinner("Loading pool..."):
+                    try:
+                        if is_pga:
+                            _pga_slate = preset.get("projection_slate", "showdown")
+                            pool_fresh, meta_fresh = _load_pga_pool(api_key, slate_date, _pga_slate)
+                        else:
+                            pool_fresh, meta_fresh = _load_nba_pool(api_key, slate_date)
+                        try:
+                            from yak_core.sim_sandbox import score_player_breakout
+                            pool_fresh["breakout_score"] = score_player_breakout(pool_fresh)
+                        except Exception:
+                            pool_fresh["breakout_score"] = 0.0
+                        pool_fresh.to_parquet(str(out_dir / "slate_pool.parquet"), index=False)
+                        with open(out_dir / "slate_meta.json", "w") as f:
+                            json.dump(meta_fresh, f, indent=2, default=str)
+                    except Exception as e:
+                        st.error(f"Pool load error: {e}")
+                        return
+
             with st.spinner(f"Building {num_lineups} lineups..."):
                 try:
                     lineups_df = _build_lineups(

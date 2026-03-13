@@ -200,12 +200,33 @@ def build_pga_pool(
                 print(f"[pga_pool] Mapped '{_alt}' → 'r1_teetime'")
                 break
 
-    # Flatten r1_teetime if it contains dicts (e.g. {"1": "8:52 am", ...})
+    # Flatten r1_teetime if it contains dicts/lists/stringified-dicts
     if "r1_teetime" in pool.columns:
-        pool["r1_teetime"] = pool["r1_teetime"].apply(
-            lambda v: v.get("1", v.get(1, next(iter(v.values()), "")))
-            if isinstance(v, dict) else ("" if pd.isna(v) else str(v))
-        )
+        def _clean_teetime(v):
+            import ast as _ast
+            # Handle actual dicts
+            if isinstance(v, dict):
+                return v.get("teetime", v.get("1", v.get(1, next(iter(v.values()), ""))))
+            # Handle lists/arrays
+            if isinstance(v, (list, tuple)):
+                return _clean_teetime(v[0]) if v else ""
+            # Handle NaN/None
+            try:
+                if pd.isna(v):
+                    return ""
+            except (ValueError, TypeError):
+                pass
+            # Handle stringified dicts (e.g. "{'teetime': '2026-03-12 08:52', ...}")
+            s = str(v)
+            if s.startswith("{"):
+                try:
+                    d = _ast.literal_eval(s)
+                    if isinstance(d, dict):
+                        return d.get("teetime", d.get("1", d.get(1, next(iter(d.values()), ""))))
+                except (ValueError, SyntaxError):
+                    pass
+            return s
+        pool["r1_teetime"] = pool["r1_teetime"].apply(_clean_teetime)
 
     # Derive early_late_wave from r1_teetime if not already populated
     if ("early_late_wave" not in pool.columns or pool["early_late_wave"].isna().all()) \
