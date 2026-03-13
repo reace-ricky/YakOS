@@ -458,6 +458,7 @@ def sync_to_github(sports: list[str]) -> dict:
         "data/calibration_feedback/pga/slate_errors.json",
         "data/calibration_feedback/pga/correction_factors.json",
         "data/calibration_feedback/breakout_accuracy.json",
+        "data/calibration_feedback/recalibrated_backtest.json",
         "data/edge_feedback/signal_history.json",
         "data/edge_feedback/signal_weights.json",
     ]
@@ -523,6 +524,14 @@ def main():
 
     # Persist breakout accuracy to repo data so the Dashboard can read it
     _persist_breakout_accuracy(results, slate_date)
+
+    # Re-run recalibrated backtest with updated corrections
+    try:
+        from scripts.recalibrated_backtest import run_recalibrated_backtest
+        run_recalibrated_backtest()
+        log.info("Recalibrated backtest updated")
+    except Exception as e:
+        log.warning("Recalibrated backtest failed (non-fatal): %s", e)
 
     # Sync to GitHub
     if active_sports:

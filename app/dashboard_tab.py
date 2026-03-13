@@ -55,6 +55,9 @@ def _load_all_dashboard_data(sport: str) -> Dict[str, Any]:
     # Breakout accuracy (persisted by nightly calibration)
     breakout_accuracy = _load_json(REPO_ROOT / "data" / "calibration_feedback" / "breakout_accuracy.json")
 
+    # Recalibrated backtest (all slates re-projected through current corrections)
+    recal_backtest = _load_json(REPO_ROOT / "data" / "calibration_feedback" / "recalibrated_backtest.json")
+
     return {
         "slate_errors": slate_errors,
         "signal_history": signal_history,
@@ -62,6 +65,7 @@ def _load_all_dashboard_data(sport: str) -> Dict[str, Any]:
         "contest_history": contest_history,
         "breakout_profile": breakout_profile,
         "breakout_accuracy": breakout_accuracy,
+        "recal_backtest": recal_backtest,
         "sport": sport_lower,
     }
 
@@ -148,24 +152,29 @@ def _render_system_health(data: Dict[str, Any]) -> None:
 
     slate_errors = data["slate_errors"]
     signal_weights = data["signal_weights"]
+    recal = data.get("recal_backtest", {})
+    sport = data["sport"]
 
     sorted_dates = sorted(slate_errors.keys())
 
-    # Projection Accuracy: rolling MAE from recent 5 vs prior 5
-    recent_mae = None
-    prior_mae = None
-    mae_delta = None
-    if len(sorted_dates) >= 2:
+    # Projection Accuracy: prefer recalibrated backtest corrected_mae
+    recal_summary = recal.get("summary", {}).get(sport, {})
+    recal_mae = recal_summary.get("corrected_mae")
+    recal_improvement = recal_summary.get("improvement")
+
+    # Fallback to rolling MAE if no recalibrated data
+    recent_mae = recal_mae
+    mae_delta = recal_improvement
+    if recent_mae is None and len(sorted_dates) >= 2:
         recent_5 = sorted_dates[-5:]
         prior_5 = sorted_dates[-10:-5] if len(sorted_dates) >= 10 else sorted_dates[:max(1, len(sorted_dates) - 5)]
         recent_maes = [slate_errors[d].get("overall", {}).get("mae", 0) for d in recent_5 if slate_errors[d].get("overall", {}).get("mae") is not None]
         prior_maes = [slate_errors[d].get("overall", {}).get("mae", 0) for d in prior_5 if slate_errors[d].get("overall", {}).get("mae") is not None]
         if recent_maes:
             recent_mae = sum(recent_maes) / len(recent_maes)
-        if prior_maes:
-            prior_mae = sum(prior_maes) / len(prior_maes)
+        prior_mae = sum(prior_maes) / len(prior_maes) if prior_maes else None
         if recent_mae is not None and prior_mae is not None:
-            mae_delta = recent_mae - prior_mae  # negative = improving
+            mae_delta = recent_mae - prior_mae
 
     # Signal weighted hit rate
     sig_stats = signal_weights.get("signal_stats", {})
@@ -181,14 +190,16 @@ def _render_system_health(data: Dict[str, Any]) -> None:
     c1, c2, c3 = st.columns(3)
     with c1:
         if recent_mae is not None:
+            label = "Model MAE (recalibrated)" if recal_mae is not None else "Projection Accuracy (MAE)"
+            delta_str = f"{mae_delta:+.2f} vs raw" if recal_mae is not None and mae_delta is not None else (f"{mae_delta:+.2f}" if mae_delta is not None else None)
             st.metric(
-                "Projection Accuracy (MAE)",
+                label,
                 f"{recent_mae:.2f}",
-                delta=f"{mae_delta:+.2f}" if mae_delta is not None else None,
+                delta=delta_str,
                 delta_color="inverse",  # lower MAE is better
             )
         else:
-            st.metric("Projection Accuracy (MAE)", "N/A")
+            st.metric("Model MAE (recalibrated)", "N/A")
     with c2:
         if overall_hit_rate is not None:
             st.metric(
@@ -217,32 +228,46 @@ def _render_calibration_trend(data: Dict[str, Any]) -> None:
 
     slate_errors = data["slate_errors"]
     sport = data["sport"]
+    recal = data.get("recal_backtest", {})
 
-    if not slate_errors:
+    if not slate_errors and not recal.get("slates"):
         st.info("No calibration data available.")
         return
 
-    rows = []
+    # Build rows for the as-run MAE line from slate_errors
+    chart_rows = []
     for d in sorted(slate_errors.keys()):
         overall = slate_errors[d].get("overall", {})
         mae = overall.get("mae")
         if mae is not None:
-            rows.append({"date": d, "MAE": mae})
+            chart_rows.append({"date": d, "MAE": mae, "Series": "As-Run MAE"})
 
-    if not rows:
+    # Build rows for the recalibrated MAE line from recal_backtest slates
+    recal_slates = recal.get("slates", [])
+    for s in recal_slates:
+        if s.get("sport", "").lower() == sport and s.get("corrected_mae") is not None:
+            chart_rows.append({"date": s["date"], "MAE": s["corrected_mae"], "Series": "Recalibrated MAE"})
+
+    if not chart_rows:
         st.info("No MAE data available.")
         return
 
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(chart_rows)
     df["date"] = pd.to_datetime(df["date"])
 
     target_mae = 6.0 if sport == "nba" else 25.0
 
-    # MAE line
-    mae_line = alt.Chart(df).mark_line(point=True, color="#4C78A8").encode(
+    color_scale = alt.Scale(
+        domain=["As-Run MAE", "Recalibrated MAE"],
+        range=["#4C78A8", "#E45756"],
+    )
+
+    # Dual MAE lines
+    mae_lines = alt.Chart(df).mark_line(point=True).encode(
         x=alt.X("date:T", title="Date"),
         y=alt.Y("MAE:Q", title="MAE", scale=alt.Scale(zero=False)),
-        tooltip=["date:T", "MAE:Q"],
+        color=alt.Color("Series:N", scale=color_scale),
+        tooltip=["date:T", "Series:N", "MAE:Q"],
     )
 
     # Target line
@@ -260,11 +285,12 @@ def _render_calibration_trend(data: Dict[str, Any]) -> None:
         text=alt.value(f"Target: {target_mae}"),
     )
 
-    chart = (mae_line + target_rule + target_label).properties(
+    chart = (mae_lines + target_rule + target_label).properties(
         height=300,
     ).interactive()
 
     st.altair_chart(chart, use_container_width=True)
+    st.caption("As-Run = accuracy at time of slate. Recalibrated = accuracy with current model corrections applied retroactively.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
