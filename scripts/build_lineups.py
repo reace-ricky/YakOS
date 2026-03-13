@@ -90,6 +90,7 @@ def build_lineups(
     num_lineups: int | None = None,
     lock: list[str] | None = None,
     exclude: list[str] | None = None,
+    showdown_teams: list[str] | None = None,
 ) -> pd.DataFrame:
     """Build lineups and write output files. Returns lineups DataFrame."""
     from yak_core.config import CONTEST_PRESETS
@@ -157,6 +158,11 @@ def build_lineups(
     # Check for Showdown (uses a different builder path)
     is_showdown = preset.get("slate_type") == "Showdown Captain" or "showdown" in contest_label.lower()
 
+    # NBA Showdown: filter pool to the selected 2-team matchup
+    if is_showdown and sport == "NBA" and showdown_teams and len(showdown_teams) == 2:
+        pool = pool[pool["team"].isin(showdown_teams)].reset_index(drop=True)
+        print(f"[build_lineups] Showdown: filtered to {showdown_teams} ({len(pool)} players)")
+
     if is_showdown and sport == "NBA":
         from yak_core.lineups import build_showdown_lineups
         lineups_df, exposure_df = build_showdown_lineups(pool, cfg)
@@ -166,8 +172,11 @@ def build_lineups(
     if lineups_df.empty:
         sys.exit("ERROR: Optimizer returned zero lineups.")
 
-    # Write outputs
+    # Write outputs — showdown slugs are keyed by matchup to avoid overwrites
     slug = _slugify(contest_label)
+    if is_showdown and showdown_teams and len(showdown_teams) == 2:
+        teams_tag = "_".join(t.lower() for t in sorted(showdown_teams))
+        slug = f"{slug}_{teams_tag}"
     lineups_path = f"{out_dir}/{slug}_lineups.parquet"
     meta_path = f"{out_dir}/{slug}_meta.json"
 
@@ -185,6 +194,8 @@ def build_lineups(
         "exclude": exclude or [],
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+    if is_showdown and showdown_teams:
+        build_meta["showdown_teams"] = showdown_teams
     with open(meta_path, "w") as f:
         json.dump(build_meta, f, indent=2, default=str)
 
@@ -212,6 +223,8 @@ def main(argv: list[str] | None = None) -> pd.DataFrame:
                         help="Player names to lock into every lineup.")
     parser.add_argument("--exclude", nargs="*", default=None,
                         help="Player names to exclude from all lineups.")
+    parser.add_argument("--teams", nargs=2, default=None,
+                        help="Two team abbreviations for Showdown (e.g. CLE DAL).")
     args = parser.parse_args(argv)
 
     return build_lineups(
@@ -220,6 +233,7 @@ def main(argv: list[str] | None = None) -> pd.DataFrame:
         num_lineups=args.count,
         lock=args.lock,
         exclude=args.exclude,
+        showdown_teams=args.teams,
     )
 
 
