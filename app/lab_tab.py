@@ -70,6 +70,13 @@ def render_lab_tab(sport: str) -> None:
                         pool = _merge_rg_csv(pool, rg_file)
                         meta["proj_source"] = "rotogrinders+tank01"
 
+                # Score breakout predictions
+                try:
+                    from yak_core.sim_sandbox import score_player_breakout
+                    pool["breakout_score"] = score_player_breakout(pool)
+                except Exception:
+                    pool["breakout_score"] = 0.0
+
                 # Write outputs
                 pool.to_parquet(str(out_dir / "slate_pool.parquet"), index=False)
                 with open(out_dir / "slate_meta.json", "w") as f:
@@ -85,7 +92,7 @@ def render_lab_tab(sport: str) -> None:
     if pool_path.exists():
         pool = pd.read_parquet(pool_path)
 
-        preview_cols = ["player_name", "pos", "team", "salary", "proj", "floor", "ceil", "ownership"]
+        preview_cols = ["player_name", "pos", "team", "salary", "proj", "floor", "ceil", "ownership", "breakout_score"]
         if is_pga:
             preview_cols += ["wave", "r1_teetime"]
             if "early_late_wave" in pool.columns and "wave" not in pool.columns:

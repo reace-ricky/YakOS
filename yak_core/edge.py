@@ -375,6 +375,7 @@ def _compute_edge_labels(df: pd.DataFrame) -> pd.Series:
     ceil_mag = pd.to_numeric(df.get("ceil_magnitude", pd.Series(0.0, index=df.index)), errors="coerce").fillna(0.0)
     pop_score = pd.to_numeric(df.get("pop_catalyst_score", pd.Series(0.0, index=df.index)), errors="coerce").fillna(0.0)
     is_anchor = df.get("is_anchor", pd.Series(False, index=df.index)).fillna(False).astype(bool)
+    breakout = pd.to_numeric(df.get("breakout_score", pd.Series(0.0, index=df.index)), errors="coerce").fillna(0.0)
 
     # Compute pool-relative percentile cutoffs (90th for elite, 75th for notable)
     smash_p90 = max(float(smash.quantile(0.90)), 0.35)  # Floor: at least 35%
@@ -418,6 +419,10 @@ def _compute_edge_labels(df: pd.DataFrame) -> pd.Series:
             pop_tag = df.iloc[i].get("pop_catalyst_tag", "")
             if pop_tag:
                 tags.append(f"🚀 {pop_tag}")
+
+        # Breakout Watch — breakout_score >= 60
+        if breakout.iloc[i] >= 60:
+            tags.append("🔮 Breakout Watch")
 
         labels_list[i] = tags
 
@@ -570,6 +575,7 @@ def _compute_pga_edge_labels(df: pd.DataFrame) -> pd.Series:
     sg_total = pd.to_numeric(df.get("sg_total", pd.Series(0.0, index=df.index)), errors="coerce").fillna(0.0)
     course_fit = pd.to_numeric(df.get("course_fit", pd.Series(0.0, index=df.index)), errors="coerce").fillna(0.0)
     sg_app = pd.to_numeric(df.get("sg_app", pd.Series(0.0, index=df.index)), errors="coerce").fillna(0.0)
+    breakout = pd.to_numeric(df.get("breakout_score", pd.Series(0.0, index=df.index)), errors="coerce").fillna(0.0)
 
     # Pool-relative cutoffs
     sg_p85 = max(float(sg_total.quantile(0.85)), 0.5)
@@ -612,6 +618,10 @@ def _compute_pga_edge_labels(df: pd.DataFrame) -> pd.Series:
         l = lev.iloc[i]
         if l >= lev_p85:
             tags.append("\u2705 +Leverage")
+
+        # Breakout Watch — breakout_score >= 60
+        if breakout.iloc[i] >= 60:
+            tags.append("\U0001f52e Breakout Watch")
 
         labels_list[i] = tags
 
