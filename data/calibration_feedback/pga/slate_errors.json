@@ -684,5 +684,37 @@
         "mae": 17.64
       }
     }
+  },
+  "2026-03-12": {
+    "slate_date": "2026-03-12",
+    "overall": {
+      "mean_error": 28.42,
+      "mae": 32.62,
+      "rmse": 38.01,
+      "correlation": 0.375,
+      "n_players": 21
+    },
+    "by_position": {
+      "G": {
+        "mean_error": 28.42,
+        "median_error": 36.62,
+        "n": 21,
+        "mae": 32.62
+      }
+    },
+    "by_salary_tier": {
+      "<6.5K": {
+        "mean_error": 28.66,
+        "median_error": 36.62,
+        "n": 15,
+        "mae": 32.14
+      },
+      "6.5-7.5K": {
+        "mean_error": 27.82,
+        "median_error": 39.22,
+        "n": 6,
+        "mae": 33.83
+      }
+    }
   }
 }
