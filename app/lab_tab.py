@@ -56,6 +56,20 @@ def render_lab_tab(sport: str) -> None:
     if not is_pga:
         rg_file = st.file_uploader("RotoGrinders CSV (optional)", type=["csv"], key=f"lab_rg_{sport}")
 
+    # Warn if displayed pool is stale (date or slate mismatch)
+    pool_path = out_dir / "slate_pool.parquet"
+    _meta_path_check = out_dir / "slate_meta.json"
+    _pool_stale = False
+    if _meta_path_check.exists():
+        _chk_meta = json.loads(_meta_path_check.read_text())
+        if _chk_meta.get("date") != slate_date:
+            _pool_stale = True
+            st.warning(
+                f"Pool is for {_chk_meta.get('date', '?')} "
+                f"({_chk_meta.get('slate', '?')} slate). "
+                f"Click **Load Pool** to refresh for {slate_date}."
+            )
+
     if st.button("Load Pool", key=f"lab_load_{sport}"):
         # PGA: auto-detect slate from contest type (set later) or default
         pga_slate = "showdown"  # default for PGA; overridden below if meta exists
@@ -87,7 +101,6 @@ def render_lab_tab(sport: str) -> None:
                 return
 
     # Show current pool preview
-    pool_path = out_dir / "slate_pool.parquet"
     if pool_path.exists():
         pool = pd.read_parquet(pool_path)
 
@@ -121,6 +134,11 @@ def render_lab_tab(sport: str) -> None:
             _saved_excl = json.loads(_excl_file.read_text())
 
         if is_pga:
+            # Pre-check excluded names in current pool
+            pool_names = set(display_pool["player_name"])
+            _excl_in_pool = [n for n in _saved_excl if n in pool_names]
+            _excl_not_in_pool = [n for n in _saved_excl if n not in pool_names]
+
             display_pool.insert(0, "exclude", display_pool["player_name"].isin(_saved_excl))
             st.markdown(f"**Current pool:** {len(display_pool)} players — check to exclude")
             edited = st.data_editor(
@@ -134,13 +152,16 @@ def render_lab_tab(sport: str) -> None:
                 disabled=[c for c in avail],  # only exclude column is editable
                 key=f"lab_pool_editor_{sport}",
             )
-            # Save exclusions to file whenever they change
-            new_excl = edited[edited["exclude"]]["player_name"].tolist()
-            if new_excl != _saved_excl:
+            # Build new exclusion list from editor + carry over names not in this pool
+            _editor_excl = edited[edited["exclude"]]["player_name"].tolist()
+            new_excl = list(set(_editor_excl + _excl_not_in_pool))
+            if set(new_excl) != set(_saved_excl):
                 _excl_file.write_text(json.dumps(new_excl))
             n_excl = len(new_excl)
             if n_excl > 0:
                 st.caption(f"❌ {n_excl} player(s) excluded from builds")
+            if _excl_not_in_pool:
+                st.caption(f"ℹ️ Also excluded (not in this pool): {', '.join(_excl_not_in_pool)}")
         else:
             st.markdown(f"**Current pool:** {len(display_pool)} players")
             st.dataframe(display_pool, use_container_width=True, hide_index=True, height=400)
@@ -310,6 +331,9 @@ def render_lab_tab(sport: str) -> None:
                     except Exception as e:
                         st.error(f"Pool load error: {e}")
                         return
+
+            if exclude_list:
+                st.info(f"Excluding: {', '.join(exclude_list)}")
 
             with st.spinner(f"Building {num_lineups} lineups..."):
                 try:
