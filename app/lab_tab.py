@@ -819,6 +819,23 @@ def _render_historical_replay(sport: str) -> None:
                     if excluded:
                         replay_pool = replay_pool[~replay_pool["player_name"].isin(excluded)].reset_index(drop=True)
 
+                    # Clean NaN/inf in numeric columns so PuLP doesn't crash
+                    numeric_cols = replay_pool.select_dtypes(include=["number"]).columns
+                    for c in numeric_cols:
+                        replay_pool[c] = pd.to_numeric(replay_pool[c], errors="coerce")
+                        replay_pool[c] = replay_pool[c].replace([np.inf, -np.inf], np.nan)
+                    # Fill NaN with sensible defaults
+                    for c in ["leverage", "edge_score", "smash_prob", "bust_prob"]:
+                        if c in replay_pool.columns:
+                            replay_pool[c] = replay_pool[c].fillna(0.0)
+                    for c in ["floor", "ceil"]:
+                        if c in replay_pool.columns:
+                            replay_pool[c] = replay_pool[c].fillna(replay_pool["proj"] if "proj" in replay_pool.columns else 0)
+                    replay_pool["proj"] = replay_pool["proj"].fillna(0.0)
+                    replay_pool["salary"] = replay_pool["salary"].fillna(0).astype(int)
+                    # Drop players with zero projection or salary
+                    replay_pool = replay_pool[(replay_pool["proj"] > 0) & (replay_pool["salary"] > 0)].reset_index(drop=True)
+
                     # Ensure required columns
                     if "player_id" not in replay_pool.columns:
                         replay_pool["player_id"] = replay_pool["player_name"].str.lower().str.replace(" ", "_")
