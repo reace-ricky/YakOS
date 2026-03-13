@@ -756,9 +756,21 @@ def _render_historical_replay(sport: str) -> None:
     if not archive_files:
         return
 
+    # ── Load completed replay tracking ──
+    completed_path = Path(__file__).resolve().parent.parent / "data" / "replay_history" / "completed.json"
+    completed_path.parent.mkdir(parents=True, exist_ok=True)
+    if completed_path.exists():
+        try:
+            completed_data = json.loads(completed_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            completed_data = {"completed": {}}
+    else:
+        completed_data = {"completed": {}}
+    completed_slugs = set(completed_data.get("completed", {}).keys())
+
     with st.expander("\U0001f4dc Historical Replay"):
         # Parse filenames: 2026-03-01_gpp_main.parquet → date=2026-03-01, contest=gpp_main
-        slate_options = []
+        all_slate_options = []
         for f in archive_files:
             fname = f.stem  # e.g. "2026-03-01_gpp_main"
             parts = fname.split("_", 1)
@@ -770,16 +782,38 @@ def _render_historical_replay(sport: str) -> None:
             file_sport = "PGA" if "pga" in contest_slug.lower() else "NBA"
             if file_sport != sport.upper():
                 continue
+            full_slug = f"{slate_date}_{contest_slug}"
             label = f"{slate_date} — {contest_slug.replace('_', ' ').title()}"
-            slate_options.append({"label": label, "path": f, "date": slate_date, "slug": contest_slug})
+            all_slate_options.append({
+                "label": label, "path": f, "date": slate_date,
+                "slug": contest_slug, "full_slug": full_slug,
+            })
+
+        if not all_slate_options:
+            st.info(f"No archived {sport.upper()} slates found.")
+            return
+
+        # Filter out completed replays unless "Show completed" is checked
+        show_completed = st.checkbox("Show completed replays", key=f"replay_show_done_{sport}")
+        if show_completed:
+            slate_options = all_slate_options
+        else:
+            slate_options = [s for s in all_slate_options if s["full_slug"] not in completed_slugs]
 
         if not slate_options:
-            st.info(f"No archived {sport.upper()} slates found.")
+            st.info("All slates have been replayed! Check 'Show completed replays' to re-run.")
             return
 
         labels = [s["label"] for s in slate_options]
         selected_idx = st.selectbox("Select a historical slate", range(len(labels)),
                                     format_func=lambda i: labels[i], key=f"replay_slate_{sport}")
+
+        # Show note if selected slate was previously completed
+        selected_full_slug = slate_options[selected_idx]["full_slug"]
+        if selected_full_slug in completed_slugs:
+            done_info = completed_data["completed"][selected_full_slug]
+            done_date = done_info.get("completed_at", "unknown")
+            st.info(f"Previously replayed on {done_date}")
         selected = slate_options[selected_idx]
 
         # Load the archive
@@ -938,6 +972,12 @@ def _render_historical_replay(sport: str) -> None:
                         with c3:
                             st.metric("Avg Proj Total", f"{avg_proj:.1f}")
 
+                        # Stash replay results for mark-done
+                        st.session_state[f"_replay_result_{sport}"] = {
+                            "n_lineups": n_built,
+                            "best_actual": round(float(best_actual), 2),
+                        }
+
                         # Check cash rate against contest bands
                         try:
                             history_path = Path(__file__).resolve().parent.parent / "data" / "contest_results" / "history.json"
@@ -971,3 +1011,24 @@ def _render_historical_replay(sport: str) -> None:
 
                 except Exception as e:
                     st.error(f"Replay error: {e}")
+
+        # ── Mark Replay Done button ──
+        if selected_full_slug not in completed_slugs:
+            if st.button("Mark Replay Done", key=f"replay_done_{sport}"):
+                _replay_res = st.session_state.get(f"_replay_result_{sport}", {})
+                done_entry = {
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                    "n_lineups": _replay_res.get("n_lineups", n_lineups),
+                    "best_actual": _replay_res.get("best_actual"),
+                }
+                completed_data["completed"][selected_full_slug] = done_entry
+                completed_path.write_text(json.dumps(completed_data, indent=2))
+                try:
+                    from yak_core.github_persistence import sync_feedback_async
+                    sync_feedback_async(
+                        files=["data/replay_history/completed.json"],
+                        commit_message=f"Replay completed: {selected_full_slug}",
+                    )
+                except Exception:
+                    pass
+                st.rerun()
