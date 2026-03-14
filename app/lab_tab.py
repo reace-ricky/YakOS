@@ -968,6 +968,85 @@ def _fetch_nba_actuals(api_key: str, game_date: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _fetch_pga_actuals(api_key: str) -> pd.DataFrame:
+    """Fetch actual DK fantasy points for the current/most recent PGA event via DataGolf.
+
+    Uses the historical-dfs-data/points endpoint which returns DK fantasy
+    points directly.  Requires DataGolf premium; returns empty on 403.
+
+    Falls back to the event list to auto-detect the most recent event.
+
+    Returns a DataFrame with columns: player_name, actual_fp
+    """
+    from yak_core.datagolf import DataGolfClient
+
+    dg = DataGolfClient(api_key)
+
+    # Find the most recent event
+    try:
+        events = dg.get_dfs_event_list()
+    except Exception as exc:
+        print(f"[_fetch_pga_actuals] Event list fetch failed: {exc}")
+        return pd.DataFrame(columns=["player_name", "actual_fp"])
+
+    if events.empty:
+        return pd.DataFrame(columns=["player_name", "actual_fp"])
+
+    # Events are sorted newest-first by DataGolf; pick the latest one
+    # that has a year matching current or most recent
+    from datetime import date as _date
+    current_year = _date.today().year
+
+    # Filter to current year events, take the last one (most recent)
+    if "year" in events.columns:
+        year_events = events[events["year"] == current_year]
+        if year_events.empty:
+            year_events = events
+    else:
+        year_events = events
+
+    # Take the last row (most recent event)
+    latest = year_events.iloc[-1] if len(year_events) > 0 else None
+    if latest is None:
+        return pd.DataFrame(columns=["player_name", "actual_fp"])
+
+    event_id = int(latest.get("event_id", latest.get("id", 0)))
+    year = int(latest.get("year", latest.get("calendar_year", current_year)))
+    event_name = latest.get("event_name", latest.get("name", f"Event {event_id}"))
+    print(f"[_fetch_pga_actuals] Fetching actuals for: {event_name} ({year}, ID={event_id})")
+
+    try:
+        df = dg.get_historical_dfs_points(event_id=event_id, year=year, tour="pga", site="draftkings")
+    except Exception as exc:
+        print(f"[_fetch_pga_actuals] DFS points fetch failed: {exc}")
+        return pd.DataFrame(columns=["player_name", "actual_fp"])
+
+    if df.empty:
+        return pd.DataFrame(columns=["player_name", "actual_fp"])
+
+    # Normalize column names — DataGolf may return 'dk_points', 'total_points', etc.
+    fp_col = None
+    for candidate in ["dk_points", "total_points", "fantasy_points", "total", "points", "dk_salary"]:
+        if candidate in df.columns:
+            fp_col = candidate
+            break
+    # If no obvious FP column, check for numeric columns that look like FP
+    if fp_col is None:
+        for c in df.columns:
+            if "point" in c.lower() or "fp" in c.lower() or "score" in c.lower():
+                fp_col = c
+                break
+
+    if fp_col is None or "player_name" not in df.columns:
+        print(f"[_fetch_pga_actuals] Unexpected columns: {list(df.columns)}")
+        return pd.DataFrame(columns=["player_name", "actual_fp"])
+
+    result = df[["player_name"]].copy()
+    result["actual_fp"] = pd.to_numeric(df[fp_col], errors="coerce").fillna(0.0).round(2)
+    result["event_name"] = event_name
+    return result
+
+
 def _render_historical_replay(sport: str) -> None:
     st.markdown("### Historical Replay")
     from app.data_loader import published_dir as _pub_dir
@@ -995,10 +1074,27 @@ def _render_historical_replay(sport: str) -> None:
     actuals_path = out_dir / "actuals.parquet"
     if not actuals_path.exists():
         st.caption("No actuals loaded yet.")
-
-        # Auto-fetch option (NBA only for now)
         is_pga = sport.upper() == "PGA"
-        if not is_pga:
+
+        if is_pga:
+            # PGA: fetch from DataGolf
+            if st.button("Fetch Actuals from DataGolf", key=f"replay_fetch_{sport}"):
+                api_key = os.environ.get("DATAGOLF_API_KEY") or _get_secret("DATAGOLF_API_KEY")
+                if not api_key:
+                    st.error("Missing DATAGOLF_API_KEY.")
+                else:
+                    with st.spinner("Fetching DK fantasy points from DataGolf..."):
+                        actuals_df = _fetch_pga_actuals(api_key)
+                    if actuals_df.empty:
+                        st.warning("No actuals found. The event may still be in progress, or your DataGolf plan may not include historical DFS data.")
+                    else:
+                        event_name = actuals_df["event_name"].iloc[0] if "event_name" in actuals_df.columns else ""
+                        actuals_df = actuals_df[["player_name", "actual_fp"]]
+                        actuals_df.to_parquet(str(actuals_path), index=False)
+                        st.success(f"Fetched actuals for {len(actuals_df)} players" + (f" ({event_name})" if event_name else "") + ".")
+                        st.rerun()
+        else:
+            # NBA: fetch from Tank01 box scores
             meta_path = out_dir / "slate_meta.json"
             slate_date = ""
             if meta_path.exists():
