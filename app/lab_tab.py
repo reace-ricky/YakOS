@@ -438,7 +438,10 @@ def _get_secret(key: str) -> str:
 def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
     import requests
     from yak_core.config import DEFAULT_CONFIG, DK_LINEUP_SIZE, DK_POS_SLOTS, SALARY_CAP, merge_config
-    from yak_core.live import fetch_live_opt_pool, _TANK01_HOST, auto_flag_injuries, apply_manual_injury_overrides_to_pool
+    from yak_core.live import (
+        fetch_live_opt_pool, fetch_player_game_logs,
+        _TANK01_HOST, auto_flag_injuries, apply_manual_injury_overrides_to_pool,
+    )
     from yak_core.projections import apply_projections
     from yak_core.calibration_feedback import get_correction_factors, apply_corrections
 
@@ -446,10 +449,31 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
         "RAPIDAPI_KEY": api_key,
         "SLATE_DATE": slate_date,
         "DATA_MODE": "live",
-        "PROJ_SOURCE": "salary_implied",
+        "PROJ_SOURCE": "model",
     })
 
     pool = fetch_live_opt_pool(slate_date, cfg)
+
+    # ── Fetch rolling game logs from Tank01 (5/10/20 game averages) ──
+    # This gives proj_model real performance data so projections differ
+    # from salary-implied. Without this the optimizer is a salary maximizer.
+    try:
+        player_names = pool["player_name"].tolist()
+        id_map = dict(zip(pool["player_name"], pool["player_id"].astype(str))) if "player_id" in pool.columns else {}
+        game_logs = fetch_player_game_logs(
+            player_names=player_names,
+            player_id_map=id_map,
+            api_key=api_key,
+        )
+        if not game_logs.empty:
+            pool = pool.merge(game_logs, on="player_name", how="left")
+            _n_with = pool["rolling_fp_5"].notna().sum() if "rolling_fp_5" in pool.columns else 0
+            print(f"[_load_nba_pool] Merged rolling game logs for {_n_with}/{len(pool)} players")
+        else:
+            print("[_load_nba_pool] No rolling game logs returned — projections will use historical/salary fallback")
+    except Exception as exc:
+        print(f"[_load_nba_pool] fetch_player_game_logs failed (non-fatal): {exc}")
+
     pool = apply_projections(pool, cfg)
 
     # ── Cross-reference Tank01 injury list to catch OUT players whose DFS
@@ -465,6 +489,7 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
     except Exception as exc:
         print(f"[_load_nba_pool] manual injury overrides failed (non-fatal): {exc}")
 
+    # floor/ceil: proj_model sets these from rolling data; only fill gaps
     if "floor" not in pool.columns or pool["floor"].isna().all():
         pool["floor"] = (pool["proj"] * 0.60).round(2)
     if "ceil" not in pool.columns or pool["ceil"].isna().all():
@@ -815,6 +840,10 @@ def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, o
         "NUM_LINEUPS": num_lineups,
         "LOCK": lock_list,
         "EXCLUDE": exclude_list,
+        # Preserve model projections already embedded in slate_pool.parquet
+        # (loaded during _load_nba_pool with PROJ_SOURCE='model').
+        # Without this, prepare_pool's _add_projections overwrites with salary_implied.
+        "PROJ_SOURCE": "parquet",
     })
     if showdown_teams:
         pool = pool[pool["team"].isin(showdown_teams)].reset_index(drop=True)
