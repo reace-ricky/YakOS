@@ -10,10 +10,16 @@ from .config import (
 )
 
 from .lineups import (
+    # ── New API (lineups rewrite) ────────────────────────────────────────
+    load_player_pool,
+    prepare_pool,
+    build_multiple_lineups_with_exposure,
+    build_showdown_lineups,
+    build_run_config,
+    # ── Backward-compat shims (raise on call / delegate to new API) ──
     load_opt_pool_from_config,
     build_player_pool,
     build_slate_pool,
-    build_multiple_lineups_with_exposure,
     run_lineups_from_config,
     to_dk_upload_format,
 )
@@ -97,11 +103,16 @@ __all__ = [
     "DK_POS_SLOTS",
     "SALARY_CAP",
     "merge_config",
-    # lineups
-    "load_opt_pool_from_config(",
+    # lineups (new API)
+    "load_player_pool",
+    "prepare_pool",
+    "build_multiple_lineups_with_exposure",
+    "build_showdown_lineups",
+    "build_run_config",
+    # lineups (backward-compat shims)
+    "load_opt_pool_from_config",
     "build_player_pool",
     "build_slate_pool",
-    "build_multiple_lineups_with_exposure",
     "run_lineups_from_config",
     "to_dk_upload_format",
     # validation
