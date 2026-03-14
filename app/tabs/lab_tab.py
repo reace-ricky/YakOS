@@ -64,8 +64,18 @@ def render_lab_tab(sport: str) -> None:
                 f"Click **Load Pool** to refresh for {slate_date}."
             )
 
+    if is_pga:
+        pga_slate = st.radio(
+            "DK slate",
+            ["main", "showdown"],
+            horizontal=True,
+            key=f"lab_pga_slate_{sport}",
+            help="'main' = full tournament (4-day GPP). 'showdown' = single-round contests.",
+        )
+    else:
+        pga_slate = "main"
+
     if st.button("Load Pool", key=f"lab_load_{sport}"):
-        pga_slate = "showdown"
         with st.spinner("Loading pool..."):
             try:
                 if is_pga:
@@ -93,6 +103,19 @@ def render_lab_tab(sport: str) -> None:
 
     if pool_path.exists():
         pool = pd.read_parquet(pool_path)
+
+        # Show which slate is loaded and warn if it doesn't match the selector
+        if is_pga and _meta_path_check.exists():
+            try:
+                _loaded_meta = json.loads(_meta_path_check.read_text())
+                _loaded_slate = _loaded_meta.get("slate", "?")
+                if _loaded_slate != pga_slate:
+                    st.warning(
+                        f"Loaded pool is the **{_loaded_slate}** slate. "
+                        f"You selected **{pga_slate}**. Click **Load Pool** to reload."
+                    )
+            except Exception:
+                pass
 
         preview_cols = ["player_name", "pos", "team", "salary", "proj", "floor", "ceil", "ownership", "breakout_score"]
         if is_pga:
