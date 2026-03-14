@@ -72,9 +72,33 @@ def render_lab_tab(sport: str) -> None:
                     pool, meta = _load_pga_pool(api_key, slate_date, pga_slate)
                 else:
                     pool, meta = _load_nba_pool(api_key, slate_date)
+                    # Auto-merge saved RG file if it exists (from prior upload)
+                    _rg_auto_path = os.path.join(
+                        str(Path(__file__).resolve().parent.parent),
+                        "data", "rg_uploads", f"rg_{slate_date}.csv"
+                    )
                     if rg_file is not None:
                         pool = _merge_rg_csv(pool, rg_file)
                         meta["proj_source"] = "rotogrinders+tank01"
+                        # Save for auto-reload next time
+                        try:
+                            _rg_save_dir = os.path.join(
+                                str(Path(__file__).resolve().parent.parent),
+                                "data", "rg_uploads"
+                            )
+                            os.makedirs(_rg_save_dir, exist_ok=True)
+                            rg_file.seek(0)
+                            with open(_rg_auto_path, "wb") as _f:
+                                _f.write(rg_file.read())
+                        except Exception:
+                            pass
+                    elif os.path.isfile(_rg_auto_path):
+                        try:
+                            pool = _merge_rg_csv(pool, _rg_auto_path)
+                            meta["proj_source"] = "rotogrinders+tank01 (saved)"
+                            st.info(f"Auto-merged saved RotoGrinders file for {slate_date}")
+                        except Exception:
+                            pass
 
                 try:
                     from yak_core.sim_sandbox import score_player_breakout
@@ -441,9 +465,12 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
     from yak_core.live import (
         fetch_live_opt_pool, fetch_player_game_logs,
         _TANK01_HOST, auto_flag_injuries, apply_manual_injury_overrides_to_pool,
+        fetch_betting_odds,
     )
     from yak_core.projections import apply_projections
     from yak_core.calibration_feedback import get_correction_factors, apply_corrections
+    from yak_core.injury_cascade import apply_injury_cascade
+    from yak_core.blowout_risk import apply_blowout_cascade
 
     cfg = merge_config({
         "RAPIDAPI_KEY": api_key,
@@ -489,12 +516,43 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
     except Exception as exc:
         print(f"[_load_nba_pool] manual injury overrides failed (non-fatal): {exc}")
 
+    # ── Injury cascade: boost backups when teammates are OUT ──
+    try:
+        pool, cascade_report = apply_injury_cascade(pool)
+        _n_bumped = int((pool.get("injury_bump_fp", pd.Series(0, index=pool.index)) > 0).sum())
+        if _n_bumped:
+            print(f"[_load_nba_pool] Injury cascade boosted {_n_bumped} player(s)")
+    except Exception as exc:
+        print(f"[_load_nba_pool] apply_injury_cascade failed (non-fatal): {exc}")
+
     # floor/ceil: proj_model sets these from rolling data; only fill gaps
-    # NBA DFS ceiling games are 2x+ average (boom games, OT, etc.)
+    # Uses salary-tier spread multiplier (same formula as old _enrich_pool)
     if "floor" not in pool.columns or pool["floor"].isna().all():
-        pool["floor"] = (pool["proj"] * 0.55).round(2)
-    if "ceil" not in pool.columns or pool["ceil"].isna().all():
-        pool["ceil"] = (pool["proj"] * 2.00).round(2)
+        import numpy as np
+        _sal = pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0)
+        _sal_k = (_sal / 1000.0).clip(lower=3.0)
+        _spread_mult = (0.65 - _sal_k * 0.03).clip(lower=0.25, upper=0.55)
+        _proj = pd.to_numeric(pool.get("proj", 0), errors="coerce").fillna(0).clip(lower=0)
+        # Blend with rolling variance when available
+        if "rolling_fp_5" in pool.columns and "rolling_fp_10" in pool.columns:
+            _fp5 = pd.to_numeric(pool["rolling_fp_5"], errors="coerce")
+            _fp10 = pd.to_numeric(pool["rolling_fp_10"], errors="coerce")
+            _rmean = ((_fp5.fillna(0) + _fp10.fillna(0)) / 2.0).replace(0, 1)
+            _rdiff = (_fp5.fillna(0) - _fp10.fillna(0)).abs()
+            _rcv = (_rdiff / _rmean).clip(lower=0.05, upper=0.60)
+            _has_rv = _fp5.notna() & _fp10.notna()
+            _spread_mult[_has_rv] = (
+                _rcv[_has_rv] * 0.60 + _spread_mult[_has_rv] * 0.40
+            ).clip(lower=0.25, upper=0.55)
+        pool["floor"] = (_proj * (1.0 - _spread_mult)).round(2)
+        pool["ceil"] = (_proj * (1.0 + _spread_mult)).round(2)
+    elif "ceil" not in pool.columns or pool["ceil"].isna().all():
+        import numpy as np
+        _sal = pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0)
+        _sal_k = (_sal / 1000.0).clip(lower=3.0)
+        _spread_mult = (0.65 - _sal_k * 0.03).clip(lower=0.25, upper=0.55)
+        _proj = pd.to_numeric(pool.get("proj", 0), errors="coerce").fillna(0).clip(lower=0)
+        pool["ceil"] = (_proj * (1.0 + _spread_mult)).round(2)
 
     corrections = get_correction_factors(sport="NBA")
     if corrections.get("n_slates", 0) > 0:
@@ -510,6 +568,7 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
             pool["ownership"] = 0.0
 
     matchups = []
+    game_id_map = {}  # team -> game_id; populated by schedule fetch below
     try:
         import requests as _req
         clean_date = slate_date.replace("-", "")
@@ -549,6 +608,63 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
             print(f"[_load_nba_pool] Mapped game_id for {_n_with_gid}/{len(pool)} players ({len(game_id_map)//2} games)")
     except Exception:
         pass
+
+    # ── Fetch betting odds and apply blowout-risk minute adjustments ──
+    try:
+        odds_df = fetch_betting_odds(slate_date, api_key)
+        if not odds_df.empty and "team" in pool.columns:
+            # Build game_spreads dict for apply_blowout_cascade
+            game_spreads = {}
+            for _, row in odds_df.iterrows():
+                spread_val = float(row.get("spread", 0))
+                home = str(row.get("home_team", "")).upper()
+                away = str(row.get("away_team", "")).upper()
+                if not home or not away:
+                    continue
+                # Determine favorite/underdog
+                if spread_val < 0:  # negative = home is favored
+                    fav, dog = home, away
+                else:
+                    fav, dog = away, home
+                gid = game_id_map.get(home, game_id_map.get(away, f"{away}@{home}"))
+                game_spreads[gid] = {
+                    "favorite": fav, "underdog": dog,
+                    "spread": abs(spread_val),
+                    "total": float(row.get("vegas_total", 0)),
+                }
+            if game_spreads:
+                pool, _bo_report = apply_blowout_cascade(pool, game_spreads)
+                _n_adj = int((pool.get("blowout_min_adj", pd.Series(0, index=pool.index)).abs() > 0).sum())
+                if _n_adj:
+                    print(f"[_load_nba_pool] Blowout risk adjusted minutes for {_n_adj} player(s)")
+
+            # Map spread to each player for b2b/spread minute dampening
+            spread_map = {}
+            for _, row in odds_df.iterrows():
+                home = str(row.get("home_team", "")).upper()
+                away = str(row.get("away_team", "")).upper()
+                sp = abs(float(row.get("spread", 0)))
+                spread_map[home] = sp
+                spread_map[away] = sp
+            pool["spread"] = pool["team"].map(spread_map).fillna(0.0)
+    except Exception as exc:
+        print(f"[_load_nba_pool] betting odds / blowout cascade failed (non-fatal): {exc}")
+
+    # ── B2B dampening: players on back-to-backs lose ~7% of minutes ──
+    if "proj_minutes" in pool.columns and "b2b" in pool.columns:
+        b2b_mask = pool["b2b"].fillna(False).astype(bool)
+        if b2b_mask.any():
+            pool.loc[b2b_mask, "proj_minutes"] = (
+                pd.to_numeric(pool.loc[b2b_mask, "proj_minutes"], errors="coerce").fillna(0) * 0.93
+            )
+            print(f"[_load_nba_pool] B2B dampened minutes for {b2b_mask.sum()} player(s)")
+
+    # ── Sim eligibility ──
+    try:
+        from yak_core.sims import compute_sim_eligible
+        pool = compute_sim_eligible(pool)
+    except Exception as exc:
+        print(f"[_load_nba_pool] compute_sim_eligible failed (non-fatal): {exc}")
 
     meta = {
         "sport": "NBA", "site": "DK", "date": slate_date,

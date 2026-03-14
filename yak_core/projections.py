@@ -160,9 +160,11 @@ def proj_model(
     3. **Salary-implied** fallback (``salary * FP_PER_K / 1000``).
        Only used when neither rolling stats nor parquets are available.
 
-    The function also populates ``floor`` and ``ceil`` columns (0.65× and
-    1.45× of proj) when it computes projections from rolling data, giving
-    the archetype system real ceiling/floor signals for the optimizer.
+    The function also populates ``floor`` and ``ceil`` columns using
+    salary-tier-aware spread multipliers (0.25×–0.55× of proj) when it
+    computes projections from rolling data, giving the archetype system
+    real ceiling/floor signals for the optimizer.  Higher-salaried studs
+    get tighter ranges (~0.35×); cheap value plays get wider ones (~0.55×).
 
     Config keys:
       MODEL_HIST_WEIGHT : float, weight on historical avg (default 0.6)
@@ -220,10 +222,27 @@ def proj_model(
         )
         proj_series = proj_series.clip(lower=0)
 
-        # Populate floor / ceil so the archetype system can use them
-        # NBA DFS ceiling games are 2x+ average (boom games, OT, etc.)
-        pool_df["floor"] = (proj_series * 0.55).round(2)
-        pool_df["ceil"]  = (proj_series * 2.00).round(2)
+        # Populate floor / ceil using salary-tier spread multipliers.
+        # Higher-salaried players have tighter ranges (studs are more
+        # predictable), value plays have wider variance.
+        _sal = pd.to_numeric(df.get("salary", pd.Series(0, index=df.index)), errors="coerce").fillna(0)
+        _sal_k = (_sal / 1000.0).clip(lower=3.0)
+        _spread_mult = (0.65 - _sal_k * 0.03).clip(lower=0.25, upper=0.55)
+
+        # Blend with rolling variance when available
+        if "rolling_fp_5" in df.columns and "rolling_fp_10" in df.columns:
+            _fp5 = pd.to_numeric(df["rolling_fp_5"], errors="coerce")
+            _fp10 = pd.to_numeric(df["rolling_fp_10"], errors="coerce")
+            _rmean = ((_fp5.fillna(0) + _fp10.fillna(0)) / 2.0).replace(0, 1)
+            _rdiff = (_fp5.fillna(0) - _fp10.fillna(0)).abs()
+            _rcv = (_rdiff / _rmean).clip(lower=0.05, upper=0.60)
+            _has_rv = _fp5.notna() & _fp10.notna()
+            _spread_mult[_has_rv] = (
+                _rcv[_has_rv] * 0.60 + _spread_mult[_has_rv] * 0.40
+            ).clip(lower=0.25, upper=0.55)
+
+        pool_df["floor"] = (proj_series * (1.0 - _spread_mult)).round(2)
+        pool_df["ceil"]  = (proj_series * (1.0 + _spread_mult)).round(2)
 
         print(f"[proj_model] {_n_with_rolling}/{len(df)} players had Tank01 "
               f"rolling game-log data — projections differentiated from salary")
@@ -389,8 +408,10 @@ def yakos_fp_projection(player_features: dict) -> dict:
             rolling_signal = rolling_weighted / rolling_w_sum
             model_pred = model_pred * 0.4 + rolling_signal * 0.6
         model_pred = max(0.0, model_pred)
-        floor = max(0.0, model_pred * 0.55)
-        ceil = model_pred * 2.00
+        _sal_k = max(salary / 1000.0, 3.0)
+        _sm = max(0.25, min(0.55, 0.65 - _sal_k * 0.03))
+        floor = max(0.0, model_pred * (1.0 - _sm))
+        ceil = model_pred * (1.0 + _sm)
         return {"proj": round(model_pred, 2), "floor": round(floor, 2), "ceil": round(ceil, 2)}
 
     sal_base = salary * DEFAULT_FP_PER_K / 1000.0
@@ -415,8 +436,10 @@ def yakos_fp_projection(player_features: dict) -> dict:
         proj = sal_base
 
     proj = max(0.0, proj)
-    floor = max(0.0, proj * 0.55)
-    ceil = proj * 2.00
+    _sal_k = max(salary / 1000.0, 3.0) if salary > 0 else 5.0
+    _sm = max(0.25, min(0.55, 0.65 - _sal_k * 0.03))
+    floor = max(0.0, proj * (1.0 - _sm))
+    ceil = proj * (1.0 + _sm)
     return {"proj": round(proj, 2), "floor": round(floor, 2), "ceil": round(ceil, 2)}
 
 
