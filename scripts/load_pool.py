@@ -236,6 +236,17 @@ def main(argv: list[str] | None = None) -> pd.DataFrame:
     else:
         pool, meta = _load_pga_pool(slate_date, args.slate)
 
+    # ── Filter OUT / IR / Suspended players ────────────────────────────────
+    _DEFINITE_OUT = {"OUT", "IR", "SUSPENDED"}
+    if "status" in pool.columns:
+        _pre_inj = len(pool)
+        pool = pool[
+            ~pool["status"].fillna("").str.strip().str.upper().isin(_DEFINITE_OUT)
+        ].reset_index(drop=True)
+        _inj_removed = _pre_inj - len(pool)
+        if _inj_removed:
+            print(f"[load_pool] Filtered {_inj_removed} OUT/IR player(s) ({_pre_inj} → {len(pool)})")
+
     # ── Trim obvious filler ────────────────────────────────────────────────
     # DK lists full 17-18 man rosters. Drop deep bench guys nobody would
     # roster — keeps the pool focused on real options.
