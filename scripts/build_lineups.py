@@ -51,7 +51,12 @@ def _build_optimizer_cfg(
         "NUM_LINEUPS": num_lineups or preset.get("default_lineups", 20),
         "SALARY_CAP": preset.get("salary_cap", DK_PGA_SALARY_CAP if is_pga else SALARY_CAP),
         "MAX_EXPOSURE": preset.get("default_max_exposure", 0.35),
-        "MIN_SALARY_USED": preset.get("min_salary", preset.get("min_salary_used", 46000)),
+        # Showdown contests have no salary floor — only a $50K cap.
+        # Fall back to 0 for any showdown preset; classic contests default to 46000.
+        "MIN_SALARY_USED": preset.get("min_salary", preset.get("min_salary_used",
+            0 if (preset.get("slate_type") == "Showdown Captain"
+                  or "showdown" in preset.get("internal_contest", "").lower())
+            else 46000)),
         "CONTEST_TYPE": preset.get("internal_contest", "gpp"),
         "SPORT": sport.upper(),
         "LOCK": lock or [],
@@ -109,6 +114,40 @@ def build_lineups(
 
     print(f"[build_lineups] Loaded {len(pool)} players from {pool_path}")
 
+    # ── Injury monitor / cascade (live pools) ────────────────────────────────
+    # Refresh injury statuses, drop confirmed OUTs, and bump healthy
+    # teammate projections when a key player is ruled out.
+    try:
+        from yak_core.injury_monitor import InjuryMonitorState, apply_monitor_to_pool
+        from yak_core.injury_cascade import apply_injury_cascade
+
+        injury_state = InjuryMonitorState.load(today_str())
+        pool = apply_monitor_to_pool(pool, injury_state)
+
+        # Belt-and-suspenders: drop any OUT/IR that survived the monitor step
+        _OUT_STATUSES = {"OUT", "IR", "SUSPENDED"}
+        if "status" in pool.columns:
+            _pre = len(pool)
+            pool = pool[
+                ~pool["status"].fillna("").str.strip().str.upper().isin(_OUT_STATUSES)
+            ].reset_index(drop=True)
+            _dropped = _pre - len(pool)
+            if _dropped:
+                print(f"[build_lineups] Dropped {_dropped} OUT/IR player(s) via injury monitor")
+
+        # Cascade: bump healthy teammate projections
+        if "proj_minutes" in pool.columns or "minutes" in pool.columns:
+            pool, cascade_report = apply_injury_cascade(pool)
+            if cascade_report:
+                print(
+                    f"[build_lineups] Injury cascade applied: "
+                    f"{len(cascade_report)} key injury/ies redistributed"
+                )
+    except FileNotFoundError:
+        pass  # No monitor state on disk yet — first run of the day
+    except Exception as exc:
+        print(f"[build_lineups] WARNING: injury monitor step failed: {exc}")
+
     # Ensure valid ownership data before building lineups
     pool = ensure_ownership(pool, sport=sport)
 
@@ -135,7 +174,6 @@ def build_lineups(
 
     # Merge lock/exclude from edge state fade list (CLI flags take priority)
     if not exclude and edge_state.get("fade_names"):
-        # Don't auto-exclude fades — just note them
         n_fades = len(edge_state.get("fade_names", []))
         if n_fades:
             print(f"[build_lineups] Note: {n_fades} fade candidates in edge state (not auto-excluded)")
