@@ -406,15 +406,19 @@ def build_multiple_lineups_with_exposure(
         # v5/H5_ForcedDiverse over-penalized ownership (-own*15) causing
         # infeasibility on small slates and systematic avoidance of smash
         # candidates who happened to be popular.
-        # gpp_score = proj*0.35 + ceil*0.55 - own*5
+        # gpp_score = proj*GPP_PROJ_WEIGHT + ceil*GPP_CEIL_WEIGHT + own*GPP_OWN_WEIGHT
+        # Defaults match v6 formula: proj*0.35 + ceil*0.55 - own*5
+        gpp_proj_weight = float(cfg.get("GPP_PROJ_WEIGHT", 0.35))
+        gpp_ceil_weight = float(cfg.get("GPP_CEIL_WEIGHT", 0.55))
+        gpp_own_weight  = float(cfg.get("GPP_OWN_WEIGHT", -5.0))
         for p in players:
             proj  = float(p.get("proj", 0))
             ceil_ = float(p.get("ceil", p.get("proj", 0)))
             own   = float(p.get("ownership", p.get("own_proj", 0.5)))
             p["_gpp_score"] = (
-                proj * 0.35
-                + ceil_ * 0.55
-                - own * 5.0
+                proj * gpp_proj_weight
+                + ceil_ * gpp_ceil_weight
+                + own * gpp_own_weight
             )
     elif is_showdown_classic:
         # Showdown formula (single-round, no captain): ceiling-heavy with
