@@ -14,7 +14,7 @@ import pandas as pd
 import streamlit as st
 
 
-# ── Styled card CSS ───────────────────────────────────────────────────────
+# ── Styled card CSS ─────────────────────────────────────────────────────────
 _CARD_CSS = """
 <style>
 .edge-box {
@@ -72,7 +72,7 @@ _CARD_CSS = """
 </style>
 """
 
-# ── Box colors + emojis ──────────────────────────────────────────────────
+# ── Box colors + emojis ──────────────────────────────────────────────────────
 _BOX_CONFIG = {
     "core_plays": {"title": "Core Plays", "emoji": "🎯", "color": "#2196F3"},
     "leverage_plays": {"title": "Leverage Plays", "emoji": "💎", "color": "#FF9800"},
@@ -103,14 +103,14 @@ def _render_player_card_html(player: Dict[str, Any], is_pga: bool) -> str:
         wave = player.get("wave", "")
         teetime = player.get("r1_teetime", "")
         if wave == "Early":
-            wave_html = f'<span class="wave-badge wave-early">☀️ Early{" · " + teetime if teetime else ""}</span>'
+            wave_html = f'<span class="wave-badge wave-early">☀️ Early{". " + teetime if teetime else ""}</span>'
         elif wave == "Late":
-            wave_html = f'<span class="wave-badge wave-late">🌙 Late{" · " + teetime if teetime else ""}</span>'
+            wave_html = f'<span class="wave-badge wave-late">🌙 Late{". " + teetime if teetime else ""}</span>'
 
     return (
         f'<div class="player-card">'
         f'<div class="name">{name}{wave_html}</div>'
-        f'<div class="stats">{" · ".join(stats_parts)}</div>'
+        f'<div class="stats">{" . ".join(stats_parts)}</div>'
         f'</div>'
     )
 
@@ -267,9 +267,9 @@ def render_edge_tab(sport: str) -> None:
                     continue
                 for idx in sorted(ldf["lineup_index"].unique()):
                     lu = ldf[ldf["lineup_index"] == idx]
-                    total_sal = int(pd.to_numeric(lu.get("salary", 0), errors="coerce").fillna(0).sum())
-                    total_proj = float(pd.to_numeric(lu.get("proj", 0), errors="coerce").fillna(0).sum())
-                    total_ceil = float(pd.to_numeric(lu.get("ceil", 0), errors="coerce").fillna(0).sum())
+                    total_sal = int(pd.to_numeric(lu["salary"], errors="coerce").fillna(0).sum()) if "salary" in lu.columns else 0
+                    total_proj = float(pd.to_numeric(lu["proj"], errors="coerce").fillna(0).sum()) if "proj" in lu.columns else 0.0
+                    total_ceil = float(pd.to_numeric(lu["ceil"], errors="coerce").fillna(0).sum()) if "ceil" in lu.columns else 0.0
                     ceil_part = f" · {total_ceil:.1f} ceil" if total_ceil > 0 else ""
                     st.markdown(f"**Lineup {idx + 1}** — ${total_sal:,} sal · {total_proj:.1f} proj{ceil_part}")
                     display_cols = ["slot", "player_name", "pos", "salary", "proj", "ceil"]
