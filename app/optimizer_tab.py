@@ -199,6 +199,18 @@ def render_optimizer_tab(sport: str) -> None:
         if "player_id" not in build_pool.columns:
             build_pool["player_id"] = build_pool["player_name"].str.lower().str.replace(" ", "_")
 
+        # PGA: live re-check for withdrawals (same as Lab _build_lineups)
+        if is_pga:
+            try:
+                from app.lab_tab import _recheck_pga_withdrawals
+                _before_wd = len(build_pool)
+                build_pool = _recheck_pga_withdrawals(build_pool)
+                _after_wd = len(build_pool)
+                if _after_wd < _before_wd:
+                    st.info(f"Removed {_before_wd - _after_wd} withdrawn player(s) from pool.")
+            except Exception as _wd_err:
+                print(f"[optimizer] PGA withdrawal re-check failed (non-fatal): {_wd_err}")
+
         # NBA Showdown: filter pool to the selected 2-team matchup BEFORE prepare_pool
         if is_nba_showdown and showdown_teams:
             build_pool = build_pool[build_pool["team"].isin(showdown_teams)].reset_index(drop=True)
