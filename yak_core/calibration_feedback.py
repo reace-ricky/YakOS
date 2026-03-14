@@ -266,6 +266,19 @@ def record_slate_errors(
         "by_salary_tier": tier_errors,
     }
 
+    # ── Guard: reject obviously corrupted entries ────────────────────────
+    # Historical replay can produce garbage when Tank01 returns 0 for proj
+    # on past slates.  Symptoms: MAE > 15, NaN correlation, bias ≈ +22.
+    _corr = overall.get("correlation", 0)
+    _mae  = overall.get("mae", 0)
+    if (_mae is not None and _mae > 15) or (isinstance(_corr, float) and np.isnan(_corr)):
+        return {
+            "error": (
+                f"Rejected slate {slate_date}: implausible quality "
+                f"(MAE={_mae}, corr={_corr}). Likely bad proj data."
+            )
+        }
+
     # Load existing history and append/replace
     history = _load_history(store, sport=sport)
     history[slate_date] = slate_record
