@@ -732,18 +732,35 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
     _value = _safe_col(df, "value")
     sal_med = float(_sal.median()) if len(_sal) > 0 else 7000.0
     own_med = float(_own.median()) if len(_own) > 0 else 15.0
+
+    # ── Pool-relative percentile thresholds ──
+    # Edge scores are always 0-1 (all components normalised), so absolute
+    # thresholds like "< 0" never fire.  Use percentile cutoffs instead.
+    _edge_p20 = float(np.percentile(_edge.dropna(), 20)) if len(_edge.dropna()) > 2 else 0.0
+    _edge_p50 = float(np.percentile(_edge.dropna(), 50)) if len(_edge.dropna()) > 2 else 0.5
+
     _pick_cols = ["player_name", "salary", "proj", _own_col, "edge", "value"]
-    core = df[(_sal >= sal_med) & (_own >= own_med) & (_edge > 0)][_pick_cols].rename(columns={_own_col: "ownership"})
-    leverage = df[(_sal >= sal_med) & (_own < own_med) & (_edge > 0)][_pick_cols].rename(columns={_own_col: "ownership"})
+    # Core: premium salary, high ownership consensus, above-median edge
+    core = df[(_sal >= sal_med) & (_own >= own_med) & (_edge >= _edge_p50)][_pick_cols].rename(columns={_own_col: "ownership"})
+    # Leverage: premium salary, under-owned, above-median edge (market misprice)
+    leverage = df[(_sal >= sal_med) & (_own < own_med) & (_edge >= _edge_p50)][_pick_cols].rename(columns={_own_col: "ownership"})
+    # Value: cheaper players with decent pts/$1K
     value = df[(_sal < sal_med) & (_value > 0)][_pick_cols].rename(columns={_own_col: "ownership"})
-    fade = df[(_edge < 0) | ((_own >= own_med * 1.5) & (_edge <= 0))][_pick_cols].rename(columns={_own_col: "ownership"})
+    # Fade: bottom 20% edge, OR heavily owned but below-median edge (chalk traps)
+    fade = df[
+        (_edge <= _edge_p20) | ((_own >= own_med * 1.5) & (_edge < _edge_p50))
+    ][_pick_cols].rename(columns={_own_col: "ownership"})
+
     def _to_records(frame, n=5):
         return frame.sort_values("edge", ascending=False).head(n).to_dict(orient="records")
+    def _to_records_asc(frame, n=5):
+        """Fade candidates: worst edge first."""
+        return frame.sort_values("edge", ascending=True).head(n).to_dict(orient="records")
     return {
         "core_plays": _to_records(core, 5),
         "leverage_plays": _to_records(leverage, 5),
         "value_plays": _to_records(value, 5),
-        "fade_candidates": _to_records(fade, 5),
+        "fade_candidates": _to_records_asc(fade, 5),
     }
 
 
