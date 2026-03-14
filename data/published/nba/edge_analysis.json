@@ -1,10 +1,10 @@
 {
   "bullets": [
     "Core anchors: Anthony Edwards, Cade Cunningham, Deni Avdija",
-    "Leverage plays: Will Richard, Mikal Bridges",
+    "Leverage plays: Will Richard, Bennedict Mathurin",
     "Value targets: Matisse Thybulle, Jose Alvarado"
   ],
-  "recommendation": "5 core plays anchored at $8,800\u2013$10,900. 5 value plays averaging 8.1 pts/$1K. 5 leverage plays at 2\u20133% ownership.",
+  "recommendation": "5 core plays anchored at $8,800\u2013$10,900. 5 value plays averaging 8.1 pts/$1K. 5 leverage plays at 3\u20133% ownership.",
   "core_plays": [
     {
       "player_name": "Anthony Edwards",
@@ -57,6 +57,14 @@
       "value": 5.928476161556693
     },
     {
+      "player_name": "Bennedict Mathurin",
+      "salary": 6400,
+      "proj": 32.5473466263234,
+      "ownership": 2.88,
+      "edge": 0.4432772738532645,
+      "value": 5.085522910363031
+    },
+    {
       "player_name": "Mikal Bridges",
       "salary": 6200,
       "proj": 31.81464974738093,
@@ -79,14 +87,6 @@
       "ownership": 2.7,
       "edge": 0.44026661014458296,
       "value": 5.120934787543218
-    },
-    {
-      "player_name": "Micah Potter",
-      "salary": 4700,
-      "proj": 26.558404695343928,
-      "ownership": 2.48,
-      "edge": 0.43965742288226983,
-      "value": 5.6507244032646655
     }
   ],
   "value_plays": [
@@ -107,14 +107,6 @@
       "value": 8.276412172568422
     },
     {
-      "player_name": "Jordan Poole",
-      "salary": 3700,
-      "proj": 28.043825051609815,
-      "ownership": 4.26,
-      "edge": 0.4920719529859361,
-      "value": 7.57941217611076
-    },
-    {
       "player_name": "Oscar Tshiebwe",
       "salary": 3600,
       "proj": 27.545120796474286,
@@ -129,6 +121,14 @@
       "ownership": 4.31,
       "edge": 0.4899544303577319,
       "value": 8.148398221338308
+    },
+    {
+      "player_name": "Caleb Martin",
+      "salary": 3400,
+      "proj": 26.601872135808637,
+      "ownership": 3.99,
+      "edge": 0.4895561514338533,
+      "value": 7.824080039943717
     }
   ],
   "fade_candidates": [],
