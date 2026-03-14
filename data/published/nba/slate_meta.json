@@ -1,0 +1,69 @@
+{
+  "sport": "NBA",
+  "site": "DK",
+  "date": "2026-03-13",
+  "salary_cap": 50000,
+  "roster_slots": [
+    "PG",
+    "SG",
+    "SF",
+    "PF",
+    "C",
+    "G",
+    "F",
+    "UTIL"
+  ],
+  "lineup_size": 8,
+  "pool_size": 279,
+  "proj_source": "salary_implied",
+  "matchups": [
+    {
+      "away": "CLE",
+      "home": "DAL",
+      "game_id": "20260313_CLE@DAL",
+      "label": "CLE @ DAL"
+    },
+    {
+      "away": "MIN",
+      "home": "GS",
+      "game_id": "20260313_MIN@GS",
+      "label": "MIN @ GS"
+    },
+    {
+      "away": "NY",
+      "home": "IND",
+      "game_id": "20260313_NY@IND",
+      "label": "NY @ IND"
+    },
+    {
+      "away": "PHO",
+      "home": "TOR",
+      "game_id": "20260313_PHO@TOR",
+      "label": "PHO @ TOR"
+    },
+    {
+      "away": "CHI",
+      "home": "LAC",
+      "game_id": "20260313_CHI@LAC",
+      "label": "CHI @ LAC"
+    },
+    {
+      "away": "UTA",
+      "home": "POR",
+      "game_id": "20260313_UTA@POR",
+      "label": "UTA @ POR"
+    },
+    {
+      "away": "NO",
+      "home": "HOU",
+      "game_id": "20260313_NO@HOU",
+      "label": "NO @ HOU"
+    },
+    {
+      "away": "MEM",
+      "home": "DET",
+      "game_id": "20260313_MEM@DET",
+      "label": "MEM @ DET"
+    }
+  ]
+}
