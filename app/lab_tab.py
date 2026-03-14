@@ -490,10 +490,11 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
         print(f"[_load_nba_pool] manual injury overrides failed (non-fatal): {exc}")
 
     # floor/ceil: proj_model sets these from rolling data; only fill gaps
+    # NBA DFS ceiling games are 2x+ average (boom games, OT, etc.)
     if "floor" not in pool.columns or pool["floor"].isna().all():
-        pool["floor"] = (pool["proj"] * 0.60).round(2)
+        pool["floor"] = (pool["proj"] * 0.55).round(2)
     if "ceil" not in pool.columns or pool["ceil"].isna().all():
-        pool["ceil"] = (pool["proj"] * 1.55).round(2)
+        pool["ceil"] = (pool["proj"] * 2.00).round(2)
 
     corrections = get_correction_factors(sport="NBA")
     if corrections.get("n_slates", 0) > 0:

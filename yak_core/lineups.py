@@ -169,10 +169,11 @@ def _add_scores(
     value_weight = float(cfg.get("VALUE_WEIGHT", 0.0))
 
     # ── gpp_score = proj*GPP_PROJ_WEIGHT + ceil*GPP_CEIL_WEIGHT + own*GPP_OWN_WEIGHT
-    # Defaults match v6 formula: proj*0.35 + ceil*0.55 - own*5
-    gpp_proj_weight = float(cfg.get("GPP_PROJ_WEIGHT", 0.35))
-    gpp_ceil_weight = float(cfg.get("GPP_CEIL_WEIGHT", 0.55))
-    gpp_own_weight  = float(cfg.get("GPP_OWN_WEIGHT", -5.0))
+    # v7: ceil=2.0x proj, so ceiling term now adds real differentiation.
+    # Shifted to 25/65 split to chase ceilings harder in GPP.
+    gpp_proj_weight = float(cfg.get("GPP_PROJ_WEIGHT", 0.25))
+    gpp_ceil_weight = float(cfg.get("GPP_CEIL_WEIGHT", 0.65))
+    gpp_own_weight  = float(cfg.get("GPP_OWN_WEIGHT", -3.0))
 
     ceil_col = df["ceil"] if "ceil" in df.columns else df["proj"]
     own_col  = df["own_pct"]
@@ -504,20 +505,34 @@ def _build_one_lineup(
                         >= min_team_stack * t_vars[t]
                     )
 
-        # Bring-back: require 1 player from opposing team in stacked game
+        # Bring-back: if we stack 2+ players from one team in a game,
+        # require at least 1 from the opposing team (game correlation).
         force_bring_back = gc.get("force_bring_back", False)
         if force_bring_back and "game_id" in players[0] and "team" in players[0]:
-            # For each game, require at least 1 player from each team
             game_ids = list({p["game_id"] for p in players if p.get("game_id")})
             for gid in game_ids:
                 game_players = [i for i in range(n) if players[i].get("game_id") == gid]
                 if len(game_players) >= 2:
                     teams_in_game = list({players[i]["team"] for i in game_players})
                     if len(teams_in_game) == 2:
-                        # Soft bring-back: if any player from team A is selected,
-                        # require at least 1 from team B
-                        # Implement as: min 1 from team B if >= 2 from team A
-                        pass  # Simplified — full bring-back implemented below
+                        team_a, team_b = teams_in_game
+                        a_idxs = [i for i in game_players if players[i]["team"] == team_a]
+                        b_idxs = [i for i in game_players if players[i]["team"] == team_b]
+                        # Binary: bb_a = 1 if >=2 from team_a selected
+                        bb_a = pulp.LpVariable(f"bb_a_{gid}", cat="Binary")
+                        bb_b = pulp.LpVariable(f"bb_b_{gid}", cat="Binary")
+                        a_count = pulp.lpSum(x[(i, s)] for i in a_idxs for s in slots)
+                        b_count = pulp.lpSum(x[(i, s)] for i in b_idxs for s in slots)
+                        # bb_a=1 when a_count >= 2  (big-M: M=8)
+                        prob += a_count >= 2 * bb_a
+                        prob += a_count <= 1 + 7 * bb_a
+                        # bb_b=1 when b_count >= 2
+                        prob += b_count >= 2 * bb_b
+                        prob += b_count <= 1 + 7 * bb_b
+                        # If stacking team_a (2+), require >=1 from team_b
+                        prob += b_count >= bb_a
+                        # If stacking team_b (2+), require >=1 from team_a
+                        prob += a_count >= bb_b
 
     # Tier constraints from edge state
     tc = tier_constraints or {}
@@ -657,10 +672,26 @@ def build_multiple_lineups_with_exposure(
     # Pair-appearances tracking matrix
     pair_appearances: Dict[tuple, int] = {}
 
+    # ── Per-solve projection randomization for GPP/MME ──────────────────────
+    # Re-seed projections each solve so the optimizer explores different
+    # player combos.  Without this, exposure limits are the ONLY source of
+    # lineup diversity and all lineups converge to the same core.
+    rng = np.random.default_rng(seed=42)
+
     lineups = []
     for lineup_num in range(num_lineups):
         if progress_callback:
             progress_callback(lineup_num, num_lineups)
+
+        # Randomize scores for GPP/MME — each solve sees a different surface
+        if is_gpp and num_lineups > 1:
+            noise = rng.normal(1.0, 0.10, size=n)  # ±10% noise
+            for i in range(n):
+                base_score = players[i].get(score_col, players[i].get("proj", 0))
+                players[i]["_solve_score"] = base_score * noise[i]
+            _solve_score_col = "_solve_score"
+        else:
+            _solve_score_col = score_col
 
         gpp_constraints_d = None
         if is_gpp:
@@ -699,7 +730,7 @@ def build_multiple_lineups_with_exposure(
             salary_cap=salary_cap,
             min_salary=min_salary,
             max_appearances=remaining,
-            score_col=score_col,
+            score_col=_solve_score_col,
             pos_caps=pos_caps,
             solver_time_limit=solver_time_limit,
             gpp_constraints=gpp_constraints_d,
@@ -717,7 +748,7 @@ def build_multiple_lineups_with_exposure(
                 salary_cap=salary_cap,
                 min_salary=min_salary,
                 max_appearances=remaining,
-                score_col=score_col,
+                score_col=_solve_score_col,
                 pos_caps=pos_caps,
                 solver_time_limit=solver_time_limit,
                 gpp_constraints=None,

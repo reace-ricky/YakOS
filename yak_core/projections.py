@@ -221,8 +221,9 @@ def proj_model(
         proj_series = proj_series.clip(lower=0)
 
         # Populate floor / ceil so the archetype system can use them
-        pool_df["floor"] = (proj_series * 0.65).round(2)
-        pool_df["ceil"]  = (proj_series * 1.45).round(2)
+        # NBA DFS ceiling games are 2x+ average (boom games, OT, etc.)
+        pool_df["floor"] = (proj_series * 0.55).round(2)
+        pool_df["ceil"]  = (proj_series * 2.00).round(2)
 
         print(f"[proj_model] {_n_with_rolling}/{len(df)} players had Tank01 "
               f"rolling game-log data — projections differentiated from salary")
@@ -388,8 +389,8 @@ def yakos_fp_projection(player_features: dict) -> dict:
             rolling_signal = rolling_weighted / rolling_w_sum
             model_pred = model_pred * 0.4 + rolling_signal * 0.6
         model_pred = max(0.0, model_pred)
-        floor = max(0.0, model_pred * 0.65)
-        ceil = model_pred * 1.45
+        floor = max(0.0, model_pred * 0.55)
+        ceil = model_pred * 2.00
         return {"proj": round(model_pred, 2), "floor": round(floor, 2), "ceil": round(ceil, 2)}
 
     sal_base = salary * DEFAULT_FP_PER_K / 1000.0
@@ -414,8 +415,8 @@ def yakos_fp_projection(player_features: dict) -> dict:
         proj = sal_base
 
     proj = max(0.0, proj)
-    floor = max(0.0, proj * 0.65)
-    ceil = proj * 1.45
+    floor = max(0.0, proj * 0.55)
+    ceil = proj * 2.00
     return {"proj": round(proj, 2), "floor": round(floor, 2), "ceil": round(ceil, 2)}
 
 

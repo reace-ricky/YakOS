@@ -95,7 +95,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "MIN_GAME_STACK": 0,
     "LOGIC_PROFILE": "ours",
     "BAND": "core",
-    "MIN_SALARY_USED": 46000,
+    "MIN_SALARY_USED": 49000,
     # Projection knobs
     "PROJ_SOURCE": "salary_implied", # "parquet", "salary_implied", "regression", "blend"
     "FP_PER_K": 4.0,             # FP per $1K salary (used by salary_implied)
@@ -166,7 +166,7 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "correlation_mode": "stack",
         "default_lineups": 150,
         "default_max_exposure": 0.35,
-        "min_salary": 46000,
+        "min_salary": 49000,
         # Pool sizing
         "pool_size_min": 40,
         "pool_size_max": 70,
@@ -206,7 +206,7 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "correlation_mode": "stack",
         "default_lineups": 20,
         "default_max_exposure": 0.5,
-        "min_salary": 46000,
+        "min_salary": 49000,
         # Pool sizing
         "pool_size_min": 20,
         "pool_size_max": 40,
@@ -246,7 +246,7 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "correlation_mode": "stack",
         "default_lineups": 20,
         "default_max_exposure": 0.5,
-        "min_salary": 46000,
+        "min_salary": 49000,
         # Pool sizing
         "pool_size_min": 15,
         "pool_size_max": 35,
