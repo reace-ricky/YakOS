@@ -51,7 +51,12 @@ def _build_optimizer_cfg(
         "NUM_LINEUPS": num_lineups or preset.get("default_lineups", 20),
         "SALARY_CAP": preset.get("salary_cap", DK_PGA_SALARY_CAP if is_pga else SALARY_CAP),
         "MAX_EXPOSURE": preset.get("default_max_exposure", 0.35),
-        "MIN_SALARY_USED": preset.get("min_salary", preset.get("min_salary_used", 46000)),
+        # Showdown contests have no salary floor — only a $50K cap.
+        # Fall back to 0 for any showdown preset; classic contests default to 46000.
+        "MIN_SALARY_USED": preset.get("min_salary", preset.get("min_salary_used",
+            0 if (preset.get("slate_type") == "Showdown Captain"
+                  or "showdown" in preset.get("internal_contest", "").lower())
+            else 46000)),
         "CONTEST_TYPE": preset.get("internal_contest", "gpp"),
         "SPORT": sport.upper(),
         "LOCK": lock or [],
