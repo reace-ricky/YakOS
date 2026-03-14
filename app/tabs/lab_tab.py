@@ -1,0 +1,1513 @@
+"""Tab 3: The Lab (admin only).
+
+Provides controls to:
+  1. Load Pool (NBA via Tank01 + optional RG CSV, PGA via DataGolf)
+  2. Run Edge Analysis (compute_edge_metrics + classify)
+  3. Build & Publish (build lineups + sync_feedback_to_github)
+
+All heavy logic is delegated to yak_core functions — NOT subprocess calls.
+"""
+from __future__ import annotations
+
+import json
+import os
+import tempfile
+from datetime import date, datetime, timezone
+from pathlib import Path
+from typing import Any, Dict
+
+import pandas as pd
+import streamlit as st
+
+
+def render_lab_tab(sport: str) -> None:
+    from app.data_loader import published_dir
+
+    is_pga = sport.upper() == "PGA"
+    out_dir = published_dir(sport)
+    today_str = date.today().isoformat()
+
+    st.markdown("### Load Pool")
+
+    if is_pga:
+        api_key = os.environ.get("DATAGOLF_API_KEY") or _get_secret("DATAGOLF_API_KEY")
+        if not api_key:
+            st.error("Missing DATAGOLF_API_KEY. Set it in Streamlit secrets or environment.")
+            return
+    else:
+        api_key = (
+            os.environ.get("RAPIDAPI_KEY")
+            or os.environ.get("TANK01_RAPIDAPI_KEY")
+            or _get_secret("RAPIDAPI_KEY")
+            or _get_secret("TANK01_RAPIDAPI_KEY")
+        )
+        if not api_key:
+            st.error("Missing RAPIDAPI_KEY. Set it in Streamlit secrets or environment.")
+            return
+
+    slate_date = st.text_input("Slate date", value=today_str, key=f"lab_date_{sport}")
+
+    rg_file = None
+    if not is_pga:
+        rg_file = st.file_uploader("RotoGrinders CSV (optional)", type=["csv"], key=f"lab_rg_{sport}")
+
+    pool_path = out_dir / "slate_pool.parquet"
+    _meta_path_check = out_dir / "slate_meta.json"
+    _pool_stale = False
+    if _meta_path_check.exists():
+        _chk_meta = json.loads(_meta_path_check.read_text())
+        if _chk_meta.get("date") != slate_date:
+            _pool_stale = True
+            st.warning(
+                f"Pool is for {_chk_meta.get('date', '?')} "
+                f"({_chk_meta.get('slate', '?')} slate). "
+                f"Click **Load Pool** to refresh for {slate_date}."
+            )
+
+    if st.button("Load Pool", key=f"lab_load_{sport}"):
+        pga_slate = "showdown"
+        with st.spinner("Loading pool..."):
+            try:
+                if is_pga:
+                    pool, meta = _load_pga_pool(api_key, slate_date, pga_slate)
+                else:
+                    pool, meta = _load_nba_pool(api_key, slate_date)
+                    if rg_file is not None:
+                        pool = _merge_rg_csv(pool, rg_file)
+                        meta["proj_source"] = "rotogrinders+tank01"
+
+                try:
+                    from yak_core.sim_sandbox import score_player_breakout
+                    pool["breakout_score"] = score_player_breakout(pool)
+                except Exception:
+                    pool["breakout_score"] = 0.0
+
+                pool.to_parquet(str(out_dir / "slate_pool.parquet"), index=False)
+                with open(out_dir / "slate_meta.json", "w") as f:
+                    json.dump(meta, f, indent=2, default=str)
+
+                st.success(f"Loaded {len(pool)} players \u2192 {out_dir}")
+            except Exception as e:
+                st.error(f"Load pool error: {e}")
+                return
+
+    if pool_path.exists():
+        pool = pd.read_parquet(pool_path)
+
+        preview_cols = ["player_name", "pos", "team", "salary", "proj", "floor", "ceil", "ownership", "breakout_score"]
+        if is_pga:
+            preview_cols += ["wave", "r1_teetime"]
+            if "early_late_wave" in pool.columns and "wave" not in pool.columns:
+                pool["wave"] = pool["early_late_wave"].map(
+                    {0: "Early", 1: "Late", "Early": "Early", "Late": "Late"}
+                ).fillna("")
+        if "r1_teetime" in pool.columns:
+            def _preview_teetime(v):
+                if isinstance(v, dict):
+                    return v.get("teetime", v.get("1", v.get(1, next(iter(v.values()), ""))))
+                try:
+                    if pd.isna(v):
+                        return ""
+                except (ValueError, TypeError):
+                    pass
+                return str(v)
+            pool["r1_teetime"] = pool["r1_teetime"].apply(_preview_teetime)
+        avail = [c for c in preview_cols if c in pool.columns]
+        display_pool = pool[avail].copy().sort_values("salary", ascending=False).reset_index(drop=True)
+
+        _excl_file = out_dir / "excluded_players.json"
+        _saved_excl: list[str] = []
+        if _excl_file.exists():
+            _saved_excl = json.loads(_excl_file.read_text())
+
+        if is_pga:
+            pool_names = set(display_pool["player_name"])
+            _excl_in_pool = [n for n in _saved_excl if n in pool_names]
+            _excl_not_in_pool = [n for n in _saved_excl if n not in pool_names]
+
+            display_pool.insert(0, "exclude", display_pool["player_name"].isin(_saved_excl))
+            st.markdown(f"**Current pool:** {len(display_pool)} players \u2014 check to exclude")
+            edited = st.data_editor(
+                display_pool,
+                use_container_width=True,
+                hide_index=True,
+                height=500,
+                column_config={
+                    "exclude": st.column_config.CheckboxColumn("Exclude", default=False),
+                },
+                disabled=[c for c in avail],
+                key=f"lab_pool_editor_{sport}",
+            )
+            _editor_excl = edited[edited["exclude"]]["player_name"].tolist()
+            new_excl = list(set(_editor_excl + _excl_not_in_pool))
+            if set(new_excl) != set(_saved_excl):
+                _excl_file.write_text(json.dumps(new_excl))
+            n_excl = len(new_excl)
+            if n_excl > 0:
+                st.caption(f"\u274c {n_excl} player(s) excluded from builds")
+            if _excl_not_in_pool:
+                st.caption(f"\u2139\ufe0f Also excluded (not in this pool): {', '.join(_excl_not_in_pool)}")
+        else:
+            st.markdown(f"**Current pool:** {len(display_pool)} players")
+            st.dataframe(display_pool, use_container_width=True, hide_index=True, height=400)
+
+        sal_col = pd.to_numeric(pool.get("salary", pd.Series(dtype=float)), errors="coerce")
+        proj_col = pd.to_numeric(pool.get("proj", pd.Series(dtype=float)), errors="coerce")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("Players", len(pool))
+        with c2:
+            st.metric("Salary range", f"${int(sal_col.min()):,} \u2013 ${int(sal_col.max()):,}")
+        with c3:
+            st.metric("Proj range", f"{proj_col.min():.1f} \u2013 {proj_col.max():.1f}")
+
+    st.markdown("---")
+    st.markdown("### Run Edge Analysis")
+
+    if st.button("Run Edge Analysis", key=f"lab_edge_{sport}"):
+        if not pool_path.exists():
+            st.warning("Load a pool first.")
+        else:
+            with st.spinner("Computing edge metrics..."):
+                try:
+                    edge_df, edge_analysis, edge_state = _run_edge(sport, slate_date, out_dir)
+                    st.success(f"Edge analysis complete \u2014 {len(edge_df)} players scored")
+
+                    for key, label in [
+                        ("core_plays", "Core"), ("leverage_plays", "Leverage"),
+                        ("value_plays", "Value"), ("fade_candidates", "Fades"),
+                    ]:
+                        players = edge_analysis.get(key, [])
+                        names = ", ".join(p["player_name"] for p in players[:5])
+                        st.markdown(f"**{label} ({len(players)}):** {names}")
+
+                    for b in edge_analysis.get("bullets", []):
+                        st.markdown(f"- {b}")
+
+                except Exception as e:
+                    st.error(f"Edge analysis error: {e}")
+
+    st.markdown("---")
+    st.markdown("### Build & Publish")
+
+    from yak_core.config import CONTEST_PRESETS
+
+    if is_pga:
+        try:
+            _parsed_date = datetime.strptime(slate_date, "%Y-%m-%d")
+            is_thursday = _parsed_date.weekday() == 3
+        except (ValueError, TypeError):
+            is_thursday = False
+        if is_thursday:
+            contest_options = ["PGA GPP", "PGA Cash", "PGA Showdown"]
+        else:
+            contest_options = ["PGA Cash", "PGA Showdown"]
+    else:
+        contest_options = ["GPP Main", "GPP Early", "Showdown", "Cash Main"]
+    contest_options = [c for c in contest_options if c in CONTEST_PRESETS]
+
+    _contest_display = {
+        "PGA GPP": "PGA GPP (Full Tournament)",
+    }
+
+    col_c, col_n = st.columns(2)
+    with col_c:
+        contest_label = st.selectbox(
+            "Contest type", contest_options,
+            format_func=lambda x: _contest_display.get(x, x),
+            key=f"lab_contest_{sport}",
+        )
+    with col_n:
+        preset = CONTEST_PRESETS.get(contest_label, {})
+        num_lineups = st.number_input("Lineups", min_value=1, max_value=150, value=1, key=f"lab_nlu_{sport}")
+
+    if is_pga and contest_label == "PGA GPP":
+        st.info("Full tournament lineup (4 rounds). Projections use multi-day model.")
+
+    showdown_teams: list[str] = []
+    is_nba_showdown = (
+        not is_pga
+        and (preset.get("slate_type") == "Showdown Captain" or "showdown" in contest_label.lower())
+    )
+    is_nba_matchup_contest = (
+        not is_pga
+        and (is_nba_showdown or "cash" in contest_label.lower())
+    )
+    if is_nba_matchup_contest:
+        _meta_path = out_dir / "slate_meta.json"
+        _sd_meta = json.loads(_meta_path.read_text()) if _meta_path.exists() else {}
+        matchups = _sd_meta.get("matchups", [])
+        if matchups:
+            matchup_options = [m["label"] for m in matchups]
+            if not is_nba_showdown:
+                matchup_options = ["Full Slate"] + matchup_options
+            selected_matchup = st.selectbox(
+                "Matchup", options=matchup_options, key=f"lab_sd_matchup_{sport}"
+            )
+            if selected_matchup != "Full Slate":
+                sel = next((m for m in matchups if m["label"] == selected_matchup), None)
+                if sel:
+                    showdown_teams = [sel["away"], sel["home"]]
+        else:
+            st.warning("No matchup data found. Re-run Load Pool to fetch the schedule.")
+
+    _pool_names_sorted: list[str] = []
+    if pool_path.exists():
+        try:
+            _pool_for_names = pd.read_parquet(pool_path, columns=["player_name", "salary"])
+            _pool_for_names = _pool_for_names.sort_values("salary", ascending=False)
+            _pool_names_sorted = _pool_for_names["player_name"].dropna().tolist()
+        except Exception:
+            pass
+
+    _excl_file_build = out_dir / "excluded_players.json"
+    _saved_excl_build: list[str] = []
+    if _excl_file_build.exists():
+        _saved_excl_build = json.loads(_excl_file_build.read_text())
+    _default_excl = [n for n in _saved_excl_build if n in _pool_names_sorted]
+
+    col_lock, col_excl = st.columns(2)
+    with col_lock:
+        lock_list = st.multiselect("Lock players", options=_pool_names_sorted, default=[], key=f"lab_lock_{sport}")
+    with col_excl:
+        exclude_list = st.multiselect("Exclude players", options=_pool_names_sorted, default=_default_excl, key=f"lab_excl_{sport}")
+
+    if set(exclude_list) != set(_saved_excl_build):
+        _excl_file_build.write_text(json.dumps(exclude_list))
+
+    if st.button("Build Lineups", key=f"lab_build_{sport}"):
+        if is_nba_showdown and len(showdown_teams) != 2:
+            st.warning("Pick exactly 2 teams for Showdown.")
+        else:
+            _needs_load = not pool_path.exists()
+            if not _needs_load:
+                _meta_path = out_dir / "slate_meta.json"
+                if _meta_path.exists():
+                    _cur_meta = json.loads(_meta_path.read_text())
+                    if _cur_meta.get("date") != slate_date:
+                        _needs_load = True
+                    if is_pga:
+                        _needed_slate = preset.get("projection_slate", "showdown")
+                        if _cur_meta.get("slate") != _needed_slate:
+                            _needs_load = True
+
+            if _needs_load:
+                with st.spinner("Loading pool..."):
+                    try:
+                        if is_pga:
+                            _pga_slate = preset.get("projection_slate", "showdown")
+                            pool_fresh, meta_fresh = _load_pga_pool(api_key, slate_date, _pga_slate)
+                        else:
+                            pool_fresh, meta_fresh = _load_nba_pool(api_key, slate_date)
+                        try:
+                            from yak_core.sim_sandbox import score_player_breakout
+                            pool_fresh["breakout_score"] = score_player_breakout(pool_fresh)
+                        except Exception:
+                            pool_fresh["breakout_score"] = 0.0
+                        pool_fresh.to_parquet(str(out_dir / "slate_pool.parquet"), index=False)
+                        with open(out_dir / "slate_meta.json", "w") as f:
+                            json.dump(meta_fresh, f, indent=2, default=str)
+                    except Exception as e:
+                        st.error(f"Pool load error: {e}")
+                        return
+
+            if exclude_list:
+                st.info(f"Excluding: {', '.join(exclude_list)}")
+
+            with st.spinner(f"Building {num_lineups} lineups..."):
+                try:
+                    lineups_df = _build_lineups(
+                        sport, contest_label, num_lineups, lock_list, exclude_list, out_dir,
+                        showdown_teams=showdown_teams if showdown_teams else None,
+                    )
+                    n_built = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else 0
+
+                    from app.data_loader import invalidate_published_cache
+                    invalidate_published_cache()
+
+                    st.success(f"Built {n_built} lineups for {contest_label}")
+
+                    show_cols = ["lineup_index", "player_name", "pos", "salary", "proj"]
+                    if "slot" in lineups_df.columns:
+                        show_cols.insert(1, "slot")
+                    avail = [c for c in show_cols if c in lineups_df.columns]
+                    st.dataframe(lineups_df[avail].head(40), use_container_width=True, hide_index=True)
+                except Exception as e:
+                    st.error(f"Build lineups error: {e}")
+
+    st.markdown("---")
+    if st.button("Publish to GitHub", type="primary", key=f"lab_publish_{sport}"):
+        with st.spinner("Publishing..."):
+            try:
+                result = _publish_to_github(sport, out_dir)
+                if result.get("status") == "ok":
+                    from app.data_loader import invalidate_published_cache
+                    invalidate_published_cache()
+                    st.success(f"Published! SHA: {result.get('sha', 'N/A')}")
+                else:
+                    st.error(f"Publish failed: {result.get('reason', 'unknown')}")
+            except Exception as e:
+                st.error(f"Publish error: {e}")
+
+    st.markdown("---")
+    st.markdown("### Manage Lineups")
+
+    lineup_files = sorted(out_dir.glob("*_lineups.parquet"))
+    if lineup_files:
+        lineup_info = []
+        for lf in lineup_files:
+            slug = lf.stem.replace("_lineups", "")
+            meta_file = out_dir / f"{slug}_meta.json"
+            meta_data = {}
+            if meta_file.exists():
+                try:
+                    meta_data = json.loads(meta_file.read_text())
+                except Exception:
+                    pass
+            try:
+                ldf = pd.read_parquet(lf)
+                n_lu = int(ldf["lineup_index"].nunique()) if "lineup_index" in ldf.columns else 0
+            except Exception:
+                n_lu = 0
+            matchup = meta_data.get("matchup", "")
+            if matchup:
+                label = f"Showdown \u2014 {matchup}"
+            else:
+                label = slug.replace("_", " ").title()
+            built_at = meta_data.get("built_at", meta_data.get("timestamp", ""))
+            lineup_info.append({
+                "slug": slug, "label": label, "n_lineups": n_lu,
+                "built_at": built_at, "path": lf,
+            })
+
+        for info in lineup_info:
+            col_info, col_del = st.columns([4, 1])
+            with col_info:
+                ts = f" \u2014 {info['built_at']}" if info["built_at"] else ""
+                st.markdown(f"**{info['label']}** ({info['n_lineups']} lineups{ts})")
+            with col_del:
+                if st.button("\U0001f5d1\ufe0f Delete", key=f"del_{sport}_{info['slug']}"):
+                    _delete_lineup_set(out_dir, info["slug"])
+                    from app.data_loader import invalidate_published_cache
+                    invalidate_published_cache()
+                    st.rerun()
+    else:
+        st.caption("No published lineups.")
+
+    st.markdown("---")
+    _render_historical_replay(sport)
+
+
+# ===============================================================
+# Internal helpers
+# ===============================================================
+
+def _delete_lineup_set(out_dir: Path, slug: str) -> None:
+    from yak_core.config import YAKOS_ROOT
+
+    suffixes = ["_lineups.parquet", "_exposure.parquet", "_meta.json"]
+    deleted = []
+    repo_rel_paths = []
+    for suffix in suffixes:
+        fp = out_dir / f"{slug}{suffix}"
+        if fp.exists():
+            # Track repo-relative path for GitHub deletion
+            repo_rel_paths.append(os.path.relpath(str(fp), YAKOS_ROOT))
+            fp.unlink()
+            deleted.append(fp.name)
+    if deleted:
+        st.toast(f"Deleted: {', '.join(deleted)}")
+        # Also remove from GitHub so they don't reappear on redeploy
+        try:
+            from yak_core.github_persistence import delete_files_from_github
+            delete_files_from_github(
+                repo_rel_paths,
+                commit_message=f"Delete published lineups: {slug}",
+            )
+        except Exception as exc:
+            print(f"[_delete_lineup_set] GitHub cleanup failed (non-fatal): {exc}")
+
+
+def _get_secret(key: str) -> str:
+    try:
+        return st.secrets.get(key, "")
+    except Exception:
+        return ""
+
+
+def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
+    import requests
+    from yak_core.config import DEFAULT_CONFIG, DK_LINEUP_SIZE, DK_POS_SLOTS, SALARY_CAP, merge_config
+    from yak_core.live import (
+        fetch_live_opt_pool, fetch_player_game_logs,
+        _TANK01_HOST, auto_flag_injuries, apply_manual_injury_overrides_to_pool,
+    )
+    from yak_core.projections import apply_projections
+    from yak_core.calibration_feedback import get_correction_factors, apply_corrections
+
+    cfg = merge_config({
+        "RAPIDAPI_KEY": api_key,
+        "SLATE_DATE": slate_date,
+        "DATA_MODE": "live",
+        "PROJ_SOURCE": "model",
+    })
+
+    pool = fetch_live_opt_pool(slate_date, cfg)
+
+    # ── Fetch rolling game logs from Tank01 (5/10/20 game averages) ──
+    # This gives proj_model real performance data so projections differ
+    # from salary-implied. Without this the optimizer is a salary maximizer.
+    try:
+        player_names = pool["player_name"].tolist()
+        id_map = dict(zip(pool["player_name"], pool["player_id"].astype(str))) if "player_id" in pool.columns else {}
+        game_logs = fetch_player_game_logs(
+            player_names=player_names,
+            player_id_map=id_map,
+            api_key=api_key,
+        )
+        if not game_logs.empty:
+            pool = pool.merge(game_logs, on="player_name", how="left")
+            _n_with = pool["rolling_fp_5"].notna().sum() if "rolling_fp_5" in pool.columns else 0
+            print(f"[_load_nba_pool] Merged rolling game logs for {_n_with}/{len(pool)} players")
+        else:
+            print("[_load_nba_pool] No rolling game logs returned — projections will use historical/salary fallback")
+    except Exception as exc:
+        print(f"[_load_nba_pool] fetch_player_game_logs failed (non-fatal): {exc}")
+
+    pool = apply_projections(pool, cfg)
+
+    # ── Cross-reference Tank01 injury list to catch OUT players whose DFS
+    #    entry lacks an injuryStatus (e.g. Jarrett Allen still on slate but OUT).
+    try:
+        pool = auto_flag_injuries(pool, api_key=api_key, slate_date=slate_date)
+    except Exception as exc:
+        print(f"[_load_nba_pool] auto_flag_injuries failed (non-fatal): {exc}")
+
+    # ── Apply manual injury overrides from config/manual_injuries.csv ──
+    try:
+        pool = apply_manual_injury_overrides_to_pool(pool)
+    except Exception as exc:
+        print(f"[_load_nba_pool] manual injury overrides failed (non-fatal): {exc}")
+
+    # floor/ceil: proj_model sets these from rolling data; only fill gaps
+    # NBA DFS ceiling games are 2x+ average (boom games, OT, etc.)
+    if "floor" not in pool.columns or pool["floor"].isna().all():
+        pool["floor"] = (pool["proj"] * 0.55).round(2)
+    if "ceil" not in pool.columns or pool["ceil"].isna().all():
+        pool["ceil"] = (pool["proj"] * 2.00).round(2)
+
+    corrections = get_correction_factors(sport="NBA")
+    if corrections.get("n_slates", 0) > 0:
+        pool = apply_corrections(pool, corrections, sport="NBA")
+
+    try:
+        from yak_core.ownership_guard import ensure_ownership
+        pool = ensure_ownership(pool, sport="NBA")
+    except Exception:
+        if "own_proj" in pool.columns and "ownership" not in pool.columns:
+            pool["ownership"] = pool["own_proj"]
+        if "ownership" not in pool.columns:
+            pool["ownership"] = 0.0
+
+    matchups = []
+    try:
+        import requests as _req
+        clean_date = slate_date.replace("-", "")
+        resp = _req.get(
+            f"https://{_TANK01_HOST}/getNBAGamesForDate",
+            headers={"x-rapidapi-key": api_key, "x-rapidapi-host": _TANK01_HOST},
+            params={"gameDate": clean_date},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        games_data = resp.json()
+        games_body = games_data.get("body", games_data) if isinstance(games_data, dict) else games_data
+        games_list = games_body if isinstance(games_body, list) else []
+
+        opp_map = {}
+        game_id_map = {}  # team -> game_id (for optimizer stacking)
+        for g in games_list:
+            if not isinstance(g, dict):
+                continue
+            away = str(g.get("away", "")).upper()
+            home = str(g.get("home", "")).upper()
+            game_id = g.get("gameID", "")
+            if away and home:
+                opp_map[away] = home
+                opp_map[home] = away
+                if game_id:
+                    game_id_map[away] = str(game_id)
+                    game_id_map[home] = str(game_id)
+                matchups.append({"away": away, "home": home, "game_id": game_id, "label": f"{away} @ {home}"})
+
+        if opp_map and "team" in pool.columns:
+            pool["opponent"] = pool["team"].map(opp_map).fillna(pool.get("opponent", ""))
+        # Map game_id to each player so the optimizer can enforce game stacks
+        if game_id_map and "team" in pool.columns:
+            pool["game_id"] = pool["team"].map(game_id_map).fillna("")
+            _n_with_gid = (pool["game_id"] != "").sum()
+            print(f"[_load_nba_pool] Mapped game_id for {_n_with_gid}/{len(pool)} players ({len(game_id_map)//2} games)")
+    except Exception:
+        pass
+
+    meta = {
+        "sport": "NBA", "site": "DK", "date": slate_date,
+        "salary_cap": SALARY_CAP, "roster_slots": DK_POS_SLOTS, "lineup_size": DK_LINEUP_SIZE,
+        "pool_size": len(pool), "proj_source": cfg.get("PROJ_SOURCE", "salary_implied"),
+        "matchups": matchups,
+    }
+    return pool, meta
+
+
+def _load_pga_pool(api_key: str, slate_date: str, slate: str) -> tuple:
+    from yak_core.datagolf import DataGolfClient
+    from yak_core.pga_pool import build_pga_pool
+    from yak_core.config import DK_PGA_LINEUP_SIZE, DK_PGA_POS_SLOTS, DK_PGA_SALARY_CAP
+    from yak_core.calibration_feedback import get_correction_factors, apply_corrections
+
+    dg = DataGolfClient(api_key)
+    pool = build_pga_pool(dg, site="draftkings", slate=slate)
+
+    corrections = get_correction_factors(sport="PGA")
+    if corrections.get("n_slates", 0) > 0:
+        pool = apply_corrections(pool, corrections, sport="PGA")
+
+    meta = {
+        "sport": "PGA", "site": "DK", "date": slate_date, "slate": slate,
+        "salary_cap": DK_PGA_SALARY_CAP, "roster_slots": DK_PGA_POS_SLOTS,
+        "lineup_size": DK_PGA_LINEUP_SIZE, "pool_size": len(pool),
+    }
+    return pool, meta
+
+
+def _merge_rg_csv(pool, rg_file):
+    rg = pd.read_csv(rg_file)
+    rg["_join_name"] = rg["PLAYER"].str.strip().str.lower()
+    pool["_join_name"] = pool["player_name"].str.strip().str.lower()
+    rg_lookup = rg.set_index("_join_name")
+    for idx, row in pool.iterrows():
+        jn = row["_join_name"]
+        if jn not in rg_lookup.index:
+            continue
+        r = rg_lookup.loc[jn]
+        if isinstance(r, pd.DataFrame):
+            r = r.iloc[0]
+        rg_proj = float(r.get("FPTS", 0) or 0)
+        if rg_proj > 0:
+            pool.at[idx, "proj"] = rg_proj
+            pool.at[idx, "proj_source"] = "rotogrinders"
+        rg_floor = float(r.get("FLOOR", 0) or 0)
+        rg_ceil = float(r.get("CEIL", 0) or 0)
+        if rg_floor > 0:
+            pool.at[idx, "floor"] = rg_floor
+        if rg_ceil > 0:
+            pool.at[idx, "ceil"] = rg_ceil
+        pown_str = str(r.get("POWN", "0%")).replace("%", "").strip()
+        try:
+            pown_val = float(pown_str)
+        except (ValueError, TypeError):
+            pown_val = 0.0
+        if pown_val > 0:
+            pool.at[idx, "ownership"] = pown_val
+            pool.at[idx, "own_proj"] = pown_val
+        for sim_col in ["SIM15TH", "SIM33RD", "SIM50TH", "SIM66TH", "SIM85TH", "SIM90TH", "SIM99TH"]:
+            val = r.get(sim_col)
+            if val is not None and not pd.isna(val):
+                pool.at[idx, sim_col.lower()] = float(val)
+        smash_val = r.get("SMASH")
+        if smash_val is not None and not pd.isna(smash_val):
+            pool.at[idx, "smash_prob"] = float(smash_val)
+    pool.drop(columns=["_join_name"], inplace=True)
+    return pool
+
+
+def _run_edge(sport: str, slate_date: str, out_dir: Path) -> tuple:
+    from yak_core.edge import compute_edge_metrics
+    from yak_core.calibration_feedback import get_correction_factors
+
+    pool = pd.read_parquet(out_dir / "slate_pool.parquet")
+
+    # ── PGA: live re-check for withdrawals before edge analysis ──
+    if sport.upper() == "PGA":
+        pool = _recheck_pga_withdrawals(pool)
+
+    _excl_path = out_dir / "excluded_players.json"
+    if _excl_path.exists():
+        import json as _json
+        _excl_names = _json.loads(_excl_path.read_text())
+        if _excl_names:
+            pool = pool[~pool["player_name"].isin(_excl_names)].reset_index(drop=True)
+
+    calibration_state = get_correction_factors(sport=sport.upper())
+    edge_df = compute_edge_metrics(
+        pool,
+        calibration_state=calibration_state if calibration_state.get("n_slates", 0) > 0 else None,
+        sport=sport.upper(),
+    )
+    classified = _classify_plays(edge_df, sport)
+    bullets = _build_bullets(classified, edge_df, sport)
+    n_core = len(classified["core_plays"])
+    n_value = len(classified["value_plays"])
+    n_leverage = len(classified["leverage_plays"])
+    core_sals = [p["salary"] for p in classified["core_plays"]]
+    core_sal_range = f"${min(core_sals):,}\u2013${max(core_sals):,}" if core_sals else ""
+    val_rates = [p["value"] for p in classified["value_plays"] if p["value"] > 0]
+    val_avg = f"{sum(val_rates)/len(val_rates):.1f}" if val_rates else "0"
+    lev_owns = [p["ownership"] for p in classified["leverage_plays"]]
+    lev_own_range = f"{min(lev_owns):.0f}\u2013{max(lev_owns):.0f}%" if lev_owns else ""
+    rec_parts = [f"{n_core} core plays anchored at {core_sal_range}"]
+    if n_value:
+        rec_parts.append(f"{n_value} value plays averaging {val_avg} pts/$1K")
+    if n_leverage and lev_own_range:
+        rec_parts.append(f"{n_leverage} leverage plays at {lev_own_range} ownership")
+    recommendation = ". ".join(rec_parts) + "."
+    edge_state: Dict[str, Any] = {
+        "sport": sport.upper(), "date": slate_date,
+        "core_names": [p["player_name"] for p in classified["core_plays"]],
+        "leverage_names": [p["player_name"] for p in classified["leverage_plays"]],
+        "value_names": [p["player_name"] for p in classified["value_plays"]],
+        "fade_names": [p["player_name"] for p in classified["fade_candidates"]],
+        "calibration_slates": calibration_state.get("n_slates", 0),
+    }
+    if sport.upper() == "PGA" and "early_late_wave" in edge_df.columns:
+        early_df = edge_df[edge_df["early_late_wave"].isin([0, "Early"])]
+        late_df = edge_df[edge_df["early_late_wave"].isin([1, "Late"])]
+        edge_state["wave_split"] = {
+            "early_count": int(len(early_df)), "late_count": int(len(late_df)),
+            "early_avg_proj": round(float(early_df["proj"].mean()), 1) if len(early_df) > 0 else 0,
+            "late_avg_proj": round(float(late_df["proj"].mean()), 1) if len(late_df) > 0 else 0,
+            "early_players": early_df.nlargest(5, "proj")["player_name"].tolist(),
+            "late_players": late_df.nlargest(5, "proj")["player_name"].tolist(),
+        }
+    edge_analysis = {"bullets": bullets, "recommendation": recommendation, **classified, "signals_df_path": "signals.parquet"}
+    with open(out_dir / "edge_state.json", "w") as f:
+        json.dump(edge_state, f, indent=2, default=str)
+    with open(out_dir / "edge_analysis.json", "w") as f:
+        json.dump(edge_analysis, f, indent=2, default=str)
+    edge_df.to_parquet(str(out_dir / "signals.parquet"), index=False)
+    return edge_df, edge_analysis, edge_state
+
+
+def _classify_plays(sdf, sport: str = "NBA") -> dict:
+    import numpy as np
+    try:
+        from yak_core.ownership_guard import ensure_ownership
+        sdf = ensure_ownership(sdf, sport=sport)
+    except Exception as _eg:
+        print(f"[_classify_plays] ownership_guard unavailable: {_eg}")
+
+    def _safe_col(frame, name, default=0):
+        if name in frame.columns:
+            return pd.to_numeric(frame[name], errors="coerce").fillna(default)
+        return pd.Series(default, index=frame.index)
+
+    df = sdf.copy()
+
+    # ── Filter OUT / IR / Suspended / WD players before classifying ──
+    # These players should never appear as Core/Leverage/Value picks.
+    _REMOVE_STATUSES = {"OUT", "IR", "SUSPENDED", "WD"}
+    if "status" in df.columns:
+        _before = len(df)
+        df = df[
+            ~df["status"].fillna("").str.strip().str.upper().isin(_REMOVE_STATUSES)
+        ].reset_index(drop=True)
+        _removed = _before - len(df)
+        if _removed:
+            print(f"[_classify_plays] Excluded {_removed} OUT/IR/WD/Suspended player(s) from edge classification")
+
+    _sal = _safe_col(df, "salary")
+    _proj = _safe_col(df, "proj")
+    _own_col = "ownership" if "ownership" in df.columns and df["ownership"].notna().any() else "own_pct"
+    _own = _safe_col(df, _own_col)
+
+    # Derive 'edge' from 'edge_score' (compute_edge_metrics output column)
+    if "edge" not in df.columns and "edge_score" in df.columns:
+        df["edge"] = pd.to_numeric(df["edge_score"], errors="coerce").fillna(0.0)
+    # Derive 'value' as pts per $1K salary
+    if "value" not in df.columns:
+        _sal_k = _sal.clip(lower=1000) / 1000.0
+        df["value"] = _proj / _sal_k
+
+    _edge = _safe_col(df, "edge")
+    _value = _safe_col(df, "value")
+    sal_med = float(_sal.median()) if len(_sal) > 0 else 7000.0
+    own_med = float(_own.median()) if len(_own) > 0 else 15.0
+    _pick_cols = ["player_name", "salary", "proj", _own_col, "edge", "value"]
+    core = df[(_sal >= sal_med) & (_own >= own_med) & (_edge > 0)][_pick_cols].rename(columns={_own_col: "ownership"})
+    leverage = df[(_sal >= sal_med) & (_own < own_med) & (_edge > 0)][_pick_cols].rename(columns={_own_col: "ownership"})
+    value = df[(_sal < sal_med) & (_value > 0)][_pick_cols].rename(columns={_own_col: "ownership"})
+    fade = df[(_edge < 0) | ((_own >= own_med * 1.5) & (_edge <= 0))][_pick_cols].rename(columns={_own_col: "ownership"})
+    def _to_records(frame, n=5):
+        return frame.sort_values("edge", ascending=False).head(n).to_dict(orient="records")
+    return {
+        "core_plays": _to_records(core, 5),
+        "leverage_plays": _to_records(leverage, 5),
+        "value_plays": _to_records(value, 5),
+        "fade_candidates": _to_records(fade, 5),
+    }
+
+
+def _build_bullets(classified: dict, edge_df, sport: str) -> list:
+    bullets = []
+    core = classified.get("core_plays", [])
+    leverage = classified.get("leverage_plays", [])
+    value = classified.get("value_plays", [])
+    fade = classified.get("fade_candidates", [])
+    if core:
+        top_core = core[:3]
+        names = ", ".join(p["player_name"] for p in top_core)
+        bullets.append(f"Core anchors: {names}")
+    if leverage:
+        top_lev = leverage[:2]
+        names = ", ".join(p["player_name"] for p in top_lev)
+        bullets.append(f"Leverage plays: {names}")
+    if value:
+        top_val = value[:2]
+        names = ", ".join(p["player_name"] for p in top_val)
+        bullets.append(f"Value targets: {names}")
+    if fade:
+        top_fade = fade[:2]
+        names = ", ".join(p["player_name"] for p in top_fade)
+        bullets.append(f"Fade candidates: {names}")
+    return bullets
+
+
+def _recheck_pga_withdrawals(pool: pd.DataFrame) -> pd.DataFrame:
+    """Live re-check of PGA field at lineup-build time.
+
+    Queries the DataGolf /field-updates endpoint to catch players who
+    withdrew AFTER the pool was first loaded and saved to parquet.
+    This mirrors what auto_flag_injuries() does for NBA.
+    """
+    try:
+        from yak_core.datagolf import DataGolfClient
+        api_key = os.environ.get("DATAGOLF_API_KEY") or _get_secret("DATAGOLF_API_KEY")
+        if not api_key:
+            print("[_recheck_pga_withdrawals] No DATAGOLF_API_KEY — skipping")
+            return pool
+
+        dg = DataGolfClient(api_key)
+        field_df = dg.get_field()
+        if field_df.empty:
+            print("[_recheck_pga_withdrawals] Empty field response — skipping")
+            return pool
+
+        if "dg_id" not in pool.columns or "dg_id" not in field_df.columns:
+            print("[_recheck_pga_withdrawals] No dg_id column — skipping")
+            return pool
+
+        field_ids = set(field_df["dg_id"].values)
+        _before = len(pool)
+
+        # Players in pool but NOT in the live field → withdrawn
+        _wd_mask = ~pool["dg_id"].isin(field_ids)
+
+        # Also check for explicit WD flags in field data
+        for _wd_col in ["wd", "is_wd", "status"]:
+            if _wd_col in field_df.columns:
+                _wd_ids = set(field_df.loc[
+                    field_df[_wd_col].astype(str).str.lower().isin(
+                        ["wd", "true", "1", "withdrawn"]
+                    ),
+                    "dg_id"
+                ].values)
+                if _wd_ids:
+                    _wd_mask = _wd_mask | pool["dg_id"].isin(_wd_ids)
+                break
+
+        _wd_count = _wd_mask.sum()
+        if _wd_count > 0:
+            _wd_names = pool.loc[_wd_mask, "player_name"].tolist()
+            pool = pool[~_wd_mask].reset_index(drop=True)
+            print(
+                f"[_recheck_pga_withdrawals] Removed {_wd_count} withdrawn player(s) "
+                f"at build time: {', '.join(_wd_names[:10])}"
+            )
+        else:
+            print("[_recheck_pga_withdrawals] No new withdrawals detected")
+
+        return pool
+    except Exception as e:
+        print(f"[_recheck_pga_withdrawals] Re-check failed (non-fatal): {e}")
+        return pool
+
+
+def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None):
+    from yak_core.config import CONTEST_PRESETS, merge_config
+    from yak_core.lineups import build_multiple_lineups_with_exposure, build_player_pool, build_showdown_lineups
+
+    pool = pd.read_parquet(out_dir / "slate_pool.parquet")
+
+    # ── PGA: live re-check for withdrawals at build time ──
+    # Catches players who withdrew AFTER the pool was loaded.
+    if sport.upper() == "PGA":
+        pool = _recheck_pga_withdrawals(pool)
+
+    preset = CONTEST_PRESETS.get(contest_label, {})
+    cfg = merge_config({
+        **preset,
+        "SPORT": sport.upper(),
+        "NUM_LINEUPS": num_lineups,
+        "LOCK": lock_list,
+        "EXCLUDE": exclude_list,
+        # Preserve model projections already embedded in slate_pool.parquet
+        # (loaded during _load_nba_pool with PROJ_SOURCE='model').
+        # Without this, prepare_pool's _add_projections overwrites with salary_implied.
+        "PROJ_SOURCE": "parquet",
+    })
+    if showdown_teams:
+        pool = pool[pool["team"].isin(showdown_teams)].reset_index(drop=True)
+
+    _excl_path = out_dir / "excluded_players.json"
+    if _excl_path.exists():
+        _saved = json.loads(_excl_path.read_text())
+        for name in _saved:
+            if name not in cfg.get("EXCLUDE", []):
+                cfg.setdefault("EXCLUDE", []).append(name)
+
+    edge_path = out_dir / "edge_state.json"
+    if edge_path.exists():
+        edge_state = json.loads(edge_path.read_text())
+        tier_player_names = {}
+        for tier_key in ["core_names", "leverage_names", "value_names", "fade_names"]:
+            tier = tier_key.replace("_names", "")
+            tier_player_names[tier] = edge_state.get(tier_key, [])
+        cfg["TIER_CONSTRAINTS"] = {
+            "tier_player_names": tier_player_names,
+            "tier_min_players": {"core_or_value": 2},
+            "tier_max_players": {"fade": 3},
+        }
+
+    player_pool = build_player_pool(pool, cfg)
+    if cfg.get("captain_aware"):
+        lineups_df, exposure_df = build_showdown_lineups(player_pool, cfg)
+    else:
+        lineups_df, exposure_df = build_multiple_lineups_with_exposure(player_pool, cfg)
+
+    contest_slug = contest_label.lower().replace(" ", "_")
+    if showdown_teams:
+        contest_slug += "_" + "_".join(sorted(showdown_teams)).lower()
+    lineups_out = out_dir / f"{contest_slug}_lineups.parquet"
+    exposure_out = out_dir / f"{contest_slug}_exposure.parquet"
+    meta_out = out_dir / f"{contest_slug}_meta.json"
+    lineups_df.to_parquet(str(lineups_out), index=False)
+    exposure_df.to_parquet(str(exposure_out), index=False)
+    with open(meta_out, "w") as f:
+        meta_data = {"contest": contest_label, "sport": sport.upper(), "num_lineups": num_lineups,
+                     "built_at": datetime.now(timezone.utc).isoformat(), "lock": lock_list, "exclude": exclude_list}
+        if showdown_teams:
+            meta_data["matchup"] = " vs ".join(showdown_teams)
+        json.dump(meta_data, f, indent=2)
+    return lineups_df
+
+
+def _publish_to_github(sport: str, out_dir: Path) -> dict:
+    from yak_core.config import YAKOS_ROOT
+    from yak_core.github_persistence import sync_feedback_to_github
+
+    # Collect all files in the published directory as repo-relative paths
+    files: list[str] = []
+    for fname in sorted(os.listdir(out_dir)):
+        abs_path = os.path.join(out_dir, fname)
+        if os.path.isfile(abs_path):
+            files.append(os.path.relpath(abs_path, YAKOS_ROOT))
+    if not files:
+        return {"status": "skipped", "reason": "No files to publish"}
+
+    result = sync_feedback_to_github(
+        files=files,
+        commit_message=f"YakOS publish: {sport.upper()} lineups {date.today().isoformat()}",
+    )
+    return result
+
+
+def _fetch_nba_actuals(api_key: str, game_date: str) -> pd.DataFrame:
+    """Fetch actual DK fantasy points from Tank01 box scores for a given date.
+
+    Calls getNBAGamesForDate → getNBABoxScore for each game, then computes
+    DraftKings fantasy points from the raw stat lines.
+
+    Returns a DataFrame with columns: player_name, actual_fp
+    """
+    import requests as _req
+    from yak_core.live import _TANK01_HOST
+
+    clean_date = game_date.replace("-", "")
+    hdrs = {"x-rapidapi-key": api_key, "x-rapidapi-host": _TANK01_HOST}
+
+    # 1. Get all games for the date
+    resp = _req.get(
+        f"https://{_TANK01_HOST}/getNBAGamesForDate",
+        headers=hdrs, params={"gameDate": clean_date}, timeout=15,
+    )
+    resp.raise_for_status()
+    games_data = resp.json()
+    games_body = games_data.get("body", games_data) if isinstance(games_data, dict) else games_data
+    games_list = games_body if isinstance(games_body, list) else []
+
+    if not games_list:
+        return pd.DataFrame(columns=["player_name", "actual_fp"])
+
+    # 2. Fetch box scores for each game
+    rows = []
+    for g in games_list:
+        gid = g.get("gameID", "")
+        if not gid:
+            continue
+        try:
+            box_resp = _req.get(
+                f"https://{_TANK01_HOST}/getNBABoxScore",
+                headers=hdrs, params={"gameID": gid}, timeout=15,
+            )
+            box_resp.raise_for_status()
+            box = box_resp.json()
+            box_body = box.get("body", box) if isinstance(box, dict) else box
+            player_stats = box_body.get("playerStats", {}) if isinstance(box_body, dict) else {}
+
+            for pid, pdata in player_stats.items():
+                if not isinstance(pdata, dict):
+                    continue
+                name = pdata.get("longName", "").strip()
+                if not name:
+                    continue
+
+                # Parse stats
+                pts = float(pdata.get("pts", 0) or 0)
+                reb = float(pdata.get("reb", 0) or 0)
+                ast = float(pdata.get("ast", 0) or 0)
+                stl = float(pdata.get("stl", 0) or 0)
+                blk = float(pdata.get("blk", 0) or 0)
+                tov = float(pdata.get("TOV", 0) or 0)
+                tpm = float(pdata.get("tptfgm", 0) or 0)
+
+                # DraftKings NBA scoring
+                dk_fp = (
+                    pts * 1.0
+                    + tpm * 0.5
+                    + reb * 1.25
+                    + ast * 1.5
+                    + stl * 2.0
+                    + blk * 2.0
+                    + tov * -0.5
+                )
+
+                # Double-double / triple-double bonuses
+                stat_cats = [pts, reb, ast, stl, blk]
+                doubles = sum(1 for s in stat_cats if s >= 10)
+                if doubles >= 3:
+                    dk_fp += 3.0  # triple-double
+                elif doubles >= 2:
+                    dk_fp += 1.5  # double-double
+
+                rows.append({"player_name": name, "actual_fp": round(dk_fp, 2)})
+        except Exception as exc:
+            print(f"[_fetch_nba_actuals] Box score fetch failed for {gid}: {exc}")
+            continue
+
+    return pd.DataFrame(rows)
+
+
+def _fetch_pga_actuals(api_key: str) -> pd.DataFrame:
+    """Fetch actual DK fantasy points for the current/most recent PGA event via DataGolf.
+
+    Uses the historical-dfs-data/points endpoint which returns DK fantasy
+    points directly.  Requires DataGolf premium; returns empty on 403.
+
+    Falls back to the event list to auto-detect the most recent event.
+
+    Returns a DataFrame with columns: player_name, actual_fp
+    """
+    from yak_core.datagolf import DataGolfClient
+
+    dg = DataGolfClient(api_key)
+
+    # Find the most recent event
+    try:
+        events = dg.get_dfs_event_list()
+    except Exception as exc:
+        print(f"[_fetch_pga_actuals] Event list fetch failed: {exc}")
+        return pd.DataFrame(columns=["player_name", "actual_fp"])
+
+    if events.empty:
+        return pd.DataFrame(columns=["player_name", "actual_fp"])
+
+    # Events are sorted newest-first by DataGolf; pick the latest one
+    # that has a year matching current or most recent
+    from datetime import date as _date
+    current_year = _date.today().year
+
+    # Filter to current year events, take the last one (most recent)
+    if "year" in events.columns:
+        year_events = events[events["year"] == current_year]
+        if year_events.empty:
+            year_events = events
+    else:
+        year_events = events
+
+    # Take the last row (most recent event)
+    latest = year_events.iloc[-1] if len(year_events) > 0 else None
+    if latest is None:
+        return pd.DataFrame(columns=["player_name", "actual_fp"])
+
+    event_id = int(latest.get("event_id", latest.get("id", 0)))
+    year = int(latest.get("year", latest.get("calendar_year", current_year)))
+    event_name = latest.get("event_name", latest.get("name", f"Event {event_id}"))
+    print(f"[_fetch_pga_actuals] Fetching actuals for: {event_name} ({year}, ID={event_id})")
+
+    try:
+        df = dg.get_historical_dfs_points(event_id=event_id, year=year, tour="pga", site="draftkings")
+    except Exception as exc:
+        print(f"[_fetch_pga_actuals] DFS points fetch failed: {exc}")
+        return pd.DataFrame(columns=["player_name", "actual_fp"])
+
+    if df.empty:
+        return pd.DataFrame(columns=["player_name", "actual_fp"])
+
+    # Normalize column names — DataGolf may return 'dk_points', 'total_points', etc.
+    fp_col = None
+    for candidate in ["dk_points", "total_points", "fantasy_points", "total", "points", "dk_salary"]:
+        if candidate in df.columns:
+            fp_col = candidate
+            break
+    # If no obvious FP column, check for numeric columns that look like FP
+    if fp_col is None:
+        for c in df.columns:
+            if "point" in c.lower() or "fp" in c.lower() or "score" in c.lower():
+                fp_col = c
+                break
+
+    if fp_col is None or "player_name" not in df.columns:
+        print(f"[_fetch_pga_actuals] Unexpected columns: {list(df.columns)}")
+        return pd.DataFrame(columns=["player_name", "actual_fp"])
+
+    result = df[["player_name"]].copy()
+    result["actual_fp"] = pd.to_numeric(df[fp_col], errors="coerce").fillna(0.0).round(2)
+    result["event_name"] = event_name
+    return result
+
+
+def _compute_optimal_lineup(
+    out_dir: Path, actuals: pd.DataFrame, sport: str, contest_slug: str,
+) -> tuple:
+    """Compute the hindsight-optimal lineup using actual FP as the objective.
+
+    Returns (optimal_score, optimal_players_df) or (None, None) on failure.
+    """
+    try:
+        import pulp
+        from yak_core.config import (
+            CONTEST_PRESETS, merge_config,
+            DK_POS_SLOTS, DK_PGA_POS_SLOTS,
+            SALARY_CAP, DK_PGA_SALARY_CAP,
+        )
+
+        pool_path = out_dir / "slate_pool.parquet"
+        if not pool_path.exists():
+            return None, None
+        pool = pd.read_parquet(pool_path)
+
+        # Drop placeholder actual_fp before merging real actuals
+        if "actual_fp" in pool.columns:
+            pool = pool.drop(columns=["actual_fp"])
+        pool = pool.merge(
+            actuals[["player_name", "actual_fp"]],
+            on="player_name", how="left",
+        )
+        pool["actual_fp"] = pd.to_numeric(pool["actual_fp"], errors="coerce").fillna(0)
+        pool = pool[pool["actual_fp"] > 0].copy()
+        if pool.empty:
+            return None, None
+
+        # Determine roster constraints from the contest meta
+        meta_path = out_dir / f"{contest_slug}_meta.json"
+        contest_label = ""
+        if meta_path.exists():
+            try:
+                _m = json.loads(meta_path.read_text())
+                contest_label = _m.get("contest", "")
+            except Exception:
+                pass
+
+        preset = CONTEST_PRESETS.get(contest_label, {})
+        cfg = merge_config({**preset, "SPORT": sport.upper()})
+
+        pos_slots = cfg.get("POS_SLOTS", DK_PGA_POS_SLOTS if sport.upper() == "PGA" else DK_POS_SLOTS)
+        salary_cap = int(cfg.get("SALARY_CAP", DK_PGA_SALARY_CAP if sport.upper() == "PGA" else SALARY_CAP))
+
+        # Normalise position column
+        if "position" not in pool.columns and "pos" in pool.columns:
+            pool["position"] = pool["pos"]
+        if "position" not in pool.columns:
+            pool["position"] = "G" if sport.upper() == "PGA" else "UTIL"
+        pool["position"] = pool["position"].astype(str).str.upper().str.strip()
+        pool["salary"] = pd.to_numeric(pool["salary"], errors="coerce").fillna(0).astype(int)
+        pool = pool[pool["salary"] > 0].reset_index(drop=True)
+
+        players = pool.to_dict("records")
+        n = len(players)
+        slots = pos_slots
+        k = len(slots)
+
+        def _eligible(player, slot_name):
+            nat_pos = str(player.get("position", "")).upper()
+            if slot_name == "UTIL":
+                return True
+            if slot_name == "G":
+                return nat_pos in ("PG", "SG", "G")
+            if slot_name == "F":
+                return nat_pos in ("SF", "PF", "F")
+            return nat_pos == slot_name
+
+        prob = pulp.LpProblem("optimal_hindsight", pulp.LpMaximize)
+
+        # Use enumerate for unique (player, slot_index) keys to avoid
+        # dict-key collision when slots has duplicates (e.g. PGA ["G"]*6).
+        x = {
+            (i, j): pulp.LpVariable(f"x_{i}_{j}", cat="Binary")
+            for i in range(n) for j in range(k)
+        }
+
+        # Objective: maximise total actual FP
+        prob += pulp.lpSum(
+            players[i]["actual_fp"] * x[(i, j)]
+            for i in range(n) for j in range(k)
+        )
+
+        # Each slot filled exactly once (only eligible players)
+        for j in range(k):
+            prob += pulp.lpSum(
+                x[(i, j)] for i in range(n) if _eligible(players[i], slots[j])
+            ) == 1
+
+        # Each player at most once across all slots
+        for i in range(n):
+            prob += pulp.lpSum(x[(i, j)] for j in range(k)) <= 1
+
+        # Salary cap
+        prob += pulp.lpSum(
+            players[i]["salary"] * x[(i, j)]
+            for i in range(n) for j in range(k)
+        ) <= salary_cap
+
+        prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=30))
+
+        if prob.status != pulp.constants.LpStatusOptimal:
+            return None, None
+
+        opt_rows = []
+        for i in range(n):
+            for j in range(k):
+                if x[(i, j)].varValue and x[(i, j)].varValue > 0.5:
+                    opt_rows.append({
+                        "slot": slots[j],
+                        "player_name": players[i]["player_name"],
+                        "salary": players[i]["salary"],
+                        "actual_fp": round(players[i]["actual_fp"], 2),
+                        "proj": round(float(players[i].get("proj", 0)), 2),
+                    })
+
+        opt_df = pd.DataFrame(opt_rows)
+        opt_score = opt_df["actual_fp"].sum() if not opt_df.empty else 0
+        return round(opt_score, 2), opt_df
+
+    except Exception as e:
+        print(f"[_compute_optimal_lineup] Error: {e}")
+        return None, None
+
+
+def _show_biggest_misses(
+    lu_df: pd.DataFrame, out_dir: Path, actuals: pd.DataFrame, sport: str,
+) -> None:
+    """Show high-scoring players from the pool that were NOT in any lineup."""
+    try:
+        pool_path = out_dir / "slate_pool.parquet"
+        if not pool_path.exists():
+            return
+        pool = pd.read_parquet(pool_path)
+        if "actual_fp" in pool.columns:
+            pool = pool.drop(columns=["actual_fp"])
+        pool = pool.merge(
+            actuals[["player_name", "actual_fp"]],
+            on="player_name", how="left",
+        )
+        pool["actual_fp"] = pd.to_numeric(pool["actual_fp"], errors="coerce").fillna(0)
+
+        used_names = set(lu_df["player_name"].unique()) if "player_name" in lu_df.columns else set()
+        misses = pool[~pool["player_name"].isin(used_names)].copy()
+        misses = misses[misses["actual_fp"] > 0].sort_values("actual_fp", ascending=False).head(10)
+
+        if misses.empty:
+            return
+
+        with st.expander("Biggest Misses (pool players not in your lineups)"):
+            show_cols = ["player_name", "pos", "salary", "proj", "actual_fp"]
+            avail = [c for c in show_cols if c in misses.columns]
+            st.dataframe(misses[avail], use_container_width=True, hide_index=True)
+    except Exception:
+        pass
+
+
+def _render_record_calibration(
+    out_dir: Path, actuals: pd.DataFrame, sport: str,
+) -> None:
+    """Button to record calibration errors from the replay actuals."""
+    st.markdown("**Record Calibration**")
+    st.caption(
+        "Record projection errors from this slate into the calibration system. "
+        "This updates correction factors for future projections."
+    )
+
+    meta_path = out_dir / "slate_meta.json"
+    slate_date = ""
+    if meta_path.exists():
+        try:
+            _m = json.loads(meta_path.read_text())
+            slate_date = _m.get("date", "")
+        except Exception:
+            pass
+
+    cal_date = st.text_input(
+        "Slate date for calibration",
+        value=slate_date,
+        key=f"replay_cal_date_{sport}",
+    )
+
+    if st.button("Record Calibration", key=f"replay_record_cal_{sport}"):
+        if not cal_date:
+            st.error("Enter a slate date.")
+            return
+
+        pool_path = out_dir / "slate_pool.parquet"
+        if not pool_path.exists():
+            st.error("No slate pool found.")
+            return
+
+        pool = pd.read_parquet(pool_path)
+        if "actual_fp" in pool.columns:
+            pool = pool.drop(columns=["actual_fp"])
+        pool = pool.merge(
+            actuals[["player_name", "actual_fp"]],
+            on="player_name", how="left",
+        )
+        pool["actual_fp"] = pd.to_numeric(pool["actual_fp"], errors="coerce")
+
+        matched = pool["actual_fp"].notna().sum()
+        if matched == 0:
+            st.error("No actuals matched to pool players.")
+            return
+
+        try:
+            from yak_core.calibration_feedback import record_slate_errors, get_calibration_summary
+
+            result = record_slate_errors(cal_date, pool, sport=sport.upper())
+
+            if isinstance(result, dict) and "error" in result:
+                st.warning(f"Calibration rejected: {result['error']}")
+            else:
+                summary = get_calibration_summary(sport=sport.upper())
+                n_slates = summary.get("n_slates", 0)
+                latest_mae = summary.get("latest_mae", "?")
+                overall_bias = summary.get("overall_bias", 0)
+                st.success(
+                    f"Recorded calibration for {cal_date}. "
+                    f"{n_slates} slates total, latest MAE: {latest_mae}, "
+                    f"overall bias correction: {overall_bias:+.2f} FP"
+                )
+        except Exception as e:
+            st.error(f"Calibration error: {e}")
+
+
+def _render_historical_replay(sport: str) -> None:
+    st.markdown("### Historical Replay")
+    from app.data_loader import published_dir as _pub_dir
+    out_dir = _pub_dir(sport)
+    lineup_files = sorted(out_dir.glob("*_lineups.parquet"))
+    if not lineup_files:
+        st.caption("No lineup files available for replay.")
+        return
+
+    slug_options = [lf.stem.replace("_lineups", "") for lf in lineup_files]
+    selected_slug = st.selectbox("Select lineup set", slug_options, key=f"replay_slug_{sport}")
+    if not selected_slug:
+        return
+
+    selected_full_slug = selected_slug
+    replay_lineups_path = out_dir / f"{selected_full_slug}_lineups.parquet"
+    if not replay_lineups_path.exists():
+        st.warning("Selected lineup file not found.")
+        return
+
+    replay_lineups = pd.read_parquet(replay_lineups_path)
+    st.markdown(f"**{selected_full_slug}** \u2014 {replay_lineups['lineup_index'].nunique() if 'lineup_index' in replay_lineups.columns else 0} lineups")
+
+    # ── Load or fetch actuals ──
+    actuals_path = out_dir / "actuals.parquet"
+    if not actuals_path.exists():
+        st.caption("No actuals loaded yet.")
+        is_pga = sport.upper() == "PGA"
+
+        if is_pga:
+            # PGA: fetch from DataGolf
+            if st.button("Fetch Actuals from DataGolf", key=f"replay_fetch_{sport}"):
+                api_key = os.environ.get("DATAGOLF_API_KEY") or _get_secret("DATAGOLF_API_KEY")
+                if not api_key:
+                    st.error("Missing DATAGOLF_API_KEY.")
+                else:
+                    with st.spinner("Fetching DK fantasy points from DataGolf..."):
+                        actuals_df = _fetch_pga_actuals(api_key)
+                    if actuals_df.empty:
+                        st.warning("No actuals found. The event may still be in progress, or your DataGolf plan may not include historical DFS data.")
+                    else:
+                        event_name = actuals_df["event_name"].iloc[0] if "event_name" in actuals_df.columns else ""
+                        actuals_df = actuals_df[["player_name", "actual_fp"]]
+                        actuals_df.to_parquet(str(actuals_path), index=False)
+                        st.success(f"Fetched actuals for {len(actuals_df)} players" + (f" ({event_name})" if event_name else "") + ".")
+                        st.rerun()
+        else:
+            # NBA: fetch from Tank01 box scores
+            meta_path = out_dir / "slate_meta.json"
+            slate_date = ""
+            if meta_path.exists():
+                try:
+                    _m = json.loads(meta_path.read_text())
+                    slate_date = _m.get("date", "")
+                except Exception:
+                    pass
+
+            fetch_date = st.text_input(
+                "Slate date for actuals",
+                value=slate_date,
+                key=f"replay_fetch_date_{sport}",
+            )
+            if st.button("Fetch Actuals from API", key=f"replay_fetch_{sport}"):
+                api_key = (
+                    os.environ.get("RAPIDAPI_KEY")
+                    or os.environ.get("TANK01_RAPIDAPI_KEY")
+                    or _get_secret("RAPIDAPI_KEY")
+                    or _get_secret("TANK01_RAPIDAPI_KEY")
+                )
+                if not api_key:
+                    st.error("Missing RAPIDAPI_KEY.")
+                elif not fetch_date:
+                    st.error("Enter a slate date.")
+                else:
+                    with st.spinner("Fetching box scores..."):
+                        actuals_df = _fetch_nba_actuals(api_key, fetch_date)
+                    if actuals_df.empty:
+                        st.warning("No box score data found for that date. Games may not have finished yet.")
+                    else:
+                        actuals_df.to_parquet(str(actuals_path), index=False)
+                        st.success(f"Fetched actuals for {len(actuals_df)} players.")
+                        st.rerun()
+
+        st.markdown("---")
+        st.caption("Or upload a CSV with `player_name` and `actual_fp` columns.")
+        actuals_file = st.file_uploader("Upload actuals CSV", type=["csv"], key=f"replay_actuals_{sport}")
+        if actuals_file:
+            actuals_df = pd.read_csv(actuals_file)
+            if "player_name" in actuals_df.columns and "actual_fp" in actuals_df.columns:
+                actuals_df.to_parquet(str(actuals_path), index=False)
+                st.success("Actuals saved.")
+                st.rerun()
+        return
+
+    actuals = pd.read_parquet(actuals_path)
+    st.caption(f"Actuals loaded: {len(actuals)} players")
+
+    # ── Score lineups against actuals ──
+    try:
+        # Merge actuals into lineup data and compute per-lineup totals
+        lu_df = replay_lineups.copy()
+        if "player_name" in lu_df.columns:
+            lu_df = lu_df.merge(
+                actuals[["player_name", "actual_fp"]],
+                on="player_name",
+                how="left",
+            )
+            lu_df["actual_fp"] = lu_df["actual_fp"].fillna(0.0)
+
+            if "lineup_index" in lu_df.columns:
+                # Per-lineup summary
+                proj_col = "proj" if "proj" in lu_df.columns else None
+                summary_rows = []
+                for idx in sorted(lu_df["lineup_index"].unique()):
+                    lu_slice = lu_df[lu_df["lineup_index"] == idx]
+                    total_actual = lu_slice["actual_fp"].sum()
+                    total_proj = lu_slice[proj_col].sum() if proj_col else 0.0
+                    total_sal = int(lu_slice["salary"].sum()) if "salary" in lu_slice.columns else 0
+                    summary_rows.append({
+                        "lineup": idx + 1,
+                        "total_actual": round(total_actual, 2),
+                        "total_proj": round(total_proj, 2),
+                        "diff": round(total_actual - total_proj, 2),
+                        "salary": total_sal,
+                    })
+                summary_df = pd.DataFrame(summary_rows)
+                st.markdown("**Lineup Scores**")
+                st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+                # ── Hindsight optimal lineup ──────────────────────────────────
+                optimal_score, optimal_players = _compute_optimal_lineup(
+                    out_dir, actuals, sport, selected_full_slug,
+                )
+
+                avg_actual = summary_df["total_actual"].mean()
+                avg_proj = summary_df["total_proj"].mean()
+                best = summary_df["total_actual"].max()
+                beat_proj_pct = (summary_df["total_actual"] >= summary_df["total_proj"]).mean() * 100
+
+                # KPI row 1: your lineups
+                k1, k2, k3, k4 = st.columns(4)
+                with k1:
+                    st.metric("Avg Actual", f"{avg_actual:.1f}")
+                with k2:
+                    st.metric("Avg Proj", f"{avg_proj:.1f}")
+                with k3:
+                    st.metric("Best Lineup", f"{best:.1f}")
+                with k4:
+                    st.metric("Beat Proj %", f"{beat_proj_pct:.0f}%")
+
+                # KPI row 2: vs optimal
+                if optimal_score and optimal_score > 0:
+                    efficiency = (best / optimal_score) * 100 if optimal_score else 0
+                    gap = optimal_score - best
+                    o1, o2, o3, o4 = st.columns(4)
+                    with o1:
+                        st.metric("Optimal Lineup", f"{optimal_score:.1f}")
+                    with o2:
+                        st.metric("Efficiency", f"{efficiency:.0f}%",
+                                  help="Your best lineup ÷ hindsight optimal")
+                    with o3:
+                        st.metric("Gap to Optimal", f"{gap:+.1f}")
+                    with o4:
+                        sal_used = summary_df["salary"].mean()
+                        st.metric("Avg Salary Used", f"${sal_used:,.0f}")
+
+                    # Show optimal lineup
+                    with st.expander("Hindsight Optimal Lineup"):
+                        if optimal_players is not None and not optimal_players.empty:
+                            st.dataframe(optimal_players, use_container_width=True, hide_index=True)
+                        else:
+                            st.caption("Could not compute optimal lineup.")
+
+                    # Biggest misses: players NOT in your lineups who scored big
+                    _show_biggest_misses(lu_df, out_dir, actuals, sport)
+
+                # Detailed player-level view
+                with st.expander("Player-level detail"):
+                    detail_cols = ["lineup_index", "player_name", "pos", "salary", "proj", "actual_fp"]
+                    avail_cols = [c for c in detail_cols if c in lu_df.columns]
+                    st.dataframe(lu_df[avail_cols], use_container_width=True, hide_index=True)
+            else:
+                st.dataframe(lu_df.head(30), use_container_width=True, hide_index=True)
+
+        # ── Record Calibration ────────────────────────────────────────────
+        st.markdown("---")
+        _render_record_calibration(out_dir, actuals, sport)
+
+        if st.button("Clear Actuals", key=f"replay_clear_{sport}"):
+            actuals_path.unlink(missing_ok=True)
+            st.rerun()
+
+    except Exception as e:
+        st.error(f"Replay error: {e}")
