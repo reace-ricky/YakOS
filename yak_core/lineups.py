@@ -18,7 +18,7 @@ from yak_core.config import (
     DK_SHOWDOWN_CAPTAIN_MULTIPLIER,
 )
 
-# ── Silence PuLP's default stdout banner ─────────────────────────────────────
+# ── Silence PuLP's default stdout banner ───────────────────────────────────────────
 pulp.LpSolverDefault.msg = False  # type: ignore[attr-defined]
 
 
@@ -168,10 +168,10 @@ def _add_scores(
     stack_weight = float(cfg.get("STACK_WEIGHT", 0.0))
     value_weight = float(cfg.get("VALUE_WEIGHT", 0.0))
 
-    # ── gpp_score = proj − own_weight×own_pct ──────────────────────────────────
+    # ── gpp_score = proj − own_weight×own_pct ──────────────────────────────────────────
     df["gpp_score"] = df["proj"] - own_weight * df["own_pct"]
 
-    # ── cash_score = floor-weighted ─────────────────────────────────────────────
+    # ── cash_score = floor-weighted ─────────────────────────────────────────────────
     floor_w = float(cfg.get("CASH_FLOOR_WEIGHT", 0.6))
     proj_w  = float(cfg.get("CASH_PROJ_WEIGHT",  0.4))
     if "floor" in df.columns:
@@ -179,7 +179,7 @@ def _add_scores(
     else:
         df["cash_score"] = df["proj"]
 
-    # ── value_score ──────────────────────────────────────────────────────────────
+    # ── value_score ─────────────────────────────────────────────────────────────────
     if value_weight > 0:
         df["value_score"] = df["proj"] / (df["salary"] / 1_000.0 + 1e-9)
     else:
@@ -575,7 +575,7 @@ def build_multiple_lineups_with_exposure(
     tier_min_players: Dict[str, int] = tier_constraints.get("tier_min_players", {})
     tier_max_players: Dict[str, int] = tier_constraints.get("tier_max_players", {})
 
-    # ── Contest-type detection ──────────────────────────────────────────────────────
+    # ── Contest-type detection ────────────────────────────────────────────────────────────────────
     contest_type = cfg.get("CONTEST_TYPE", "gpp").lower()
     is_showdown_classic = contest_type in ("showdown",)
     is_gpp = contest_type in ("gpp", "mme", "sd", "captain")
@@ -813,365 +813,32 @@ def _build_one_lineup_with_stacks(
     )
 
 
-# =============================================================================
-# PuLP OPTIMISER — SHOWDOWN (Captain mode)
-# =============================================================================
-
-def _build_one_lineup_showdown(
-    players: list,
-    salary_cap: int,
-    min_salary: int,
-    max_appearances: dict,
-    captain_own_penalty: float = 10.0,
-    captain_ceil_bonus: float = 0.2,
-    solver_time_limit: int = 30,
-    forced_captain_idx: int | None = None,
-    excluded_players: list | None = None,
-    not_with_pairs: list | None = None,
-) -> list | None:
-    """Build one Showdown lineup (1 CPT + 5 FLEX).
-
-    Captain salary = 1.5× base salary.
-    Captain fantasy points = 1.5× base projection.
-    Returns list of (player_dict, slot_name) or None if infeasible.
-    """
-    n = len(players)
-    CPT_MULT = DK_SHOWDOWN_CAPTAIN_MULTIPLIER  # 1.5
-
-    prob = pulp.LpProblem("dfs_showdown", pulp.LpMaximize)
-
-    # y[i] = 1 if player i is the Captain
-    y = [pulp.LpVariable(f"y_{i}", cat="Binary") for i in range(n)]
-    # z[i] = 1 if player i is a FLEX (non-captain)
-    z = [pulp.LpVariable(f"z_{i}", cat="Binary") for i in range(n)]
-
-    # Objective: CPT gets 1.5× proj, FLEX gets 1.0× proj
-    # Subtract ownership penalty for captain to encourage variety
-    proj_vals = [float(p.get("proj", 0)) for p in players]
-    own_vals  = [float(p.get("own_pct", 0)) for p in players]
-    ceil_vals = [float(p.get("ceil",  proj_vals[i] * 1.25)) for i, p in enumerate(players)]
-
-    prob += pulp.lpSum(
-        (
-            CPT_MULT * proj_vals[i]
-            + captain_ceil_bonus * ceil_vals[i]
-            - captain_own_penalty * own_vals[i]
-        ) * y[i]
-        + proj_vals[i] * z[i]
-        for i in range(n)
-    )
-
-    # Exactly 1 captain
-    prob += pulp.lpSum(y) == 1
-    # Exactly 5 flex
-    prob += pulp.lpSum(z) == 5
-
-    # A player can be captain OR flex, not both
-    for i in range(n):
-        prob += y[i] + z[i] <= 1
-
-    # Salary: captain at 1.5× salary
-    prob += (
-        pulp.lpSum(CPT_MULT * players[i]["salary"] * y[i] for i in range(n))
-        + pulp.lpSum(players[i]["salary"] * z[i] for i in range(n))
-        <= salary_cap
-    )
-
-    # Salary floor
-    if min_salary > 0:
-        prob += (
-            pulp.lpSum(CPT_MULT * players[i]["salary"] * y[i] for i in range(n))
-            + pulp.lpSum(players[i]["salary"] * z[i] for i in range(n))
-            >= min_salary
-        )
-
-    # Exposure limits
-    for i, max_app in max_appearances.items():
-        prob += y[i] + z[i] <= max_app
-
-    # Forced captain
-    if forced_captain_idx is not None:
-        prob += y[forced_captain_idx] == 1
-
-    # Excluded players
-    if excluded_players:
-        for ep_idx in excluded_players:
-            prob += y[ep_idx] + z[ep_idx] == 0
-
-    # NOT_WITH
-    if not_with_pairs:
-        for (idx_a, idx_b) in not_with_pairs:
-            prob += y[idx_a] + z[idx_a] + y[idx_b] + z[idx_b] <= 1
-
-    solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=solver_time_limit)
-    prob.solve(solver)
-
-    if pulp.LpStatus[prob.status] != "Optimal":
-        return None
-
-    result = []
-    for i in range(n):
-        if pulp.value(y[i]) > 0.5:
-            result.append((players[i], "CPT"))
-        elif pulp.value(z[i]) > 0.5:
-            result.append((players[i], "FLEX"))
-    return result if len(result) == 6 else None
-
-
-def build_showdown_lineups(
-    player_pool: pd.DataFrame,
-    cfg: Dict[str, Any],
-    progress_callback=None,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Build Showdown Captain-mode lineups.
-
-    Parameters
-    ----------
-    player_pool : pd.DataFrame
-        Already prepared pool (output of ``prepare_pool``).
-        Should contain only the two teams in the matchup.
-    cfg : Dict[str, Any]
-        Optimizer config with at minimum:
-        ``NUM_LINEUPS``, ``SALARY_CAP``, ``MAX_EXPOSURE``.
-
-    Returns
-    -------
-    Tuple[pd.DataFrame, pd.DataFrame]
-        (lineups_df, exposure_df) — same shape as classic builder.
-    """
-    num_lineups = int(cfg.get("NUM_LINEUPS", 3))
-    salary_cap = int(cfg.get("SALARY_CAP", 50000))
-    max_exposure = float(cfg.get("MAX_EXPOSURE", 0.6))
-    # Showdown has no salary floor on DK — set to 0 unless explicitly overridden
-    min_salary = int(cfg.get("MIN_SALARY_USED", 0))
-    solver_time_limit = int(cfg.get("SOLVER_TIME_LIMIT", 30))
-    captain_own_penalty = float(cfg.get("SD_CAPTAIN_OWN_PENALTY", 10.0))
-    captain_ceil_bonus  = float(cfg.get("SD_CAPTAIN_CEIL_BONUS",  0.2))
-    max_appearances = max(1, int(num_lineups * max_exposure))
-
-    lock_names    = [n.strip() for n in cfg.get("LOCK",    [])]
-    exclude_names = [n.strip() for n in cfg.get("EXCLUDE", [])]
-    not_with_raw  = cfg.get("NOT_WITH", [])
-    not_with_pairs: list[tuple[str, str]] = [
-        (str(pair[0]).strip(), str(pair[1]).strip())
-        for pair in not_with_raw
-        if isinstance(pair, (list, tuple)) and len(pair) >= 2
-    ]
-
-    players = player_pool.to_dict("records")
-    n = len(players)
-    name_to_idx = {p["player_name"]: i for i, p in enumerate(players)}
-
-    exclude_indices = [name_to_idx[nm] for nm in exclude_names if nm in name_to_idx]
-    not_with_idx_pairs = [
-        (name_to_idx[a], name_to_idx[b])
-        for (a, b) in not_with_pairs
-        if a in name_to_idx and b in name_to_idx
-    ]
-
-    remaining = {}
-    for i, p in enumerate(players):
-        if i in exclude_indices:
-            remaining[i] = 0
-        else:
-            remaining[i] = max_appearances
-
-    lineups = []
-    for lineup_num in range(num_lineups):
-        if progress_callback:
-            progress_callback(lineup_num, num_lineups)
-
-        # Cycle captain if lock list provided
-        forced_cpt = None
-        if lock_names:
-            cpt_name = lock_names[lineup_num % len(lock_names)]
-            if cpt_name in name_to_idx:
-                forced_cpt = name_to_idx[cpt_name]
-
-        result = _build_one_lineup_showdown(
-            players=players,
-            salary_cap=salary_cap,
-            min_salary=min_salary,
-            max_appearances=remaining,
-            captain_own_penalty=captain_own_penalty,
-            captain_ceil_bonus=captain_ceil_bonus,
-            solver_time_limit=solver_time_limit,
-            forced_captain_idx=forced_cpt,
-            excluded_players=exclude_indices,
-            not_with_pairs=not_with_idx_pairs,
-        )
-
-        if result is None:
-            break
-
-        lineup_rows = []
-        selected_indices = []
-        for player, slot in result:
-            idx = name_to_idx[player["player_name"]]
-            selected_indices.append(idx)
-            lineup_rows.append({
-                "lineup_index": lineup_num,
-                "slot": slot,
-                "player_name": player["player_name"],
-                "team": player.get("team", ""),
-                "position": player.get("position", ""),
-                "salary": player["salary"],
-                "proj": player.get("proj", 0),
-                "own_pct": player.get("own_pct", 0),
-                "gpp_score": player.get("gpp_score", 0),
-            })
-
-        lineups.append(lineup_rows)
-
-        for idx in selected_indices:
-            remaining[idx] = max(0, remaining[idx] - 1)
-
-    if not lineups:
-        return pd.DataFrame(), pd.DataFrame()
-
-    all_rows = [row for lu in lineups for row in lu]
-    lineups_df = pd.DataFrame(all_rows)
-
-    # Exposure
-    n_built = lineups_df["lineup_index"].nunique() if not lineups_df.empty else 0
-    exp_rows = []
-    for pname, idx in name_to_idx.items():
-        times = sum(1 for lu in lineups if any(r["player_name"] == pname for r in lu))
-        if times > 0:
-            exp_rows.append({
-                "player_name": pname,
-                "team": players[idx].get("team", ""),
-                "salary": players[idx]["salary"],
-                "proj": players[idx].get("proj", 0),
-                "lineups": times,
-                "exposure": times / max(n_built, 1),
-            })
-    exposures_df = pd.DataFrame(exp_rows).sort_values("exposure", ascending=False) if exp_rows else pd.DataFrame()
-
-    return lineups_df, exposures_df
-
-
-# =============================================================================
-# build_run_config — convenience wrapper
-# =============================================================================
-
-def build_run_config(
-    sport: str = "NBA",
-    contest_label: str = "GPP Main",
-    num_lineups: int | None = None,
-    slate_date: str | None = None,
-    data_mode: str = "historical",
-    lock: list | None = None,
-    exclude: list | None = None,
-    **overrides,
-) -> Dict[str, Any]:
-    """Build a complete run-config dict from a contest preset + overrides.
-
-    This is the recommended entry point for callers who have a contest label
-    and want a ready-to-use cfg dict for
-    ``build_multiple_lineups_with_exposure`` or ``build_showdown_lineups``.
-
-    Parameters
-    ----------
-    sport : str
-        "NBA" or "PGA" (case-insensitive).
-    contest_label : str
-        One of the keys in ``CONTEST_PRESETS`` (e.g. ``"GPP Main"``,
-        ``"Showdown"``, ``"Cash Main"``).
-    num_lineups : int or None
-        Override number of lineups.  Defaults to preset's ``default_lineups``.
-    slate_date : str or None
-        ISO 8601 date for historical pools.  Defaults to today.
-    data_mode : str
-        ``"historical"`` or ``"live"``.
-    lock : list or None
-        Player names to force into every lineup.
-    exclude : list or None
-        Player names to exclude from all lineups.
-    **overrides
-        Any additional cfg keys to merge in last.
-
-    Returns
-    -------
-    Dict[str, Any]
-        Fully merged cfg dict.
-    """
-    from yak_core.config import CONTEST_PRESETS, DK_POS_SLOTS, DK_LINEUP_SIZE
-    from yak_core.config import DK_PGA_POS_SLOTS, DK_PGA_LINEUP_SIZE, DK_PGA_SALARY_CAP
-    from yak_core.config import merge_config
-
-    sport = sport.upper()
-    preset = CONTEST_PRESETS.get(contest_label)
-    if preset is None:
-        raise KeyError(
-            f"Unknown contest_label '{contest_label}'. "
-            f"Valid: {list(CONTEST_PRESETS.keys())}"
-        )
-
-    is_pga = sport == "PGA"
-
-    base: Dict[str, Any] = {
-        "SPORT":       sport,
-        "DATA_MODE":   data_mode,
-        "SLATE_DATE":  slate_date,
-        "NUM_LINEUPS": num_lineups or preset.get("default_lineups", 20),
-        "SALARY_CAP":  preset.get("salary_cap",
-                            DK_PGA_SALARY_CAP if is_pga else SALARY_CAP),
-        "MAX_EXPOSURE":   preset.get("default_max_exposure", 0.35),
-        "MIN_SALARY_USED": preset.get("min_salary",
-                            preset.get("min_salary_used", 0)),
-        "CONTEST_TYPE":  preset.get("internal_contest", "gpp"),
-        "LOCK":    lock or [],
-        "EXCLUDE": exclude or [],
-    }
-
-    # Position slots
-    if is_pga:
-        base["POS_SLOTS"]   = preset.get("pos_slots",   DK_PGA_POS_SLOTS)
-        base["LINEUP_SIZE"] = preset.get("lineup_size", DK_PGA_LINEUP_SIZE)
-        base["POS_CAPS"]    = preset.get("pos_caps",    {})
-    else:
-        base["POS_SLOTS"]   = DK_POS_SLOTS
-        base["LINEUP_SIZE"] = DK_LINEUP_SIZE
-
-    # GPP knobs from preset
-    is_pga_default = is_pga
-    base["GPP_MAX_PUNT_PLAYERS"]    = preset.get("max_punt_players",      1 if is_pga_default else 2)
-    base["GPP_MIN_MID_PLAYERS"]     = preset.get("min_mid_salary_players", 2 if is_pga_default else 3)
-    base["GPP_OWN_CAP"]             = preset.get("own_cap",               5.0 if is_pga_default else 6.0)
-    base["GPP_MIN_LOW_OWN_PLAYERS"] = preset.get("min_low_own_players",   1)
-    base["GPP_LOW_OWN_THRESHOLD"]   = preset.get("low_own_threshold",     0.40)
-    base["GPP_FORCE_GAME_STACK"]    = preset.get("force_game_stack",      not is_pga_default)
-    base["STACK_WEIGHT"]            = preset.get("stack_weight",          0.0 if is_pga_default else 0.05)
-    base["VALUE_WEIGHT"]            = preset.get("value_weight",          0.30 if is_pga_default else 0.05)
-    base["OWN_WEIGHT"]              = preset.get("own_weight",            0.25 if is_pga_default else 0.10)
-
-    # Merge any caller overrides
-    if overrides:
-        base.update(overrides)
-
-    return base
-
-
-# =============================================================================
-# PASS-2 DIVERSITY (swap one player per lineup)
-# =============================================================================
-
 def _build_one_lineup_pass2(
     players: list,
     pos_slots: list,
     salary_cap: int,
     min_salary: int,
-    existing_lineup_indices: list,
     max_appearances: dict,
     score_col: str = "gpp_score",
     pos_caps: dict | None = None,
     solver_time_limit: int = 30,
+    gpp_constraints: dict | None = None,
+    tier_constraints: dict | None = None,
+    not_with_pairs: list | None = None,
+    forced_players: list | None = None,
+    excluded_players: list | None = None,
+    already_built: list | None = None,
+    min_unique_players: int = 1,
 ) -> list | None:
-    """Build a lineup that differs by at least one player from an existing one."""
+    """Build one lineup that differs from all already-built lineups by at
+    least ``min_unique_players`` players.
+
+    Adds a uniqueness constraint: for each existing lineup, the sum of
+    indicator variables for players in that lineup must be ≤
+    (lineup_size − min_unique_players).
+    """
     n = len(players)
-    slots = pos_slots
-    k = len(slots)
+    k = len(pos_slots)
 
     def _eligible(player: dict, slot: str) -> bool:
         nat_pos = str(player.get("position", "")).upper()
@@ -1183,60 +850,157 @@ def _build_one_lineup_pass2(
             return nat_pos in ("SF", "PF", "F")
         return nat_pos == slot
 
-    prob = pulp.LpProblem("dfs_pass2", pulp.LpMaximize)
-    x = {(i, s): pulp.LpVariable(f"x_{i}_{s}", cat="Binary")
-         for i in range(n) for s in slots}
-
-    prob += pulp.lpSum(
-        players[i].get(score_col, players[i].get("proj", 0)) * x[(i, s)]
+    prob2 = pulp.LpProblem("dfs_classic_pass2", pulp.LpMaximize)
+    x = {
+        (i, s): pulp.LpVariable(f"x_{i}_{s}", cat="Binary")
         for i in range(n)
-        for s in slots
+        for s in pos_slots
+    }
+
+    score_key = score_col
+    prob2 += pulp.lpSum(
+        players[i].get(score_key, players[i].get("proj", 0)) * x[(i, s)]
+        for i in range(n)
+        for s in pos_slots
     )
 
-    for s in slots:
-        prob += pulp.lpSum(x[(i, s)] for i in range(n) if _eligible(players[i], s)) == 1
+    for s in pos_slots:
+        prob2 += pulp.lpSum(
+            x[(i, s)] for i in range(n) if _eligible(players[i], s)
+        ) == 1
 
     for i in range(n):
-        prob += pulp.lpSum(x[(i, s)] for s in slots) <= 1
+        prob2 += pulp.lpSum(x[(i, s)] for s in pos_slots) <= 1
 
-    prob += (
-        pulp.lpSum(players[i]["salary"] * x[(i, s)] for i in range(n) for s in slots)
-        <= salary_cap
+    salary_sum2 = pulp.lpSum(
+        players[i]["salary"] * x[(i, s)]
+        for i in range(n)
+        for s in pos_slots
     )
-    prob += (
-        pulp.lpSum(players[i]["salary"] * x[(i, s)] for i in range(n) for s in slots)
-        >= min_salary
-    )
-
+    prob2 += salary_sum2 <= salary_cap
+    prob2 += salary_sum2 >= min_salary
     if pos_caps:
         for nat_pos, cap_val in pos_caps.items():
-            eligible_for_pos = [i for i in range(n)
-                                if str(players[i].get("position", "")).upper() == nat_pos]
-            if eligible_for_pos:
-                prob += (
-                    pulp.lpSum(x[(i, s)] for i in eligible_for_pos for s in slots)
+            eligible_players = [
+                i for i in range(n)
+                if str(players[i].get("position", "")).upper() == nat_pos
+            ]
+            if eligible_players:
+                prob2 += (
+                    pulp.lpSum(x[(i, s)] for i in eligible_players for s in pos_slots)
                     <= cap_val
                 )
 
     for i, max_app in max_appearances.items():
-        prob += pulp.lpSum(x[(i, s)] for s in slots) <= max_app
+        prob2 += pulp.lpSum(x[(i, s)] for s in pos_slots) <= max_app
 
-    # Diversity: must differ from existing lineup by at least 1 player
-    if existing_lineup_indices:
-        n_existing = len(existing_lineup_indices)
-        prob += (
-            pulp.lpSum(x[(i, s)] for i in existing_lineup_indices for s in slots)
-            <= n_existing - 1
-        )
+    if forced_players:
+        for fp_idx in forced_players:
+            prob2 += pulp.lpSum(x[(fp_idx, s)] for s in pos_slots) == 1
 
-    solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=solver_time_limit)
-    prob.solve(solver)
+    if excluded_players:
+        for ep_idx in excluded_players:
+            prob2 += pulp.lpSum(x[(ep_idx, s)] for s in pos_slots) == 0
 
-    if pulp.LpStatus[prob.status] != "Optimal":
+    if not_with_pairs:
+        for (idx_a, idx_b) in not_with_pairs:
+            prob2 += (
+                pulp.lpSum(x[(idx_a, s)] for s in pos_slots)
+                + pulp.lpSum(x[(idx_b, s)] for s in pos_slots)
+                <= 1
+            )
+
+    gc = gpp_constraints or {}
+    if gc:
+        max_punt = gc.get("max_punt_players")
+        if max_punt is not None:
+            punt_idxs = [i for i in range(n) if players[i]["salary"] < 4000]
+            if punt_idxs:
+                prob2 += (
+                    pulp.lpSum(x[(i, s)] for i in punt_idxs for s in pos_slots)
+                    <= max_punt
+                )
+        min_mid = gc.get("min_mid_players")
+        if min_mid is not None:
+            mid_idxs = [i for i in range(n) if 4000 <= players[i]["salary"] <= 7000]
+            if mid_idxs:
+                prob2 += (
+                    pulp.lpSum(x[(i, s)] for i in mid_idxs for s in pos_slots)
+                    >= min_mid
+                )
+        own_cap = gc.get("own_cap")
+        if own_cap is not None and own_cap > 0:
+            own_vals = [float(p.get("own_pct", 0)) for p in players]
+            if max(own_vals) > 0:
+                prob2 += (
+                    pulp.lpSum(
+                        own_vals[i] * x[(i, s)]
+                        for i in range(n)
+                        for s in pos_slots
+                    ) <= own_cap
+                )
+        min_low_own = gc.get("min_low_own_players")
+        low_own_thresh = gc.get("low_own_threshold", 0.40)
+        if min_low_own is not None and min_low_own > 0:
+            low_own_idxs = [
+                i for i in range(n)
+                if float(players[i].get("own_pct", 0)) < low_own_thresh
+            ]
+            if low_own_idxs:
+                prob2 += (
+                    pulp.lpSum(x[(i, s)] for i in low_own_idxs for s in pos_slots)
+                    >= min_low_own
+                )
+
+    tc = tier_constraints or {}
+    if tc:
+        tier_player_names2 = tc.get("tier_player_names", {})
+        tier_min2 = tc.get("tier_min_players", {})
+        tier_max2 = tc.get("tier_max_players", {})
+        name_to_idx2 = {p["player_name"]: i for i, p in enumerate(players)}
+        for tier, names in tier_player_names2.items():
+            idxs = [name_to_idx2[nm] for nm in names if nm in name_to_idx2]
+            if not idxs:
+                continue
+            if tier in tier_min2:
+                prob2 += (
+                    pulp.lpSum(x[(i, s)] for i in idxs for s in pos_slots)
+                    >= tier_min2[tier]
+                )
+            if tier in tier_max2:
+                prob2 += (
+                    pulp.lpSum(x[(i, s)] for i in idxs for s in pos_slots)
+                    <= tier_max2[tier]
+                )
+
+    # Uniqueness constraints
+    if already_built:
+        for existing_lineup in already_built:
+            # existing_lineup is a list of (player_dict, slot) tuples
+            existing_idxs = set()
+            name_to_idx_local = {p["player_name"]: i for i, p in enumerate(players)}
+            for (p_dict, _slot) in existing_lineup:
+                nm = p_dict["player_name"]
+                if nm in name_to_idx_local:
+                    existing_idxs.add(name_to_idx_local[nm])
+            if existing_idxs:
+                prob2 += (
+                    pulp.lpSum(
+                        x[(i, s)]
+                        for i in existing_idxs
+                        for s in pos_slots
+                        if i < n
+                    ) <= k - min_unique_players
+                )
+
+    solver2 = pulp.PULP_CBC_CMD(msg=False, timeLimit=solver_time_limit)
+    prob2.solve(solver2)
+
+    if pulp.LpStatus[prob2.status] != "Optimal":
         return None
 
     result = []
-    for s in slots:
+    for s in pos_slots:
         for i in range(n):
             if _eligible(players[i], s) and pulp.value(x[(i, s)]) > 0.5:
                 result.append((players[i], s))
@@ -1245,47 +1009,347 @@ def _build_one_lineup_pass2(
 
 
 # =============================================================================
-# BACKWARD-COMPAT SHIMS
+# PuLP OPTIMISER — SHOWDOWN (Captain Mode)
 # =============================================================================
-# These functions were removed in the lineups rewrite.  They raise immediately
-# so callers get a clear error message pointing to the new API rather than a
-# silent wrong-answer.
 
-def load_opt_pool_from_config(*args, **kwargs):
-    """Removed in lineups rewrite — use load_player_pool() + prepare_pool()."""
-    raise NotImplementedError(
-        "load_opt_pool_from_config() was removed in the lineups rewrite. "
-        "Use yak_core.lineups.load_player_pool() + prepare_pool() instead."
+def build_showdown_lineups(
+    player_pool: pd.DataFrame,
+    cfg: Dict[str, Any],
+    progress_callback=None,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Build Showdown Captain-mode lineups (1 CPT + 5 FLEX).
+
+    The Captain slot:
+    - Earns 1.5× fantasy points
+    - Costs 1.5× salary
+    - May be filled by any position
+
+    Parameters
+    ----------
+    player_pool : pd.DataFrame
+        Pool already filtered to the 2-team matchup.
+    cfg : Dict[str, Any]
+        Config dict.  Key fields used:
+        - ``NUM_LINEUPS``        : number of lineups to build (default 20)
+        - ``SALARY_CAP``         : max total salary (default 50000)
+        - ``MIN_SALARY_USED``    : min total salary (default 0 for Showdown)
+        - ``MAX_EXPOSURE``       : max fraction of lineups any player appears in
+        - ``SOLVER_TIME_LIMIT``  : seconds per LP solve (default 30)
+        - ``LOCK``               : list of player names forced into every lineup
+        - ``SD_CAPTAIN_OWN_PENALTY``: penalise high-owned captains (default 10.0)
+        - ``SD_CAPTAIN_CEIL_BONUS`` : bonus weight on ceiling for CPT slot
+
+    Returns
+    -------
+    (lineups_df, exposures_df) in the same long format as the Classic optimizer,
+    with ``slot`` values of ``"CPT"`` or ``"FLEX"``.
+    """
+    num_lineups = int(cfg.get("NUM_LINEUPS", 20))
+    salary_cap = int(cfg.get("SALARY_CAP", 50000))
+    min_salary = int(cfg.get("MIN_SALARY_USED", 0))  # Showdown has no salary floor
+    max_exposure = float(cfg.get("MAX_EXPOSURE", 0.35))
+    solver_time_limit = int(cfg.get("SOLVER_TIME_LIMIT", 30))
+    lock_names = [n.strip() for n in cfg.get("LOCK", [])]
+    max_appearances = max(1, int(num_lineups * max_exposure))
+    max_pair_appearances = int(cfg.get("MAX_PAIR_APPEARANCES", 0))
+
+    base_players = player_pool.to_dict("records")
+    m = len(base_players)
+    if m < DK_SHOWDOWN_LINEUP_SIZE:
+        raise ValueError(
+            f"Showdown pool has only {m} players; need at least {DK_SHOWDOWN_LINEUP_SIZE}"
+        )
+
+    # Build augmented player list: each base player appears twice:
+    #   index i      -> FLEX version (salary = base, score = base)
+    #   index i + m  -> CPT version  (salary = 1.5x, score = 1.5x)
+    cpt_mult = DK_SHOWDOWN_CAPTAIN_MULTIPLIER
+
+    players: list[dict] = []
+    for p in base_players:
+        # FLEX copy
+        players.append({
+            **p,
+            "_role": "FLEX",
+            "_base_idx": len(players),  # will be overwritten below
+        })
+    flex_count = len(players)  # == m
+    for p in base_players:
+        # CPT copy
+        cpt_salary = int(round(p["salary"] * cpt_mult))
+        cpt_score  = p.get("gpp_score", p.get("proj", 0)) * cpt_mult
+        # Adjust captain score: bonus for ceiling, penalty for high ownership
+        ceil_bonus    = float(cfg.get("SD_CAPTAIN_CEIL_BONUS", 0.2))
+        own_penalty   = float(cfg.get("SD_CAPTAIN_OWN_PENALTY", 10.0))
+        if "ceil" in p:
+            cpt_score += ceil_bonus * float(p["ceil"])
+        cpt_score -= own_penalty * float(p.get("own_pct", 0))
+        players.append({
+            **p,
+            "salary": cpt_salary,
+            "gpp_score": cpt_score,
+            "_role": "CPT",
+            "_base_idx": len(players) - flex_count,
+        })
+
+    # Fix _base_idx for FLEX copies
+    for i in range(flex_count):
+        players[i]["_base_idx"] = i
+
+    n = len(players)  # == 2 * m
+    pos_slots = DK_SHOWDOWN_SLOTS  # ["CPT", "FLEX", "FLEX", "FLEX", "FLEX", "FLEX"]
+    k = len(pos_slots)
+
+    # Name-to-index maps (FLEX indices = 0..m-1, CPT indices = m..2m-1)
+    name_to_flex = {p["player_name"]: i for i, p in enumerate(players[:flex_count])}
+    name_to_cpt  = {p["player_name"]: i for i, p in enumerate(players[flex_count:], start=flex_count)}
+
+    lock_flex_indices = [name_to_flex[nm] for nm in lock_names if nm in name_to_flex]
+
+    # Appearance budgets (apply to base-player level, not CPT/FLEX separately)
+    base_remaining = {i: max_appearances for i in range(m)}
+    for i in range(m):
+        pname = base_players[i]["player_name"]
+        if pname in [base_players[li]["player_name"] for li in lock_flex_indices]:
+            base_remaining[i] = num_lineups
+
+    pair_appearances: Dict[tuple, int] = {}
+    lineups = []
+
+    for lineup_num in range(num_lineups):
+        if progress_callback:
+            progress_callback(lineup_num, num_lineups)
+
+        # Build extra not-with pairs from pair appearance tracking
+        extra_not_with_base: list[tuple[int, int]] = []
+        if max_pair_appearances > 0:
+            extra_not_with_base = [
+                (a, b) for (a, b), cnt in pair_appearances.items()
+                if cnt >= max_pair_appearances
+            ]
+
+        prob = pulp.LpProblem(f"sd_{lineup_num}", pulp.LpMaximize)
+
+        # y[i] = 1 if player i (in augmented list) is selected
+        y = [pulp.LpVariable(f"y_{i}", cat="Binary") for i in range(n)]
+
+        # Objective: maximise total adjusted score
+        prob += pulp.lpSum(
+            players[i].get("gpp_score", players[i].get("proj", 0)) * y[i]
+            for i in range(n)
+        )
+
+        # Exactly 1 CPT slot
+        prob += pulp.lpSum(y[i] for i in range(flex_count, n)) == 1
+
+        # Exactly 5 FLEX slots
+        prob += pulp.lpSum(y[i] for i in range(flex_count)) == 5
+
+        # A base player cannot be both CPT and FLEX
+        for base_i in range(m):
+            prob += y[base_i] + y[base_i + flex_count] <= 1
+
+        # Salary cap and floor
+        prob += pulp.lpSum(players[i]["salary"] * y[i] for i in range(n)) <= salary_cap
+        prob += pulp.lpSum(players[i]["salary"] * y[i] for i in range(n)) >= min_salary
+
+        # LOCK: locked players must appear (either as CPT or FLEX)
+        if lock_names:
+            for nm in lock_names:
+                if nm in name_to_flex:
+                    flex_i = name_to_flex[nm]
+                    cpt_i  = name_to_cpt[nm]
+                    prob += y[flex_i] + y[cpt_i] >= 1
+
+        # Exposure: each base player can appear at most base_remaining[base_i] more times
+        for base_i in range(m):
+            budget = base_remaining[base_i]
+            prob += y[base_i] + y[base_i + flex_count] <= budget
+
+        # NOT_WITH at base-player level
+        if extra_not_with_base:
+            for (bi_a, bi_b) in extra_not_with_base:
+                prob += (
+                    y[bi_a] + y[bi_a + flex_count]
+                    + y[bi_b] + y[bi_b + flex_count]
+                    <= 1
+                )
+
+        solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=solver_time_limit)
+        prob.solve(solver)
+
+        if pulp.LpStatus[prob.status] != "Optimal":
+            break
+
+        # Decode solution
+        lineup_rows = []
+        selected_base_idxs = []
+
+        # CPT
+        for i in range(flex_count, n):
+            if pulp.value(y[i]) > 0.5:
+                p = players[i]
+                base_i = i - flex_count
+                selected_base_idxs.append(base_i)
+                lineup_rows.append({
+                    "lineup_index": lineup_num,
+                    "slot": "CPT",
+                    "player_name": p["player_name"],
+                    "team": p.get("team", ""),
+                    "position": p.get("position", ""),
+                    "salary": p["salary"],  # already 1.5x
+                    "proj": p.get("proj", 0) * cpt_mult,
+                    "own_pct": p.get("own_pct", 0),
+                    "gpp_score": p.get("gpp_score", 0),
+                    "cash_score": p.get("cash_score", 0),
+                })
+                break
+
+        # FLEX
+        for i in range(flex_count):
+            if pulp.value(y[i]) > 0.5:
+                p = players[i]
+                selected_base_idxs.append(i)
+                lineup_rows.append({
+                    "lineup_index": lineup_num,
+                    "slot": "FLEX",
+                    "player_name": p["player_name"],
+                    "team": p.get("team", ""),
+                    "position": p.get("position", ""),
+                    "salary": p["salary"],
+                    "proj": p.get("proj", 0),
+                    "own_pct": p.get("own_pct", 0),
+                    "gpp_score": p.get("gpp_score", 0),
+                    "cash_score": p.get("cash_score", 0),
+                })
+
+        lineups.append(lineup_rows)
+
+        # Update appearance budgets
+        for base_i in selected_base_idxs:
+            pname = base_players[base_i]["player_name"]
+            is_locked = pname in lock_names
+            if not is_locked:
+                base_remaining[base_i] = max(0, base_remaining[base_i] - 1)
+
+        # Update pair appearances
+        if max_pair_appearances > 0:
+            for a in selected_base_idxs:
+                for b in selected_base_idxs:
+                    if a < b:
+                        pair_appearances[(a, b)] = pair_appearances.get((a, b), 0) + 1
+
+    if not lineups:
+        return pd.DataFrame(), pd.DataFrame()
+
+    all_rows = [row for lu in lineups for row in lu]
+    lineups_df = pd.DataFrame(all_rows)
+
+    # Exposure
+    n_built = lineups_df["lineup_index"].nunique() if not lineups_df.empty else 0
+    exp_rows = []
+    for base_i, p in enumerate(base_players):
+        times = sum(
+            1 for lu in lineups
+            if any(r["player_name"] == p["player_name"] for r in lu)
+        )
+        if times > 0:
+            exp_rows.append({
+                "player_name": p["player_name"],
+                "team": p.get("team", ""),
+                "salary": p["salary"],
+                "proj": p.get("proj", 0),
+                "own_pct": p.get("own_pct", 0),
+                "lineups": times,
+                "exposure": times / max(n_built, 1),
+            })
+    exposures_df = pd.DataFrame(exp_rows).sort_values("exposure", ascending=False)
+
+    return lineups_df, exposures_df
+
+
+# =============================================================================
+# RUN CONFIGURATION BUILDER
+# =============================================================================
+
+def build_run_config(
+    player_pool: pd.DataFrame,
+    overrides: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """Merge user overrides into DEFAULT_CONFIG and return enriched run dict.
+
+    Parameters
+    ----------
+    player_pool : pd.DataFrame
+        The player pool that will be optimised (used for metadata).
+    overrides : dict or None
+        Keys to override in DEFAULT_CONFIG.  Accepts both canonical
+        UPPER-case keys and lowercase aliases.
+
+    Returns
+    -------
+    dict
+        Merged config with extra keys: ``num_players``, ``config``.
+    """
+    from yak_core.config import merge_config
+    merged = merge_config(overrides or {})
+    return {
+        "num_lineups": merged.get("NUM_LINEUPS"),
+        "salary_cap": merged.get("SALARY_CAP"),
+        "max_exposure": merged.get("MAX_EXPOSURE"),
+        "logic_profile": merged.get("LOGIC_PROFILE"),
+        "band": merged.get("BAND"),
+        "min_salary_used": merged.get("MIN_SALARY_USED"),
+        "yakos_root": YAKOS_ROOT,
+        "num_players": int(len(player_pool)),
+        "config": merged,
+    }
+
+
+# =============================================================================
+# BACKWARD-COMPATIBILITY SHIMS
+# =============================================================================
+# __init__.py and older callers may still import these names.
+# Keep them around as thin wrappers / deprecation stubs.
+
+def load_opt_pool_from_config(cfg: Dict[str, Any]) -> pd.DataFrame:
+    """Deprecated. Use load_player_pool() + prepare_pool() instead."""
+    raise RuntimeError(
+        "load_opt_pool_from_config is deprecated; "
+        "use load_player_pool() + prepare_pool() instead."
     )
 
 
-def build_player_pool(*args, **kwargs):
-    """Removed in lineups rewrite — use load_player_pool() + prepare_pool()."""
-    raise NotImplementedError(
-        "build_player_pool() was removed in the lineups rewrite. "
-        "Use yak_core.lineups.load_player_pool() + prepare_pool() instead."
+def build_player_pool(opt_pool: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
+    """Deprecated wrapper — delegates to prepare_pool()."""
+    import warnings
+    warnings.warn(
+        "build_player_pool() is deprecated; use prepare_pool() instead.",
+        DeprecationWarning,
+        stacklevel=2,
     )
+    return prepare_pool(opt_pool, cfg)
 
 
-def build_slate_pool(*args, **kwargs):
-    """Removed in lineups rewrite — use load_player_pool()."""
-    raise NotImplementedError(
+def build_slate_pool(*args, **kwargs) -> pd.DataFrame:
+    """Deprecated stub. Slate building now lives in scripts/load_pool.py."""
+    raise RuntimeError(
         "build_slate_pool() was removed in the lineups rewrite. "
-        "Use yak_core.lineups.load_player_pool() instead."
+        "Use scripts/load_pool.py to build the slate pool."
     )
 
 
-def run_lineups_from_config(*args, **kwargs):
-    """Removed in lineups rewrite — use build_multiple_lineups_with_exposure()."""
-    raise NotImplementedError(
+def run_lineups_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Deprecated stub. Use build_run_config() + build_multiple_lineups_with_exposure() directly."""
+    raise RuntimeError(
         "run_lineups_from_config() was removed in the lineups rewrite. "
-        "Use yak_core.lineups.build_multiple_lineups_with_exposure() instead."
+        "Use build_run_config() + the new optimizer functions instead."
     )
 
 
-def to_dk_upload_format(*args, **kwargs):
-    """Removed in lineups rewrite — use yak_core.publishing instead."""
-    raise NotImplementedError(
+def to_dk_upload_format(lineups_df: pd.DataFrame) -> pd.DataFrame:
+    """Deprecated stub. DK upload formatting now lives in yak_core.publishing."""
+    raise RuntimeError(
         "to_dk_upload_format() was removed in the lineups rewrite. "
         "Use yak_core.publishing instead."
     )
