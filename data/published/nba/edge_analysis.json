@@ -1,134 +1,134 @@
 {
   "bullets": [
-    "Core anchors: Cade Cunningham, Anthony Edwards, Deni Avdija",
-    "Leverage plays: Mikal Bridges, Toumani Camara",
-    "Value targets: Matisse Thybulle, Jose Alvarado"
+    "Core anchors: Victor Wembanyama, Luka Doncic, Nikola Jokic",
+    "Leverage plays: Sam Hauser, Micah Potter",
+    "Value targets: Julian Reese, Jock Landale"
   ],
-  "recommendation": "5 core plays anchored at $8,800\u2013$10,900. 5 value plays averaging 8.1 pts/$1K. 5 leverage plays at 3\u20133% ownership.",
+  "recommendation": "5 core plays anchored at $10,800\u2013$12,500. 5 value plays averaging 6.0 pts/$1K. 5 leverage plays at 2\u20132% ownership.",
   "core_plays": [
+    {
+      "player_name": "Victor Wembanyama",
+      "salary": 11000,
+      "proj": 57.253599401922834,
+      "ownership": 7.12,
+      "edge": 0.5592478695931375,
+      "value": 5.204872672902076
+    },
+    {
+      "player_name": "Luka Doncic",
+      "salary": 12300,
+      "proj": 56.27015832557576,
+      "ownership": 5.87,
+      "edge": 0.5519481889874215,
+      "value": 4.574809619965508
+    },
+    {
+      "player_name": "Nikola Jokic",
+      "salary": 12500,
+      "proj": 55.5123088928279,
+      "ownership": 5.75,
+      "edge": 0.5332327402094676,
+      "value": 4.440984711426232
+    },
+    {
+      "player_name": "Jalen Johnson",
+      "salary": 10800,
+      "proj": 50.99935304776917,
+      "ownership": 5.85,
+      "edge": 0.5331830983223191,
+      "value": 4.722162319237886
+    },
     {
       "player_name": "Cade Cunningham",
       "salary": 10900,
-      "proj": 57.65504959813543,
-      "ownership": 5.09,
-      "edge": 0.5852466100951181,
-      "value": 5.289454091572058
-    },
-    {
-      "player_name": "Anthony Edwards",
-      "salary": 9500,
-      "proj": 55.846213430105806,
-      "ownership": 6.15,
-      "edge": 0.583952148664938,
-      "value": 5.8785487821164
-    },
-    {
-      "player_name": "Deni Avdija",
-      "salary": 8800,
-      "proj": 50.62072951277887,
-      "ownership": 5.81,
-      "edge": 0.569205354200703,
-      "value": 5.752355626452144
-    },
-    {
-      "player_name": "Donovan Mitchell",
-      "salary": 9500,
-      "proj": 52.214221344340096,
-      "ownership": 5.5,
-      "edge": 0.5628320531679489,
-      "value": 5.49623382572001
-    },
-    {
-      "player_name": "Jalen Brunson",
-      "salary": 9100,
-      "proj": 51.209882414515064,
-      "ownership": 5.88,
-      "edge": 0.555356144238185,
-      "value": 5.6274596059906665
+      "proj": 49.56663137511949,
+      "ownership": 5.47,
+      "edge": 0.5202062872491866,
+      "value": 4.5473973738641735
     }
   ],
   "leverage_plays": [
     {
-      "player_name": "Mikal Bridges",
-      "salary": 6200,
-      "proj": 31.81464974738093,
-      "ownership": 2.81,
-      "edge": 0.42599755493190805,
-      "value": 5.131395120545311
+      "player_name": "Sam Hauser",
+      "salary": 4800,
+      "proj": 20.185263994495116,
+      "ownership": 2.33,
+      "edge": 0.352954294327781,
+      "value": 4.205263332186483
     },
     {
-      "player_name": "Toumani Camara",
-      "salary": 6200,
-      "proj": 31.749795682767953,
-      "ownership": 2.7,
-      "edge": 0.42386433277262425,
-      "value": 5.120934787543218
+      "player_name": "Micah Potter",
+      "salary": 4700,
+      "proj": 19.951273418009798,
+      "ownership": 2.32,
+      "edge": 0.35144775508092035,
+      "value": 4.2449517910659145
     },
     {
-      "player_name": "Jerami Grant",
-      "salary": 6300,
-      "proj": 32.30126450033959,
-      "ownership": 2.73,
-      "edge": 0.4228423371462147,
-      "value": 5.127184841323745
+      "player_name": "Aaron Nesmith",
+      "salary": 5400,
+      "proj": 21.194784378856887,
+      "ownership": 2.25,
+      "edge": 0.3511112738613322,
+      "value": 3.9249600701586824
     },
     {
-      "player_name": "Ty Jerome",
-      "salary": 6700,
-      "proj": 32.7983635815245,
-      "ownership": 2.65,
-      "edge": 0.4215191557140573,
-      "value": 4.895278146496193
-    },
-    {
-      "player_name": "Brandon Williams",
+      "player_name": "Royce O'Neale",
       "salary": 5500,
-      "proj": 29.312783857952034,
-      "ownership": 2.84,
-      "edge": 0.42119132095433476,
-      "value": 5.329597065082188
+      "proj": 21.532824676660596,
+      "ownership": 2.3,
+      "edge": 0.35110855262799534,
+      "value": 3.915059032120108
+    },
+    {
+      "player_name": "Bruce Brown",
+      "salary": 4600,
+      "proj": 19.628945366560664,
+      "ownership": 2.31,
+      "edge": 0.35002212684553424,
+      "value": 4.26716203620884
     }
   ],
   "value_plays": [
     {
-      "player_name": "Matisse Thybulle",
-      "salary": 3000,
-      "proj": 26.362640608321968,
-      "ownership": 3.96,
-      "edge": 0.4495004267575891,
-      "value": 8.787546869440655
+      "player_name": "Julian Reese",
+      "salary": 3700,
+      "proj": 24.7457093198939,
+      "ownership": 4.89,
+      "edge": 0.41659880365482244,
+      "value": 6.688029545917271
     },
     {
-      "player_name": "Jose Alvarado",
-      "salary": 3200,
-      "proj": 26.484518952218956,
-      "ownership": 4.02,
-      "edge": 0.4471563563079255,
-      "value": 8.276412172568422
+      "player_name": "Jock Landale",
+      "salary": 3700,
+      "proj": 21.745634828073573,
+      "ownership": 4.55,
+      "edge": 0.3910507299531222,
+      "value": 5.877198602182046
     },
     {
-      "player_name": "Oscar Tshiebwe",
-      "salary": 3600,
-      "proj": 27.545120796474286,
-      "ownership": 3.99,
-      "edge": 0.44461503060324237,
-      "value": 7.651422443465079
+      "player_name": "Jonas Valanciunas",
+      "salary": 3500,
+      "proj": 21.054476180388836,
+      "ownership": 4.26,
+      "edge": 0.38965406006271097,
+      "value": 6.015564622968239
     },
     {
-      "player_name": "Kevin Love",
-      "salary": 3400,
-      "proj": 26.670861224243353,
-      "ownership": 3.91,
-      "edge": 0.4433687087740405,
-      "value": 7.844370948306869
+      "player_name": "Caleb Martin",
+      "salary": 3300,
+      "proj": 20.32261175966071,
+      "ownership": 3.81,
+      "edge": 0.38956019165340167,
+      "value": 6.158367199897185
     },
     {
-      "player_name": "Yves Missi",
-      "salary": 3200,
-      "proj": 26.074874308282585,
-      "ownership": 4.31,
-      "edge": 0.44218409265883624,
-      "value": 8.148398221338308
+      "player_name": "Zaccharie Risacher",
+      "salary": 3800,
+      "proj": 20.212205911320137,
+      "ownership": 3.6,
+      "edge": 0.37585762594060934,
+      "value": 5.319001555610562
     }
   ],
   "fade_candidates": [],

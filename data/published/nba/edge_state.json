@@ -1,27 +1,27 @@
 {
   "sport": "NBA",
-  "date": "2026-03-13",
+  "date": "2026-03-12",
   "core_names": [
-    "Cade Cunningham",
-    "Anthony Edwards",
-    "Deni Avdija",
-    "Donovan Mitchell",
-    "Jalen Brunson"
+    "Victor Wembanyama",
+    "Luka Doncic",
+    "Nikola Jokic",
+    "Jalen Johnson",
+    "Cade Cunningham"
   ],
   "leverage_names": [
-    "Mikal Bridges",
-    "Toumani Camara",
-    "Jerami Grant",
-    "Ty Jerome",
-    "Brandon Williams"
+    "Sam Hauser",
+    "Micah Potter",
+    "Aaron Nesmith",
+    "Royce O'Neale",
+    "Bruce Brown"
   ],
   "value_names": [
-    "Matisse Thybulle",
-    "Jose Alvarado",
-    "Oscar Tshiebwe",
-    "Kevin Love",
-    "Yves Missi"
+    "Julian Reese",
+    "Jock Landale",
+    "Jonas Valanciunas",
+    "Caleb Martin",
+    "Zaccharie Risacher"
   ],
   "fade_names": [],
-  "calibration_slates": 15
+  "calibration_slates": 12
 }
