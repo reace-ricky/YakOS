@@ -286,7 +286,7 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "correlation_mode": "stack",
         "default_lineups": 3,
         "default_max_exposure": 0.6,
-        "min_salary": 46000,
+        "min_salary": 0,  # Showdown has no salary floor — DK only enforces a $50K cap
         # Pool sizing
         "pool_size_min": 10,
         "pool_size_max": 16,
@@ -353,7 +353,7 @@ PGA_CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "projection_slate": "main",
         "projection_style": "ceil",
         "volatility": "high",
-        "correlation_mode": None,   # No team stacking in PGA
+        "correlation_mode": None,
         "lineup_size": DK_PGA_LINEUP_SIZE,
         "num_lineups": 20,
         "default_lineups": 20,
@@ -372,21 +372,16 @@ PGA_CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "target_avg_ownership_min": 10,
         "target_avg_ownership_max": 20,
         "ownership_caps_by_tier": None,
-        # Ownership / leverage
         "own_weight": 0.25,
         "own_cap": 5.0,
         "min_low_own_players": 1,
         "low_own_threshold": 0.40,
-        # GPP structure
         "min_mid_salary_players": 2,
         "max_punt_players": 1,
         "force_game_stack": False,
-        # Correlation rules
         "not_with_auto": False,
         "max_per_team": None,
-        # Exposure
         "exposure_rules": False,
-        # Ownership sim contest type
         "ownership_contest_type": "gpp",
     },
     "PGA Cash": {
@@ -432,7 +427,7 @@ PGA_CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "description": "PGA single-round showdown — 6 golfers, ceiling-weighted (one round)",
         "slate_type": "Classic",
         "archetype": "Ceiling Hunter",
-        "internal_contest": "Showdown",  # Showdown formula: proj*0.25 + ceil*0.70 - own*2
+        "internal_contest": "Showdown",
         "projection_slate": "showdown",
         "projection_style": "ceil",
         "volatility": "high",
@@ -441,8 +436,8 @@ PGA_CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "num_lineups": 20,
         "default_lineups": 20,
         "salary_cap": DK_PGA_SALARY_CAP,
-        "min_salary": 46000,
-        "min_salary_used": 46000,
+        "min_salary": 0,  # Showdown has no salary floor — DK only enforces a $50K cap
+        "min_salary_used": 0,  # Showdown has no salary floor — DK only enforces a $50K cap
         "default_max_exposure": 0.50,
         "max_exposure": 0.50,
         "pos_slots": DK_PGA_POS_SLOTS,
@@ -479,7 +474,7 @@ CONTEST_PRESET_LABELS: List[str] = list(CONTEST_PRESETS.keys())
 # NBA gets GPP/Cash/Showdown, PGA gets GPP only.
 UI_CONTEST_LABELS: List[str] = ["GPP", "Cash", "Showdown"]
 UI_CONTEST_MAP: Dict[str, str] = {
-    "GPP": "GPP Main",       # Game filter handles early/late scoping
+    "GPP": "GPP Main",
     "Cash": "Cash Main",
     "Showdown": "Showdown",
 }
@@ -591,7 +586,6 @@ def classify_draft_group(dg: Dict[str, Any]) -> str:
 
     # Showdown: single-game contests
     if game_type_id == 81 or "showdown" in game_style.lower():
-        # Suffix usually has the matchup like "(LAL @ DEN)"
         matchup = suffix.strip("()")
         if matchup:
             return f"Showdown: {matchup}"
@@ -619,8 +613,6 @@ def classify_draft_group(dg: Dict[str, Any]) -> str:
 
 # DK game type IDs we support for lineup building.
 # 70 = Classic, 81 = Showdown Captain Mode.
-# Filters out: 188 (Tiers), 193 (Showdown Tiers), 73 (NBA Tiers),
-#              343 (Points), 112 (2nd Half), and other non-standard formats.
 _SUPPORTED_GAME_TYPE_IDS = {70, 81}
 
 
@@ -631,12 +623,10 @@ def _format_start_time(start_time_str: str) -> str:
     try:
         from datetime import datetime as _dt
         from zoneinfo import ZoneInfo as _ZI
-        # DK returns ISO-ish timestamps like '2026-03-08T01:00:00.0000000'
         cleaned = start_time_str.rstrip("0").rstrip(".")
         dt = _dt.fromisoformat(cleaned)
         dt_utc = dt.replace(tzinfo=_ZI("UTC"))
         dt_et = dt_utc.astimezone(_ZI("America/New_York"))
-        # Format: "Sat 8PM" (drop leading zero, drop minutes if :00)
         day = dt_et.strftime("%a")
         hour = dt_et.strftime("%I").lstrip("0")
         minute = dt_et.strftime("%M")
@@ -681,14 +671,11 @@ def build_slate_options(draft_groups: list) -> List[Dict[str, Any]]:
         start_time = str(dg.get("StartDate") or dg.get("startDate") or dg.get("start_time") or "")
         sort_order = int(dg.get("SortOrder") or dg.get("sortOrder") or dg.get("sort_order") or 99)
 
-        # Filter: only Classic (70) and Showdown (81) game types.
-        # Skip Tiers (73/188/193), Points (343), 2nd Half (112), etc.
         if _SUPPORTED_GAME_TYPE_IDS and game_type_id not in _SUPPORTED_GAME_TYPE_IDS:
             continue
 
         label = classify_draft_group(dg)
 
-        # Sort key: Classic (0) before Showdown (1), then by game count desc
         is_showdown = 1 if (game_type_id == 81 or "showdown" in game_style.lower()) else 0
         
         options.append({
@@ -704,7 +691,6 @@ def build_slate_options(draft_groups: list) -> List[Dict[str, Any]]:
 
     options.sort(key=lambda x: x["_sort_key"])
 
-    # Disambiguate any remaining duplicate labels using start time
     label_counts: Dict[str, int] = {}
     for opt in options:
         label_counts[opt["label"]] = label_counts.get(opt["label"], 0) + 1
@@ -718,7 +704,6 @@ def build_slate_options(draft_groups: list) -> List[Dict[str, Any]]:
                 else:
                     opt["label"] = f"{opt['label']} (DG {opt['draft_group_id']})"
 
-    # Remove internal sort key
     for opt in options:
         opt.pop("_sort_key", None)
     return options
@@ -752,7 +737,7 @@ def merge_config(overrides: Dict[str, Any]) -> Dict[str, Any]:
     if overrides:
         normalized = {}
         for k, v in overrides.items():
-            canon = _KEY_ALIASES.get(k, k)   # map alias or keep as-is
+            canon = _KEY_ALIASES.get(k, k)
             normalized[canon] = v
         cfg.update(normalized)
     return cfg
