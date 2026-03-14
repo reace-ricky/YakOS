@@ -689,7 +689,7 @@ def _build_bullets(classified: dict, edge_df, sport: str) -> list:
 
 def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None):
     from yak_core.config import CONTEST_PRESETS, merge_config
-    from yak_core.optimizer import build_multiple_lineups_with_exposure, build_player_pool
+    from yak_core.lineups import build_multiple_lineups_with_exposure, build_player_pool
 
     pool = pd.read_parquet(out_dir / "slate_pool.parquet")
     preset = CONTEST_PRESETS.get(contest_label, {})
@@ -744,10 +744,20 @@ def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, o
 
 
 def _publish_to_github(sport: str, out_dir: Path) -> dict:
-    from yak_core.github_sync import sync_feedback_to_github
+    from yak_core.config import YAKOS_ROOT
+    from yak_core.github_persistence import sync_feedback_to_github
+
+    # Collect all files in the published directory as repo-relative paths
+    files: list[str] = []
+    for fname in sorted(os.listdir(out_dir)):
+        abs_path = os.path.join(out_dir, fname)
+        if os.path.isfile(abs_path):
+            files.append(os.path.relpath(abs_path, YAKOS_ROOT))
+    if not files:
+        return {"status": "skipped", "reason": "No files to publish"}
+
     result = sync_feedback_to_github(
-        sport=sport.upper(),
-        local_dir=str(out_dir),
+        files=files,
         commit_message=f"YakOS publish: {sport.upper()} lineups {date.today().isoformat()}",
     )
     return result
@@ -799,11 +809,11 @@ def _render_historical_replay(sport: str) -> None:
 
         if st.button("Sync Replay to GitHub", key=f"replay_sync_{sport}"):
             try:
-                from yak_core.github_sync import sync_feedback_to_github
+                from yak_core.config import YAKOS_ROOT as _YR
+                from yak_core.github_persistence import sync_feedback_to_github
+                _replay_rel = os.path.relpath(str(replay_out), _YR)
                 sync_feedback_to_github(
-                    sport=sport.upper(),
-                    local_dir=str(out_dir),
-                    extra_files=[str(replay_out)],
+                    files=[_replay_rel],
                     commit_message=f"Replay completed: {selected_full_slug}",
                 )
             except Exception:
