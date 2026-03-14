@@ -577,6 +577,11 @@ def _run_edge(sport: str, slate_date: str, out_dir: Path) -> tuple:
     from yak_core.calibration_feedback import get_correction_factors
 
     pool = pd.read_parquet(out_dir / "slate_pool.parquet")
+
+    # ── PGA: live re-check for withdrawals before edge analysis ──
+    if sport.upper() == "PGA":
+        pool = _recheck_pga_withdrawals(pool)
+
     _excl_path = out_dir / "excluded_players.json"
     if _excl_path.exists():
         import json as _json
@@ -700,11 +705,77 @@ def _build_bullets(classified: dict, edge_df, sport: str) -> list:
     return bullets
 
 
+def _recheck_pga_withdrawals(pool: pd.DataFrame) -> pd.DataFrame:
+    """Live re-check of PGA field at lineup-build time.
+
+    Queries the DataGolf /field-updates endpoint to catch players who
+    withdrew AFTER the pool was first loaded and saved to parquet.
+    This mirrors what auto_flag_injuries() does for NBA.
+    """
+    try:
+        from yak_core.datagolf import DataGolfClient
+        api_key = os.environ.get("DATAGOLF_API_KEY") or _get_secret("DATAGOLF_API_KEY")
+        if not api_key:
+            print("[_recheck_pga_withdrawals] No DATAGOLF_API_KEY — skipping")
+            return pool
+
+        dg = DataGolfClient(api_key)
+        field_df = dg.get_field()
+        if field_df.empty:
+            print("[_recheck_pga_withdrawals] Empty field response — skipping")
+            return pool
+
+        if "dg_id" not in pool.columns or "dg_id" not in field_df.columns:
+            print("[_recheck_pga_withdrawals] No dg_id column — skipping")
+            return pool
+
+        field_ids = set(field_df["dg_id"].values)
+        _before = len(pool)
+
+        # Players in pool but NOT in the live field → withdrawn
+        _wd_mask = ~pool["dg_id"].isin(field_ids)
+
+        # Also check for explicit WD flags in field data
+        for _wd_col in ["wd", "is_wd", "status"]:
+            if _wd_col in field_df.columns:
+                _wd_ids = set(field_df.loc[
+                    field_df[_wd_col].astype(str).str.lower().isin(
+                        ["wd", "true", "1", "withdrawn"]
+                    ),
+                    "dg_id"
+                ].values)
+                if _wd_ids:
+                    _wd_mask = _wd_mask | pool["dg_id"].isin(_wd_ids)
+                break
+
+        _wd_count = _wd_mask.sum()
+        if _wd_count > 0:
+            _wd_names = pool.loc[_wd_mask, "player_name"].tolist()
+            pool = pool[~_wd_mask].reset_index(drop=True)
+            print(
+                f"[_recheck_pga_withdrawals] Removed {_wd_count} withdrawn player(s) "
+                f"at build time: {', '.join(_wd_names[:10])}"
+            )
+        else:
+            print("[_recheck_pga_withdrawals] No new withdrawals detected")
+
+        return pool
+    except Exception as e:
+        print(f"[_recheck_pga_withdrawals] Re-check failed (non-fatal): {e}")
+        return pool
+
+
 def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None):
     from yak_core.config import CONTEST_PRESETS, merge_config
     from yak_core.lineups import build_multiple_lineups_with_exposure, build_player_pool, build_showdown_lineups
 
     pool = pd.read_parquet(out_dir / "slate_pool.parquet")
+
+    # ── PGA: live re-check for withdrawals at build time ──
+    # Catches players who withdrew AFTER the pool was loaded.
+    if sport.upper() == "PGA":
+        pool = _recheck_pga_withdrawals(pool)
+
     preset = CONTEST_PRESETS.get(contest_label, {})
     cfg = merge_config({
         **preset,
