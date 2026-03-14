@@ -4,30 +4,39 @@
   "core_names": [
     "Cade Cunningham",
     "Anthony Edwards",
-    "Kawhi Leonard",
-    "Donovan Mitchell",
-    "Jalen Brunson"
-  ],
-  "leverage_names": [
+    "Jalen Brunson",
     "Karl-Anthony Towns",
+    "Donovan Mitchell",
+    "Kawhi Leonard",
     "Josh Giddey",
     "Alperen Sengun",
     "Pascal Siakam",
     "Stephen Curry"
   ],
-  "value_names": [
-    "Derrick Jones Jr.",
-    "AJ Lawson",
-    "Landry Shamet",
-    "Jamison Battle",
-    "Dennis Schroder"
-  ],
-  "fade_names": [
-    "Cedric Coward",
-    "Guerschon Yabusele",
-    "Brandon Williams",
+  "leverage_names": [
+    "De'Anthony Melton",
+    "Tari Eason",
+    "Donte DiVincenzo",
+    "Jahmai Mashack",
+    "Cam Spencer",
+    "Jaden Ivey",
+    "Scoot Henderson",
+    "Taylor Hendricks",
     "Royce O'Neale",
-    "Taylor Hendricks"
+    "Sandro Mamukelashvili"
   ],
+  "value_names": [
+    "Tristen Newton",
+    "CJ Huntley",
+    "Mike Conley",
+    "Koby Brea",
+    "AJ Johnson",
+    "Trey Jemison",
+    "Chaz Lanier",
+    "Ron Holland",
+    "Trey Alexander",
+    "AJ Lawson"
+  ],
+  "fade_names": [],
   "calibration_slates": 15
 }
