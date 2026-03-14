@@ -403,15 +403,29 @@ def render_lab_tab(sport: str) -> None:
 # ===============================================================
 
 def _delete_lineup_set(out_dir: Path, slug: str) -> None:
+    from yak_core.config import YAKOS_ROOT
+
     suffixes = ["_lineups.parquet", "_exposure.parquet", "_meta.json"]
     deleted = []
+    repo_rel_paths = []
     for suffix in suffixes:
         fp = out_dir / f"{slug}{suffix}"
         if fp.exists():
+            # Track repo-relative path for GitHub deletion
+            repo_rel_paths.append(os.path.relpath(str(fp), YAKOS_ROOT))
             fp.unlink()
             deleted.append(fp.name)
     if deleted:
         st.toast(f"Deleted: {', '.join(deleted)}")
+        # Also remove from GitHub so they don't reappear on redeploy
+        try:
+            from yak_core.github_persistence import delete_files_from_github
+            delete_files_from_github(
+                repo_rel_paths,
+                commit_message=f"Delete published lineups: {slug}",
+            )
+        except Exception as exc:
+            print(f"[_delete_lineup_set] GitHub cleanup failed (non-fatal): {exc}")
 
 
 def _get_secret(key: str) -> str:
