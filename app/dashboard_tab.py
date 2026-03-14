@@ -962,7 +962,7 @@ def _run_post_slate(sport: str, slate_date: str) -> Dict[str, Any]:
 
             # Merge actuals into pool
             pool_with_actuals = pool.merge(
-                actuals[["player_name", "actual_fp"]].rename(columns={"actual_fp": "actual"}),
+                actuals[["player_name", "actual_fp"]],
                 on="player_name",
                 how="left",
             )
@@ -975,11 +975,11 @@ def _run_post_slate(sport: str, slate_date: str) -> Dict[str, Any]:
     try:
         from yak_core.calibration_feedback import record_slate_errors, get_calibration_summary
 
-        has_actual = pool_with_actuals["actual"].notna().sum()
+        has_actual = pool_with_actuals["actual_fp"].notna().sum()
         if has_actual == 0:
             return {"status": "error", "message": "No actuals matched to pool players"}
 
-        record_slate_errors(pool_with_actuals, slate_date=slate_date, sport=sport.upper())
+        record_slate_errors(slate_date, pool_with_actuals, sport=sport.upper())
 
         summary = get_calibration_summary(sport=sport.upper())
         return {
