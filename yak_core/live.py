@@ -602,8 +602,9 @@ def fetch_espn_nba_injuries() -> list:
 # Auto injury detection
 # ---------------------------------------------------------------------------
 
-_STALE_GAME_DAYS = 14  # if last game > N days ago, flag as likely OUT
-_MIN_SALARY_FLOOR = 3500  # DK minimum-salary players are strong OUT signal
+_STALE_GAME_DAYS_MIN_SAL = 14  # min-salary players: flag if 14+ days stale
+_STALE_GAME_DAYS_ANY_SAL = 7   # any salary: flag if 7+ days stale (healthy scratch)
+_MIN_SALARY_FLOOR = 3500       # DK minimum-salary threshold
 
 
 def auto_flag_injuries(
@@ -681,7 +682,7 @@ def auto_flag_injuries(
     except Exception as exc:
         print(f"[auto_flag_injuries] ESPN injury list failed (non-fatal): {exc}")
 
-    # ── Signal 2: Stale last_game_date + minimum salary ───────────────
+    # ── Signal 2: Stale last_game_date (healthy scratches + long-term OUT) ──
     stale_count = 0
     if "last_game_date" in pool.columns:
         # Resolve reference date
@@ -711,15 +712,21 @@ def auto_flag_injuries(
             days_since = (ref_date - last_dt).days
             salary = float(row.get("salary", 0))
 
-            # Only flag min-salary players.  High-salary players with
-            # old game logs are likely just missing current-season data
-            # from Tank01 (API only returns ~20 recent games).  If DK
-            # prices someone at $5K+, they expect that player to play.
-            if days_since >= _STALE_GAME_DAYS and salary <= _MIN_SALARY_FLOOR:
+            # Tier A: min-salary players stale 14+ days → likely long-term OUT/IR
+            if days_since >= _STALE_GAME_DAYS_MIN_SAL and salary <= _MIN_SALARY_FLOOR:
                 pool.at[idx, "status"] = "OUT"
                 pool.at[idx, "injury_note"] = (
                     f"Inactive {days_since}d (last game {lgd[:8]}), "
                     f"min salary ${int(salary):,} — likely OUT/IR"
+                )
+                stale_count += 1
+            # Tier B: ANY salary stale 7+ days → healthy scratch / DNP
+            # NBA teams play every 1-3 days; 7 days = 2-3 missed team games.
+            elif days_since >= _STALE_GAME_DAYS_ANY_SAL:
+                pool.at[idx, "status"] = "OUT"
+                pool.at[idx, "injury_note"] = (
+                    f"No box score in {days_since}d (last game {lgd[:8]}) "
+                    f"— likely healthy scratch / DNP"
                 )
                 stale_count += 1
 
