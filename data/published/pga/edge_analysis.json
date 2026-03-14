@@ -2,7 +2,8 @@
   "bullets": [
     "Core anchors: Ryan Gerard, J.J. Spaun, Scottie Scheffler",
     "Leverage plays: Si Woo Kim, Corey Conners",
-    "Value targets: Max McGreevy, Andrew Putnam"
+    "Value targets: Max McGreevy, Andrew Putnam",
+    "Fade candidates: Justin Thomas, Danny Walker"
   ],
   "recommendation": "5 core plays anchored at $7,400\u2013$14,000. 5 value plays averaging 3.3 pts/$1K. 5 leverage plays at 1\u20138% ownership.",
   "core_plays": [
@@ -131,6 +132,47 @@
       "value": 3.26
     }
   ],
-  "fade_candidates": [],
+  "fade_candidates": [
+    {
+      "player_name": "Justin Thomas",
+      "salary": 7600,
+      "proj": 26.14,
+      "ownership": 1.02,
+      "edge": 0.3407082033085109,
+      "value": 2.93
+    },
+    {
+      "player_name": "Danny Walker",
+      "salary": 6100,
+      "proj": 27.82,
+      "ownership": 11.74,
+      "edge": 0.352083683398806,
+      "value": 3.4
+    },
+    {
+      "player_name": "Brooks Koepka",
+      "salary": 7800,
+      "proj": 25.68,
+      "ownership": 0.87,
+      "edge": 0.35518821225615393,
+      "value": 2.79
+    },
+    {
+      "player_name": "Chris Gotterup",
+      "salary": 8900,
+      "proj": 30.06,
+      "ownership": 11.26,
+      "edge": 0.3669146180172223,
+      "value": 2.58
+    },
+    {
+      "player_name": "Joe Highsmith",
+      "salary": 6300,
+      "proj": 27.58,
+      "ownership": 9.51,
+      "edge": 0.37960251715704507,
+      "value": 3.25
+    }
+  ],
   "signals_df_path": "signals.parquet"
 }

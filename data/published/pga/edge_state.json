@@ -22,6 +22,12 @@
     "Nick Taylor",
     "Nico Echavarria"
   ],
-  "fade_names": [],
-  "calibration_slates": 7
+  "fade_names": [
+    "Justin Thomas",
+    "Danny Walker",
+    "Brooks Koepka",
+    "Chris Gotterup",
+    "Joe Highsmith"
+  ],
+  "calibration_slates": 8
 }
