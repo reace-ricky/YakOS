@@ -1,134 +1,134 @@
 {
   "bullets": [
-    "Core anchors: Cade Cunningham, Anthony Edwards, Jalen Brunson",
-    "Leverage plays: Tari Eason, Donte DiVincenzo",
-    "Value targets: Tristen Newton, CJ Huntley"
+    "Core anchors: Anthony Edwards, Cade Cunningham, Deni Avdija",
+    "Leverage plays: Will Richard, Mikal Bridges",
+    "Value targets: Matisse Thybulle, Jose Alvarado"
   ],
-  "recommendation": "5 core plays anchored at $9,000\u2013$10,900. 5 value plays averaging 3.8 pts/$1K. 5 leverage plays at 2\u20132% ownership.",
+  "recommendation": "5 core plays anchored at $8,800\u2013$10,900. 5 value plays averaging 8.1 pts/$1K. 5 leverage plays at 2\u20133% ownership.",
   "core_plays": [
-    {
-      "player_name": "Cade Cunningham",
-      "salary": 10900,
-      "proj": 45.18283685356449,
-      "ownership": 6.07,
-      "edge": 0.5282990815149967,
-      "value": 4.145214390235274
-    },
     {
       "player_name": "Anthony Edwards",
       "salary": 9500,
-      "proj": 41.393756727175244,
-      "ownership": 7.42,
-      "edge": 0.5199249733405209,
-      "value": 4.357237550228973
+      "proj": 55.846213430105806,
+      "ownership": 6.15,
+      "edge": 0.6172010972180538,
+      "value": 5.8785487821164
     },
     {
-      "player_name": "Jalen Brunson",
-      "salary": 9100,
-      "proj": 39.574167324223446,
-      "ownership": 7.63,
-      "edge": 0.5101686158145256,
-      "value": 4.34880959606851
+      "player_name": "Cade Cunningham",
+      "salary": 10900,
+      "proj": 57.65504959813543,
+      "ownership": 5.09,
+      "edge": 0.6057592572258274,
+      "value": 5.289454091572058
     },
     {
-      "player_name": "Karl-Anthony Towns",
-      "salary": 9000,
-      "proj": 39.29138251247524,
-      "ownership": 7.88,
-      "edge": 0.5023764482860014,
-      "value": 4.365709168052804
+      "player_name": "Deni Avdija",
+      "salary": 8800,
+      "proj": 50.62072951277887,
+      "ownership": 5.81,
+      "edge": 0.598778980934977,
+      "value": 5.752355626452144
     },
     {
       "player_name": "Donovan Mitchell",
       "salary": 9500,
-      "proj": 39.73060822239132,
-      "ownership": 6.21,
-      "edge": 0.5004651414247712,
-      "value": 4.1821692865675075
+      "proj": 52.214221344340096,
+      "ownership": 5.5,
+      "edge": 0.5883038920623129,
+      "value": 5.49623382572001
+    },
+    {
+      "player_name": "Jalen Brunson",
+      "salary": 9100,
+      "proj": 51.209882414515064,
+      "ownership": 5.88,
+      "edge": 0.5839220000063884,
+      "value": 5.6274596059906665
     }
   ],
   "leverage_plays": [
     {
-      "player_name": "Tari Eason",
+      "player_name": "Will Richard",
+      "salary": 4200,
+      "proj": 24.899599878538112,
+      "ownership": 2.61,
+      "edge": 0.4442502792069001,
+      "value": 5.928476161556693
+    },
+    {
+      "player_name": "Mikal Bridges",
+      "salary": 6200,
+      "proj": 31.81464974738093,
+      "ownership": 2.81,
+      "edge": 0.4426892651243885,
+      "value": 5.131395120545311
+    },
+    {
+      "player_name": "Brandon Williams",
       "salary": 5500,
-      "proj": 21.16836092337874,
-      "ownership": 2.3,
-      "edge": 0.35314806089449174,
-      "value": 3.8487928951597707
+      "proj": 29.312783857952034,
+      "ownership": 2.84,
+      "edge": 0.44217255928044424,
+      "value": 5.329597065082188
     },
     {
-      "player_name": "Donte DiVincenzo",
-      "salary": 5500,
-      "proj": 21.29990275989899,
-      "ownership": 2.43,
-      "edge": 0.35270838127986537,
-      "value": 3.8727095927089077
+      "player_name": "Toumani Camara",
+      "salary": 6200,
+      "proj": 31.749795682767953,
+      "ownership": 2.7,
+      "edge": 0.44026661014458296,
+      "value": 5.120934787543218
     },
     {
-      "player_name": "Jahmai Mashack",
-      "salary": 5100,
-      "proj": 20.275215725775308,
-      "ownership": 2.47,
-      "edge": 0.35228848570155896,
-      "value": 3.975532495250061
-    },
-    {
-      "player_name": "Cam Spencer",
-      "salary": 5300,
-      "proj": 20.30845418400694,
-      "ownership": 2.17,
-      "edge": 0.34668486077470523,
-      "value": 3.8317838083031965
-    },
-    {
-      "player_name": "Scoot Henderson",
-      "salary": 5500,
-      "proj": 20.780657036817495,
-      "ownership": 2.18,
-      "edge": 0.3463077737924861,
-      "value": 3.778301279421363
+      "player_name": "Micah Potter",
+      "salary": 4700,
+      "proj": 26.558404695343928,
+      "ownership": 2.48,
+      "edge": 0.43965742288226983,
+      "value": 5.6507244032646655
     }
   ],
   "value_plays": [
     {
-      "player_name": "Tristen Newton",
+      "player_name": "Matisse Thybulle",
       "salary": 3000,
-      "proj": 11.550817774444019,
-      "ownership": 0.11,
-      "edge": 0.40843475119492945,
-      "value": 3.8502725914813394
+      "proj": 26.362640608321968,
+      "ownership": 3.96,
+      "edge": 0.4962754899588493,
+      "value": 8.787546869440655
     },
     {
-      "player_name": "CJ Huntley",
-      "salary": 3000,
-      "proj": 11.519299258495431,
-      "ownership": 0.12,
-      "edge": 0.3983080017608835,
-      "value": 3.8397664194984773
-    },
-    {
-      "player_name": "Mike Conley",
-      "salary": 3000,
-      "proj": 11.588002460455773,
-      "ownership": 0.14,
-      "edge": 0.3838956409578394,
-      "value": 3.862667486818591
-    },
-    {
-      "player_name": "Koby Brea",
-      "salary": 3000,
-      "proj": 11.704487556940379,
-      "ownership": 0.16,
-      "edge": 0.3748741613707844,
-      "value": 3.9014958523134595
-    },
-    {
-      "player_name": "AJ Johnson",
+      "player_name": "Jose Alvarado",
       "salary": 3200,
-      "proj": 12.09462880124089,
-      "ownership": 0.17,
-      "edge": 0.36898649008615025,
-      "value": 3.779571500387778
+      "proj": 26.484518952218956,
+      "ownership": 4.02,
+      "edge": 0.4923932883150938,
+      "value": 8.276412172568422
+    },
+    {
+      "player_name": "Jordan Poole",
+      "salary": 3700,
+      "proj": 28.043825051609815,
+      "ownership": 4.26,
+      "edge": 0.4920719529859361,
+      "value": 7.57941217611076
+    },
+    {
+      "player_name": "Oscar Tshiebwe",
+      "salary": 3600,
+      "proj": 27.545120796474286,
+      "ownership": 3.99,
+      "edge": 0.49138419423215196,
+      "value": 7.651422443465079
+    },
+    {
+      "player_name": "Yves Missi",
+      "salary": 3200,
+      "proj": 26.074874308282585,
+      "ownership": 4.31,
+      "edge": 0.4899544303577319,
+      "value": 8.148398221338308
     }
   ],
   "fade_candidates": [],

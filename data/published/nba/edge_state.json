@@ -2,25 +2,25 @@
   "sport": "NBA",
   "date": "2026-03-13",
   "core_names": [
-    "Cade Cunningham",
     "Anthony Edwards",
-    "Jalen Brunson",
-    "Karl-Anthony Towns",
-    "Donovan Mitchell"
+    "Cade Cunningham",
+    "Deni Avdija",
+    "Donovan Mitchell",
+    "Jalen Brunson"
   ],
   "leverage_names": [
-    "Tari Eason",
-    "Donte DiVincenzo",
-    "Jahmai Mashack",
-    "Cam Spencer",
-    "Scoot Henderson"
+    "Will Richard",
+    "Mikal Bridges",
+    "Brandon Williams",
+    "Toumani Camara",
+    "Micah Potter"
   ],
   "value_names": [
-    "Tristen Newton",
-    "CJ Huntley",
-    "Mike Conley",
-    "Koby Brea",
-    "AJ Johnson"
+    "Matisse Thybulle",
+    "Jose Alvarado",
+    "Jordan Poole",
+    "Oscar Tshiebwe",
+    "Yves Missi"
   ],
   "fade_names": [],
   "calibration_slates": 15
