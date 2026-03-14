@@ -1,7 +1,7 @@
 {
   "sport": "NBA",
   "site": "DK",
-  "date": "2026-03-12",
+  "date": "2026-03-14",
   "salary_cap": 50000,
   "roster_slots": [
     "PG",
@@ -14,62 +14,50 @@
     "UTIL"
   ],
   "lineup_size": 8,
-  "pool_size": 315,
+  "pool_size": 212,
   "proj_source": "model",
   "matchups": [
     {
-      "away": "WAS",
-      "home": "ORL",
-      "game_id": "20260312_WAS@ORL",
-      "label": "WAS @ ORL"
-    },
-    {
-      "away": "CHI",
+      "away": "DEN",
       "home": "LAL",
-      "game_id": "20260312_CHI@LAL",
-      "label": "CHI @ LAL"
+      "game_id": "20260314_DEN@LAL",
+      "label": "DEN @ LAL"
     },
     {
-      "away": "MIL",
-      "home": "MIA",
-      "game_id": "20260312_MIL@MIA",
-      "label": "MIL @ MIA"
+      "away": "SAC",
+      "home": "LAC",
+      "game_id": "20260314_SAC@LAC",
+      "label": "SAC @ LAC"
     },
     {
       "away": "BKN",
-      "home": "ATL",
-      "game_id": "20260312_BKN@ATL",
-      "label": "BKN @ ATL"
+      "home": "PHI",
+      "game_id": "20260314_BKN@PHI",
+      "label": "BKN @ PHI"
     },
     {
-      "away": "DEN",
+      "away": "ORL",
+      "home": "MIA",
+      "game_id": "20260314_ORL@MIA",
+      "label": "ORL @ MIA"
+    },
+    {
+      "away": "WAS",
+      "home": "BOS",
+      "game_id": "20260314_WAS@BOS",
+      "label": "WAS @ BOS"
+    },
+    {
+      "away": "CHA",
       "home": "SA",
-      "game_id": "20260312_DEN@SA",
-      "label": "DEN @ SA"
+      "game_id": "20260314_CHA@SA",
+      "label": "CHA @ SA"
     },
     {
-      "away": "PHI",
-      "home": "DET",
-      "game_id": "20260312_PHI@DET",
-      "label": "PHI @ DET"
-    },
-    {
-      "away": "PHO",
-      "home": "IND",
-      "game_id": "20260312_PHO@IND",
-      "label": "PHO @ IND"
-    },
-    {
-      "away": "DAL",
-      "home": "MEM",
-      "game_id": "20260312_DAL@MEM",
-      "label": "DAL @ MEM"
-    },
-    {
-      "away": "BOS",
-      "home": "OKC",
-      "game_id": "20260312_BOS@OKC",
-      "label": "BOS @ OKC"
+      "away": "MIL",
+      "home": "ATL",
+      "game_id": "20260314_MIL@ATL",
+      "label": "MIL @ ATL"
     }
   ]
 }
