@@ -2,25 +2,25 @@
   "sport": "NBA",
   "date": "2026-03-13",
   "core_names": [
-    "Anthony Edwards",
     "Cade Cunningham",
+    "Anthony Edwards",
     "Deni Avdija",
     "Donovan Mitchell",
     "Jalen Brunson"
   ],
   "leverage_names": [
-    "Will Richard",
-    "Bennedict Mathurin",
     "Mikal Bridges",
-    "Brandon Williams",
-    "Toumani Camara"
+    "Toumani Camara",
+    "Jerami Grant",
+    "Ty Jerome",
+    "Brandon Williams"
   ],
   "value_names": [
     "Matisse Thybulle",
     "Jose Alvarado",
     "Oscar Tshiebwe",
-    "Yves Missi",
-    "Caleb Martin"
+    "Kevin Love",
+    "Yves Missi"
   ],
   "fade_names": [],
   "calibration_slates": 15

@@ -1,0 +1,10 @@
+{
+  "contest": "GPP Main",
+  "sport": "NBA",
+  "num_lineups": 5,
+  "built_at": "2026-03-14T20:24:26.398476+00:00",
+  "lock": [],
+  "exclude": [
+    "AJ Lawson"
+  ]
+}
