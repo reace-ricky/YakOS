@@ -286,7 +286,7 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "correlation_mode": "stack",
         "default_lineups": 3,
         "default_max_exposure": 0.6,
-        "min_salary": 46000,
+        "min_salary": 0,  # Showdown has no salary floor — DK only enforces a $50K cap
         # Pool sizing
         "pool_size_min": 10,
         "pool_size_max": 16,
@@ -441,8 +441,8 @@ PGA_CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "num_lineups": 20,
         "default_lineups": 20,
         "salary_cap": DK_PGA_SALARY_CAP,
-        "min_salary": 46000,
-        "min_salary_used": 46000,
+        "min_salary": 0,  # Showdown has no salary floor — DK only enforces a $50K cap
+        "min_salary_used": 0,  # Showdown has no salary floor — DK only enforces a $50K cap
         "default_max_exposure": 0.50,
         "max_exposure": 0.50,
         "pos_slots": DK_PGA_POS_SLOTS,
