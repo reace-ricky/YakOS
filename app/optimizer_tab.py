@@ -245,9 +245,9 @@ def render_optimizer_tab(sport: str) -> None:
         if "lineup_index" in lineups_df.columns:
             for idx in sorted(lineups_df["lineup_index"].unique()):
                 lu = lineups_df[lineups_df["lineup_index"] == idx]
-                total_sal = int(pd.to_numeric(lu.get("salary", 0), errors="coerce").fillna(0).sum())
-                total_proj = float(pd.to_numeric(lu.get("proj", 0), errors="coerce").fillna(0).sum())
-                total_ceil = float(pd.to_numeric(lu.get("ceil", 0), errors="coerce").fillna(0).sum())
+                total_sal = int(pd.to_numeric(lu["salary"], errors="coerce").fillna(0).sum()) if "salary" in lu.columns else 0
+                total_proj = float(pd.to_numeric(lu["proj"], errors="coerce").fillna(0).sum()) if "proj" in lu.columns else 0.0
+                total_ceil = float(pd.to_numeric(lu["ceil"], errors="coerce").fillna(0).sum()) if "ceil" in lu.columns else 0.0
                 ceil_part = f" | {total_ceil:.1f} ceil" if total_ceil > 0 else ""
                 st.markdown(f"**Lineup {idx + 1}** — ${total_sal:,} sal | {total_proj:.1f} proj{ceil_part}")
                 show_cols = ["player_name", "pos", "salary", "proj", "ceil"]
