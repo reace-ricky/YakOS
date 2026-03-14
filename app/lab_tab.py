@@ -689,7 +689,7 @@ def _build_bullets(classified: dict, edge_df, sport: str) -> list:
 
 def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None):
     from yak_core.config import CONTEST_PRESETS, merge_config
-    from yak_core.optimizer import build_multiple_lineups_with_exposure, build_player_pool
+    from yak_core.lineups import build_multiple_lineups_with_exposure, build_player_pool
 
     pool = pd.read_parquet(out_dir / "slate_pool.parquet")
     preset = CONTEST_PRESETS.get(contest_label, {})
