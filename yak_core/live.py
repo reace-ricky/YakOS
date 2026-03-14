@@ -568,6 +568,14 @@ def fetch_espn_nba_injuries() -> list:
         "day-to-day": "GTD",
         "suspension": "SUSPENDED",
     }
+    # Phrases in the ESPN injury comment that mean the player is OUT tonight,
+    # even when the official designation is only "Day-To-Day".
+    _OUT_PHRASES = (
+        " is out", " ruled out", " will not play", " will rest",
+        " will sit", " won't play", " has been ruled out",
+        " will miss", " not available", " remains out",
+        " sidelined", " will be sidelined", " maintenance day",
+    )
     try:
         resp = requests.get(_ESPN_NBA_INJURIES_URL, timeout=15)
         resp.raise_for_status()
@@ -577,6 +585,7 @@ def fetch_espn_nba_injuries() -> list:
         return []
 
     results = []
+    gtd_promoted = 0
     for team_block in data.get("injuries", []):
         for entry in team_block.get("injuries", []):
             athlete = entry.get("athlete", {})
@@ -587,14 +596,22 @@ def fetch_espn_nba_injuries() -> list:
             mapped = _espn_status_map.get(raw_status)
             if not mapped:
                 continue
-            comment = entry.get("shortComment", entry.get("longComment", ""))
+            comment = str(entry.get("longComment", entry.get("shortComment", "")))
+            # Promote GTD → OUT when the description says they're actually
+            # sitting tonight (rest day, ruled out, maintenance day, etc.)
+            if mapped == "GTD" and comment:
+                comment_lower = comment.lower()
+                if any(phrase in comment_lower for phrase in _OUT_PHRASES):
+                    mapped = "OUT"
+                    gtd_promoted += 1
             results.append({
                 "player_name": name,
                 "status": mapped,
-                "comment": str(comment)[:120],
+                "comment": comment[:120],
             })
 
-    print(f"[fetch_espn_nba_injuries] {len(results)} injured players from ESPN")
+    print(f"[fetch_espn_nba_injuries] {len(results)} injured players from ESPN"
+          f" ({gtd_promoted} GTD promoted to OUT based on description)")
     return results
 
 
