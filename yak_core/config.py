@@ -723,6 +723,8 @@ _KEY_ALIASES = {
     "max_exposure": "MAX_EXPOSURE",
     "min_team_stack": "MIN_TEAM_STACK",
     "min_game_stack": "MIN_GAME_STACK",
+    "min_salary": "MIN_SALARY_USED",
+    "min_salary_used": "MIN_SALARY_USED",
     "yakos_root": "YAKOS_ROOT",
 }
 

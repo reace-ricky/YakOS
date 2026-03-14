@@ -525,6 +525,7 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
         games_list = games_body if isinstance(games_body, list) else []
 
         opp_map = {}
+        game_id_map = {}  # team -> game_id (for optimizer stacking)
         for g in games_list:
             if not isinstance(g, dict):
                 continue
@@ -534,10 +535,18 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
             if away and home:
                 opp_map[away] = home
                 opp_map[home] = away
+                if game_id:
+                    game_id_map[away] = str(game_id)
+                    game_id_map[home] = str(game_id)
                 matchups.append({"away": away, "home": home, "game_id": game_id, "label": f"{away} @ {home}"})
 
         if opp_map and "team" in pool.columns:
             pool["opponent"] = pool["team"].map(opp_map).fillna(pool.get("opponent", ""))
+        # Map game_id to each player so the optimizer can enforce game stacks
+        if game_id_map and "team" in pool.columns:
+            pool["game_id"] = pool["team"].map(game_id_map).fillna("")
+            _n_with_gid = (pool["game_id"] != "").sum()
+            print(f"[_load_nba_pool] Mapped game_id for {_n_with_gid}/{len(pool)} players ({len(game_id_map)//2} games)")
     except Exception:
         pass
 
