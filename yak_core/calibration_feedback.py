@@ -268,10 +268,12 @@ def record_slate_errors(
 
     # ── Guard: reject obviously corrupted entries ────────────────────────
     # Historical replay can produce garbage when Tank01 returns 0 for proj
-    # on past slates.  Symptoms: MAE > 15, NaN correlation, bias ≈ +22.
+    # on past slates.  Symptoms: high MAE, NaN correlation.
+    # Thresholds are sport-specific: NBA typical MAE ~7-9, PGA 4-day ~20-30.
     _corr = overall.get("correlation", 0)
     _mae  = overall.get("mae", 0)
-    if (_mae is not None and _mae > 15) or (isinstance(_corr, float) and np.isnan(_corr)):
+    _max_mae = 40 if sport.upper() == "PGA" else 15
+    if (_mae is not None and _mae > _max_mae) or (isinstance(_corr, float) and np.isnan(_corr)):
         return {
             "error": (
                 f"Rejected slate {slate_date}: implausible quality "
