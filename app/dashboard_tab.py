@@ -960,7 +960,11 @@ def _run_post_slate(sport: str, slate_date: str) -> Dict[str, Any]:
             if actuals.empty:
                 return {"status": "error", "message": f"No actuals available for {slate_date}"}
 
-            # Merge actuals into pool
+            # Merge actuals into pool — drop the placeholder actual_fp
+            # column first (set to NaN by fetch_live_dfs) so pandas doesn't
+            # create actual_fp_x / actual_fp_y suffix columns.
+            if "actual_fp" in pool.columns:
+                pool = pool.drop(columns=["actual_fp"])
             pool_with_actuals = pool.merge(
                 actuals[["player_name", "actual_fp"]],
                 on="player_name",
