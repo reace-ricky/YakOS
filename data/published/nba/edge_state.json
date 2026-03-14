@@ -6,36 +6,21 @@
     "Anthony Edwards",
     "Jalen Brunson",
     "Karl-Anthony Towns",
-    "Donovan Mitchell",
-    "Kawhi Leonard",
-    "Josh Giddey",
-    "Alperen Sengun",
-    "Pascal Siakam",
-    "Stephen Curry"
+    "Donovan Mitchell"
   ],
   "leverage_names": [
-    "De'Anthony Melton",
     "Tari Eason",
     "Donte DiVincenzo",
     "Jahmai Mashack",
     "Cam Spencer",
-    "Jaden Ivey",
-    "Scoot Henderson",
-    "Taylor Hendricks",
-    "Royce O'Neale",
-    "Sandro Mamukelashvili"
+    "Scoot Henderson"
   ],
   "value_names": [
     "Tristen Newton",
     "CJ Huntley",
     "Mike Conley",
     "Koby Brea",
-    "AJ Johnson",
-    "Trey Jemison",
-    "Chaz Lanier",
-    "Ron Holland",
-    "Trey Alexander",
-    "AJ Lawson"
+    "AJ Johnson"
   ],
   "fade_names": [],
   "calibration_slates": 15

@@ -1,10 +1,10 @@
 {
   "bullets": [
     "Core anchors: Cade Cunningham, Anthony Edwards, Jalen Brunson",
-    "Leverage plays: De'Anthony Melton, Tari Eason",
+    "Leverage plays: Tari Eason, Donte DiVincenzo",
     "Value targets: Tristen Newton, CJ Huntley"
   ],
-  "recommendation": "10 core plays anchored at $8,000\u2013$10,900. 10 value plays averaging 4.0 pts/$1K. 10 leverage plays at 2\u20132% ownership.",
+  "recommendation": "5 core plays anchored at $9,000\u2013$10,900. 5 value plays averaging 3.8 pts/$1K. 5 leverage plays at 2\u20132% ownership.",
   "core_plays": [
     {
       "player_name": "Cade Cunningham",
@@ -45,57 +45,9 @@
       "ownership": 6.21,
       "edge": 0.5004651414247712,
       "value": 4.1821692865675075
-    },
-    {
-      "player_name": "Kawhi Leonard",
-      "salary": 9700,
-      "proj": 39.9617672557279,
-      "ownership": 5.86,
-      "edge": 0.49351104542471036,
-      "value": 4.119769820178134
-    },
-    {
-      "player_name": "Josh Giddey",
-      "salary": 8900,
-      "proj": 37.52575687758302,
-      "ownership": 6.72,
-      "edge": 0.48818873075158425,
-      "value": 4.216377177256519
-    },
-    {
-      "player_name": "Alperen Sengun",
-      "salary": 8700,
-      "proj": 37.1310143525249,
-      "ownership": 7.13,
-      "edge": 0.48469997941819953,
-      "value": 4.267932684198264
-    },
-    {
-      "player_name": "Pascal Siakam",
-      "salary": 8000,
-      "proj": 35.01503803027449,
-      "ownership": 7.11,
-      "edge": 0.48466576223919744,
-      "value": 4.376879753784311
-    },
-    {
-      "player_name": "Stephen Curry",
-      "salary": 9200,
-      "proj": 36.669187999213506,
-      "ownership": 4.99,
-      "edge": 0.47265916713932576,
-      "value": 3.985781304262338
     }
   ],
   "leverage_plays": [
-    {
-      "player_name": "De'Anthony Melton",
-      "salary": 6000,
-      "proj": 22.542398031192764,
-      "ownership": 2.39,
-      "edge": 0.353324623955981,
-      "value": 3.7570663385321272
-    },
     {
       "player_name": "Tari Eason",
       "salary": 5500,
@@ -129,44 +81,12 @@
       "value": 3.8317838083031965
     },
     {
-      "player_name": "Jaden Ivey",
-      "salary": 5000,
-      "proj": 20.07462925794959,
-      "ownership": 2.5,
-      "edge": 0.346511659796009,
-      "value": 4.0149258515899175
-    },
-    {
       "player_name": "Scoot Henderson",
       "salary": 5500,
       "proj": 20.780657036817495,
       "ownership": 2.18,
       "edge": 0.3463077737924861,
       "value": 3.778301279421363
-    },
-    {
-      "player_name": "Taylor Hendricks",
-      "salary": 5200,
-      "proj": 19.802207520742556,
-      "ownership": 1.94,
-      "edge": 0.34473607186372274,
-      "value": 3.80811683091203
-    },
-    {
-      "player_name": "Royce O'Neale",
-      "salary": 5200,
-      "proj": 19.479864782367553,
-      "ownership": 1.74,
-      "edge": 0.34071478515954723,
-      "value": 3.746127842762991
-    },
-    {
-      "player_name": "Sandro Mamukelashvili",
-      "salary": 4300,
-      "proj": 17.447926788876526,
-      "ownership": 2.33,
-      "edge": 0.33599216921473957,
-      "value": 4.057657392761983
     }
   ],
   "value_plays": [
@@ -209,46 +129,6 @@
       "ownership": 0.17,
       "edge": 0.36898649008615025,
       "value": 3.779571500387778
-    },
-    {
-      "player_name": "Trey Jemison",
-      "salary": 3000,
-      "proj": 11.80964088444495,
-      "ownership": 0.18,
-      "edge": 0.3661173213355437,
-      "value": 3.9365469614816497
-    },
-    {
-      "player_name": "Chaz Lanier",
-      "salary": 3000,
-      "proj": 11.782928121138967,
-      "ownership": 0.21,
-      "edge": 0.35714018877130754,
-      "value": 3.9276427070463225
-    },
-    {
-      "player_name": "Ron Holland",
-      "salary": 3800,
-      "proj": 17.303428493254643,
-      "ownership": 4.26,
-      "edge": 0.35561796213710767,
-      "value": 4.55353381401438
-    },
-    {
-      "player_name": "Trey Alexander",
-      "salary": 3000,
-      "proj": 11.78903979143651,
-      "ownership": 0.22,
-      "edge": 0.35435175162105986,
-      "value": 3.929679930478837
-    },
-    {
-      "player_name": "AJ Lawson",
-      "salary": 3000,
-      "proj": 14.491638894392832,
-      "ownership": 3.65,
-      "edge": 0.35277132982351384,
-      "value": 4.830546298130944
     }
   ],
   "fade_candidates": [],
