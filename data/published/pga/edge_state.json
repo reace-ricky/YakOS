@@ -1,33 +1,27 @@
 {
   "sport": "PGA",
-  "date": "2026-03-13",
+  "date": "2026-03-14",
   "core_names": [
-    "Cameron Young",
-    "Ludvig Aberg",
-    "Russell Henley",
+    "Ryan Gerard",
+    "J.J. Spaun",
+    "Scottie Scheffler",
     "Matt Fitzpatrick",
-    "Robert MacIntyre"
+    "Viktor Hovland"
   ],
   "leverage_names": [
-    "David Ford",
-    "Joel Dahmen",
-    "Max McGreevy",
-    "Aaron Rai",
-    "Andrew Putnam"
+    "Si Woo Kim",
+    "Corey Conners",
+    "Russell Henley",
+    "Alex Noren",
+    "Daniel Berger"
   ],
   "value_names": [
-    "S.H. Kim",
-    "Chandler Phillips",
-    "Chad Ramey",
-    "Zecheng Dou",
-    "Karl Vilips"
+    "Max McGreevy",
+    "Andrew Putnam",
+    "Takumi Kanaya",
+    "Nick Taylor",
+    "Nico Echavarria"
   ],
-  "fade_names": [
-    "Justin Thomas",
-    "Aldrich Potgieter",
-    "Brooks Koepka",
-    "Danny Walker",
-    "Chris Gotterup"
-  ],
+  "fade_names": [],
   "calibration_slates": 7
 }
