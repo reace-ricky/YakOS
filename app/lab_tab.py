@@ -251,18 +251,29 @@ def render_lab_tab(sport: str) -> None:
         else:
             st.warning("No matchup data found. Re-run Load Pool to fetch the schedule.")
 
-    lock_input = st.text_input("Lock players (comma-separated)", key=f"lab_lock_{sport}")
-    exclude_input = st.text_input("Exclude players (comma-separated)", key=f"lab_excl_{sport}")
-
-    lock_list = [n.strip() for n in lock_input.split(",") if n.strip()] if lock_input else []
-    exclude_list = [n.strip() for n in exclude_input.split(",") if n.strip()] if exclude_input else []
+    _pool_names_sorted: list[str] = []
+    if pool_path.exists():
+        try:
+            _pool_for_names = pd.read_parquet(pool_path, columns=["player_name", "salary"])
+            _pool_for_names = _pool_for_names.sort_values("salary", ascending=False)
+            _pool_names_sorted = _pool_for_names["player_name"].dropna().tolist()
+        except Exception:
+            pass
 
     _excl_file_build = out_dir / "excluded_players.json"
+    _saved_excl_build: list[str] = []
     if _excl_file_build.exists():
-        _cb_excl = json.loads(_excl_file_build.read_text())
-        for name in _cb_excl:
-            if name not in exclude_list:
-                exclude_list.append(name)
+        _saved_excl_build = json.loads(_excl_file_build.read_text())
+    _default_excl = [n for n in _saved_excl_build if n in _pool_names_sorted]
+
+    col_lock, col_excl = st.columns(2)
+    with col_lock:
+        lock_list = st.multiselect("Lock players", options=_pool_names_sorted, default=[], key=f"lab_lock_{sport}")
+    with col_excl:
+        exclude_list = st.multiselect("Exclude players", options=_pool_names_sorted, default=_default_excl, key=f"lab_excl_{sport}")
+
+    if set(exclude_list) != set(_saved_excl_build):
+        _excl_file_build.write_text(json.dumps(exclude_list))
 
     if st.button("Build Lineups", key=f"lab_build_{sport}"):
         if is_nba_showdown and len(showdown_teams) != 2:
@@ -311,7 +322,6 @@ def render_lab_tab(sport: str) -> None:
                     )
                     n_built = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else 0
 
-                    # Invalidate Edge tab cache so it picks up new lineups immediately
                     from app.data_loader import invalidate_published_cache
                     invalidate_published_cache()
 
@@ -331,7 +341,6 @@ def render_lab_tab(sport: str) -> None:
             try:
                 result = _publish_to_github(sport, out_dir)
                 if result.get("status") == "ok":
-                    # Invalidate Edge tab cache so published data is visible immediately
                     from app.data_loader import invalidate_published_cache
                     invalidate_published_cache()
                     st.success(f"Published! SHA: {result.get('sha', 'N/A')}")
@@ -394,7 +403,6 @@ def render_lab_tab(sport: str) -> None:
 # ===============================================================
 
 def _delete_lineup_set(out_dir: Path, slug: str) -> None:
-    """Delete a published lineup set (lineups + exposure + meta)."""
     suffixes = ["_lineups.parquet", "_exposure.parquet", "_meta.json"]
     deleted = []
     for suffix in suffixes:
@@ -407,7 +415,6 @@ def _delete_lineup_set(out_dir: Path, slug: str) -> None:
 
 
 def _get_secret(key: str) -> str:
-    """Try to get a secret from Streamlit secrets."""
     try:
         return st.secrets.get(key, "")
     except Exception:
@@ -415,7 +422,6 @@ def _get_secret(key: str) -> str:
 
 
 def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
-    """Load NBA pool via Tank01."""
     import requests
     from yak_core.config import DEFAULT_CONFIG, DK_LINEUP_SIZE, DK_POS_SLOTS, SALARY_CAP, merge_config
     from yak_core.live import fetch_live_opt_pool, _TANK01_HOST
@@ -441,7 +447,6 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
     if corrections.get("n_slates", 0) > 0:
         pool = apply_corrections(pool, corrections, sport="NBA")
 
-    # Ensure valid ownership data (handles None/all-zeros/wrong scale)
     try:
         from yak_core.ownership_guard import ensure_ownership
         pool = ensure_ownership(pool, sport="NBA")
@@ -451,11 +456,11 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
         if "ownership" not in pool.columns:
             pool["ownership"] = 0.0
 
-    # Fetch schedule to build matchups and fill opponent column
     matchups = []
     try:
+        import requests as _req
         clean_date = slate_date.replace("-", "")
-        resp = requests.get(
+        resp = _req.get(
             f"https://{_TANK01_HOST}/getNBAGamesForDate",
             headers={"x-rapidapi-key": api_key, "x-rapidapi-host": _TANK01_HOST},
             params={"gameDate": clean_date},
@@ -476,11 +481,7 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
             if away and home:
                 opp_map[away] = home
                 opp_map[home] = away
-                matchups.append({
-                    "away": away, "home": home,
-                    "game_id": game_id,
-                    "label": f"{away} @ {home}",
-                })
+                matchups.append({"away": away, "home": home, "game_id": game_id, "label": f"{away} @ {home}"})
 
         if opp_map and "team" in pool.columns:
             pool["opponent"] = pool["team"].map(opp_map).fillna(pool.get("opponent", ""))
@@ -488,21 +489,15 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
         pass
 
     meta = {
-        "sport": "NBA",
-        "site": "DK",
-        "date": slate_date,
-        "salary_cap": SALARY_CAP,
-        "roster_slots": DK_POS_SLOTS,
-        "lineup_size": DK_LINEUP_SIZE,
-        "pool_size": len(pool),
-        "proj_source": cfg.get("PROJ_SOURCE", "salary_implied"),
+        "sport": "NBA", "site": "DK", "date": slate_date,
+        "salary_cap": SALARY_CAP, "roster_slots": DK_POS_SLOTS, "lineup_size": DK_LINEUP_SIZE,
+        "pool_size": len(pool), "proj_source": cfg.get("PROJ_SOURCE", "salary_implied"),
         "matchups": matchups,
     }
     return pool, meta
 
 
 def _load_pga_pool(api_key: str, slate_date: str, slate: str) -> tuple:
-    """Load PGA pool via DataGolf."""
     from yak_core.datagolf import DataGolfClient
     from yak_core.pga_pool import build_pga_pool
     from yak_core.config import DK_PGA_LINEUP_SIZE, DK_PGA_POS_SLOTS, DK_PGA_SALARY_CAP
@@ -516,27 +511,18 @@ def _load_pga_pool(api_key: str, slate_date: str, slate: str) -> tuple:
         pool = apply_corrections(pool, corrections, sport="PGA")
 
     meta = {
-        "sport": "PGA",
-        "site": "DK",
-        "date": slate_date,
-        "slate": slate,
-        "salary_cap": DK_PGA_SALARY_CAP,
-        "roster_slots": DK_PGA_POS_SLOTS,
-        "lineup_size": DK_PGA_LINEUP_SIZE,
-        "pool_size": len(pool),
+        "sport": "PGA", "site": "DK", "date": slate_date, "slate": slate,
+        "salary_cap": DK_PGA_SALARY_CAP, "roster_slots": DK_PGA_POS_SLOTS,
+        "lineup_size": DK_PGA_LINEUP_SIZE, "pool_size": len(pool),
     }
     return pool, meta
 
 
-def _merge_rg_csv(pool: pd.DataFrame, rg_file) -> pd.DataFrame:
-    """Merge uploaded RG CSV into the pool."""
+def _merge_rg_csv(pool, rg_file):
     rg = pd.read_csv(rg_file)
-
     rg["_join_name"] = rg["PLAYER"].str.strip().str.lower()
     pool["_join_name"] = pool["player_name"].str.strip().str.lower()
-
     rg_lookup = rg.set_index("_join_name")
-
     for idx, row in pool.iterrows():
         jn = row["_join_name"]
         if jn not in rg_lookup.index:
@@ -544,19 +530,16 @@ def _merge_rg_csv(pool: pd.DataFrame, rg_file) -> pd.DataFrame:
         r = rg_lookup.loc[jn]
         if isinstance(r, pd.DataFrame):
             r = r.iloc[0]
-
         rg_proj = float(r.get("FPTS", 0) or 0)
         if rg_proj > 0:
             pool.at[idx, "proj"] = rg_proj
             pool.at[idx, "proj_source"] = "rotogrinders"
-
         rg_floor = float(r.get("FLOOR", 0) or 0)
         rg_ceil = float(r.get("CEIL", 0) or 0)
         if rg_floor > 0:
             pool.at[idx, "floor"] = rg_floor
         if rg_ceil > 0:
             pool.at[idx, "ceil"] = rg_ceil
-
         pown_str = str(r.get("POWN", "0%")).replace("%", "").strip()
         try:
             pown_val = float(pown_str)
@@ -565,27 +548,22 @@ def _merge_rg_csv(pool: pd.DataFrame, rg_file) -> pd.DataFrame:
         if pown_val > 0:
             pool.at[idx, "ownership"] = pown_val
             pool.at[idx, "own_proj"] = pown_val
-
         for sim_col in ["SIM15TH", "SIM33RD", "SIM50TH", "SIM66TH", "SIM85TH", "SIM90TH", "SIM99TH"]:
             val = r.get(sim_col)
             if val is not None and not pd.isna(val):
                 pool.at[idx, sim_col.lower()] = float(val)
-
         smash_val = r.get("SMASH")
         if smash_val is not None and not pd.isna(smash_val):
             pool.at[idx, "smash_prob"] = float(smash_val)
-
     pool.drop(columns=["_join_name"], inplace=True)
     return pool
 
 
 def _run_edge(sport: str, slate_date: str, out_dir: Path) -> tuple:
-    """Run edge analysis."""
     from yak_core.edge import compute_edge_metrics
     from yak_core.calibration_feedback import get_correction_factors
 
     pool = pd.read_parquet(out_dir / "slate_pool.parquet")
-
     _excl_path = out_dir / "excluded_players.json"
     if _excl_path.exists():
         import json as _json
@@ -594,76 +572,57 @@ def _run_edge(sport: str, slate_date: str, out_dir: Path) -> tuple:
             pool = pool[~pool["player_name"].isin(_excl_names)].reset_index(drop=True)
 
     calibration_state = get_correction_factors(sport=sport.upper())
-
     edge_df = compute_edge_metrics(
         pool,
         calibration_state=calibration_state if calibration_state.get("n_slates", 0) > 0 else None,
         sport=sport.upper(),
     )
-
     classified = _classify_plays(edge_df, sport)
     bullets = _build_bullets(classified, edge_df, sport)
-
     n_core = len(classified["core_plays"])
     n_value = len(classified["value_plays"])
     n_leverage = len(classified["leverage_plays"])
-
     core_sals = [p["salary"] for p in classified["core_plays"]]
     core_sal_range = f"${min(core_sals):,}\u2013${max(core_sals):,}" if core_sals else ""
     val_rates = [p["value"] for p in classified["value_plays"] if p["value"] > 0]
     val_avg = f"{sum(val_rates)/len(val_rates):.1f}" if val_rates else "0"
     lev_owns = [p["ownership"] for p in classified["leverage_plays"]]
     lev_own_range = f"{min(lev_owns):.0f}\u2013{max(lev_owns):.0f}%" if lev_owns else ""
-
     rec_parts = [f"{n_core} core plays anchored at {core_sal_range}"]
     if n_value:
         rec_parts.append(f"{n_value} value plays averaging {val_avg} pts/$1K")
     if n_leverage and lev_own_range:
         rec_parts.append(f"{n_leverage} leverage plays at {lev_own_range} ownership")
     recommendation = ". ".join(rec_parts) + "."
-
     edge_state: Dict[str, Any] = {
-        "sport": sport.upper(),
-        "date": slate_date,
+        "sport": sport.upper(), "date": slate_date,
         "core_names": [p["player_name"] for p in classified["core_plays"]],
         "leverage_names": [p["player_name"] for p in classified["leverage_plays"]],
         "value_names": [p["player_name"] for p in classified["value_plays"]],
         "fade_names": [p["player_name"] for p in classified["fade_candidates"]],
         "calibration_slates": calibration_state.get("n_slates", 0),
     }
-
     if sport.upper() == "PGA" and "early_late_wave" in edge_df.columns:
         early_df = edge_df[edge_df["early_late_wave"].isin([0, "Early"])]
         late_df = edge_df[edge_df["early_late_wave"].isin([1, "Late"])]
         edge_state["wave_split"] = {
-            "early_count": int(len(early_df)),
-            "late_count": int(len(late_df)),
+            "early_count": int(len(early_df)), "late_count": int(len(late_df)),
             "early_avg_proj": round(float(early_df["proj"].mean()), 1) if len(early_df) > 0 else 0,
             "late_avg_proj": round(float(late_df["proj"].mean()), 1) if len(late_df) > 0 else 0,
             "early_players": early_df.nlargest(5, "proj")["player_name"].tolist(),
             "late_players": late_df.nlargest(5, "proj")["player_name"].tolist(),
         }
-
-    edge_analysis = {
-        "bullets": bullets,
-        "recommendation": recommendation,
-        **classified,
-        "signals_df_path": "signals.parquet",
-    }
-
+    edge_analysis = {"bullets": bullets, "recommendation": recommendation, **classified, "signals_df_path": "signals.parquet"}
     with open(out_dir / "edge_state.json", "w") as f:
         json.dump(edge_state, f, indent=2, default=str)
     with open(out_dir / "edge_analysis.json", "w") as f:
         json.dump(edge_analysis, f, indent=2, default=str)
     edge_df.to_parquet(str(out_dir / "signals.parquet"), index=False)
-
     return edge_df, edge_analysis, edge_state
 
 
-def _classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
-    """Classify players into 4-box."""
+def _classify_plays(sdf, sport: str = "NBA") -> dict:
     import numpy as np
-    # Ensure valid ownership data before classification -- fixes the None/all-zeros bug
     try:
         from yak_core.ownership_guard import ensure_ownership
         sdf = ensure_ownership(sdf, sport=sport)
@@ -682,311 +641,163 @@ def _classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
     _own = _safe_col(df, _own_col)
     _edge = _safe_col(df, "edge")
     _value = _safe_col(df, "value")
-
     sal_med = float(_sal.median()) if len(_sal) > 0 else 7000.0
     own_med = float(_own.median()) if len(_own) > 0 else 15.0
-
-    core = df[
-        (_sal >= sal_med) & (_own >= own_med) & (_edge > 0)
-    ][["player_name", "salary", "proj", _own_col, "edge", "value"]].rename(columns={_own_col: "ownership"})
-
-    leverage = df[
-        (_sal >= sal_med) & (_own < own_med) & (_edge > 0)
-    ][["player_name", "salary", "proj", _own_col, "edge", "value"]].rename(columns={_own_col: "ownership"})
-
-    value = df[
-        (_sal < sal_med) & (_value > 0)
-    ][["player_name", "salary", "proj", _own_col, "edge", "value"]].rename(columns={_own_col: "ownership"})
-
-    fade = df[
-        (_edge < 0) | ((_own >= own_med * 1.5) & (_edge <= 0))
-    ][["player_name", "salary", "proj", _own_col, "edge", "value"]].rename(columns={_own_col: "ownership"})
-
+    core = df[(_sal >= sal_med) & (_own >= own_med) & (_edge > 0)][["player_name", "salary", "proj", _own_col, "edge", "value"]].rename(columns={_own_col: "ownership"})
+    leverage = df[(_sal >= sal_med) & (_own < own_med) & (_edge > 0)][["player_name", "salary", "proj", _own_col, "edge", "value"]].rename(columns={_own_col: "ownership"})
+    value = df[(_sal < sal_med) & (_value > 0)][["player_name", "salary", "proj", _own_col, "edge", "value"]].rename(columns={_own_col: "ownership"})
+    fade = df[(_edge < 0) | ((_own >= own_med * 1.5) & (_edge <= 0))][["player_name", "salary", "proj", _own_col, "edge", "value"]].rename(columns={_own_col: "ownership"})
     def _to_records(frame):
         return frame.sort_values("edge", ascending=False).head(10).to_dict(orient="records")
-
-    return {
-        "core_plays": _to_records(core),
-        "leverage_plays": _to_records(leverage),
-        "value_plays": _to_records(value),
-        "fade_candidates": _to_records(fade),
-    }
+    return {"core_plays": _to_records(core), "leverage_plays": _to_records(leverage), "value_plays": _to_records(value), "fade_candidates": _to_records(fade)}
 
 
-def _build_bullets(classified: dict, edge_df: pd.DataFrame, sport: str) -> list[str]:
-    """Generate bullet-point narrative for the edge analysis."""
+def _build_bullets(classified: dict, edge_df, sport: str) -> list:
     bullets = []
-
     core = classified.get("core_plays", [])
-    if core:
-        top = core[0]
-        bullets.append(
-            f"Top core play: {top['player_name']} (${top['salary']:,}, "
-            f"{top['proj']:.1f} pts proj, {top.get('ownership', 0):.0f}% own)"
-        )
-
     leverage = classified.get("leverage_plays", [])
-    if leverage:
-        names = ", ".join(p["player_name"] for p in leverage[:3])
-        bullets.append(f"Leverage plays to differentiate: {names}")
-
     value = classified.get("value_plays", [])
-    if value:
-        top_val = max(value, key=lambda x: x.get("value", 0))
-        bullets.append(
-            f"Best value: {top_val['player_name']} "
-            f"(${top_val['salary']:,}, {top_val.get('value', 0):.2f} pts/$1K)"
-        )
-
     fade = classified.get("fade_candidates", [])
+    if core:
+        top_core = core[:3]
+        names = ", ".join(p["player_name"] for p in top_core)
+        bullets.append(f"Core anchors: {names}")
+    if leverage:
+        top_lev = leverage[:2]
+        names = ", ".join(p["player_name"] for p in top_lev)
+        bullets.append(f"Leverage plays: {names}")
+    if value:
+        top_val = value[:2]
+        names = ", ".join(p["player_name"] for p in top_val)
+        bullets.append(f"Value targets: {names}")
     if fade:
-        names = ", ".join(p["player_name"] for p in fade[:2])
+        top_fade = fade[:2]
+        names = ", ".join(p["player_name"] for p in top_fade)
         bullets.append(f"Fade candidates: {names}")
-
-    if sport.upper() == "PGA" and "early_late_wave" in edge_df.columns:
-        early = edge_df[edge_df["early_late_wave"].isin([0, "Early"])]
-        late = edge_df[edge_df["early_late_wave"].isin([1, "Late"])]
-        if len(early) > 0 and len(late) > 0:
-            early_avg = early["proj"].mean()
-            late_avg = late["proj"].mean()
-            better = "Early" if early_avg > late_avg else "Late"
-            diff = abs(early_avg - late_avg)
-            bullets.append(
-                f"{better} wave has stronger projections by {diff:.1f} pts avg "
-                f"(Early: {early_avg:.1f}, Late: {late_avg:.1f})"
-            )
-
     return bullets
 
 
-def _build_lineups(
-    sport: str,
-    contest_type: str,
-    num_lineups: int,
-    lock_players: list[str],
-    exclude_players: list[str],
-    out_dir: Path,
-    showdown_teams: list[str] | None = None,
-) -> pd.DataFrame:
-    """Build DFS lineups using the optimizer."""
-    from yak_core.config import CONTEST_PRESETS
-    from scripts.build_lineups import build_lineups
+def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None):
+    from yak_core.config import CONTEST_PRESETS, merge_config
+    from yak_core.optimizer import build_multiple_lineups_with_exposure, build_player_pool
 
     pool = pd.read_parquet(out_dir / "slate_pool.parquet")
-
-    # Ensure valid ownership data before building lineups
-    try:
-        from yak_core.ownership_guard import ensure_ownership
-        pool = ensure_ownership(pool, sport=sport)
-    except Exception as _eg:
-        print(f"[_build_lineups] ownership_guard unavailable: {_eg}")
-
-    if exclude_players:
-        pool = pool[~pool["player_name"].isin(exclude_players)].reset_index(drop=True)
-
-    preset = CONTEST_PRESETS.get(contest_type, {})
-    slate_type = preset.get("slate_type", "Classic")
-
+    preset = CONTEST_PRESETS.get(contest_label, {})
+    cfg = merge_config({
+        **preset,
+        "SPORT": sport.upper(),
+        "NUM_LINEUPS": num_lineups,
+        "LOCK": lock_list,
+        "EXCLUDE": exclude_list,
+    })
     if showdown_teams:
         pool = pool[pool["team"].isin(showdown_teams)].reset_index(drop=True)
 
-    lineups = build_lineups(
-        pool=pool,
-        contest_type=contest_type,
-        num_lineups=num_lineups,
-        lock_players=lock_players,
-        exclude_players=[],
-        sport=sport.upper(),
-    )
+    _excl_path = out_dir / "excluded_players.json"
+    if _excl_path.exists():
+        _saved = json.loads(_excl_path.read_text())
+        for name in _saved:
+            if name not in cfg.get("EXCLUDE", []):
+                cfg.setdefault("EXCLUDE", []).append(name)
 
-    if lineups is not None and not lineups.empty:
-        slug = contest_type.lower().replace(" ", "_")
-        if showdown_teams:
-            slug += "_" + "_".join(t.lower() for t in showdown_teams)
-        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        lineup_path = out_dir / f"{slug}_lineups.parquet"
-        exposure_path = out_dir / f"{slug}_exposure.parquet"
-        meta_path = out_dir / f"{slug}_meta.json"
-
-        lineups.to_parquet(str(lineup_path), index=False)
-
-        exp_cols = ["player_name", "pos", "salary", "proj", "ownership"]
-        if "slot" in lineups.columns:
-            exp_cols.insert(2, "slot")
-        exp_avail = [c for c in exp_cols if c in lineups.columns]
-        exposure = (
-            lineups[exp_avail]
-            .groupby("player_name")
-            .agg(
-                appearances=("player_name", "count"),
-                **{c: (c, "first") for c in exp_avail if c != "player_name"},
-            )
-            .reset_index(drop=True)
-        )
-        exposure["exposure_pct"] = (exposure["appearances"] / num_lineups * 100).round(1)
-        exposure.to_parquet(str(exposure_path), index=False)
-
-        meta_out = {
-            "contest_type": contest_type,
-            "slate_type": slate_type,
-            "num_lineups": num_lineups,
-            "built_at": ts,
-            "sport": sport.upper(),
+    edge_path = out_dir / "edge_state.json"
+    if edge_path.exists():
+        edge_state = json.loads(edge_path.read_text())
+        tier_player_names = {}
+        for tier_key in ["core_names", "leverage_names", "value_names", "fade_names"]:
+            tier = tier_key.replace("_names", "")
+            tier_player_names[tier] = edge_state.get(tier_key, [])
+        cfg["TIER_CONSTRAINTS"] = {
+            "tier_player_names": tier_player_names,
+            "tier_min_players": {"core_or_value": 2},
+            "tier_max_players": {"fade": 3},
         }
-        if showdown_teams:
-            meta_out["matchup"] = " vs ".join(showdown_teams)
-        with open(meta_path, "w") as f:
-            json.dump(meta_out, f, indent=2)
 
-    return lineups if lineups is not None else pd.DataFrame()
+    player_pool = build_player_pool(pool, cfg)
+    lineups_df, exposure_df = build_multiple_lineups_with_exposure(player_pool, cfg)
+
+    contest_slug = contest_label.lower().replace(" ", "_")
+    if showdown_teams:
+        contest_slug += "_" + "_".join(sorted(showdown_teams)).lower()
+    lineups_out = out_dir / f"{contest_slug}_lineups.parquet"
+    exposure_out = out_dir / f"{contest_slug}_exposure.parquet"
+    meta_out = out_dir / f"{contest_slug}_meta.json"
+    lineups_df.to_parquet(str(lineups_out), index=False)
+    exposure_df.to_parquet(str(exposure_out), index=False)
+    with open(meta_out, "w") as f:
+        meta_data = {"contest": contest_label, "sport": sport.upper(), "num_lineups": num_lineups,
+                     "built_at": datetime.now(timezone.utc).isoformat(), "lock": lock_list, "exclude": exclude_list}
+        if showdown_teams:
+            meta_data["matchup"] = " vs ".join(showdown_teams)
+        json.dump(meta_data, f, indent=2)
+    return lineups_df
 
 
 def _publish_to_github(sport: str, out_dir: Path) -> dict:
-    """Sync published lineups to GitHub."""
-    try:
-        from yak_core.github_sync import sync_feedback_to_github
-        result = sync_feedback_to_github(
-            sport=sport.upper(),
-            local_dir=str(out_dir),
-        )
-        return result
-    except Exception as e:
-        return {"status": "error", "reason": str(e)}
+    from yak_core.github_sync import sync_feedback_to_github
+    result = sync_feedback_to_github(
+        sport=sport.upper(),
+        local_dir=str(out_dir),
+        commit_message=f"YakOS publish: {sport.upper()} lineups {date.today().isoformat()}",
+    )
+    return result
 
 
 def _render_historical_replay(sport: str) -> None:
-    """Section 5: replay a historical slate for calibration."""
-    from app.data_loader import published_dir
-    import glob as _glob
-
     st.markdown("### Historical Replay")
-    st.caption("Re-run optimizer on a past slate to calibrate projections.")
-
-    out_dir = published_dir(sport)
-    replay_dir = out_dir / "replay"
-    replay_dir.mkdir(parents=True, exist_ok=True)
-
-    # List available historical parquet files
-    parquet_files = sorted(_glob.glob(str(out_dir / "*.parquet")))
-    pool_files = [f for f in parquet_files if "pool" in Path(f).stem]
-
-    if not pool_files:
-        st.info("No historical pool files found. Load and publish a slate first.")
+    from app.data_loader import published_dir as _pub_dir
+    out_dir = _pub_dir(sport)
+    lineup_files = sorted(out_dir.glob("*_lineups.parquet"))
+    if not lineup_files:
+        st.caption("No lineup files available for replay.")
         return
 
-    file_options = {Path(f).stem: f for f in pool_files}
-    selected_stem = st.selectbox(
-        "Select historical pool", list(file_options.keys()),
-        key=f"replay_pool_sel_{sport}",
-    )
-    selected_path = file_options[selected_stem]
+    slug_options = [lf.stem.replace("_lineups", "") for lf in lineup_files]
+    selected_slug = st.selectbox("Select lineup set", slug_options, key=f"replay_slug_{sport}")
+    if not selected_slug:
+        return
 
-    # Contest type
-    from yak_core.config import CONTEST_PRESETS
-    is_pga = sport.upper() == "PGA"
-    if is_pga:
-        contest_options = [k for k in CONTEST_PRESETS if k.startswith("PGA")]
-    else:
-        contest_options = [k for k in CONTEST_PRESETS if not k.startswith("PGA")]
-    contest_options = contest_options or list(CONTEST_PRESETS.keys())
+    selected_full_slug = selected_slug
+    replay_lineups_path = out_dir / f"{selected_full_slug}_lineups.parquet"
+    if not replay_lineups_path.exists():
+        st.warning("Selected lineup file not found.")
+        return
 
-    replay_contest = st.selectbox(
-        "Contest type", contest_options, key=f"replay_contest_{sport}"
-    )
-    replay_n = st.number_input("Lineups", min_value=1, max_value=50, value=5, key=f"replay_n_{sport}")
+    replay_lineups = pd.read_parquet(replay_lineups_path)
+    st.markdown(f"**{selected_full_slug}** — {replay_lineups['lineup_index'].nunique() if 'lineup_index' in replay_lineups.columns else 0} lineups")
 
-    # Optional: actual results CSV
-    results_file = st.file_uploader(
-        "Actual results CSV (optional, for scoring)",
-        type=["csv"],
-        key=f"replay_results_{sport}",
-    )
-
-    # Discovered replay results
-    existing_replays = sorted(
-        _glob.glob(str(replay_dir / "*_replay_results.json")),
-        reverse=True,
-    )
-
-    if existing_replays:
-        st.markdown("**Previous replays:**")
-        for rp in existing_replays[:5]:
-            rp_name = Path(rp).stem.replace("_replay_results", "")
-            try:
-                rp_data = json.loads(Path(rp).read_text())
-                avg_score = rp_data.get("avg_score", "N/A")
-                n_lu = rp_data.get("n_lineups", "?")
-                st.caption(f"  {rp_name}: {n_lu} lineups, avg score {avg_score}")
-            except Exception:
-                st.caption(f"  {rp_name}")
-
-    if st.button("Run Replay", key=f"replay_run_{sport}"):
-        with st.spinner("Running replay..."):
-            try:
-                replay_pool = pd.read_parquet(selected_path)
-
-                # Ensure valid ownership data for replay pool
-                try:
-                    from yak_core.ownership_guard import ensure_ownership
-                    replay_pool = ensure_ownership(replay_pool, sport=sport)
-                except Exception as _eg:
-                    print(f"[_render_historical_replay] ownership_guard unavailable: {_eg}")
-
-                from scripts.build_lineups import build_lineups
-                replay_lineups = build_lineups(
-                    pool=replay_pool,
-                    contest_type=replay_contest,
-                    num_lineups=replay_n,
-                    lock_players=[],
-                    exclude_players=[],
-                    sport=sport.upper(),
-                )
-
-                if replay_lineups is None or replay_lineups.empty:
-                    st.warning("Optimizer returned no lineups for replay.")
-                    return
-
-                # Score if results CSV provided
-                replay_results = {"n_lineups": replay_n, "avg_score": "N/A"}
-                if results_file is not None:
-                    try:
-                        actual_df = pd.read_csv(results_file)
-                        from yak_core.scoring import score_lineups
-                        scored = score_lineups(replay_lineups, actual_df)
-                        avg_score = round(float(scored["total_score"].mean()), 2) if "total_score" in scored.columns else "N/A"
-                        replay_results["avg_score"] = avg_score
-                        replay_results["scored_lineups"] = scored.to_dict(orient="records")
-                        st.success(f"Replay complete. Avg score: {avg_score}")
-                    except Exception as se:
-                        st.warning(f"Scoring failed: {se}")
-                        st.success(f"Replay complete ({replay_n} lineups built, no scoring).")
-                else:
-                    st.success(f"Replay complete ({replay_n} lineups built).")
-
-                # Save replay results
-                selected_full_slug = Path(selected_path).stem
-                replay_out = replay_dir / f"{selected_full_slug}_replay_results.json"
-                with open(replay_out, "w") as f:
-                    json.dump(replay_results, f, indent=2, default=str)
-
-                # Show preview
-                show_cols = ["lineup_index", "player_name", "pos", "salary", "proj"]
-                if "slot" in replay_lineups.columns:
-                    show_cols.insert(1, "slot")
-                avail_cols = [c for c in show_cols if c in replay_lineups.columns]
-                st.dataframe(replay_lineups[avail_cols].head(30), use_container_width=True, hide_index=True)
-
-                # Push calibration feedback to GitHub
-                try:
-                    from yak_core.github_sync import sync_feedback_to_github
-                    sync_feedback_to_github(
-                        sport=sport.upper(),
-                        local_dir=str(out_dir),
-                        extra_files=[str(replay_out)],
-                        commit_message=f"Replay completed: {selected_full_slug}",
-                    )
-                except Exception:
-                    pass
+    actuals_path = out_dir / "actuals.parquet"
+    if not actuals_path.exists():
+        st.caption("No actuals file found. Upload actuals to enable scoring.")
+        actuals_file = st.file_uploader("Upload actuals CSV", type=["csv"], key=f"replay_actuals_{sport}")
+        if actuals_file:
+            actuals_df = pd.read_csv(actuals_file)
+            if "player_name" in actuals_df.columns and "actual_fp" in actuals_df.columns:
+                actuals_df.to_parquet(str(actuals_path), index=False)
+                st.success("Actuals saved.")
                 st.rerun()
-            except Exception as e:
-                st.error(f"Replay error: {e}")
+        return
+
+    actuals = pd.read_parquet(actuals_path)
+    try:
+        from yak_core.scoring import score_lineups
+        scored = score_lineups(replay_lineups, actuals)
+        st.dataframe(scored.head(20), use_container_width=True, hide_index=True)
+
+        replay_out = out_dir / f"{selected_full_slug}_replay.parquet"
+        scored.to_parquet(str(replay_out), index=False)
+
+        if st.button("Sync Replay to GitHub", key=f"replay_sync_{sport}"):
+            try:
+                from yak_core.github_sync import sync_feedback_to_github
+                sync_feedback_to_github(
+                    sport=sport.upper(),
+                    local_dir=str(out_dir),
+                    extra_files=[str(replay_out)],
+                    commit_message=f"Replay completed: {selected_full_slug}",
+                )
+            except Exception:
+                pass
+            st.rerun()
+    except Exception as e:
+        st.error(f"Replay error: {e}")
