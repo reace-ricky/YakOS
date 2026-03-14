@@ -667,6 +667,19 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
         return pd.Series(default, index=frame.index)
 
     df = sdf.copy()
+
+    # ── Filter OUT / IR / Suspended / WD players before classifying ──
+    # These players should never appear as Core/Leverage/Value picks.
+    _REMOVE_STATUSES = {"OUT", "IR", "SUSPENDED", "WD"}
+    if "status" in df.columns:
+        _before = len(df)
+        df = df[
+            ~df["status"].fillna("").str.strip().str.upper().isin(_REMOVE_STATUSES)
+        ].reset_index(drop=True)
+        _removed = _before - len(df)
+        if _removed:
+            print(f"[_classify_plays] Excluded {_removed} OUT/IR/WD/Suspended player(s) from edge classification")
+
     _sal = _safe_col(df, "salary")
     _proj = _safe_col(df, "proj")
     _own_col = "ownership" if "ownership" in df.columns and df["ownership"].notna().any() else "own_pct"
@@ -689,9 +702,14 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
     leverage = df[(_sal >= sal_med) & (_own < own_med) & (_edge > 0)][_pick_cols].rename(columns={_own_col: "ownership"})
     value = df[(_sal < sal_med) & (_value > 0)][_pick_cols].rename(columns={_own_col: "ownership"})
     fade = df[(_edge < 0) | ((_own >= own_med * 1.5) & (_edge <= 0))][_pick_cols].rename(columns={_own_col: "ownership"})
-    def _to_records(frame):
-        return frame.sort_values("edge", ascending=False).head(10).to_dict(orient="records")
-    return {"core_plays": _to_records(core), "leverage_plays": _to_records(leverage), "value_plays": _to_records(value), "fade_candidates": _to_records(fade)}
+    def _to_records(frame, n=5):
+        return frame.sort_values("edge", ascending=False).head(n).to_dict(orient="records")
+    return {
+        "core_plays": _to_records(core, 5),
+        "leverage_plays": _to_records(leverage, 5),
+        "value_plays": _to_records(value, 5),
+        "fade_candidates": _to_records(fade, 5),
+    }
 
 
 def _build_bullets(classified: dict, edge_df, sport: str) -> list:
@@ -864,6 +882,92 @@ def _publish_to_github(sport: str, out_dir: Path) -> dict:
     return result
 
 
+def _fetch_nba_actuals(api_key: str, game_date: str) -> pd.DataFrame:
+    """Fetch actual DK fantasy points from Tank01 box scores for a given date.
+
+    Calls getNBAGamesForDate → getNBABoxScore for each game, then computes
+    DraftKings fantasy points from the raw stat lines.
+
+    Returns a DataFrame with columns: player_name, actual_fp
+    """
+    import requests as _req
+    from yak_core.live import _TANK01_HOST
+
+    clean_date = game_date.replace("-", "")
+    hdrs = {"x-rapidapi-key": api_key, "x-rapidapi-host": _TANK01_HOST}
+
+    # 1. Get all games for the date
+    resp = _req.get(
+        f"https://{_TANK01_HOST}/getNBAGamesForDate",
+        headers=hdrs, params={"gameDate": clean_date}, timeout=15,
+    )
+    resp.raise_for_status()
+    games_data = resp.json()
+    games_body = games_data.get("body", games_data) if isinstance(games_data, dict) else games_data
+    games_list = games_body if isinstance(games_body, list) else []
+
+    if not games_list:
+        return pd.DataFrame(columns=["player_name", "actual_fp"])
+
+    # 2. Fetch box scores for each game
+    rows = []
+    for g in games_list:
+        gid = g.get("gameID", "")
+        if not gid:
+            continue
+        try:
+            box_resp = _req.get(
+                f"https://{_TANK01_HOST}/getNBABoxScore",
+                headers=hdrs, params={"gameID": gid}, timeout=15,
+            )
+            box_resp.raise_for_status()
+            box = box_resp.json()
+            box_body = box.get("body", box) if isinstance(box, dict) else box
+            player_stats = box_body.get("playerStats", {}) if isinstance(box_body, dict) else {}
+
+            for pid, pdata in player_stats.items():
+                if not isinstance(pdata, dict):
+                    continue
+                name = pdata.get("longName", "").strip()
+                if not name:
+                    continue
+
+                # Parse stats
+                pts = float(pdata.get("pts", 0) or 0)
+                reb = float(pdata.get("reb", 0) or 0)
+                ast = float(pdata.get("ast", 0) or 0)
+                stl = float(pdata.get("stl", 0) or 0)
+                blk = float(pdata.get("blk", 0) or 0)
+                tov = float(pdata.get("TOV", 0) or 0)
+                tpm = float(pdata.get("tptfgm", 0) or 0)
+
+                # DraftKings NBA scoring
+                dk_fp = (
+                    pts * 1.0
+                    + tpm * 0.5
+                    + reb * 1.25
+                    + ast * 1.5
+                    + stl * 2.0
+                    + blk * 2.0
+                    + tov * -0.5
+                )
+
+                # Double-double / triple-double bonuses
+                stat_cats = [pts, reb, ast, stl, blk]
+                doubles = sum(1 for s in stat_cats if s >= 10)
+                if doubles >= 3:
+                    dk_fp += 3.0  # triple-double
+                elif doubles >= 2:
+                    dk_fp += 1.5  # double-double
+
+                rows.append({"player_name": name, "actual_fp": round(dk_fp, 2)})
+        except Exception as exc:
+            print(f"[_fetch_nba_actuals] Box score fetch failed for {gid}: {exc}")
+            continue
+
+    return pd.DataFrame(rows)
+
+
 def _render_historical_replay(sport: str) -> None:
     st.markdown("### Historical Replay")
     from app.data_loader import published_dir as _pub_dir
@@ -887,9 +991,51 @@ def _render_historical_replay(sport: str) -> None:
     replay_lineups = pd.read_parquet(replay_lineups_path)
     st.markdown(f"**{selected_full_slug}** \u2014 {replay_lineups['lineup_index'].nunique() if 'lineup_index' in replay_lineups.columns else 0} lineups")
 
+    # ── Load or fetch actuals ──
     actuals_path = out_dir / "actuals.parquet"
     if not actuals_path.exists():
-        st.caption("No actuals file found. Upload actuals to enable scoring.")
+        st.caption("No actuals loaded yet.")
+
+        # Auto-fetch option (NBA only for now)
+        is_pga = sport.upper() == "PGA"
+        if not is_pga:
+            meta_path = out_dir / "slate_meta.json"
+            slate_date = ""
+            if meta_path.exists():
+                try:
+                    _m = json.loads(meta_path.read_text())
+                    slate_date = _m.get("date", "")
+                except Exception:
+                    pass
+
+            fetch_date = st.text_input(
+                "Slate date for actuals",
+                value=slate_date,
+                key=f"replay_fetch_date_{sport}",
+            )
+            if st.button("Fetch Actuals from API", key=f"replay_fetch_{sport}"):
+                api_key = (
+                    os.environ.get("RAPIDAPI_KEY")
+                    or os.environ.get("TANK01_RAPIDAPI_KEY")
+                    or _get_secret("RAPIDAPI_KEY")
+                    or _get_secret("TANK01_RAPIDAPI_KEY")
+                )
+                if not api_key:
+                    st.error("Missing RAPIDAPI_KEY.")
+                elif not fetch_date:
+                    st.error("Enter a slate date.")
+                else:
+                    with st.spinner("Fetching box scores..."):
+                        actuals_df = _fetch_nba_actuals(api_key, fetch_date)
+                    if actuals_df.empty:
+                        st.warning("No box score data found for that date. Games may not have finished yet.")
+                    else:
+                        actuals_df.to_parquet(str(actuals_path), index=False)
+                        st.success(f"Fetched actuals for {len(actuals_df)} players.")
+                        st.rerun()
+
+        st.markdown("---")
+        st.caption("Or upload a CSV with `player_name` and `actual_fp` columns.")
         actuals_file = st.file_uploader("Upload actuals CSV", type=["csv"], key=f"replay_actuals_{sport}")
         if actuals_file:
             actuals_df = pd.read_csv(actuals_file)
@@ -900,25 +1046,66 @@ def _render_historical_replay(sport: str) -> None:
         return
 
     actuals = pd.read_parquet(actuals_path)
+    st.caption(f"Actuals loaded: {len(actuals)} players")
+
+    # ── Score lineups against actuals ──
     try:
-        from yak_core.scoring import score_lineups
-        scored = score_lineups(replay_lineups, actuals)
-        st.dataframe(scored.head(20), use_container_width=True, hide_index=True)
+        # Merge actuals into lineup data and compute per-lineup totals
+        lu_df = replay_lineups.copy()
+        if "player_name" in lu_df.columns:
+            lu_df = lu_df.merge(
+                actuals[["player_name", "actual_fp"]],
+                on="player_name",
+                how="left",
+            )
+            lu_df["actual_fp"] = lu_df["actual_fp"].fillna(0.0)
 
-        replay_out = out_dir / f"{selected_full_slug}_replay.parquet"
-        scored.to_parquet(str(replay_out), index=False)
+            if "lineup_index" in lu_df.columns:
+                # Per-lineup summary
+                proj_col = "proj" if "proj" in lu_df.columns else None
+                summary_rows = []
+                for idx in sorted(lu_df["lineup_index"].unique()):
+                    lu_slice = lu_df[lu_df["lineup_index"] == idx]
+                    total_actual = lu_slice["actual_fp"].sum()
+                    total_proj = lu_slice[proj_col].sum() if proj_col else 0.0
+                    total_sal = int(lu_slice["salary"].sum()) if "salary" in lu_slice.columns else 0
+                    summary_rows.append({
+                        "lineup": idx + 1,
+                        "total_actual": round(total_actual, 2),
+                        "total_proj": round(total_proj, 2),
+                        "diff": round(total_actual - total_proj, 2),
+                        "salary": total_sal,
+                    })
+                summary_df = pd.DataFrame(summary_rows)
+                st.markdown("**Lineup Scores**")
+                st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
-        if st.button("Sync Replay to GitHub", key=f"replay_sync_{sport}"):
-            try:
-                from yak_core.config import YAKOS_ROOT as _YR
-                from yak_core.github_persistence import sync_feedback_to_github
-                _replay_rel = os.path.relpath(str(replay_out), _YR)
-                sync_feedback_to_github(
-                    files=[_replay_rel],
-                    commit_message=f"Replay completed: {selected_full_slug}",
-                )
-            except Exception:
-                pass
+                # KPIs
+                avg_actual = summary_df["total_actual"].mean()
+                avg_proj = summary_df["total_proj"].mean()
+                best = summary_df["total_actual"].max()
+                beat_proj_pct = (summary_df["total_actual"] >= summary_df["total_proj"]).mean() * 100
+                k1, k2, k3, k4 = st.columns(4)
+                with k1:
+                    st.metric("Avg Actual", f"{avg_actual:.1f}")
+                with k2:
+                    st.metric("Avg Proj", f"{avg_proj:.1f}")
+                with k3:
+                    st.metric("Best Lineup", f"{best:.1f}")
+                with k4:
+                    st.metric("Beat Proj %", f"{beat_proj_pct:.0f}%")
+
+                # Detailed player-level view
+                with st.expander("Player-level detail"):
+                    detail_cols = ["lineup_index", "player_name", "pos", "salary", "proj", "actual_fp"]
+                    avail_cols = [c for c in detail_cols if c in lu_df.columns]
+                    st.dataframe(lu_df[avail_cols], use_container_width=True, hide_index=True)
+            else:
+                st.dataframe(lu_df.head(30), use_container_width=True, hide_index=True)
+
+        if st.button("Clear Actuals", key=f"replay_clear_{sport}"):
+            actuals_path.unlink(missing_ok=True)
             st.rerun()
+
     except Exception as e:
         st.error(f"Replay error: {e}")
