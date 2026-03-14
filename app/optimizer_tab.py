@@ -190,28 +190,50 @@ def render_optimizer_tab(sport: str) -> None:
             st.warning("Pick exactly 2 teams for Showdown.")
             return
 
-        # Prepare pool
+        # Prepare pool — same pipeline the Lab uses (build_player_pool → prepare_pool)
+        # This ensures gpp_score / cash_score / value_score / stack_score are computed
+        # and OUT/IR/WD players are filtered.
+        from yak_core.lineups import build_player_pool
+
         build_pool = pool.copy()
         if "player_id" not in build_pool.columns:
             build_pool["player_id"] = build_pool["player_name"].str.lower().str.replace(" ", "_")
-        # Ensure valid ownership (handles None/all-zeros/wrong scale)
-        try:
-            from yak_core.ownership_guard import ensure_ownership
-            build_pool = ensure_ownership(build_pool, sport=sport)
-        except Exception:
-            build_pool["ownership"] = pd.to_numeric(
-                build_pool.get("ownership", 0), errors="coerce"
-            ).fillna(0.0)
 
-        # Apply lock/exclude directly on the pool
-        if excluded:
-            build_pool = build_pool[~build_pool["player_name"].isin(excluded)].reset_index(drop=True)
-
-        # NBA Showdown: filter pool to the selected 2-team matchup
+        # NBA Showdown: filter pool to the selected 2-team matchup BEFORE prepare_pool
         if is_nba_showdown and showdown_teams:
             build_pool = build_pool[build_pool["team"].isin(showdown_teams)].reset_index(drop=True)
 
         cfg = _build_optimizer_cfg(preset, sport, num_lineups, max_exposure, locked, excluded)
+        # Preserve projections already in the published pool (don't overwrite with salary_implied)
+        cfg["PROJ_SOURCE"] = "parquet"
+
+        # Load edge state for tier constraints (same as Lab _build_lineups)
+        try:
+            import json
+            from app.data_loader import published_dir
+            _opt_out_dir = published_dir(sport)
+            _edge_path = _opt_out_dir / "edge_state.json"
+            if _edge_path.exists():
+                _edge_st = json.loads(_edge_path.read_text())
+                _tier_names = {}
+                for _tk in ["core_names", "leverage_names", "value_names", "fade_names"]:
+                    _tier_names[_tk.replace("_names", "")] = _edge_st.get(_tk, [])
+                cfg["TIER_CONSTRAINTS"] = {
+                    "tier_player_names": _tier_names,
+                    "tier_min_players": {"core_or_value": 2},
+                    "tier_max_players": {"fade": 3},
+                }
+            # Also apply saved excluded players
+            _excl_path = _opt_out_dir / "excluded_players.json"
+            if _excl_path.exists():
+                for _name in json.loads(_excl_path.read_text()):
+                    if _name not in cfg.get("EXCLUDE", []):
+                        cfg.setdefault("EXCLUDE", []).append(_name)
+        except Exception:
+            pass  # Non-fatal — optimizer can work without edge tiers
+
+        # Run through the same prepare_pool the Lab uses
+        build_pool = build_player_pool(build_pool, cfg)
 
         with st.spinner(f"Building {num_lineups} lineups..."):
             try:
