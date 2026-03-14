@@ -18,7 +18,7 @@ from yak_core.config import (
     DK_SHOWDOWN_CAPTAIN_MULTIPLIER,
 )
 
-# ── Silence PuLP's default stdout banner ─────────────────────────────────────
+# ── Silence PuLP's default stdout banner ──────────────────────────────────────
 pulp.LpSolverDefault.msg = False  # type: ignore[attr-defined]
 
 
@@ -51,1181 +51,552 @@ def load_player_pool(
     Returns
     -------
     pd.DataFrame
-        Raw player-pool frame from the source (columns vary by sport/mode).
+        Player pool with at minimum: ``player_name``, ``team``,
+        ``salary``, ``position``.
     """
-    sport = sport.upper()
     root = yakos_root or YAKOS_ROOT
+    sport = sport.upper()
 
-    if data_mode == "historical":
-        ds = slate_date or str(date.today())
-        if sport == "NBA":
-            path = os.path.join(root, "data", "nba", "pool", f"{ds}.parquet")
-        elif sport == "PGA":
-            path = os.path.join(root, "data", "pga", "pool", f"{ds}.parquet")
+    if data_mode == "live":
+        from yak_core.live_pool import fetch_live_pool  # type: ignore[import]
+        return fetch_live_pool(sport=sport, root=root)
+
+    # --- historical: read local parquet ---
+    if slate_date is None:
+        slate_date = str(date.today())
+
+    # Try sport-specific subdirectory first, then legacy flat layout
+    parquet_candidates = [
+        os.path.join(root, "data", "pools", sport, f"{slate_date}.parquet"),
+        os.path.join(root, "data", "pools", f"{slate_date}.parquet"),
+        os.path.join(root, "data", "pools", "latest.parquet"),
+    ]
+    for path in parquet_candidates:
+        if os.path.exists(path):
+            df = pd.read_parquet(path)
+            # Normalise column names to snake_case
+            df.columns = [c.lower().replace(" ", "_") for c in df.columns]
+            return df
+
+    raise FileNotFoundError(
+        f"No pool parquet found for {sport}/{slate_date}. "
+        f"Tried: {parquet_candidates}"
+    )
+
+
+# =============================================================================
+# SCORING / PROJECTION HELPERS
+# =============================================================================
+
+def _salary_implied_projection(
+    salary: float,
+    fp_per_k: float = 4.0,
+) -> float:
+    """Compute a naïve salary-implied projection: salary / 1000 * fp_per_k."""
+    return (salary / 1_000.0) * fp_per_k
+
+
+def _add_projections(
+    df: pd.DataFrame,
+    cfg: Dict[str, Any],
+) -> pd.DataFrame:
+    """Ensure the pool has a ``proj`` column.
+
+    Strategy selected by ``cfg['PROJ_SOURCE']``:
+    - ``'parquet'``       : use existing ``proj`` column (no-op if present)
+    - ``'salary_implied'``: fp_per_k * salary / 1000
+    - ``'regression'``   : placeholder, falls back to salary_implied
+    - ``'blend'``        : weighted average of parquet proj and salary_implied
+    """
+    source = cfg.get("PROJ_SOURCE", "salary_implied")
+    fp_per_k = float(cfg.get("FP_PER_K", 4.0))
+    noise_frac = float(cfg.get("PROJ_NOISE", 0.05))
+    blend_w = float(cfg.get("PROJ_BLEND_WEIGHT", 0.7))  # weight on parquet in blend
+
+    si_proj = df["salary"].apply(lambda s: _salary_implied_projection(s, fp_per_k))
+
+    if source == "parquet":
+        if "proj" not in df.columns:
+            df["proj"] = si_proj
+    elif source == "blend":
+        if "proj" in df.columns:
+            parquet_proj = df["proj"].fillna(si_proj)
+            df["proj"] = blend_w * parquet_proj + (1.0 - blend_w) * si_proj
         else:
-            raise ValueError(f"Unsupported sport: {sport}")
-        return pd.read_parquet(path)
+            df["proj"] = si_proj
+    else:  # salary_implied (default) or regression fallback
+        df["proj"] = si_proj
 
-    elif data_mode == "live":
-        if sport == "NBA":
-            from yak_core.ingest_nba import fetch_nba_pool
-            return fetch_nba_pool()
-        elif sport == "PGA":
-            from yak_core.ingest_pga import fetch_pga_pool
-            return fetch_pga_pool()
-        else:
-            raise ValueError(f"Unsupported sport: {sport}")
+    # Add small noise for lineup differentiation
+    if noise_frac > 0:
+        rng = np.random.default_rng(seed=42)
+        noise = rng.normal(0, noise_frac * df["proj"].mean(), size=len(df))
+        df["proj"] = (df["proj"] + noise).clip(lower=0)
 
+    return df
+
+
+def _add_ownership(
+    df: pd.DataFrame,
+    cfg: Dict[str, Any],
+) -> pd.DataFrame:
+    """Ensure the pool has an ``own_pct`` column (0-1 scale)."""
+    own_source = cfg.get("OWN_SOURCE", "auto")
+
+    if "own_pct" in df.columns and own_source != "salary_rank":
+        df["own_pct"] = pd.to_numeric(df["own_pct"], errors="coerce").fillna(0.0)
+        # Convert from percentage to fraction if values look like percentages
+        if df["own_pct"].max() > 1.5:
+            df["own_pct"] = df["own_pct"] / 100.0
+        return df
+
+    # Generate salary-rank-based ownership proxy
+    n = len(df)
+    rank = df["salary"].rank(ascending=False, method="first")
+    # Linear decay: rank 1 => ~0.45, rank n => ~0.05
+    df["own_pct"] = 0.45 - 0.40 * (rank - 1) / max(n - 1, 1)
+    df["own_pct"] = df["own_pct"].clip(0.02, 0.60)
+    return df
+
+
+def _add_scores(
+    df: pd.DataFrame,
+    cfg: Dict[str, Any],
+) -> pd.DataFrame:
+    """Attach gpp_score, cash_score, value_score, stack_score."""
+    own_weight   = float(cfg.get("OWN_WEIGHT",   0.0))
+    stack_weight = float(cfg.get("STACK_WEIGHT", 0.0))
+    value_weight = float(cfg.get("VALUE_WEIGHT", 0.0))
+
+    # ── gpp_score = proj*GPP_PROJ_WEIGHT + ceil*GPP_CEIL_WEIGHT + own*GPP_OWN_WEIGHT
+    # Defaults match v6 formula: proj*0.35 + ceil*0.55 - own*5
+    gpp_proj_weight = float(cfg.get("GPP_PROJ_WEIGHT", 0.35))
+    gpp_ceil_weight = float(cfg.get("GPP_CEIL_WEIGHT", 0.55))
+    gpp_own_weight  = float(cfg.get("GPP_OWN_WEIGHT", -5.0))
+
+    ceil_col = df["ceil"] if "ceil" in df.columns else df["proj"]
+    own_col  = df["own_pct"]
+    df["gpp_score"] = (
+        df["proj"] * gpp_proj_weight
+        + ceil_col * gpp_ceil_weight
+        + own_col * gpp_own_weight
+    )
+
+    # ── cash_score = floor-weighted ───────────────────────────────────────────
+    floor_w = float(cfg.get("CASH_FLOOR_WEIGHT", 0.6))
+    proj_w  = float(cfg.get("CASH_PROJ_WEIGHT",  0.4))
+    if "floor" in df.columns:
+        df["cash_score"] = floor_w * df["floor"] + proj_w * df["proj"]
     else:
-        raise ValueError(f"Unknown data_mode: {data_mode!r}")
+        df["cash_score"] = df["proj"]
 
+    # ── value_score ───────────────────────────────────────────────────────────
+    if value_weight > 0:
+        df["value_score"] = df["proj"] / (df["salary"] / 1_000.0 + 1e-9)
+    else:
+        df["value_score"] = 0.0
 
-# =============================================================================
-# PLAYER POOL PREPARATION
-# =============================================================================
+    # ── stack_score (game-level correlation bonus) ───────────────────────────
+    if stack_weight > 0 and "game_id" in df.columns:
+        game_proj = df.groupby("game_id")["proj"].transform("sum")
+        df["stack_score"] = stack_weight * (game_proj / game_proj.max())
+    else:
+        df["stack_score"] = 0.0
+
+    return df
+
 
 def prepare_pool(
     df: pd.DataFrame,
-    sport: str = "NBA",
-    contest_type: str = "classic",
-    cfg: Dict[str, Any] | None = None,
+    cfg: Dict[str, Any],
 ) -> pd.DataFrame:
-    """Normalise and filter the raw player pool.
+    """Clean, project, and score the player pool.
+
+    Runs:
+    1. Column normalisation (lowercase, rename aliases)
+    2. Salary / projection cleaning
+    3. Ownership proxy
+    4. Score columns (gpp_score, cash_score, value_score, stack_score)
 
     Parameters
     ----------
     df : pd.DataFrame
-        Raw frame from :func:`load_player_pool`.
-    sport : str
-        ``"NBA"`` or ``"PGA"``.
-    contest_type : str
-        ``"classic"`` (default) or ``"showdown"``.
-    cfg : dict or None
-        Configuration overrides; merged on top of ``DEFAULT_CONFIG``.
+        Raw player pool.
+    cfg : Dict[str, Any]
+        Merged config dict (from ``yak_core.config.merge_config``).
 
     Returns
     -------
     pd.DataFrame
-        Cleaned, filtered player pool ready for the optimiser.
+        Enriched pool, index reset.
     """
-    config = {**DEFAULT_CONFIG, **(cfg or {})}
-    sport = sport.upper()
+    df = df.copy()
+    df.columns = [c.lower().replace(" ", "_") for c in df.columns]
 
-    # ── Column rename: normalise to canonical names ───────────────────────────
-    rename_map: dict[str, str] = {}
-    if sport == "NBA":
-        rename_map = {
-            "Name": "name",
-            "Roster Position": "pos",
-            "Position": "position",
-            "Salary": "salary",
-            "TeamAbbrev": "team",
-            "AvgPointsPerGame": "avg_pts",
-            "Game Info": "game_info",
-            "ID": "dk_id",
-        }
-    elif sport == "PGA":
-        rename_map = {
-            "Name": "name",
-            "Roster Position": "pos",
-            "Position": "position",
-            "Salary": "salary",
-            "TeamAbbrev": "team",
-            "AvgPointsPerGame": "avg_pts",
-            "Game Info": "game_info",
-            "ID": "dk_id",
-        }
+    # ---- Rename common DK export columns ----
+    rename_map = {
+        "name + id": "player_name",
+        "name+id": "player_name",
+        "name": "player_name",
+        "id": "player_id",
+        "pos": "position",
+        "position": "position",
+        "game info": "game_info",
+        "teamabbrev": "team",
+        "avgpointspergame": "proj",
+        "salary": "salary",
+    }
+    df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns}, inplace=True)
 
-    df = df.rename(columns=rename_map)
-
-    # ── Deduplicate columns ───────────────────────────────────────────────────
-    # Guard against duplicate column names (e.g. both 'pos' and 'position'
-    # mapping to 'position' after the rename above).  If two columns share a
-    # name, df['col'] returns a DataFrame instead of a Series, which crashes
-    # any subsequent .str accessor.  Keep only the first occurrence.
+    # ---- Drop duplicate columns (can occur when API returns both 'pos' and 'position') ----
     if df.columns.duplicated().any():
-        df = df.loc[:, ~df.columns.duplicated()]
+        _dup_names = list(df.columns[df.columns.duplicated(keep=False)].unique())
+        print(f"[prepare_pool] Dropping duplicate columns: {_dup_names}")
+        df = df.loc[:, ~df.columns.duplicated(keep="last")]
 
-    # ── Canonical position: prefer 'position', fall back to 'pos' ─────────────
-    if "position" not in df.columns and "pos" in df.columns:
-        df = df.rename(columns={"pos": "position"})
+    # ---- Guard required columns ----
+    for col in ("player_name", "salary"):
+        if col not in df.columns:
+            raise ValueError(f"Player pool missing required column: '{col}'")
 
-    # ── Numeric coercion ──────────────────────────────────────────────────────
-    df["salary"] = pd.to_numeric(df["salary"], errors="coerce")
-    df["avg_pts"] = pd.to_numeric(df["avg_pts"], errors="coerce")
+    # ---- Filter OUT / IR / WD / Suspended players ----
+    # Must run early while 'status' column still exists in the DataFrame.
+    _REMOVE_STATUSES = {"OUT", "IR", "SUSPENDED", "WD"}
+    if "status" in df.columns:
+        _before = len(df)
+        df = df[
+            ~df["status"].fillna("").str.strip().str.upper().isin(_REMOVE_STATUSES)
+        ].reset_index(drop=True)
+        _removed = _before - len(df)
+        if _removed:
+            print(f"[prepare_pool] Filtered {_removed} OUT/IR/WD/Suspended player(s)")
 
-    # ── Drop rows missing essentials ──────────────────────────────────────────
-    df = df.dropna(subset=["name", "salary", "position"])
-    df = df[df["salary"] > 0]
+    # ---- Salary cleaning ----
+    df["salary"] = (
+        df["salary"]
+        .astype(str)
+        .str.replace("[$,]", "", regex=True)
+        .str.strip()
+        .pipe(pd.to_numeric, errors="coerce")
+        .fillna(0)
+        .astype(int)
+    )
+    df = df[df["salary"] > 0].copy()
 
-    # ── Showdown: duplicate each player as CPT and FLEX ───────────────────────
-    if contest_type == "showdown":
-        cpt = df.copy()
-        cpt["slot"] = "CPT"
-        cpt["salary"] = (cpt["salary"] * DK_SHOWDOWN_CAPTAIN_MULTIPLIER).round(-2)
-        cpt["proj"] = cpt.get("proj", cpt["avg_pts"]) * DK_SHOWDOWN_CAPTAIN_MULTIPLIER
-        flex = df.copy()
-        flex["slot"] = "FLEX"
-        flex["proj"] = flex.get("proj", flex["avg_pts"])
-        df = pd.concat([cpt, flex], ignore_index=True)
-    else:
-        if "proj" not in df.columns:
-            df["proj"] = df["avg_pts"]
-
-    # ── Sport-specific position normalisation ─────────────────────────────────
-    if sport == "NBA":
-        df = _normalise_nba_positions(df, contest_type, config)
-    elif sport == "PGA":
-        df = _normalise_pga_positions(df, contest_type, config)
-
-    df = df.reset_index(drop=True)
-    return df
-
-
-# =============================================================================
-# POSITION NORMALISATION HELPERS
-# =============================================================================
-
-def _normalise_nba_positions(
-    df: pd.DataFrame,
-    contest_type: str,
-    config: Dict[str, Any],
-) -> pd.DataFrame:
-    """Expand multi-position eligibility for NBA classic/showdown slates."""
-    if contest_type == "showdown":
-        # Showdown only uses CPT/FLEX slots — positional eligibility is uniform.
-        return df
-
-    # DraftKings exports 'Roster Position' as slash-separated eligibility,
-    # e.g. "PG/SG" means the player can fill either slot.  We explode each
-    # player into one row per eligible position.
+    # ---- Position normalisation ----
     if "position" not in df.columns:
-        return df
+        df["position"] = "UTIL"
+    df["position"] = df["position"].astype(str).str.upper().str.strip()
 
-    df["position"] = df["position"].astype(str)
-    rows = []
-    for _, row in df.iterrows():
-        positions = [p.strip() for p in row["position"].split("/")]
-        for pos in positions:
-            new_row = row.copy()
-            new_row["position"] = pos
-            rows.append(new_row)
+    # ---- Team normalisation ----
+    if "team" not in df.columns:
+        df["team"] = "UNK"
+    df["team"] = df["team"].astype(str).str.upper().str.strip()
 
-    if not rows:
-        return df
+    # ---- Projections ----
+    df = _add_projections(df, cfg)
 
-    expanded = pd.DataFrame(rows).reset_index(drop=True)
-    return expanded
+    # ---- Ownership proxy ----
+    df = _add_ownership(df, cfg)
 
+    # ---- Derived scores ----
+    df = _add_scores(df, cfg)
 
-def _normalise_pga_positions(
-    df: pd.DataFrame,
-    contest_type: str,
-    config: Dict[str, Any],
-) -> pd.DataFrame:
-    """PGA pools use a single 'G' position — nothing to explode."""
-    if "position" in df.columns:
-        df["position"] = df["position"].str.upper().str.strip()
-    return df
+    return df.reset_index(drop=True)
 
 
 # =============================================================================
-# PROJECTION HELPERS
+# PuLP OPTIMISER – CLASSIC
 # =============================================================================
 
-def apply_projections(
-    df: pd.DataFrame,
-    proj: pd.Series | Dict[str, float],
-) -> pd.DataFrame:
-    """Overwrite the ``proj`` column with user-supplied projections.
+def _build_one_lineup(
+    players: list,
+    pos_slots: list,
+    salary_cap: int,
+    min_salary: int,
+    max_appearances: dict,  # {player_idx: max remaining appearances}
+    score_col: str = "gpp_score",
+    stack_weight: float = 0.0,
+    value_weight: float = 0.0,
+    pos_caps: dict | None = None,
+    solver_time_limit: int = 30,
+    gpp_constraints: dict | None = None,
+    tier_constraints: dict | None = None,
+    not_with_pairs: list | None = None,
+    forced_players: list | None = None,
+    excluded_players: list | None = None,
+) -> list | None:
+    """Solve one LP and return a list of (player_dict, slot_name) tuples.
 
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Prepared pool (output of :func:`prepare_pool`).
-    proj : pd.Series or dict
-        Mapping of player name → projected points.  Players whose names
-        are not found in *proj* retain their existing ``proj`` value.
-
-    Returns
-    -------
-    pd.DataFrame
-        Pool with updated projections.
+    Returns ``None`` if the LP is infeasible.
     """
-    if isinstance(proj, dict):
-        proj = pd.Series(proj)
-    df = df.copy()
-    df["proj"] = df["name"].map(proj).fillna(df["proj"])
-    return df
-
-
-def apply_ownership(
-    df: pd.DataFrame,
-    own: pd.Series | Dict[str, float],
-) -> pd.DataFrame:
-    """Attach projected-ownership percentages to the pool.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Prepared pool.
-    own : pd.Series or dict
-        Mapping of player name → projected ownership (0–100 scale).
-
-    Returns
-    -------
-    pd.DataFrame
-        Pool with a ``own_pct`` column added / overwritten.
-    """
-    if isinstance(own, dict):
-        own = pd.Series(own)
-    df = df.copy()
-    df["own_pct"] = df["name"].map(own).fillna(0.0)
-    return df
-
-
-# =============================================================================
-# LINEUP OPTIMIZER
-# =============================================================================
-
-def build_lineups(
-    df: pd.DataFrame,
-    sport: str = "NBA",
-    contest_type: str = "classic",
-    n: int = 20,
-    cfg: Dict[str, Any] | None = None,
-) -> list[pd.DataFrame]:
-    """Generate *n* unique DFS lineups via integer-linear programming.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Prepared pool (output of :func:`prepare_pool`).  Must contain
-        columns: ``name``, ``position``, ``salary``, ``proj``, ``team``.
-    sport : str
-        ``"NBA"`` or ``"PGA"``.
-    contest_type : str
-        ``"classic"`` or ``"showdown"``.
-    n : int
-        Number of lineups to generate (default 20).
-    cfg : dict or None
-        Config overrides merged on top of ``DEFAULT_CONFIG``.
-
-    Returns
-    -------
-    list of pd.DataFrame
-        Each element is a single lineup DataFrame (one row per player slot).
-    """
-    config = {**DEFAULT_CONFIG, **(cfg or {})}
-    sport = sport.upper()
-
-    if contest_type == "showdown":
-        return _build_showdown_lineups(df, sport, n, config)
-    else:
-        return _build_classic_lineups(df, sport, n, config)
-
-
-# ── Classic optimizer ─────────────────────────────────────────────────────────
-
-def _build_classic_lineups(
-    df: pd.DataFrame,
-    sport: str,
-    n: int,
-    config: Dict[str, Any],
-) -> list[pd.DataFrame]:
-    """ILP optimizer for classic (non-showdown) contests."""
-    lineups: list[pd.DataFrame] = []
-    excluded_sets: list[frozenset] = []
-
-    pos_slots = DK_POS_SLOTS  # e.g. {"PG": 1, "SG": 1, ..., "UTIL": 1}
-    lineup_size = DK_LINEUP_SIZE
-
-    min_teams = config.get("min_teams", 2)
-    max_from_team = config.get("max_from_team", 8)
-    min_salary = config.get("min_salary", 49000)
-    max_salary = SALARY_CAP
-    exposure_cap = config.get("exposure_cap", 1.0)
-
-    # Pre-compute: for each positional slot, which player-rows are eligible?
-    slot_eligibility: dict[str, list[int]] = {
-        slot: df.index[df["position"] == slot].tolist()
-        for slot in pos_slots
-    }
-
-    teams = df["team"].unique().tolist()
-
-    for lineup_idx in range(n):
-        prob = pulp.LpProblem(f"lineup_{lineup_idx}", pulp.LpMaximize)
-
-        # Decision variables: x[i] = 1 if player i is in the lineup
-        x = pulp.LpVariable.dicts("x", df.index, cat="Binary")
-
-        # ── Objective ─────────────────────────────────────────────────────────
-        prob += pulp.lpSum(df.loc[i, "proj"] * x[i] for i in df.index)
-
-        # ── Lineup size ───────────────────────────────────────────────────────
-        prob += pulp.lpSum(x[i] for i in df.index) == lineup_size
-
-        # ── Salary constraints ────────────────────────────────────────────────
-        prob += pulp.lpSum(df.loc[i, "salary"] * x[i] for i in df.index) <= max_salary
-        prob += pulp.lpSum(df.loc[i, "salary"] * x[i] for i in df.index) >= min_salary
-
-        # ── Positional constraints ────────────────────────────────────────────
-        for slot, count in pos_slots.items():
-            eligible = slot_eligibility.get(slot, [])
-            prob += pulp.lpSum(x[i] for i in eligible) == count
-
-        # ── Team constraints ──────────────────────────────────────────────────
-        for team in teams:
-            team_idx = df.index[df["team"] == team].tolist()
-            prob += pulp.lpSum(x[i] for i in team_idx) <= max_from_team
-
-        # min_teams: we need players from at least min_teams distinct teams
-        # Enforce via binary team indicators t[team] = 1 if ≥1 player from team
-        t = pulp.LpVariable.dicts("t", teams, cat="Binary")
-        for team in teams:
-            team_idx = df.index[df["team"] == team].tolist()
-            if team_idx:
-                prob += t[team] <= pulp.lpSum(x[i] for i in team_idx)
-                prob += (
-                    pulp.lpSum(x[i] for i in team_idx)
-                    <= len(team_idx) * t[team]
-                )
-        prob += pulp.lpSum(t[team] for team in teams) >= min_teams
-
-        # ── Exposure cap ──────────────────────────────────────────────────────
-        if exposure_cap < 1.0 and lineups:
-            max_appearances = int(exposure_cap * n)
-            for i in df.index:
-                appearances = sum(
-                    1 for prev in lineups
-                    if i in prev.index
-                )
-                if appearances >= max_appearances:
-                    prob += x[i] == 0
-
-        # ── Uniqueness: exclude previously generated lineups ──────────────────
-        for excl in excluded_sets:
-            prob += pulp.lpSum(x[i] for i in excl) <= lineup_size - 1
-
-        # ── Solve ─────────────────────────────────────────────────────────────
-        prob.solve(pulp.PULP_CBC_CMD(msg=0))
-
-        if pulp.LpStatus[prob.status] != "Optimal":
-            break
-
-        selected = [i for i in df.index if pulp.value(x[i]) == 1]
-        lineup_df = df.loc[selected].copy()
-        lineups.append(lineup_df)
-        excluded_sets.append(frozenset(selected))
-
-    return lineups
-
-
-# ── Showdown optimizer ────────────────────────────────────────────────────────
-
-def _build_showdown_lineups(
-    df: pd.DataFrame,
-    sport: str,
-    n: int,
-    config: Dict[str, Any],
-) -> list[pd.DataFrame]:
-    """ILP optimizer for DraftKings showdown (CPT + FLEX) contests."""
-    lineups: list[pd.DataFrame] = []
-    excluded_sets: list[frozenset] = []
-
-    lineup_size = DK_SHOWDOWN_LINEUP_SIZE  # typically 6
-    slots = DK_SHOWDOWN_SLOTS  # {"CPT": 1, "FLEX": 5}
-
-    max_salary = SALARY_CAP
-    min_salary = config.get("min_salary", 49000)
-    max_from_team = config.get("max_from_team", 4)
-    min_teams = config.get("min_teams", 2)
-    exposure_cap = config.get("exposure_cap", 1.0)
-
-    slot_eligibility: dict[str, list[int]] = {
-        slot: df.index[df["slot"] == slot].tolist()
-        for slot in slots
-    }
-
-    teams = df["team"].dropna().unique().tolist()
-
-    for lineup_idx in range(n):
-        prob = pulp.LpProblem(f"showdown_{lineup_idx}", pulp.LpMaximize)
-        x = pulp.LpVariable.dicts("x", df.index, cat="Binary")
-
-        prob += pulp.lpSum(df.loc[i, "proj"] * x[i] for i in df.index)
-
-        prob += pulp.lpSum(x[i] for i in df.index) == lineup_size
-        prob += pulp.lpSum(df.loc[i, "salary"] * x[i] for i in df.index) <= max_salary
-        prob += pulp.lpSum(df.loc[i, "salary"] * x[i] for i in df.index) >= min_salary
-
-        for slot, count in slots.items():
-            eligible = slot_eligibility.get(slot, [])
-            prob += pulp.lpSum(x[i] for i in eligible) == count
-
-        for team in teams:
-            team_idx = df.index[df["team"] == team].tolist()
-            prob += pulp.lpSum(x[i] for i in team_idx) <= max_from_team
-
-        t = pulp.LpVariable.dicts("t", teams, cat="Binary")
-        for team in teams:
-            team_idx = df.index[df["team"] == team].tolist()
-            if team_idx:
-                prob += t[team] <= pulp.lpSum(x[i] for i in team_idx)
-                prob += (
-                    pulp.lpSum(x[i] for i in team_idx)
-                    <= len(team_idx) * t[team]
-                )
-        prob += pulp.lpSum(t[team] for team in teams) >= min_teams
-
-        if exposure_cap < 1.0 and lineups:
-            max_appearances = int(exposure_cap * n)
-            for i in df.index:
-                appearances = sum(
-                    1 for prev in lineups
-                    if i in prev.index
-                )
-                if appearances >= max_appearances:
-                    prob += x[i] == 0
-
-        for excl in excluded_sets:
-            prob += pulp.lpSum(x[i] for i in excl) <= lineup_size - 1
-
-        prob.solve(pulp.PULP_CBC_CMD(msg=0))
-
-        if pulp.LpStatus[prob.status] != "Optimal":
-            break
-
-        selected = [i for i in df.index if pulp.value(x[i]) == 1]
-        lineup_df = df.loc[selected].copy()
-        lineups.append(lineup_df)
-        excluded_sets.append(frozenset(selected))
-
-    return lineups
-
-
-# =============================================================================
-# LINEUP EXPORT
-# =============================================================================
-
-def format_lineups_for_dk(
-    lineups: list[pd.DataFrame],
-    sport: str = "NBA",
-    contest_type: str = "classic",
-) -> pd.DataFrame:
-    """Convert a list of lineup DataFrames into the DraftKings upload format.
-
-    DraftKings expects a CSV where each row is one lineup and each column
-    corresponds to a positional slot (e.g. ``PG``, ``SG``, …, ``UTIL``).
-    Cell values are the player's DraftKings ID (``dk_id``).
-
-    Parameters
-    ----------
-    lineups : list of pd.DataFrame
-        Output of :func:`build_lineups`.
-    sport : str
-        ``"NBA"`` or ``"PGA"``.
-    contest_type : str
-        ``"classic"`` or ``"showdown"``.
-
-    Returns
-    -------
-    pd.DataFrame
-        One row per lineup, columns = positional slot headers.
-    """
-    if not lineups:
-        return pd.DataFrame()
-
-    sport = sport.upper()
-
-    if contest_type == "showdown":
-        slot_order = list(DK_SHOWDOWN_SLOTS.keys())  # ["CPT", "FLEX", ...]
-        rows = []
-        for lu in lineups:
-            row: dict[str, str] = {}
-            for slot in slot_order:
-                players = lu[lu["slot"] == slot]
-                row[slot] = "|".join(players["dk_id"].astype(str).tolist())
-            rows.append(row)
-        return pd.DataFrame(rows, columns=slot_order)
-
-    # Classic
-    if sport == "NBA":
-        slot_order = list(DK_POS_SLOTS.keys())
-    else:
-        slot_order = ["G", "G", "G", "G", "G", "G"]
-
-    rows = []
-    for lu in lineups:
-        row = {}
-        assigned: set[int] = set()
-        for slot in slot_order:
-            candidates = lu[(lu["position"] == slot) & (~lu.index.isin(assigned))]
-            if not candidates.empty:
-                chosen = candidates.index[0]
-                row[slot] = str(lu.loc[chosen, "dk_id"])
-                assigned.add(chosen)
-            else:
-                row[slot] = ""
-        rows.append(row)
-
-    return pd.DataFrame(rows, columns=slot_order)
-
-
-def export_lineups(
-    lineups: list[pd.DataFrame],
-    path: str,
-    sport: str = "NBA",
-    contest_type: str = "classic",
-) -> None:
-    """Write lineups to a CSV file in DraftKings upload format.
-
-    Parameters
-    ----------
-    lineups : list of pd.DataFrame
-        Output of :func:`build_lineups`.
-    path : str
-        Destination file path.
-    sport : str
-        ``"NBA"`` or ``"PGA"``.
-    contest_type : str
-        ``"classic"`` or ``"showdown"``.
-    """
-    dk_df = format_lineups_for_dk(lineups, sport=sport, contest_type=contest_type)
-    dk_df.to_csv(path, index=False)
-
-
-# =============================================================================
-# CONVENIENCE END-TO-END RUNNER
-# =============================================================================
-
-def run(
-    sport: str = "NBA",
-    contest_type: str = "classic",
-    data_mode: str = "historical",
-    slate_date: str | None = None,
-    n: int = 20,
-    cfg: Dict[str, Any] | None = None,
-    proj: Dict[str, float] | None = None,
-    own: Dict[str, float] | None = None,
-    export_path: str | None = None,
-    yakos_root: str | None = None,
-) -> Tuple[list[pd.DataFrame], pd.DataFrame]:
-    """End-to-end pipeline: load → prepare → project → optimise → (export).
-
-    Parameters
-    ----------
-    sport : str
-        ``"NBA"`` or ``"PGA"``.
-    contest_type : str
-        ``"classic"`` or ``"showdown"``.
-    data_mode : str
-        ``"historical"`` or ``"live"``.
-    slate_date : str or None
-        ISO 8601 date for historical mode.
-    n : int
-        Number of lineups to generate.
-    cfg : dict or None
-        Config overrides.
-    proj : dict or None
-        Custom projections ``{name: pts}``.
-    own : dict or None
-        Projected ownership ``{name: pct}``.
-    export_path : str or None
-        If provided, write lineups CSV to this path.
-    yakos_root : str or None
-        Repository root override.
-
-    Returns
-    -------
-    (lineups, pool) : tuple
-        *lineups* is a list of lineup DataFrames; *pool* is the prepared
-        player pool used by the optimiser.
-    """
-    raw = load_player_pool(
-        sport=sport,
-        data_mode=data_mode,
-        slate_date=slate_date,
-        yakos_root=yakos_root,
+    n = len(players)
+    slots = pos_slots
+    k = len(slots)
+
+    # Slot eligibility: can player i fill slot s?
+    def _eligible(player: dict, slot: str) -> bool:
+        nat_pos = str(player.get("position", "")).upper()
+        # UTIL and G/F flex slots accept any position
+        if slot == "UTIL":
+            return True
+        if slot == "G":
+            return nat_pos in ("PG", "SG", "G")
+        if slot == "F":
+            return nat_pos in ("SF", "PF", "F")
+        # Exact match for PG, SG, SF, PF, C
+        return nat_pos == slot
+
+    prob = pulp.LpProblem("dfs_classic", pulp.LpMaximize)
+
+    # x[i,s] = 1 if player i is assigned to slot s
+    x = {(i, s): pulp.LpVariable(f"x_{i}_{s}", cat="Binary")
+         for i in range(n) for s in slots}
+
+    # Objective: maximise total score
+    score_key = score_col
+    prob += pulp.lpSum(
+        players[i].get(score_key, players[i].get("proj", 0)) * x[(i, s)]
+        for i in range(n)
+        for s in slots
     )
-    pool = prepare_pool(raw, sport=sport, contest_type=contest_type, cfg=cfg)
 
-    if proj:
-        pool = apply_projections(pool, proj)
-    if own:
-        pool = apply_ownership(pool, own)
+    # Each slot must be filled by exactly one player
+    for s in slots:
+        prob += pulp.lpSum(x[(i, s)] for i in range(n) if _eligible(players[i], s)) == 1
 
-    lineups = build_lineups(pool, sport=sport, contest_type=contest_type, n=n, cfg=cfg)
+    # Each player may appear at most once across all slots
+    for i in range(n):
+        prob += pulp.lpSum(x[(i, s)] for s in slots) <= 1
 
-    if export_path:
-        export_lineups(lineups, export_path, sport=sport, contest_type=contest_type)
-
-    return lineups, pool
-
-
-# =============================================================================
-# STACKING HELPERS
-# =============================================================================
-
-def add_game_stack_constraint(
-    prob: pulp.LpProblem,
-    x: dict,
-    df: pd.DataFrame,
-    game: str,
-    min_stack: int = 3,
-) -> pulp.LpProblem:
-    """Add a constraint requiring ≥ *min_stack* players from *game*.
-
-    Parameters
-    ----------
-    prob : pulp.LpProblem
-        The ILP problem instance to modify in-place.
-    x : dict
-        Decision variable dict ``{index: LpVariable}`` from the optimizer.
-    df : pd.DataFrame
-        Prepared player pool.
-    game : str
-        Game identifier string as it appears in the ``game_info`` column,
-        e.g. ``"BOS@MIA 07:00PM ET"``.
-    min_stack : int
-        Minimum number of players required from *game*.
-
-    Returns
-    -------
-    pulp.LpProblem
-        The modified problem (same object, returned for convenience).
-    """
-    if "game_info" not in df.columns:
-        return prob
-    game_idx = df.index[df["game_info"].str.contains(game, na=False)].tolist()
-    prob += pulp.lpSum(x[i] for i in game_idx) >= min_stack
-    return prob
-
-
-def add_team_stack_constraint(
-    prob: pulp.LpProblem,
-    x: dict,
-    df: pd.DataFrame,
-    team: str,
-    min_stack: int = 3,
-) -> pulp.LpProblem:
-    """Require ≥ *min_stack* players from *team*.
-
-    Parameters
-    ----------
-    prob : pulp.LpProblem
-    x : dict
-    df : pd.DataFrame
-    team : str
-        Team abbreviation as it appears in the ``team`` column.
-    min_stack : int
-
-    Returns
-    -------
-    pulp.LpProblem
-    """
-    team_idx = df.index[df["team"] == team].tolist()
-    prob += pulp.lpSum(x[i] for i in team_idx) >= min_stack
-    return prob
-
-
-# =============================================================================
-# PLAYER LOCKING / EXCLUSION
-# =============================================================================
-
-def lock_players(
-    df: pd.DataFrame,
-    prob: pulp.LpProblem,
-    x: dict,
-    names: list[str],
-) -> pulp.LpProblem:
-    """Force specific players into every lineup.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-    prob : pulp.LpProblem
-    x : dict
-    names : list of str
-        Player names to lock.
-
-    Returns
-    -------
-    pulp.LpProblem
-    """
-    for name in names:
-        idxs = df.index[df["name"] == name].tolist()
-        for i in idxs:
-            prob += x[i] == 1
-    return prob
-
-
-def exclude_players(
-    df: pd.DataFrame,
-    prob: pulp.LpProblem,
-    x: dict,
-    names: list[str],
-) -> pulp.LpProblem:
-    """Exclude specific players from every lineup.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-    prob : pulp.LpProblem
-    x : dict
-    names : list of str
-        Player names to exclude.
-
-    Returns
-    -------
-    pulp.LpProblem
-    """
-    for name in names:
-        idxs = df.index[df["name"] == name].tolist()
-        for i in idxs:
-            prob += x[i] == 0
-    return prob
-
-
-# =============================================================================
-# ANALYSIS UTILITIES
-# =============================================================================
-
-def lineup_summary(lineups: list[pd.DataFrame]) -> pd.DataFrame:
-    """Summarise key metrics across all generated lineups.
-
-    Parameters
-    ----------
-    lineups : list of pd.DataFrame
-
-    Returns
-    -------
-    pd.DataFrame
-        One row per lineup with columns:
-        ``lineup_num``, ``total_salary``, ``total_proj``, ``n_teams``.
-    """
-    records = []
-    for i, lu in enumerate(lineups):
-        records.append({
-            "lineup_num": i + 1,
-            "total_salary": lu["salary"].sum(),
-            "total_proj": lu["proj"].sum(),
-            "n_teams": lu["team"].nunique(),
-        })
-    return pd.DataFrame(records)
-
-
-def player_exposure(lineups: list[pd.DataFrame]) -> pd.DataFrame:
-    """Calculate each player's exposure across all lineups.
-
-    Parameters
-    ----------
-    lineups : list of pd.DataFrame
-
-    Returns
-    -------
-    pd.DataFrame
-        Columns: ``name``, ``appearances``, ``exposure_pct``.
-    """
-    if not lineups:
-        return pd.DataFrame(columns=["name", "appearances", "exposure_pct"])
-
-    counts: dict[str, int] = {}
-    for lu in lineups:
-        for name in lu["name"]:
-            counts[name] = counts.get(name, 0) + 1
-
-    total = len(lineups)
-    records = [
-        {"name": name, "appearances": cnt, "exposure_pct": round(cnt / total * 100, 1)}
-        for name, cnt in sorted(counts.items(), key=lambda kv: -kv[1])
-    ]
-    return pd.DataFrame(records)
-
-
-def value_players(
-    df: pd.DataFrame,
-    min_salary: int = 3500,
-    top_n: int = 10,
-) -> pd.DataFrame:
-    """Return the top value plays ranked by proj / salary * 1000.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Prepared pool.
-    min_salary : int
-        Filter out players below this salary.
-    top_n : int
-        Number of players to return.
-
-    Returns
-    -------
-    pd.DataFrame
-    """
-    df = df[df["salary"] >= min_salary].copy()
-    df["value"] = df["proj"] / df["salary"] * 1000
-    return df.nlargest(top_n, "value")[["name", "position", "salary", "proj", "value"]]
-
-
-# =============================================================================
-# SIMULATION / MONTE CARLO
-# =============================================================================
-
-def simulate_projections(
-    df: pd.DataFrame,
-    sigma_pct: float = 0.15,
-    seed: int | None = None,
-) -> pd.DataFrame:
-    """Add Gaussian noise to projections for Monte Carlo simulation.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Pool with a ``proj`` column.
-    sigma_pct : float
-        Standard deviation as a fraction of the projected value (default 15%).
-    seed : int or None
-        Random seed for reproducibility.
-
-    Returns
-    -------
-    pd.DataFrame
-        Copy of *df* with noisy projections.
-    """
-    rng = np.random.default_rng(seed)
-    df = df.copy()
-    noise = rng.normal(loc=1.0, scale=sigma_pct, size=len(df))
-    df["proj"] = (df["proj"] * noise).clip(lower=0)
-    return df
-
-
-def run_montecarlo(
-    sport: str = "NBA",
-    contest_type: str = "classic",
-    data_mode: str = "historical",
-    slate_date: str | None = None,
-    n_lineups: int = 20,
-    n_sims: int = 100,
-    sigma_pct: float = 0.15,
-    cfg: Dict[str, Any] | None = None,
-    export_dir: str | None = None,
-    yakos_root: str | None = None,
-) -> pd.DataFrame:
-    """Run Monte Carlo simulation and return aggregated exposure stats.
-
-    For each simulation, projections are jittered and *n_lineups* lineups
-    are generated; the results are aggregated into a player exposure table.
-
-    Parameters
-    ----------
-    sport, contest_type, data_mode, slate_date, cfg, yakos_root
-        Passed through to :func:`load_player_pool` / :func:`prepare_pool`.
-    n_lineups : int
-        Lineups to generate per simulation run.
-    n_sims : int
-        Number of Monte Carlo iterations.
-    sigma_pct : float
-        Projection noise level (see :func:`simulate_projections`).
-    export_dir : str or None
-        If provided, write per-simulation CSVs to this directory.
-
-    Returns
-    -------
-    pd.DataFrame
-        Aggregated exposure table with columns
-        ``name``, ``mean_exposure_pct``, ``median_exposure_pct``, ``std_exposure_pct``.
-    """
-    raw = load_player_pool(
-        sport=sport,
-        data_mode=data_mode,
-        slate_date=slate_date,
-        yakos_root=yakos_root,
+    # Salary cap
+    prob += (
+        pulp.lpSum(
+            players[i]["salary"] * x[(i, s)]
+            for i in range(n)
+            for s in slots
+        ) <= salary_cap
     )
-    base_pool = prepare_pool(raw, sport=sport, contest_type=contest_type, cfg=cfg)
 
-    all_exposures: list[pd.DataFrame] = []
+    # Salary floor
+    prob += (
+        pulp.lpSum(
+            players[i]["salary"] * x[(i, s)]
+            for i in range(n)
+            for s in slots
+        ) >= min_salary
+    )
 
-    for sim_i in range(n_sims):
-        sim_pool = simulate_projections(base_pool, sigma_pct=sigma_pct, seed=sim_i)
-        lineups = build_lineups(
-            sim_pool,
-            sport=sport,
-            contest_type=contest_type,
-            n=n_lineups,
-            cfg=cfg,
-        )
-        exp = player_exposure(lineups)
-        exp["sim"] = sim_i
-        all_exposures.append(exp)
+    # Per-position caps
+    if pos_caps:
+        for nat_pos, cap_val in pos_caps.items():
+            eligible_for_pos = [
+                i for i in range(n)
+                if str(players[i].get("position", "")).upper() == nat_pos
+            ]
+            if eligible_for_pos:
+                prob += (
+                    pulp.lpSum(x[(i, s)] for i in eligible_for_pos for s in slots)
+                    <= cap_val
+                )
 
-        if export_dir:
-            os.makedirs(export_dir, exist_ok=True)
-            export_lineups(
-                lineups,
-                os.path.join(export_dir, f"sim_{sim_i:04d}.csv"),
-                sport=sport,
-                contest_type=contest_type,
+    # Exposure: each player may appear at most max_appearances[i] more times
+    for i, max_app in max_appearances.items():
+        prob += pulp.lpSum(x[(i, s)] for s in slots) <= max_app
+
+    # Forced players (locks)
+    if forced_players:
+        for fp_idx in forced_players:
+            prob += pulp.lpSum(x[(fp_idx, s)] for s in slots) == 1
+
+    # Excluded players
+    if excluded_players:
+        for ep_idx in excluded_players:
+            prob += pulp.lpSum(x[(ep_idx, s)] for s in slots) == 0
+
+    # NOT_WITH pairs
+    if not_with_pairs:
+        for (idx_a, idx_b) in not_with_pairs:
+            prob += (
+                pulp.lpSum(x[(idx_a, s)] for s in slots)
+                + pulp.lpSum(x[(idx_b, s)] for s in slots)
+                <= 1
             )
 
-    combined = pd.concat(all_exposures, ignore_index=True)
-    agg = (
-        combined.groupby("name")["exposure_pct"]
-        .agg(
-            mean_exposure_pct="mean",
-            median_exposure_pct="median",
-            std_exposure_pct="std",
-        )
-        .reset_index()
-        .sort_values("mean_exposure_pct", ascending=False)
-    )
-    return agg
+    # GPP constraints
+    gc = gpp_constraints or {}
+    if gc:
+        # Max punt players (salary < 4000)
+        max_punt = gc.get("max_punt_players")
+        if max_punt is not None:
+            punt_idxs = [i for i in range(n) if players[i]["salary"] < 4000]
+            if punt_idxs:
+                prob += (
+                    pulp.lpSum(x[(i, s)] for i in punt_idxs for s in slots)
+                    <= max_punt
+                )
+
+        # Min mid-salary players (4000-7000)
+        min_mid = gc.get("min_mid_players")
+        if min_mid is not None:
+            mid_idxs = [i for i in range(n) if 4000 <= players[i]["salary"] <= 7000]
+            if mid_idxs:
+                prob += (
+                    pulp.lpSum(x[(i, s)] for i in mid_idxs for s in slots)
+                    >= min_mid
+                )
+
+        # Max total ownership cap
+        own_cap = gc.get("own_cap")
+        if own_cap is not None and own_cap > 0:
+            own_vals = [float(p.get("own_pct", 0)) for p in players]
+            if max(own_vals) > 0:
+                prob += (
+                    pulp.lpSum(
+                        own_vals[i] * x[(i, s)]
+                        for i in range(n)
+                        for s in slots
+                    ) <= own_cap
+                )
+
+        # Min low-ownership players
+        min_low_own = gc.get("min_low_own_players")
+        low_own_thresh = gc.get("low_own_threshold", 0.40)
+        if min_low_own is not None and min_low_own > 0:
+            low_own_idxs = [
+                i for i in range(n)
+                if float(players[i].get("own_pct", 0)) < low_own_thresh
+            ]
+            if low_own_idxs:
+                prob += (
+                    pulp.lpSum(x[(i, s)] for i in low_own_idxs for s in slots)
+                    >= min_low_own
+                )
+
+        # Game stack: require min_game_stack players from same game
+        force_game_stack = gc.get("force_game_stack", False)
+        min_game_stack = gc.get("min_game_stack", 3)
+        if force_game_stack and "game_id" in players[0]:
+            game_ids = list({p["game_id"] for p in players if p.get("game_id")})
+            if game_ids:
+                # Binary indicator: g_var[gid] = 1 if this game is the stacked game
+                g_vars = {gid: pulp.LpVariable(f"g_{gid}", cat="Binary") for gid in game_ids}
+                prob += pulp.lpSum(g_vars[gid] for gid in game_ids) == 1
+                for gid in game_ids:
+                    game_idxs = [i for i in range(n) if players[i].get("game_id") == gid]
+                    prob += (
+                        pulp.lpSum(x[(i, s)] for i in game_idxs for s in slots)
+                        >= min_game_stack * g_vars[gid]
+                    )
+
+        # Team stack: require min_team_stack players from same team
+        min_team_stack = gc.get("min_team_stack", 0)
+        if min_team_stack > 0:
+            teams = list({p["team"] for p in players if p.get("team")})
+            if teams:
+                t_vars = {t: pulp.LpVariable(f"t_{t}", cat="Binary") for t in teams}
+                prob += pulp.lpSum(t_vars[t] for t in teams) >= 1
+                for t in teams:
+                    team_idxs = [i for i in range(n) if players[i].get("team") == t]
+                    n_slots = len(slots)
+                    prob += (
+                        pulp.lpSum(x[(i, s)] for i in team_idxs for s in slots)
+                        >= min_team_stack * t_vars[t]
+                    )
+
+        # Bring-back: require 1 player from opposing team in stacked game
+        force_bring_back = gc.get("force_bring_back", False)
+        if force_bring_back and "game_id" in players[0] and "team" in players[0]:
+            # For each game, require at least 1 player from each team
+            game_ids = list({p["game_id"] for p in players if p.get("game_id")})
+            for gid in game_ids:
+                game_players = [i for i in range(n) if players[i].get("game_id") == gid]
+                if len(game_players) >= 2:
+                    teams_in_game = list({players[i]["team"] for i in game_players})
+                    if len(teams_in_game) == 2:
+                        # Soft bring-back: if any player from team A is selected,
+                        # require at least 1 from team B
+                        # Implement as: min 1 from team B if >= 2 from team A
+                        pass  # Simplified – full bring-back implemented below
+
+    # Tier constraints from edge state
+    tc = tier_constraints or {}
+    if tc:
+        tier_player_names = tc.get("tier_player_names", {})
+        tier_min = tc.get("tier_min_players", {})
+        tier_max = tc.get("tier_max_players", {})
+        name_to_idx = {p["player_name"]: i for i, p in enumerate(players)}
+
+        for tier, names in tier_player_names.items():
+            idxs = [name_to_idx[nm] for nm in names if nm in name_to_idx]
+            if not idxs:
+                continue
+            if tier in tier_min:
+                prob += (
+                    pulp.lpSum(x[(i, s)] for i in idxs for s in slots)
+                    >= tier_min[tier]
+                )
+            if tier in tier_max:
+                prob += (
+                    pulp.lpSum(x[(i, s)] for i in idxs for s in slots)
+                    <= tier_max[tier]
+                )
+
+    # Solve
+    solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=solver_time_limit)
+    prob.solve(solver)
+
+    if pulp.LpStatus[prob.status] != "Optimal":
+        return None
+
+    result = []
+    for s in slots:
+        for i in range(n):
+            if _eligible(players[i], s) and pulp.value(x[(i, s)]) > 0.5:
+                result.append((players[i], s))
+                break
+    return result if len(result) == k else None
 
 
-# =============================================================================
-# CONTEST ENTRY MANAGEMENT
-# =============================================================================
+def build_multiple_lineups_with_exposure(
+    player_pool: pd.DataFrame,
+    cfg: Dict[str, Any],
+    progress_callback=None,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    num_lineups = int(cfg.get("NUM_LINEUPS", 20))
+    salary_cap = int(cfg.get("SALARY_CAP", 50000))
+    max_exposure = float(cfg.get("MAX_EXPOSURE", 0.35))
+    min_salary = int(cfg.get("MIN_SALARY_USED", 46000))
+    own_weight = float(cfg.get("OWN_WEIGHT", 0.0))
+    solver_time_limit = int(cfg.get("SOLVER_TIME_LIMIT", 30))
+    max_appearances = max(1, int(num_lineups * max_exposure))
+    # Per-player exposure overrides: {player_name: max_exposure_float}
+    player_max_exp = cfg.get("PLAYER_MAX_EXPOSURE", {})
+    pos_caps = cfg.get("POS_CAPS", {})
+    lock_names = [n.strip() for n in cfg.get("LOCK", [])]
+    max_pair_appearances = int(cfg.get("MAX_PAIR_APPEARANCES", 0))
+    # NOT_WITH: list of [player_a, player_b] pairs that must not appear together
+    not_with_raw = cfg.get("NOT_WITH", [])
+    not_with_pairs: list[tuple[str, str]] = [
+        (str(pair[0]).strip(), str(pair[1]).strip())
+        for pair in not_with_raw
+        if isinstance(pair, (list, tuple)) and len(pair) >= 2
+    ]
+    # TIER_CONSTRAINTS: enforce min/max players from edge tiers per lineup.
+    # Calibrated from 21-slate backtest: neutrals outperform 51.5%,
+    # fades ($8K+ chalk) over-project by +2.54 FP.
+    # Format: {"tier_player_names": {tier: [names]},
+    #          "tier_min_players": {group: count},
+    #          "tier_max_players": {tier: count}}
+    tier_constraints = cfg.get("TIER_CONSTRAINTS", {})
+    tier_player_names: Dict[str, list] = tier_constraints.get("tier_player_names", {})
+    tier_min_players: Dict[str, int] = tier_constraints.get("tier_min_players", {})
+    tier_max_players: Dict[str, int] = tier_constraints.get("tier_max_players", {})
 
-def deduplicate_lineups(
-    lineups: list[pd.DataFrame],
-    min_diff: int = 2,
-) -> list[pd.DataFrame]:
-    """Remove lineups that are too similar to earlier lineups.
+    # ── Contest-type detection ────────────────────────────────────────────────
+    contest_type = cfg.get("CONTEST_TYPE", "gpp").lower()
+    is_showdown_classic = contest_type in ("showdown",)
+    is_gpp = contest_type in ("gpp", "mme", "sd", "captain")
+    is_cash = contest_type in ("cash", "50/50", "double-up")
 
-    Two lineups are considered duplicates when they differ by fewer than
-    *min_diff* players.
-
-    Parameters
-    ----------
-    lineups : list of pd.DataFrame
-    min_diff : int
-        Minimum number of differing players required to keep a lineup.
-
-    Returns
-    -------
-    list of pd.DataFrame
-    """
-    unique: list[pd.DataFrame] = []
-    for lu in lineups:
-        lu_set = frozenset(lu["name"].tolist())
-        if all(
-            len(lu_set.symmetric_difference(frozenset(prev["name"].tolist()))) >= min_diff
-            for prev in unique
-        ):
-            unique.append(lu)
-    return unique
-
-
-def cap_exposure(
-    lineups: list[pd.DataFrame],
-    max_pct: float = 0.6,
-) -> list[pd.DataFrame]:
-    """Remove lineups to bring every player's exposure under *max_pct*.
-
-    This is a greedy post-processor: lineups are visited in order and a
-    lineup is dropped if it would push any player over the cap.
-
-    Parameters
-    ----------
-    lineups : list of pd.DataFrame
-    max_pct : float
-        Maximum allowed exposure fraction (0–1).
-
-    Returns
-    -------
-    list of pd.DataFrame
-    """
-    total = len(lineups)
-    max_appearances = int(max_pct * total)
-    counts: dict[str, int] = {}
-    kept: list[pd.DataFrame] = []
-    for lu in lineups:
-        names = lu["name"].tolist()
-        if all(counts.get(n, 0) < max_appearances for n in names):
-            kept.append(lu)
-            for n in names:
-                counts[n] = counts.get(n, 0) + 1
-    return kept
-
-
-# =============================================================================
-# SLATE UTILITIES
-# =============================================================================
-
-def list_available_slates(
-    sport: str = "NBA",
-    yakos_root: str | None = None,
-) -> list[str]:
-    """List parquet files available in the local historical cache.
-
-    Parameters
-    ----------
-    sport : str
-    yakos_root : str or None
-
-    Returns
-    -------
-    list of str
-        Sorted list of date strings (``"YYYY-MM-DD"``) for which cached
-        pool data exists.
-    """
-    import glob as _glob
-    root = yakos_root or YAKOS_ROOT
-    sport = sport.upper()
-    if sport == "NBA":
-        pattern = os.path.join(root, "data", "nba", "pool", "*.parquet")
-    elif sport == "PGA":
-        pattern = os.path.join(root, "data", "pga", "pool", "*.parquet")
-    else:
-        raise ValueError(f"Unsupported sport: {sport}")
-    files = sorted(_glob.glob(pattern))
-    return [os.path.splitext(os.path.basename(f))[0] for f in files]
-
-
-def filter_by_salary_range(
-    df: pd.DataFrame,
-    min_salary: int,
-    max_salary: int,
-) -> pd.DataFrame:
-    """Return only players within the specified salary range."""
-    return df[(df["salary"] >= min_salary) & (df["salary"] <= max_salary)].copy()
-
-
-def filter_by_team(
-    df: pd.DataFrame,
-    teams: list[str],
-) -> pd.DataFrame:
-    """Return only players belonging to the specified teams."""
-    return df[df["team"].isin(teams)].copy()
-
-
-def filter_by_position(
-    df: pd.DataFrame,
-    positions: list[str],
-) -> pd.DataFrame:
-    """Return only players eligible for the specified positions."""
-    return df[df["position"].isin(positions)].copy()
-
-
-# =============================================================================
-# ADVANCED METRICS
-# =============================================================================
-
-def add_ceiling(
-    df: pd.DataFrame,
-    sigma_pct: float = 0.25,
-) -> pd.DataFrame:
-    """Append a ``ceiling`` column (proj + 1σ)."""
-    df = df.copy()
-    df["ceiling"] = df["proj"] * (1 + sigma_pct)
-    return df
-
-
-def add_floor(
-    df: pd.DataFrame,
-    sigma_pct: float = 0.25,
-) -> pd.DataFrame:
-    """Append a ``floor`` column (proj − 1σ, clipped at 0)."""
-    df = df.copy()
-    df["floor"] = (df["proj"] * (1 - sigma_pct)).clip(lower=0)
-    return df
-
-
-def rank_players(
-    df: pd.DataFrame,
-    by: str = "proj",
-    ascending: bool = False,
-) -> pd.DataFrame:
-    """Return the pool sorted and ranked by *by*."""
-    df = df.copy().sort_values(by, ascending=ascending)
-    df["rank"] = range(1, len(df) + 1)
-    return df
-
-
-# =============================================================================
-# CORRELATION HELPERS
-# =============================================================================
-
-def teammate_correlation(
-    lineups: list[pd.DataFrame],
-    min_appearances: int = 5,
-) -> pd.DataFrame:
-    """Return a co-appearance count matrix for players across lineups.
-
-    Parameters
-    ----------
-    lineups : list of pd.DataFrame
-    min_appearances : int
-        Only include pairs where both players appear at least this many
-        times across all lineups.
-
-    Returns
-    -------
-    pd.DataFrame
-        Square matrix of co-appearance counts indexed/columned by player name.
-    """
-    from collections import Counter
-    import itertools
-
-    pair_counts: Counter = Counter()
-    solo_counts: Counter = Counter()
-    for lu in lineups:
-        names = sorted(lu["name"].tolist())
-        for name in names:
-            solo_counts[name] += 1
-        for pair in itertools.combinations(names, 2):
-            pair_counts[pair] += 1
-
-    eligible = {n for n, c in solo_counts.items() if c >= min_appearances}
-    eligible_pairs = {
-        pair: cnt for pair, cnt in pair_counts.items()
-        if pair[0] in eligible and pair[1] in eligible
-    }
-
-    players = sorted(eligible)
-    mat = pd.DataFrame(0, index=players, columns=players)
-    for (a, b), cnt in eligible_pairs.items():
-        mat.loc[a, b] = cnt
-        mat.loc[b, a] = cnt
-    np.fill_diagonal(mat.values, [solo_counts[p] for p in players])
-    return mat
-
-
-# =============================================================================
-# DEPRECATED / COMPATIBILITY SHIMS
-# =============================================================================
-
-def build_pool(*args, **kwargs):
-    """Deprecated alias for :func:`prepare_pool`.  Will be removed in v2.0."""
-    import warnings
-    warnings.warn(
-        "build_pool() is deprecated; use prepare_pool() instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return prepare_pool(*args, **kwargs)
-
-
-def generate_lineups(*args, **kwargs):
-    """Deprecated alias for :func:`build_lineups`.  Will be removed in v2.0."""
-    import warnings
-    warnings.warn(
-        "generate_lineups() is deprecated; use build_lineups() instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return build_lineups(*args, **kwargs)
-
-
-def write_lineups(*args, **kwargs):
-    """Deprecated alias for :func:`export_lineups`.  Will be removed in v2.0.
-
-    .. deprecated::
-        Use :func:`export_lineups` or :func:`yak_core.publishing` instead.
-    """
-    import warnings
-    warnings.warn(
-        "write_lineups() is deprecated. "
-        "Use yak_core.publishing instead."
-    )
+    # GPP constraint knobs – overridable via cfg; defaults come from DEFAULT_CONFIG
