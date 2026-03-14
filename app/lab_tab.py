@@ -639,14 +639,24 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
     _proj = _safe_col(df, "proj")
     _own_col = "ownership" if "ownership" in df.columns and df["ownership"].notna().any() else "own_pct"
     _own = _safe_col(df, _own_col)
+
+    # Derive 'edge' from 'edge_score' (compute_edge_metrics output column)
+    if "edge" not in df.columns and "edge_score" in df.columns:
+        df["edge"] = pd.to_numeric(df["edge_score"], errors="coerce").fillna(0.0)
+    # Derive 'value' as pts per $1K salary
+    if "value" not in df.columns:
+        _sal_k = _sal.clip(lower=1000) / 1000.0
+        df["value"] = _proj / _sal_k
+
     _edge = _safe_col(df, "edge")
     _value = _safe_col(df, "value")
     sal_med = float(_sal.median()) if len(_sal) > 0 else 7000.0
     own_med = float(_own.median()) if len(_own) > 0 else 15.0
-    core = df[(_sal >= sal_med) & (_own >= own_med) & (_edge > 0)][["player_name", "salary", "proj", _own_col, "edge", "value"]].rename(columns={_own_col: "ownership"})
-    leverage = df[(_sal >= sal_med) & (_own < own_med) & (_edge > 0)][["player_name", "salary", "proj", _own_col, "edge", "value"]].rename(columns={_own_col: "ownership"})
-    value = df[(_sal < sal_med) & (_value > 0)][["player_name", "salary", "proj", _own_col, "edge", "value"]].rename(columns={_own_col: "ownership"})
-    fade = df[(_edge < 0) | ((_own >= own_med * 1.5) & (_edge <= 0))][["player_name", "salary", "proj", _own_col, "edge", "value"]].rename(columns={_own_col: "ownership"})
+    _pick_cols = ["player_name", "salary", "proj", _own_col, "edge", "value"]
+    core = df[(_sal >= sal_med) & (_own >= own_med) & (_edge > 0)][_pick_cols].rename(columns={_own_col: "ownership"})
+    leverage = df[(_sal >= sal_med) & (_own < own_med) & (_edge > 0)][_pick_cols].rename(columns={_own_col: "ownership"})
+    value = df[(_sal < sal_med) & (_value > 0)][_pick_cols].rename(columns={_own_col: "ownership"})
+    fade = df[(_edge < 0) | ((_own >= own_med * 1.5) & (_edge <= 0))][_pick_cols].rename(columns={_own_col: "ownership"})
     def _to_records(frame):
         return frame.sort_values("edge", ascending=False).head(10).to_dict(orient="records")
     return {"core_plays": _to_records(core), "leverage_plays": _to_records(leverage), "value_plays": _to_records(value), "fade_candidates": _to_records(fade)}
