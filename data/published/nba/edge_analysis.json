@@ -1,40 +1,40 @@
 {
   "bullets": [
     "Core anchors: Jalen Johnson, Luka Doncic, Victor Wembanyama",
-    "Leverage plays: Nique Clifford, Noah Clowney",
+    "Leverage plays: Noah Clowney, Bruce Brown",
     "Value targets: Simone Fontecchio, Jalen Pickett"
   ],
-  "recommendation": "5 core plays anchored at $9,900\u2013$12,600. 5 value plays averaging 6.1 pts/$1K. 5 leverage plays at 3\u20134% ownership.",
+  "recommendation": "5 core plays anchored at $9,900\u2013$12,600. 5 value plays averaging 6.2 pts/$1K. 5 leverage plays at 3\u20133% ownership.",
   "core_plays": [
     {
       "player_name": "Jalen Johnson",
       "salary": 10700,
-      "proj": 55.304442893805756,
+      "proj": 55.38278672248308,
       "ownership": 9.54,
-      "edge": 0.5518462701231012,
-      "value": 5.168639522785585
+      "edge": 0.5524073486226466,
+      "value": 5.1759613759329985
     },
     {
       "player_name": "Luka Doncic",
       "salary": 12400,
       "proj": 56.389328739768736,
-      "ownership": 9.08,
+      "ownership": 9.05,
       "edge": 0.5509157374413332,
       "value": 4.5475265112716725
     },
     {
       "player_name": "Victor Wembanyama",
       "salary": 11200,
-      "proj": 55.25420856214123,
+      "proj": 55.34237419219892,
       "ownership": 10.0,
-      "edge": 0.5485155407143466,
-      "value": 4.93341147876261
+      "edge": 0.5491584535592322,
+      "value": 4.9412834100177605
     },
     {
       "player_name": "Nikola Jokic",
       "salary": 12600,
       "proj": 55.63528917774597,
-      "ownership": 8.85,
+      "ownership": 8.79,
       "edge": 0.5322004925633916,
       "value": 4.41549914109095
     },
@@ -49,19 +49,11 @@
   ],
   "leverage_plays": [
     {
-      "player_name": "Nique Clifford",
-      "salary": 6400,
-      "proj": 23.147272350097477,
-      "ownership": 3.78,
-      "edge": 0.3500532742726885,
-      "value": 3.6167613047027305
-    },
-    {
       "player_name": "Noah Clowney",
       "salary": 4900,
       "proj": 19.712236625934974,
       "ownership": 3.44,
-      "edge": 0.3492633799952883,
+      "edge": 0.3499049104430585,
       "value": 4.02290543386428
     },
     {
@@ -69,7 +61,7 @@
       "salary": 4300,
       "proj": 18.007296550709942,
       "ownership": 3.33,
-      "edge": 0.3471159508498693,
+      "edge": 0.3477213531899775,
       "value": 4.187743383886033
     },
     {
@@ -77,15 +69,23 @@
       "salary": 4800,
       "proj": 19.339070983545056,
       "ownership": 3.3,
-      "edge": 0.3464261465340944,
+      "edge": 0.3470822336053216,
       "value": 4.028973121571887
+    },
+    {
+      "player_name": "Cam Thomas",
+      "salary": 4000,
+      "proj": 16.790921779232534,
+      "ownership": 2.95,
+      "edge": 0.3424982634192196,
+      "value": 4.197730444808133
     },
     {
       "player_name": "Rui Hachimura",
       "salary": 4400,
       "proj": 17.18699489919701,
       "ownership": 2.65,
-      "edge": 0.33868651552275975,
+      "edge": 0.33941261125853595,
       "value": 3.9061352043629567
     }
   ],
@@ -95,31 +95,31 @@
       "salary": 3600,
       "proj": 22.05312270037328,
       "ownership": 6.43,
-      "edge": 0.3990032583878059,
+      "edge": 0.3993872298370737,
       "value": 6.1258674167703555
     },
     {
       "player_name": "Jalen Pickett",
       "salary": 3000,
       "proj": 20.286340420075714,
-      "ownership": 6.38,
-      "edge": 0.3987873974060776,
+      "ownership": 6.39,
+      "edge": 0.39912164880579437,
       "value": 6.762113473358571
     },
     {
       "player_name": "Jock Landale",
       "salary": 3600,
-      "proj": 21.565646271368124,
-      "ownership": 6.82,
-      "edge": 0.3945073341236187,
-      "value": 5.990457297602257
+      "proj": 21.587027757418756,
+      "ownership": 6.8,
+      "edge": 0.39511410311751083,
+      "value": 5.9963965992829875
     },
     {
       "player_name": "Julian Strawther",
       "salary": 3700,
       "proj": 21.85930490949473,
       "ownership": 6.16,
-      "edge": 0.39442424106683704,
+      "edge": 0.3948215199194326,
       "value": 5.907920245809386
     },
     {
@@ -127,7 +127,7 @@
       "salary": 3300,
       "proj": 19.66062657680157,
       "ownership": 6.29,
-      "edge": 0.38504753774211464,
+      "edge": 0.3853974720483575,
       "value": 5.957765629333809
     }
   ],
