@@ -153,7 +153,7 @@ def build_pga_pool(
     except Exception as e:
         print(f"[pga_pool] Skill ratings failed: {e}")
 
-    # ── 6. Field Updates (WDs, rankings, tee times) ──────────────────
+    # ── 6. Field Updates (WDs, rankings, tee times) ────────────────────
     try:
         field_df = dg.get_field()
         if not field_df.empty:
@@ -188,8 +188,13 @@ def build_pga_pool(
                     pool.loc[pool["dg_id"].isin(_wd_ids), "status"] = "WD"
             print(f"[pga_pool] Merged field updates ({len(field_df)} players)")
     except Exception as e:
-        print(f"[pga_pool] Field updates failed: {e}")
-        pool["status"] = "Active"
+        print(f"[pga_pool] \u26a0 Field updates failed: {e}")
+        # DO NOT blanket-set 'Active' \u2014 that hides WDs.
+        # Set 'UNKNOWN' so the manual exclude mechanism and
+        # the build-time re-check can still catch withdrawals.
+        if "status" not in pool.columns:
+            pool["status"] = "UNKNOWN"
+        print("[pga_pool] Status set to UNKNOWN \u2014 manual excludes + build-time re-check will apply")
 
     # ── 6b. Normalise tee-time / wave columns ─────────────────────────
     # Ensure r1_teetime exists — map from variant column names if needed
@@ -197,7 +202,7 @@ def build_pga_pool(
         for _alt in ["teetimes", "round_1_teetime", "tee_time"]:
             if _alt in pool.columns and pool[_alt].notna().any():
                 pool["r1_teetime"] = pool[_alt]
-                print(f"[pga_pool] Mapped '{_alt}' → 'r1_teetime'")
+                print(f"[pga_pool] Mapped '{_alt}' \u2192 'r1_teetime'")
                 break
 
     # Flatten r1_teetime if it contains dicts/lists/stringified-dicts
@@ -270,7 +275,7 @@ def build_pga_pool(
         if col in pool.columns:
             pool[col] = pd.to_numeric(pool[col], errors="coerce").fillna(0)
 
-    # ── 8. Store event metadata ──────────────────────────────────────
+    # ── 8. Store event metadata ────────────────────────────────────
     pool.attrs["event_name"] = event_name
     pool.attrs["sport"] = "PGA"
     pool.attrs["site"] = site
@@ -371,7 +376,7 @@ def build_pga_pool(
     n_wd = len(pool) - n_active
     print(
         f"[pga_pool] Pool built: {len(pool)} players "
-        f"({n_active} active, {n_wd} WD) — {event_name}"
+        f"({n_active} active, {n_wd} WD) \u2014 {event_name}"
     )
 
     return pool
