@@ -114,6 +114,40 @@ def build_lineups(
 
     print(f"[build_lineups] Loaded {len(pool)} players from {pool_path}")
 
+    # ── Injury monitor / cascade (live pools) ────────────────────────────────
+    # Refresh injury statuses, drop confirmed OUTs, and bump healthy
+    # teammate projections when a key player is ruled out.
+    try:
+        from yak_core.injury_monitor import InjuryMonitorState, apply_monitor_to_pool
+        from yak_core.injury_cascade import apply_injury_cascade
+
+        injury_state = InjuryMonitorState.load(today_str())
+        pool = apply_monitor_to_pool(pool, injury_state)
+
+        # Belt-and-suspenders: drop any OUT/IR that survived the monitor step
+        _OUT_STATUSES = {"OUT", "IR", "SUSPENDED"}
+        if "status" in pool.columns:
+            _pre = len(pool)
+            pool = pool[
+                ~pool["status"].fillna("").str.strip().str.upper().isin(_OUT_STATUSES)
+            ].reset_index(drop=True)
+            _dropped = _pre - len(pool)
+            if _dropped:
+                print(f"[build_lineups] Dropped {_dropped} OUT/IR player(s) via injury monitor")
+
+        # Cascade: bump healthy teammate projections
+        if "proj_minutes" in pool.columns or "minutes" in pool.columns:
+            pool, cascade_report = apply_injury_cascade(pool)
+            if cascade_report:
+                print(
+                    f"[build_lineups] Injury cascade applied: "
+                    f"{len(cascade_report)} key injury/ies redistributed"
+                )
+    except FileNotFoundError:
+        pass  # No monitor state on disk yet — first run of the day
+    except Exception as exc:
+        print(f"[build_lineups] WARNING: injury monitor step failed: {exc}")
+
     # Ensure valid ownership data before building lineups
     pool = ensure_ownership(pool, sport=sport)
 
