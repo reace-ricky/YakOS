@@ -547,6 +547,58 @@ def fetch_injury_updates(date_key: str, cfg: dict) -> list:
 
 
 # ---------------------------------------------------------------------------
+# ESPN injury data (free, no auth required)
+# ---------------------------------------------------------------------------
+
+_ESPN_NBA_INJURIES_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
+
+
+def fetch_espn_nba_injuries() -> list:
+    """Fetch current NBA injuries from ESPN's free public API.
+
+    Returns a list of dicts, each with:
+      - ``player_name`` (str): e.g. "Jarrett Allen"
+      - ``status`` (str): "OUT", "GTD", or "SUSPENDED"
+      - ``comment`` (str): short description of the injury
+
+    No API key required.  Returns an empty list on any failure.
+    """
+    _espn_status_map = {
+        "out": "OUT",
+        "day-to-day": "GTD",
+        "suspension": "SUSPENDED",
+    }
+    try:
+        resp = requests.get(_ESPN_NBA_INJURIES_URL, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        print(f"[fetch_espn_nba_injuries] ESPN fetch failed: {exc}")
+        return []
+
+    results = []
+    for team_block in data.get("injuries", []):
+        for entry in team_block.get("injuries", []):
+            athlete = entry.get("athlete", {})
+            name = athlete.get("displayName", "").strip()
+            if not name:
+                continue
+            raw_status = str(entry.get("status", "")).strip().lower()
+            mapped = _espn_status_map.get(raw_status)
+            if not mapped:
+                continue
+            comment = entry.get("shortComment", entry.get("longComment", ""))
+            results.append({
+                "player_name": name,
+                "status": mapped,
+                "comment": str(comment)[:120],
+            })
+
+    print(f"[fetch_espn_nba_injuries] {len(results)} injured players from ESPN")
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Auto injury detection
 # ---------------------------------------------------------------------------
 
@@ -604,26 +656,12 @@ def auto_flag_injuries(
 
     flagged_count = 0
 
-    # ── Signal 1: Tank01 injury list (playerID + name fallback) ──────
+    # ── Signal 1: ESPN injury list (name-based matching) ──────────────
+    # ESPN's free public API is more reliable than Tank01's injury list,
+    # which often has mismatched playerIDs and missing player names.
     try:
-        resp = requests.get(
-            "https://" + _TANK01_HOST + "/getNBAInjuryList",
-            headers=_headers(api_key),
-            timeout=20,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        body = data.get("body", data) if isinstance(data, dict) else data
-
-        if isinstance(body, list) and body:
-            # Build reverse maps: playerID → pool index AND name → pool index
-            _id_to_idx = {}
-            if "player_id" in pool.columns:
-                for idx, row in pool.iterrows():
-                    pid = str(row.get("player_id", "")).strip()
-                    if pid and pid.lower() not in ("", "nan"):
-                        _id_to_idx[pid] = idx
-
+        espn_injuries = fetch_espn_nba_injuries()
+        if espn_injuries:
             _name_to_idx = {}
             if "player_name" in pool.columns:
                 for idx, row in pool.iterrows():
@@ -631,45 +669,17 @@ def auto_flag_injuries(
                     if pname and pname != "nan":
                         _name_to_idx[pname] = idx
 
-            _desig_map = {
-                "Out": "OUT",
-                "OUT": "OUT",
-                "Day-To-Day": "GTD",
-                "DAY-TO-DAY": "GTD",
-                "GTD": "GTD",
-            }
-
-            for entry in body:
-                if not isinstance(entry, dict):
-                    continue
-                eid = str(entry.get("playerID", "")).strip()
-                desig = str(entry.get("designation", "")).strip()
-                desc = str(entry.get("description", "")).strip()
-                mapped = _desig_map.get(desig, _desig_map.get(desig.upper()))
-                if not mapped:
-                    continue
-
-                # Try ID match first
-                matched_idx = _id_to_idx.get(eid)
-
-                # Fall back to name match if ID didn't work
-                if matched_idx is None:
-                    inj_name = str(
-                        entry.get("playerName",
-                        entry.get("player",
-                        entry.get("longName", "")))
-                    ).strip().lower()
-                    if inj_name:
-                        matched_idx = _name_to_idx.get(inj_name)
-
+            for entry in espn_injuries:
+                inj_name = entry["player_name"].strip().lower()
+                matched_idx = _name_to_idx.get(inj_name)
                 if matched_idx is not None:
-                    pool.at[matched_idx, "status"] = mapped
-                    pool.at[matched_idx, "injury_note"] = f"Tank01: {desig} — {desc[:80]}"
+                    pool.at[matched_idx, "status"] = entry["status"]
+                    pool.at[matched_idx, "injury_note"] = f"ESPN: {entry['comment']}"
                     flagged_count += 1
 
-            print(f"[auto_flag_injuries] Signal 1: {flagged_count} player(s) flagged from Tank01 injury list")
+        print(f"[auto_flag_injuries] Signal 1: {flagged_count} player(s) flagged from ESPN injury list")
     except Exception as exc:
-        print(f"[auto_flag_injuries] Tank01 injury list fetch failed (non-fatal): {exc}")
+        print(f"[auto_flag_injuries] ESPN injury list failed (non-fatal): {exc}")
 
     # ── Signal 2: Stale last_game_date + minimum salary ───────────────
     stale_count = 0
