@@ -1,0 +1,108 @@
+{
+  "source": "RotoGrinders ResultsDB",
+  "extracted": "2026-03-15",
+  "results": [
+    {
+      "date": "2026-03-13",
+      "slate": "7:30 pm ET - Main (5 games)",
+      "contest": "$555 NBA $150K Alley Oop [$50K to 1st]",
+      "entries": 300,
+      "winning_score": 341.00,
+      "lineup": [
+        {"pos": "PG", "player": "Amen Thompson", "team": "HOU", "salary": 7800, "fpts": 52.50},
+        {"pos": "SG", "player": "Reed Sheppard", "team": "HOU", "salary": 6300, "fpts": 34.25},
+        {"pos": "SF", "player": "Kevin Durant", "team": "HOU", "salary": 8800, "fpts": 52.00},
+        {"pos": "PF", "player": "OG Anunoby", "team": "NYK", "salary": 6800, "fpts": 42.50},
+        {"pos": "C", "player": "Mitchell Robinson", "team": "NYK", "salary": 4000, "fpts": 47.50},
+        {"pos": "G", "player": "Dejounte Murray", "team": "NOP", "salary": 7200, "fpts": 52.75},
+        {"pos": "F", "player": "Jabari Smith", "team": "HOU", "salary": 6000, "fpts": 31.75},
+        {"pos": "UTIL", "player": "Clint Capela", "team": "HOU", "salary": 3100, "fpts": 27.75}
+      ]
+    },
+    {
+      "date": "2026-03-13",
+      "slate": "10:00 pm ET - Night (3 games)",
+      "contest": "$18 NBA $80K Fadeaway [$20K to 1st] (Night)",
+      "entries": 5228,
+      "winning_score": 353.75,
+      "lineup": [
+        {"pos": "PG", "player": "Rob Dillingham", "team": "CHI", "salary": 3900, "fpts": 24.50},
+        {"pos": "SG", "player": "Anthony Edwards", "team": "MIN", "salary": 9500, "fpts": 64.50},
+        {"pos": "SF", "player": "Brice Sensabaugh", "team": "UTA", "salary": 5600, "fpts": 44.25},
+        {"pos": "PF", "player": "Leonard Miller", "team": "CHI", "salary": 4000, "fpts": 32.50},
+        {"pos": "C", "player": "Donovan Clingan", "team": "UTA", "salary": 7600, "fpts": 62.25},
+        {"pos": "G", "player": "Josh Giddey", "team": "CHI", "salary": 8900, "fpts": 60.25},
+        {"pos": "F", "player": "Bennedict Mathurin", "team": "CHI", "salary": 6400, "fpts": 38.00},
+        {"pos": "UTIL", "player": "Nick Richards", "team": "CHI", "salary": 4100, "fpts": 27.50}
+      ]
+    },
+    {
+      "date": "2026-03-12",
+      "slate": "7:00 pm ET - Main (8 games)",
+      "contest": "$555 NBA $150K Alley Oop [$50K to 1st]",
+      "entries": 300,
+      "winning_score": 360.00,
+      "lineup": [
+        {"pos": "PG", "player": "Javon Small", "team": "DAL", "salary": 5500, "fpts": 37.00},
+        {"pos": "SG", "player": "Stephon Castle", "team": "SAS", "salary": 7200, "fpts": 64.25},
+        {"pos": "SF", "player": "Tristan da Silva", "team": "ORL", "salary": 4900, "fpts": 50.25},
+        {"pos": "PF", "player": "Danny Wolf", "team": "BKN", "salary": 4800, "fpts": 20.00},
+        {"pos": "C", "player": "Nikola Jokic", "team": "DEN", "salary": 12500, "fpts": 88.00},
+        {"pos": "G", "player": "Ajay Mitchell", "team": "OKC", "salary": 4700, "fpts": 29.00},
+        {"pos": "F", "player": "Olivier-Maxence Prosper", "team": "DAL", "salary": 4900, "fpts": 28.00},
+        {"pos": "UTIL", "player": "Daniel Gafford", "team": "DAL", "salary": 5000, "fpts": 43.50}
+      ]
+    },
+    {
+      "date": "2026-03-11",
+      "slate": "7:30 pm ET - Main (9 games)",
+      "contest": "$0 NBA $25K mini-MAX [150 Entry Max]",
+      "entries": 59453,
+      "winning_score": 339.25,
+      "lineup": [
+        {"pos": "PG", "player": "Trey Murphy", "team": "NOP", "salary": 7600, "fpts": 48.25},
+        {"pos": "SG", "player": "Nique Clifford", "team": "SAC", "salary": 6200, "fpts": 41.50},
+        {"pos": "SF", "player": "Cameron Johnson", "team": "DEN", "salary": 5100, "fpts": 35.00},
+        {"pos": "PF", "player": "DeMar DeRozan", "team": "SAC", "salary": 6400, "fpts": 57.00},
+        {"pos": "C", "player": "Nikola Jokic", "team": "DEN", "salary": 12100, "fpts": 64.50},
+        {"pos": "G", "player": "Jordan Clarkson", "team": "NYK", "salary": 3200, "fpts": 38.75},
+        {"pos": "F", "player": "Tristan da Silva", "team": "ORL", "salary": 4400, "fpts": 36.00},
+        {"pos": "UTIL", "player": "Sandro Mamukelashvili", "team": "TOR", "salary": 4600, "fpts": 18.25}
+      ]
+    },
+    {
+      "date": "2026-03-10",
+      "slate": "7:00 pm ET - Main (7 games)",
+      "contest": "$0 NBA $25K mini-MAX [150 Entry Max]",
+      "entries": 59453,
+      "winning_score": 433.25,
+      "lineup": [
+        {"pos": "PG", "player": "Cameron Payne", "team": "PHI", "salary": 5000, "fpts": 66.25},
+        {"pos": "SG", "player": "Cedric Coward", "team": "WAS", "salary": 5100, "fpts": 42.00},
+        {"pos": "SF", "player": "Kelly Oubre", "team": "PHI", "salary": 7000, "fpts": 53.00},
+        {"pos": "PF", "player": "Simone Fontecchio", "team": "MIA", "salary": 3300, "fpts": 30.00},
+        {"pos": "C", "player": "Bam Adebayo", "team": "MIA", "salary": 8400, "fpts": 107.75},
+        {"pos": "G", "player": "Dru Smith", "team": "MIA", "salary": 3400, "fpts": 23.25},
+        {"pos": "F", "player": "Dyson Daniels", "team": "ATL", "salary": 6500, "fpts": 45.25},
+        {"pos": "UTIL", "player": "Victor Wembanyama", "team": "SAS", "salary": 10900, "fpts": 65.75}
+      ]
+    },
+    {
+      "date": "2026-03-09",
+      "slate": "7:00 pm ET - Main (9 games)",
+      "contest": "$0 NBA $30K mini-MAX [150 Entry Max]",
+      "entries": 71343,
+      "winning_score": 368.50,
+      "lineup": [
+        {"pos": "PG", "player": "Shai Gilgeous-Alexander", "team": "OKC", "salary": 10700, "fpts": 75.75},
+        {"pos": "SG", "player": "De'Anthony Melton", "team": "GSW", "salary": 5900, "fpts": 40.25},
+        {"pos": "SF", "player": "Rayan Rupert", "team": "DAL", "salary": 4000, "fpts": 38.50},
+        {"pos": "PF", "player": "Olivier-Maxence Prosper", "team": "DAL", "salary": 5000, "fpts": 23.50},
+        {"pos": "C", "player": "Danny Wolf", "team": "BKN", "salary": 4500, "fpts": 32.75},
+        {"pos": "G", "player": "Javon Small", "team": "DAL", "salary": 5400, "fpts": 36.75},
+        {"pos": "F", "player": "Jaylin Williams", "team": "OKC", "salary": 5700, "fpts": 57.00},
+        {"pos": "UTIL", "player": "Karl-Anthony Towns", "team": "NYK", "salary": 8600, "fpts": 64.00}
+      ]
+    }
+  ]
+}
