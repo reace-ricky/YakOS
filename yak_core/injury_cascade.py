@@ -53,6 +53,10 @@ KEY_INJURY_MIN_MINUTES: float = 20.0
 # Hard cap on any player's total projected minutes after all bumps
 MAX_PLAYER_MINUTES: float = 40.0
 
+# Max bump multiplier: cascade bump cannot exceed this × original projection.
+# A player projected for 6 FP can get at most +18 FP (3×6), totaling 24 FP.
+_MAX_BUMP_MULTIPLIER: float = 3.0
+
 # ---------------------------------------------------------------------------
 # Position matching
 # ---------------------------------------------------------------------------
@@ -159,9 +163,27 @@ def _rotation_tier(proj_minutes: float) -> float:
     return _TIER_STARTER
 
 
-def _headroom(proj_minutes: float) -> float:
+def _realistic_ceiling(rolling_min_10: Optional[float], proj_minutes: float) -> float:
+    """Return a player-specific minutes ceiling based on recent usage.
+
+    Uses rolling_min_10 (10-game rolling avg minutes) to set a realistic cap.
+    A deep bench player (1.4 min avg) gets ceiling 20, not 40.
+    A rotation player (15 min avg) gets ceiling 37.5.
+    Falls back to proj_minutes * 2.5 if rolling_min_10 is unavailable.
+    """
+    if rolling_min_10 is not None and rolling_min_10 > 0:
+        base = rolling_min_10
+    elif proj_minutes > 0:
+        base = proj_minutes
+    else:
+        return MAX_PLAYER_MINUTES
+    return min(MAX_PLAYER_MINUTES, max(base * 2.5, 20.0))
+
+
+def _headroom(proj_minutes: float, ceiling: Optional[float] = None) -> float:
     """Return the minutes headroom (room to grow before hitting ceiling)."""
-    return max(MAX_PLAYER_MINUTES - proj_minutes, 0.0)
+    cap = ceiling if ceiling is not None else MAX_PLAYER_MINUTES
+    return max(cap - proj_minutes, 0.0)
 
 
 def _effective_fp_per_min(orig_proj: float, orig_mins: float, pos: str) -> float:
@@ -332,6 +354,8 @@ def apply_injury_cascade(
 
     # Cumulative extra minutes accumulated per player index (for cap enforcement)
     cum_extra: Dict[int, float] = {idx: 0.0 for idx in df.index}
+    # Per-player realistic minutes ceiling (populated during redistribution)
+    player_ceilings: Dict[int, float] = {}
 
     cascade_report: List[Dict] = []
 
@@ -366,8 +390,17 @@ def apply_injury_cascade(
             player_pos = _primary_pos(str(df.at[idx2, "pos"]))
             already = cum_extra.get(idx2, 0.0)
 
-            # Headroom = space to grow
-            hr = max(MAX_PLAYER_MINUTES - player_mins - already, 0.0)
+            # Player-specific realistic minutes ceiling
+            r10 = None
+            if "rolling_min_10" in df.columns:
+                r10_raw = pd.to_numeric(df.at[idx2, "rolling_min_10"], errors="coerce")
+                if pd.notna(r10_raw):
+                    r10 = float(r10_raw)
+            ceiling = _realistic_ceiling(r10, player_mins)
+            player_ceilings[idx2] = ceiling
+
+            # Headroom = space to grow (using realistic ceiling)
+            hr = max(ceiling - player_mins - already, 0.0)
             if hr <= 0:
                 continue
 
@@ -400,12 +433,13 @@ def apply_injury_cascade(
             share = w / total_weight
             extra = out_mins * share
 
-            # Cap at remaining headroom
+            # Cap at remaining headroom (using realistic ceiling)
             player_mins = float(
                 pd.to_numeric(df.at[idx2, "proj_minutes"], errors="coerce") or 0
             )
             already = cum_extra.get(idx2, 0.0)
-            space = max(MAX_PLAYER_MINUTES - player_mins - already, 0.0)
+            ceiling = player_ceilings.get(idx2, MAX_PLAYER_MINUTES)
+            space = max(ceiling - player_mins - already, 0.0)
             extra = min(extra, space)
 
             # Primary backup: cap extra minutes from this single injury at 12
@@ -428,7 +462,8 @@ def apply_injury_cascade(
                     )
                     already = cum_extra.get(idx2, 0.0)
                     existing = injury_bumps.get(idx2, 0.0)
-                    space = max(MAX_PLAYER_MINUTES - player_mins - already - existing, 0.0)
+                    ceiling = player_ceilings.get(idx2, MAX_PLAYER_MINUTES)
+                    space = max(ceiling - player_mins - already - existing, 0.0)
                     additional = min(additional, space)
                     if additional > 0:
                         injury_bumps[idx2] = injury_bumps.get(idx2, 0.0) + additional
@@ -449,7 +484,16 @@ def apply_injury_cascade(
             player_pos = str(df.at[idx2, "pos"])
             fp_per_min = _effective_fp_per_min(orig_proj, orig_mins, player_pos)
             bump_fp = round(extra * fp_per_min, 2)
-            adj_proj = round(orig_proj + bump_fp, 2)
+
+            # Cap per-injury bump by remaining bump room (_MAX_BUMP_MULTIPLIER)
+            already_bumped = float(df.at[idx2, "injury_bump_fp"])
+            remaining_bump_room = max(orig_proj * _MAX_BUMP_MULTIPLIER - already_bumped, 0.0)
+            bump_fp = min(bump_fp, round(remaining_bump_room, 2))
+
+            # Track accumulated bump so next injury iteration sees it
+            df.at[idx2, "injury_bump_fp"] = already_bumped + bump_fp
+
+            adj_proj = round(orig_proj + already_bumped + bump_fp, 2)
             sal = float(df.at[idx2, "salary"])
             new_val = round(adj_proj / (sal / 1000.0), 2) if sal > 0 else 0.0
             details = weight_details.get(idx2, {})
@@ -497,6 +541,11 @@ def apply_injury_cascade(
         player_pos = str(df.at[idx, "pos"])
         fp_per_min = _effective_fp_per_min(orig_proj, orig_mins, player_pos)
         total_bump = round(total_extra * fp_per_min, 2)
+
+        # Safety net: cap bump at _MAX_BUMP_MULTIPLIER × original projection
+        max_bump = orig_proj * _MAX_BUMP_MULTIPLIER
+        total_bump = min(total_bump, round(max_bump, 2))
+
         df.at[idx, "adjusted_proj"] = round(orig_proj + total_bump, 2)
         df.at[idx, "injury_bump_fp"] = total_bump
 
