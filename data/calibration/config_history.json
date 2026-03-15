@@ -530,5 +530,26 @@
       "mid_exposure": 35,
       "value_exposure": 25
     }
+  },
+  {
+    "timestamp": "2026-03-15T19:43:13",
+    "contest_type": "gpp",
+    "slate_date": null,
+    "action": "rollback",
+    "changes": {},
+    "values": {
+      "proj_weight": 0.6,
+      "upside_weight": 0.4,
+      "boom_weight": 0.4,
+      "own_penalty_strength": 0.6,
+      "low_own_boost": 0.5,
+      "own_neutral_pct": 15,
+      "max_punt_players": 2,
+      "min_mid_players": 2,
+      "game_diversity_pct": 65,
+      "stud_exposure": 70,
+      "mid_exposure": 35,
+      "value_exposure": 25
+    }
   }
 ]
