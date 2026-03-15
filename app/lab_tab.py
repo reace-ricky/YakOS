@@ -1284,6 +1284,26 @@ def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, o
             "tier_max_players": {"fade": 3},
         }
 
+    # Merge edge signal columns into pool so _add_scores() can use them (v9)
+    _signals_path = out_dir / "signals.parquet"
+    if _signals_path.exists():
+        _edge_cols = [
+            "smash_prob", "bust_prob", "leverage", "fp_efficiency",
+            "dvp_matchup_boost", "pop_catalyst_score",
+        ]
+        try:
+            _sig_df = pd.read_parquet(str(_signals_path))
+            _merge_cols = [c for c in _edge_cols if c in _sig_df.columns]
+            if _merge_cols and "player_name" in _sig_df.columns:
+                # Drop any existing edge columns to avoid _x/_y suffixes
+                pool = pool.drop(columns=[c for c in _merge_cols if c in pool.columns], errors="ignore")
+                pool = pool.merge(
+                    _sig_df[["player_name"] + _merge_cols].drop_duplicates("player_name"),
+                    on="player_name", how="left",
+                )
+        except Exception:
+            pass  # graceful fallback — edge signals just won't be available
+
     player_pool = build_player_pool(pool, cfg)
     if cfg.get("captain_aware"):
         lineups_df, exposure_df = build_showdown_lineups(player_pool, cfg)
