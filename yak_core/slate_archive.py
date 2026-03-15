@@ -38,11 +38,19 @@ _ARCHIVE_COLS = [
     "smash_prob", "bust_prob", "sim_eligible",
     # Actuals (filled post-slate)
     "actual_fp", "actual_own", "mp_actual",
-    # Status
-    "status", "injury_note", "gtd_out_prob",
-    # Game context (Phase 3 — miss analysis cross-referencing)
+    # Status / injury
+    "status", "injury_status", "injury_note", "gtd_out_prob",
+    # Game context
     "vegas_total", "vegas_spread", "spread", "home", "b2b",
-    "dvp", "days_rest", "rolling_cv", "rolling_fp_10",
+    "dvp", "days_rest", "rolling_cv",
+    # Rolling game-log stats (all windows)
+    "rolling_fp_5", "rolling_fp_10", "rolling_fp_20",
+    "rolling_min_5", "rolling_min_10", "rolling_min_20",
+    # Per-minute production
+    "fp_per_min",
+    # Cascade / projection source columns
+    "original_proj", "adjusted_proj", "injury_bump_fp",
+    "tank01_proj", "proj_source",
 ]
 
 
@@ -180,6 +188,81 @@ def load_archive(
         ]
 
     return combined.sort_values("slate_date").reset_index(drop=True)
+
+
+def backfill_archives() -> dict:
+    """Retroactively patch existing archived slates with missing columns.
+
+    For each archived parquet:
+    1. If ``rolling_fp_5`` / ``rolling_fp_20`` are missing but ``rolling_fp_10``
+       exists, approximate them (``≈ rolling_fp_10``).  Same for min variants.
+    2. If ``injury_status`` or ``injury_note`` are missing, add them as empty
+       strings so downstream code (e.g. cascade) knows the column exists.
+    3. If ``fp_per_min`` is missing, compute from ``proj / proj_minutes``.
+    4. Save the patched archive back to parquet.
+
+    Returns
+    -------
+    dict
+        Summary with keys ``files_scanned``, ``files_patched``,
+        ``columns_added`` (mapping of column name → count of files patched).
+    """
+    if not os.path.isdir(_ARCHIVE_DIR):
+        return {"files_scanned": 0, "files_patched": 0, "columns_added": {}}
+
+    files_scanned = 0
+    files_patched = 0
+    columns_added: dict = {}
+
+    for fname in sorted(os.listdir(_ARCHIVE_DIR)):
+        if not fname.endswith(".parquet"):
+            continue
+        files_scanned += 1
+        path = os.path.join(_ARCHIVE_DIR, fname)
+        try:
+            df = pd.read_parquet(path)
+        except Exception:
+            continue
+
+        patched = False
+
+        # ── Rolling stat approximations ──────────────────────────────────
+        _rolling_approx = [
+            ("rolling_fp_5", "rolling_fp_10"),
+            ("rolling_fp_20", "rolling_fp_10"),
+            ("rolling_min_5", "rolling_min_10"),
+            ("rolling_min_20", "rolling_min_10"),
+        ]
+        for target, source in _rolling_approx:
+            if target not in df.columns and source in df.columns:
+                df[target] = df[source]
+                patched = True
+                columns_added[target] = columns_added.get(target, 0) + 1
+
+        # ── Injury columns ───────────────────────────────────────────────
+        for col in ("injury_status", "injury_note"):
+            if col not in df.columns:
+                df[col] = ""
+                patched = True
+                columns_added[col] = columns_added.get(col, 0) + 1
+
+        # ── FP per minute ────────────────────────────────────────────────
+        if "fp_per_min" not in df.columns and "proj" in df.columns and "proj_minutes" in df.columns:
+            proj = pd.to_numeric(df["proj"], errors="coerce").fillna(0)
+            mins = pd.to_numeric(df["proj_minutes"], errors="coerce").fillna(0)
+            df["fp_per_min"] = (proj / mins.clip(lower=1)).round(3)
+            patched = True
+            columns_added["fp_per_min"] = columns_added.get("fp_per_min", 0) + 1
+
+        if patched:
+            df.to_parquet(path, index=False)
+            files_patched += 1
+
+    return {
+        "files_scanned": files_scanned,
+        "files_patched": files_patched,
+        "columns_added": columns_added,
+    }
 
 
 def archive_summary() -> dict:

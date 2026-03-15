@@ -72,6 +72,25 @@ _TIER_STARTER: float = 0.4       # 28+ min    ← near ceiling, limited upside
 _PRIMARY_BACKUP_BOOST_MULT: float = 2.0   # weight multiplier for primary backup
 _PRIMARY_BACKUP_MAX_EXTRA_MINS: float = 12.0  # hard cap on extra mins per injury
 
+# ---------------------------------------------------------------------------
+# Position-based FP/min floor rates (NBA)
+# ---------------------------------------------------------------------------
+# Cheap players ($3.5K-$5.5K) have low projected FP/min (~1.15) because their
+# projections are already low.  But cascade beneficiaries get starter-quality
+# minutes and can produce well above their baseline rate.  These floors prevent
+# the cascade bump from being unrealistically small for value-priced players.
+_POS_FPMIN_FLOOR: Dict[str, float] = {
+    "PG": 1.3,
+    "SG": 1.2,
+    "SF": 1.25,
+    "PF": 1.35,
+    "C":  1.4,
+}
+
+# Cascade beneficiaries get starter-quality minutes — apply a small multiplier
+# to the floor rate to reflect higher-quality opportunity.
+_CASCADE_OPPORTUNITY_MULT: float = 1.15
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -143,6 +162,19 @@ def _rotation_tier(proj_minutes: float) -> float:
 def _headroom(proj_minutes: float) -> float:
     """Return the minutes headroom (room to grow before hitting ceiling)."""
     return max(MAX_PLAYER_MINUTES - proj_minutes, 0.0)
+
+
+def _effective_fp_per_min(orig_proj: float, orig_mins: float, pos: str) -> float:
+    """Return the FP/min rate for cascade bump calculation.
+
+    Uses the higher of the player's own rate and the position-based floor
+    (with the opportunity multiplier applied).  This prevents cheap players
+    from getting unrealistically small cascade bumps.
+    """
+    player_rate = orig_proj / orig_mins if orig_mins > 0 else 0.0
+    primary = _primary_pos(pos)
+    floor_rate = _POS_FPMIN_FLOOR.get(primary, 1.2) * _CASCADE_OPPORTUNITY_MULT
+    return max(player_rate, floor_rate)
 
 
 def _find_primary_backup_idx(
@@ -414,7 +446,8 @@ def apply_injury_cascade(
             orig_mins = float(
                 pd.to_numeric(df.at[idx2, "proj_minutes"], errors="coerce") or 0
             )
-            fp_per_min = orig_proj / orig_mins if orig_mins > 0 else 0.0
+            player_pos = str(df.at[idx2, "pos"])
+            fp_per_min = _effective_fp_per_min(orig_proj, orig_mins, player_pos)
             bump_fp = round(extra * fp_per_min, 2)
             adj_proj = round(orig_proj + bump_fp, 2)
             sal = float(df.at[idx2, "salary"])
@@ -461,7 +494,8 @@ def apply_injury_cascade(
         orig_mins = float(
             pd.to_numeric(df.at[idx, "proj_minutes"], errors="coerce") or 0
         )
-        fp_per_min = orig_proj / orig_mins if orig_mins > 0 else 0.0
+        player_pos = str(df.at[idx, "pos"])
+        fp_per_min = _effective_fp_per_min(orig_proj, orig_mins, player_pos)
         total_bump = round(total_extra * fp_per_min, 2)
         df.at[idx, "adjusted_proj"] = round(orig_proj + total_bump, 2)
         df.at[idx, "injury_bump_fp"] = total_bump

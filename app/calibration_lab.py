@@ -2112,6 +2112,32 @@ def render_calibration_lab(sport: str) -> None:
         st.info("Calibration Lab currently supports NBA only. PGA support coming soon.")
         return
 
+    # ── Archive Backfill ─────────────────────────────────────────────────
+    with st.expander("Archive Maintenance", expanded=False):
+        st.caption(
+            "Older archives may be missing rolling stats and injury columns. "
+            "Backfill approximates missing data so training is more accurate."
+        )
+        if st.button("Backfill Archives", key="cal_lab_backfill"):
+            from yak_core.slate_archive import backfill_archives
+
+            with st.spinner("Backfilling archived slates..."):
+                result = backfill_archives()
+            if result["files_patched"] == 0:
+                st.success("All archives are already up to date — nothing to backfill.")
+            else:
+                st.success(
+                    f"Backfilled **{result['files_patched']}** / {result['files_scanned']} archive files."
+                )
+                if result["columns_added"]:
+                    cols_summary = ", ".join(
+                        f"`{col}` ({n} files)" for col, n in sorted(result["columns_added"].items())
+                    )
+                    st.info(f"Columns added: {cols_summary}")
+            # Clear cached archive data so reloads pick up patched files
+            _list_archived_dates.clear()
+            _load_archived_pool.clear()
+
     # ── Section 0: Date / Slate Selector ────────────────────────────────
     entries = _list_archived_dates()
     if not entries:
