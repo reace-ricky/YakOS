@@ -541,15 +541,21 @@ def _analyze_missed_players(
         ownership = _col(r, "ownership", _col(r, "own_pct"))
         smash_prob = _col(r, "smash_prob")
         rolling_5 = _col(r, "rolling_fp_5")
+        rolling_10 = _col(r, "rolling_fp_10")
         rolling_20 = _col(r, "rolling_fp_20")
-        form_trend = (
-            ((rolling_5 - rolling_20) / rolling_20 * 100) if rolling_20 > 0 else 0.0
-        )
+        if rolling_20 > 0 and rolling_5 != rolling_20:
+            # True 5-game vs 20-game window available
+            form_trend = (rolling_5 - rolling_20) / rolling_20 * 100
+        elif rolling_10 > 0 and proj > 0:
+            # Backfilled archive: rolling_fp_5 == rolling_fp_20 (both copied
+            # from rolling_fp_10).  Use proj vs rolling avg as form proxy.
+            form_trend = (proj - rolling_10) / rolling_10 * 100
+        else:
+            form_trend = 0.0
         injury_bump = _col(r, "injury_bump_fp")
         breakout_score = _col(r, "breakout_score")
         proj_minutes = _col(r, "proj_minutes")
-        actual_minutes = _col(r, "actual_minutes")
-        fp_per_min = (actual_fp / actual_minutes) if actual_minutes > 0 else 0.0
+        fp_per_min = _col(r, "fp_per_min")  # projected fp per minute (pre-game)
 
         # Auto-generate "why missed" reasons
         reasons: List[str] = []
@@ -559,7 +565,7 @@ def _analyze_missed_players(
             reasons.append("Form trending up")
         if ownership > 20:
             reasons.append("High ownership penalty")
-        if smash_prob > 0 and smash_prob < 15:
+        if smash_prob > 0 and smash_prob < 0.15:
             reasons.append("Low smash prob")
         if salary > 9000:
             reasons.append("Salary too high")
@@ -1835,23 +1841,23 @@ def _render_missed_player_analysis(trained_slates: List[Dict[str, Any]]) -> None
         if total_missed > 0:
             signals = {
                 "Form Trend > 10%": 0,
-                "Smash Prob > 25": 0,
+                "Smash Prob > 0.25": 0,
                 "Breakout Score > 40": 0,
                 "Injury Bump > 0": 0,
-                "FP/Min Top Quartile (>1.0)": 0,
+                "Proj FP/Min > 1.0": 0,
                 "Proj Error > 5 FP": 0,
             }
             for mp in all_mp_flat:
                 if mp.get("Form%", 0) > 10:
                     signals["Form Trend > 10%"] += 1
-                if mp.get("Smash", 0) > 25:
-                    signals["Smash Prob > 25"] += 1
+                if mp.get("Smash", 0) > 0.25:
+                    signals["Smash Prob > 0.25"] += 1
                 if mp.get("Breakout", 0) > 40:
                     signals["Breakout Score > 40"] += 1
                 if mp.get("InjBump", 0) > 0:
                     signals["Injury Bump > 0"] += 1
                 if mp.get("FP/Min", 0) > 1.0:
-                    signals["FP/Min Top Quartile (>1.0)"] += 1
+                    signals["Proj FP/Min > 1.0"] += 1
                 if mp.get("Proj Error", 0) > 5:
                     signals["Proj Error > 5 FP"] += 1
 
