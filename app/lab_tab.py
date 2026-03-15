@@ -186,36 +186,37 @@ def render_lab_tab(sport: str) -> None:
         if _excl_file.exists():
             _saved_excl = json.loads(_excl_file.read_text())
 
-        if is_pga:
-            pool_names = set(display_pool["player_name"])
-            _excl_in_pool = [n for n in _saved_excl if n in pool_names]
-            _excl_not_in_pool = [n for n in _saved_excl if n not in pool_names]
+        with st.expander(f"Pool Preview ({len(display_pool)} players)", expanded=False):
+            if is_pga:
+                pool_names = set(display_pool["player_name"])
+                _excl_in_pool = [n for n in _saved_excl if n in pool_names]
+                _excl_not_in_pool = [n for n in _saved_excl if n not in pool_names]
 
-            display_pool.insert(0, "exclude", display_pool["player_name"].isin(_saved_excl))
-            st.markdown(f"**Current pool:** {len(display_pool)} players \u2014 check to exclude")
-            edited = st.data_editor(
-                display_pool,
-                use_container_width=True,
-                hide_index=True,
-                height=500,
-                column_config={
-                    "exclude": st.column_config.CheckboxColumn("Exclude", default=False),
-                },
-                disabled=[c for c in avail],
-                key=f"lab_pool_editor_{sport}",
-            )
-            _editor_excl = edited[edited["exclude"]]["player_name"].tolist()
-            new_excl = list(set(_editor_excl + _excl_not_in_pool))
-            if set(new_excl) != set(_saved_excl):
-                _excl_file.write_text(json.dumps(new_excl))
-            n_excl = len(new_excl)
-            if n_excl > 0:
-                st.caption(f"\u274c {n_excl} player(s) excluded from builds")
-            if _excl_not_in_pool:
-                st.caption(f"\u2139\ufe0f Also excluded (not in this pool): {', '.join(_excl_not_in_pool)}")
-        else:
-            st.markdown(f"**Current pool:** {len(display_pool)} players")
-            st.dataframe(display_pool, use_container_width=True, hide_index=True, height=400)
+                display_pool.insert(0, "exclude", display_pool["player_name"].isin(_saved_excl))
+                st.markdown(f"**Current pool:** {len(display_pool)} players \u2014 check to exclude")
+                edited = st.data_editor(
+                    display_pool,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=500,
+                    column_config={
+                        "exclude": st.column_config.CheckboxColumn("Exclude", default=False),
+                    },
+                    disabled=[c for c in avail],
+                    key=f"lab_pool_editor_{sport}",
+                )
+                _editor_excl = edited[edited["exclude"]]["player_name"].tolist()
+                new_excl = list(set(_editor_excl + _excl_not_in_pool))
+                if set(new_excl) != set(_saved_excl):
+                    _excl_file.write_text(json.dumps(new_excl))
+                n_excl = len(new_excl)
+                if n_excl > 0:
+                    st.caption(f"\u274c {n_excl} player(s) excluded from builds")
+                if _excl_not_in_pool:
+                    st.caption(f"\u2139\ufe0f Also excluded (not in this pool): {', '.join(_excl_not_in_pool)}")
+            else:
+                st.markdown(f"**Current pool:** {len(display_pool)} players")
+                st.dataframe(display_pool, use_container_width=True, hide_index=True, height=400)
 
         sal_col = pd.to_numeric(pool.get("salary", pd.Series(dtype=float)), errors="coerce")
         proj_col = pd.to_numeric(pool.get("proj", pd.Series(dtype=float)), errors="coerce")
@@ -228,30 +229,29 @@ def render_lab_tab(sport: str) -> None:
             st.metric("Proj range", f"{proj_col.min():.1f} \u2013 {proj_col.max():.1f}")
 
     st.markdown("---")
-    st.markdown("### Run Edge Analysis")
+    with st.expander("Run Edge Analysis", expanded=False):
+        if st.button("Run Edge Analysis", key=f"lab_edge_{sport}"):
+            if not pool_path.exists():
+                st.warning("Load a pool first.")
+            else:
+                with st.spinner("Computing edge metrics..."):
+                    try:
+                        edge_df, edge_analysis, edge_state = _run_edge(sport, slate_date, out_dir)
+                        st.success(f"Edge analysis complete \u2014 {len(edge_df)} players scored")
 
-    if st.button("Run Edge Analysis", key=f"lab_edge_{sport}"):
-        if not pool_path.exists():
-            st.warning("Load a pool first.")
-        else:
-            with st.spinner("Computing edge metrics..."):
-                try:
-                    edge_df, edge_analysis, edge_state = _run_edge(sport, slate_date, out_dir)
-                    st.success(f"Edge analysis complete \u2014 {len(edge_df)} players scored")
+                        for key, label in [
+                            ("core_plays", "Core"), ("leverage_plays", "Leverage"),
+                            ("value_plays", "Value"), ("fade_candidates", "Fades"),
+                        ]:
+                            players = edge_analysis.get(key, [])
+                            names = ", ".join(p["player_name"] for p in players[:5])
+                            st.markdown(f"**{label} ({len(players)}):** {names}")
 
-                    for key, label in [
-                        ("core_plays", "Core"), ("leverage_plays", "Leverage"),
-                        ("value_plays", "Value"), ("fade_candidates", "Fades"),
-                    ]:
-                        players = edge_analysis.get(key, [])
-                        names = ", ".join(p["player_name"] for p in players[:5])
-                        st.markdown(f"**{label} ({len(players)}):** {names}")
+                        for b in edge_analysis.get("bullets", []):
+                            st.markdown(f"- {b}")
 
-                    for b in edge_analysis.get("bullets", []):
-                        st.markdown(f"- {b}")
-
-                except Exception as e:
-                    st.error(f"Edge analysis error: {e}")
+                    except Exception as e:
+                        st.error(f"Edge analysis error: {e}")
 
     st.markdown("---")
     st.markdown("### Build & Publish")
@@ -401,7 +401,6 @@ def render_lab_tab(sport: str) -> None:
                 except Exception as e:
                     st.error(f"Build lineups error: {e}")
 
-    st.markdown("---")
     if st.button("Publish to GitHub", type="primary", key=f"lab_publish_{sport}"):
         with st.spinner("Publishing..."):
             try:
@@ -416,52 +415,52 @@ def render_lab_tab(sport: str) -> None:
                 st.error(f"Publish error: {e}")
 
     st.markdown("---")
-    st.markdown("### Manage Lineups")
-
-    lineup_files = sorted(out_dir.glob("*_lineups.parquet"))
-    if lineup_files:
-        lineup_info = []
-        for lf in lineup_files:
-            slug = lf.stem.replace("_lineups", "")
-            meta_file = out_dir / f"{slug}_meta.json"
-            meta_data = {}
-            if meta_file.exists():
+    with st.expander("Manage Lineups", expanded=False):
+        lineup_files = sorted(out_dir.glob("*_lineups.parquet"))
+        if lineup_files:
+            lineup_info = []
+            for lf in lineup_files:
+                slug = lf.stem.replace("_lineups", "")
+                meta_file = out_dir / f"{slug}_meta.json"
+                meta_data = {}
+                if meta_file.exists():
+                    try:
+                        meta_data = json.loads(meta_file.read_text())
+                    except Exception:
+                        pass
                 try:
-                    meta_data = json.loads(meta_file.read_text())
+                    ldf = pd.read_parquet(lf)
+                    n_lu = int(ldf["lineup_index"].nunique()) if "lineup_index" in ldf.columns else 0
                 except Exception:
-                    pass
-            try:
-                ldf = pd.read_parquet(lf)
-                n_lu = int(ldf["lineup_index"].nunique()) if "lineup_index" in ldf.columns else 0
-            except Exception:
-                n_lu = 0
-            matchup = meta_data.get("matchup", "")
-            if matchup:
-                label = f"Showdown \u2014 {matchup}"
-            else:
-                label = slug.replace("_", " ").title()
-            built_at = meta_data.get("built_at", meta_data.get("timestamp", ""))
-            lineup_info.append({
-                "slug": slug, "label": label, "n_lineups": n_lu,
-                "built_at": built_at, "path": lf,
-            })
+                    n_lu = 0
+                matchup = meta_data.get("matchup", "")
+                if matchup:
+                    label = f"Showdown \u2014 {matchup}"
+                else:
+                    label = slug.replace("_", " ").title()
+                built_at = meta_data.get("built_at", meta_data.get("timestamp", ""))
+                lineup_info.append({
+                    "slug": slug, "label": label, "n_lineups": n_lu,
+                    "built_at": built_at, "path": lf,
+                })
 
-        for info in lineup_info:
-            col_info, col_del = st.columns([4, 1])
-            with col_info:
-                ts = f" \u2014 {info['built_at']}" if info["built_at"] else ""
-                st.markdown(f"**{info['label']}** ({info['n_lineups']} lineups{ts})")
-            with col_del:
-                if st.button("\U0001f5d1\ufe0f Delete", key=f"del_{sport}_{info['slug']}"):
-                    _delete_lineup_set(out_dir, info["slug"])
-                    from app.data_loader import invalidate_published_cache
-                    invalidate_published_cache()
-                    st.rerun()
-    else:
-        st.caption("No published lineups.")
+            for info in lineup_info:
+                col_info, col_del = st.columns([4, 1])
+                with col_info:
+                    ts = f" \u2014 {info['built_at']}" if info["built_at"] else ""
+                    st.markdown(f"**{info['label']}** ({info['n_lineups']} lineups{ts})")
+                with col_del:
+                    if st.button("\U0001f5d1\ufe0f Delete", key=f"del_{sport}_{info['slug']}"):
+                        _delete_lineup_set(out_dir, info["slug"])
+                        from app.data_loader import invalidate_published_cache
+                        invalidate_published_cache()
+                        st.rerun()
+        else:
+            st.caption("No published lineups.")
 
     st.markdown("---")
-    _render_historical_replay(sport)
+    with st.expander("Historical Replay", expanded=False):
+        _render_historical_replay(sport)
 
 
 # ===============================================================
@@ -1494,7 +1493,6 @@ def _fetch_pga_actuals(api_key: str) -> pd.DataFrame:
 
 
 def _render_historical_replay(sport: str) -> None:
-    st.markdown("### Historical Replay")
     from app.data_loader import published_dir as _pub_dir
     out_dir = _pub_dir(sport)
     lineup_files = sorted(out_dir.glob("*_lineups.parquet"))
