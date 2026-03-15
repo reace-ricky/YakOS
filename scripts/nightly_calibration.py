@@ -204,11 +204,14 @@ def run_nba_calibration(slate_date: str) -> dict:
         except Exception as e:
             log.warning("Could not load edge signals: %s", e)
 
-    # 8. Check for contest bands for this date
+    # 8. Check for contest bands for this date and score lineups against them
     contest_bands = None
     try:
-        from yak_core.contest_calibration import get_calibration_history
+        from yak_core.contest_calibration import (
+            get_calibration_history, ContestResult, score_vs_bands, save_contest_result,
+        )
         all_results = get_calibration_history()
+        matched_cr = None
         for cr in all_results:
             if cr.get("slate_date") == slate_date:
                 contest_bands = {
@@ -216,8 +219,40 @@ def run_nba_calibration(slate_date: str) -> dict:
                     "top_10_score": cr.get("top_1_score", 0),
                     "winning_score": cr.get("winning_score", 0),
                 }
+                matched_cr = cr
                 log.info("Found contest bands for %s: %s", slate_date, contest_bands)
                 break
+
+        # Score optimizer lineups against contest bands
+        if matched_cr and matched_cr.get("cash_line", 0) > 0:
+            from yak_core.lineups import prepare_pool, build_multiple_lineups_with_exposure
+            from yak_core.config import merge_config
+
+            try:
+                opt_cfg = merge_config({"CONTEST_TYPE": "gpp", "NUM_LINEUPS": 20})
+                opt_pool = prepare_pool(pool.copy(), opt_cfg)
+                lu_df, _ = build_multiple_lineups_with_exposure(opt_pool, opt_cfg)
+
+                if not lu_df.empty and "lineup_index" in lu_df.columns:
+                    # Map actual_fp onto lineup players
+                    lu_df["actual_fp"] = lu_df["player_name"].map(act_map).fillna(0.0)
+                    lu_totals = lu_df.groupby("lineup_index")["actual_fp"].sum()
+                    lineup_actuals = lu_totals.dropna().tolist()
+
+                    if lineup_actuals:
+                        bands_obj = ContestResult.from_dict(matched_cr)
+                        scores = score_vs_bands(lineup_actuals, bands_obj)
+                        save_contest_result(bands_obj, scores=scores)
+                        log.info(
+                            "Contest band scoring: %d lineups, cash_rate=%.1f%%, best=%.1f, avg=%.1f",
+                            scores.get("n_lineups", 0),
+                            scores.get("cash_rate", 0) * 100,
+                            scores.get("best", 0),
+                            scores.get("avg", 0),
+                        )
+                        result["contest_scores"] = scores
+            except Exception as e:
+                log.warning("Lineup scoring against bands failed (non-fatal): %s", e)
     except Exception as e:
         log.warning("Could not check contest bands: %s", e)
 
@@ -429,11 +464,14 @@ def run_pga_calibration(slate_date: str) -> dict:
         log.warning("PGA breakout scoring failed (non-fatal): %s", e)
         pool["breakout_score"] = 0.0
 
-    # 7. Check for contest bands for this date
+    # 7. Check for contest bands for this date and score lineups against them
     pga_contest_bands = None
     try:
-        from yak_core.contest_calibration import get_calibration_history
+        from yak_core.contest_calibration import (
+            get_calibration_history, ContestResult, score_vs_bands, save_contest_result,
+        )
         all_results = get_calibration_history()
+        matched_cr = None
         for cr in all_results:
             if cr.get("slate_date") == slate_date:
                 pga_contest_bands = {
@@ -441,8 +479,40 @@ def run_pga_calibration(slate_date: str) -> dict:
                     "top_10_score": cr.get("top_1_score", 0),
                     "winning_score": cr.get("winning_score", 0),
                 }
+                matched_cr = cr
                 log.info("Found PGA contest bands for %s: %s", slate_date, pga_contest_bands)
                 break
+
+        # Score optimizer lineups against contest bands
+        if matched_cr and matched_cr.get("cash_line", 0) > 0:
+            from yak_core.lineups import prepare_pool, build_multiple_lineups_with_exposure
+            from yak_core.config import merge_config
+
+            try:
+                opt_cfg = merge_config({"CONTEST_TYPE": "gpp", "NUM_LINEUPS": 20})
+                opt_pool = prepare_pool(pool.copy(), opt_cfg)
+                lu_df, _ = build_multiple_lineups_with_exposure(opt_pool, opt_cfg)
+
+                if not lu_df.empty and "lineup_index" in lu_df.columns:
+                    pga_act_map = pool.set_index("player_name")["actual_fp"].to_dict()
+                    lu_df["actual_fp"] = lu_df["player_name"].map(pga_act_map).fillna(0.0)
+                    lu_totals = lu_df.groupby("lineup_index")["actual_fp"].sum()
+                    lineup_actuals = lu_totals.dropna().tolist()
+
+                    if lineup_actuals:
+                        bands_obj = ContestResult.from_dict(matched_cr)
+                        scores = score_vs_bands(lineup_actuals, bands_obj)
+                        save_contest_result(bands_obj, scores=scores)
+                        log.info(
+                            "PGA contest band scoring: %d lineups, cash_rate=%.1f%%, best=%.1f, avg=%.1f",
+                            scores.get("n_lineups", 0),
+                            scores.get("cash_rate", 0) * 100,
+                            scores.get("best", 0),
+                            scores.get("avg", 0),
+                        )
+                        result["contest_scores"] = scores
+            except Exception as e:
+                log.warning("PGA lineup scoring against bands failed (non-fatal): %s", e)
     except Exception as e:
         log.warning("Could not check PGA contest bands: %s", e)
 
@@ -520,6 +590,8 @@ def sync_to_github(sports: list[str]) -> dict:
         "data/calibration_feedback/recalibrated_backtest.json",
         "data/edge_feedback/signal_history.json",
         "data/edge_feedback/signal_weights.json",
+        "data/contest_results/history.json",
+        "data/contest_results/rg_winning_lineups.json",
     ]
 
     # Add outcome parquets for active sports
@@ -583,6 +655,22 @@ def main():
 
     # Persist breakout accuracy to repo data so the Dashboard can read it
     _persist_breakout_accuracy(results, slate_date)
+
+    # Fetch contest results from RotoGrinders ResultsDB
+    try:
+        from scripts.fetch_rg_results import fetch_and_save as rg_fetch_and_save
+
+        rg_sports = []
+        if sport in ("NBA", "ALL"):
+            rg_sports.append("nba")
+        if sport in ("PGA", "ALL"):
+            rg_sports.append("pga")
+
+        for rg_sport in rg_sports:
+            rg_result = rg_fetch_and_save(slate_date, sport=rg_sport)
+            log.info("RG ingest (%s): %s", rg_sport, rg_result)
+    except Exception as e:
+        log.warning("RG ResultsDB ingest failed (non-fatal): %s", e)
 
     # Re-run recalibrated backtest with updated corrections
     try:
