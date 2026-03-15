@@ -116,9 +116,20 @@ def render_lab_tab(sport: str) -> None:
                         try:
                             pool = _merge_rg_csv(pool, _rg_auto_path)
                             meta["proj_source"] = "rotogrinders+tank01 (saved)"
-                            st.info(f"Auto-merged saved RotoGrinders file for {slate_date}")
                         except Exception:
                             pass
+                    else:
+                        # Fallback: check rg_archive for today's file
+                        _rg_archive_fallback = os.path.join(
+                            str(Path(__file__).resolve().parent.parent),
+                            "data", "rg_archive", "nba", f"rg_{slate_date}.csv"
+                        )
+                        if os.path.isfile(_rg_archive_fallback):
+                            try:
+                                pool = _merge_rg_csv(pool, _rg_archive_fallback)
+                                meta["proj_source"] = "rotogrinders (archive)"
+                            except Exception:
+                                pass
 
                 try:
                     from yak_core.sim_sandbox import score_player_breakout
@@ -750,13 +761,41 @@ def _load_pga_pool(api_key: str, slate_date: str, slate: str) -> tuple:
 
 
 def _merge_rg_csv(pool, rg_file):
-    rg = pd.read_csv(rg_file)
-    rg["_join_name"] = rg["PLAYER"].str.strip().str.lower()
-    pool["_join_name"] = pool["player_name"].str.strip().str.lower()
+    # ── Resilient CSV parsing (handles mobile download quirks) ────────
+    # Mobile browsers can produce different encodings, BOM markers,
+    # different line endings, or even tab-delimited exports.
+    try:
+        rg = pd.read_csv(rg_file, encoding="utf-8-sig")
+    except Exception:
+        try:
+            if hasattr(rg_file, "seek"):
+                rg_file.seek(0)
+            rg = pd.read_csv(rg_file, encoding="latin-1")
+        except Exception:
+            if hasattr(rg_file, "seek"):
+                rg_file.seek(0)
+            rg = pd.read_csv(rg_file, sep=None, engine="python")
+
+    # Normalise column names: strip whitespace, uppercase
+    rg.columns = [c.strip().upper() for c in rg.columns]
+
+    if "PLAYER" not in rg.columns:
+        st.error(
+            f"RG CSV missing PLAYER column. "
+            f"Found columns: {', '.join(rg.columns[:10])}"
+        )
+        return pool
+
+    rg["_join_name"] = rg["PLAYER"].astype(str).str.strip().str.lower()
+    pool["_join_name"] = pool["player_name"].astype(str).str.strip().str.lower()
     rg_lookup = rg.set_index("_join_name")
+
+    n_merged = 0
+    n_missing = 0
     for idx, row in pool.iterrows():
         jn = row["_join_name"]
         if jn not in rg_lookup.index:
+            n_missing += 1
             continue
         r = rg_lookup.loc[jn]
         if isinstance(r, pd.DataFrame):
@@ -765,6 +804,7 @@ def _merge_rg_csv(pool, rg_file):
         if rg_proj > 0:
             pool.at[idx, "proj"] = rg_proj
             pool.at[idx, "proj_source"] = "rotogrinders"
+            n_merged += 1
         rg_floor = float(r.get("FLOOR", 0) or 0)
         rg_ceil = float(r.get("CEIL", 0) or 0)
         if rg_floor > 0:
@@ -787,6 +827,19 @@ def _merge_rg_csv(pool, rg_file):
         if smash_val is not None and not pd.isna(smash_val):
             pool.at[idx, "smash_prob"] = float(smash_val)
     pool.drop(columns=["_join_name"], inplace=True)
+
+    # ── Diagnostic feedback so user knows what happened ────────────────
+    rg_fpts_range = f"{rg['FPTS'].min():.0f}–{rg['FPTS'].max():.0f}" if "FPTS" in rg.columns else "N/A"
+    st.info(
+        f"RG merge: {n_merged}/{len(pool)} players matched "
+        f"({n_missing} unmatched) · {len(rg)} rows in CSV · "
+        f"FPTS range {rg_fpts_range}"
+    )
+    if n_merged == 0:
+        st.warning(
+            "No players matched from RG file. Projections will use "
+            "YakOS model values instead of RotoGrinders."
+        )
     return pool
 
 
