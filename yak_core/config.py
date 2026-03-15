@@ -151,6 +151,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # Only active when using build_showdown_lineups
     "SD_CAPTAIN_OWN_PENALTY": 10.0,  # penalize high-owned captains
     "SD_CAPTAIN_CEIL_BONUS": 0.2,    # bonus weight on ceiling for captain selection
+    "SD_NOISE_STD": 0.10,            # per-solve noise std dev for lineup diversity (±10%)
 }
 
 
