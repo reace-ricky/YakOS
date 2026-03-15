@@ -628,5 +628,16 @@
         "recorded_at": "2026-03-13T14:13:45.107416+00:00"
       }
     }
+  },
+  "2026-03-14_showdown": {
+    "slate_date": "2026-03-14",
+    "contest_type": "showdown",
+    "cash_line": 227.0,
+    "top_15_score": 0.0,
+    "top_1_score": 0,
+    "winning_score": 266.0,
+    "num_entries": 5231,
+    "notes": "",
+    "recorded_at": "2026-03-15T11:12:13.271915+00:00"
   }
 }
