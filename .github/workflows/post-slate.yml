@@ -1,6 +1,8 @@
 name: Post-Slate Feedback
 
 on:
+  schedule:
+    - cron: '30 6 * * *'  # 6:30 AM UTC = 1:30 AM EDT (after all games finish)
   workflow_dispatch:
     inputs:
       sport:
@@ -33,7 +35,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run post-slate feedback
+      - name: Run nightly calibration (scheduled)
+        if: github.event_name == 'schedule'
+        env:
+          RAPIDAPI_KEY: ${{ secrets.TANK01_API_KEY }}
+          TANK01_API_KEY: ${{ secrets.TANK01_API_KEY }}
+          DATAGOLF_API_KEY: ${{ secrets.DATAGOLF_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          YESTERDAY=$(date -u -d "yesterday" +%Y-%m-%d)
+          echo "Running nightly calibration for $YESTERDAY (all sports)"
+          python scripts/nightly_calibration.py --date "$YESTERDAY" --sport all
+
+      - name: Run post-slate feedback (manual)
+        if: github.event_name == 'workflow_dispatch'
         env:
           RAPIDAPI_KEY: ${{ secrets.TANK01_API_KEY }}
           TANK01_API_KEY: ${{ secrets.TANK01_API_KEY }}
