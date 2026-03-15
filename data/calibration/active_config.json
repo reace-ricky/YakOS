@@ -2,21 +2,22 @@
   "gpp": {
     "name": "GPP Working Config",
     "created": "2026-03-15T18:13:27",
-    "updated": "2026-03-15T21:29:58",
+    "updated": "2026-03-15T21:30:05",
     "slates_trained": [
-      "2026-01-29"
+      "2026-01-29",
+      "2026-03-10"
     ],
     "values": {
-      "proj_weight": 0.55,
+      "proj_weight": 0.65,
       "upside_weight": 0.3,
-      "boom_weight": 0.25,
-      "own_penalty_strength": 1.1,
+      "boom_weight": 0.35,
+      "own_penalty_strength": 0.9,
       "low_own_boost": 0.5,
       "own_neutral_pct": 15,
       "max_punt_players": 1,
       "min_mid_players": 4,
       "game_diversity_pct": 65,
-      "stud_exposure": 50,
+      "stud_exposure": 55,
       "mid_exposure": 35,
       "value_exposure": 25,
       "edge_smash_weight": 0.0,
