@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from app.calibration_evolution import PARAM_LABELS, analyze_evolution
 from app.calibration_persistence import (
     append_config_history,
     apply_config_to_optimizer,
@@ -979,6 +980,151 @@ def _run_backtest(
     return pd.DataFrame(results)
 
 
+# ── Config Evolution Rendering ───────────────────────────────────────────
+
+
+def _render_config_evolution(contest_type_key: str, contest_mode: str) -> None:
+    """Render the Config Evolution section showing training progress."""
+    import altair as alt
+
+    active_cfg = load_active_config()
+    history = load_config_history()
+    evo = analyze_evolution(active_cfg, history, DEFAULT_LAB_CONFIG, contest_type_key)
+
+    if evo is None or not evo.slates_trained:
+        return
+
+    st.markdown("### Config Evolution")
+
+    # ── Summary Card ──────────────────────────────────────────────────
+    slate_list = ", ".join(evo.slates_trained)
+    col_s1, col_s2, col_s3 = st.columns(3)
+    col_s1.metric("Slates Trained", len(evo.slates_trained))
+    col_s2.metric("Params Changed", evo.total_changes)
+    col_s3.metric("Maturity", evo.maturity_label)
+
+    st.caption(f"Trained on: {slate_list} | Contest: {contest_mode}")
+
+    # ── Before/After Comparison Table ─────────────────────────────────
+    rows = []
+    for p in evo.params:
+        change_str = f"{p.direction_arrow} {abs(p.change):.2f}" if p.changed else "—"
+        rows.append({
+            "Parameter": p.label,
+            "Default": p.default_value,
+            "Current": p.current_value,
+            "Change": change_str,
+            "_changed": p.changed,
+        })
+
+    df = pd.DataFrame(rows)
+
+    styled = (
+        df[["Parameter", "Default", "Current", "Change"]]
+        .style.apply(
+            lambda row: (
+                ["background-color: rgba(0, 200, 83, 0.12)"] * len(row)
+                if rows[row.name]["_changed"]
+                else ["color: #888"] * len(row)
+            ),
+            axis=1,
+        )
+        .format({"Default": "{:.2f}", "Current": "{:.2f}"})
+    )
+    st.dataframe(
+        styled,
+        use_container_width=True,
+        hide_index=True,
+        height=min(35 * (len(rows) + 1), 500),
+    )
+
+    # ── Parameter Trend Charts ────────────────────────────────────────
+    changed_params = evo.changed_params
+    if changed_params:
+        st.markdown("#### Parameter Trends")
+        st.caption("How each changed parameter evolved across training slates.")
+
+        # Build a long-form dataframe for all changed params
+        chart_rows = []
+        for p in changed_params:
+            if len(p.history) < 2:
+                continue
+            # Add default as starting point
+            chart_rows.append({
+                "Slate": "Default",
+                "Parameter": p.label,
+                "Value": p.default_value,
+                "_order": 0,
+            })
+            for idx, (slate_date, val) in enumerate(p.history, start=1):
+                chart_rows.append({
+                    "Slate": slate_date,
+                    "Parameter": p.label,
+                    "Value": val,
+                    "_order": idx,
+                })
+
+        if chart_rows:
+            chart_df = pd.DataFrame(chart_rows)
+
+            # Create small multiples — one mini chart per parameter
+            n_params = chart_df["Parameter"].nunique()
+            chart = (
+                alt.Chart(chart_df)
+                .mark_line(point=True)
+                .encode(
+                    x=alt.X("_order:O", axis=alt.Axis(title="", labels=False, ticks=False)),
+                    y=alt.Y("Value:Q", scale=alt.Scale(zero=False)),
+                    tooltip=[
+                        alt.Tooltip("Slate:N", title="Slate"),
+                        alt.Tooltip("Value:Q", format=".2f"),
+                    ],
+                )
+                .properties(width=160, height=100)
+                .facet(
+                    facet=alt.Facet("Parameter:N", title=None),
+                    columns=min(n_params, 4),
+                )
+            )
+            st.altair_chart(chart, use_container_width=False)
+
+    # ── Key Insights ──────────────────────────────────────────────────
+    st.markdown("#### Insights")
+    for p in evo.params:
+        desc = p.trend_description()
+        if p.confidence == "high" and p.changed:
+            st.markdown(f"- :green[**{desc}**]")
+        elif p.confidence == "low" and p.changed:
+            st.markdown(f"- :orange[{desc}]")
+        elif p.changed:
+            st.markdown(f"- {desc}")
+        # Skip unchanged params in insights for brevity — they're visible in the table
+
+    # ── Confidence Assessment ─────────────────────────────────────────
+    high = evo.high_confidence_params
+    low = evo.low_confidence_params
+    st.markdown("#### Confidence")
+    if high:
+        st.markdown(
+            "**HIGH** — consistent direction: "
+            + ", ".join(f"**{p.label}**" for p in high)
+        )
+    if low:
+        st.markdown(
+            "**LOW** — bouncing around: "
+            + ", ".join(f"{p.label}" for p in low)
+        )
+    stable = [p for p in evo.params if p.confidence == "stable"]
+    if stable:
+        st.markdown(
+            "**STABLE** — well-calibrated: "
+            + ", ".join(f"{p.label}" for p in stable)
+        )
+
+    st.info(f"📊 {evo.maturity_recommendation}")
+    st.markdown("---")
+
+
 # ── Main Render Function ─────────────────────────────────────────────────
 
 
@@ -1035,6 +1181,9 @@ def render_calibration_lab(sport: str) -> None:
         st.info(f"**{cfg_name}**{updated_text} | {trained_text}")
     else:
         st.caption("Using default config. Analyze a slate and apply recommendations to start tuning.")
+
+    # ── Config Evolution Section ──────────────────────────────────────────
+    _render_config_evolution(contest_type_key, contest_mode)
 
     entry = entries[selected]
     pool = _load_archived_pool(entry["file"])
