@@ -1235,51 +1235,52 @@ def _render_config_evolution(contest_type_key: str, contest_mode: str) -> None:
 
 def _render_batch_train(contest_type_key: str, contest_mode: str) -> None:
     """Render the Batch Train section for training config across multiple slates."""
-    with st.expander("Batch Train Across Slates", expanded=False):
-        # Find GPP slates with actuals
-        entries = _list_archived_dates()
-        gpp_entries = []
-        for e in entries:
-            if "gpp" not in e["contest_type"].lower():
-                continue
-            try:
-                df = pd.read_parquet(e["file"])
-                if "actual_fp" in df.columns and not df["actual_fp"].isna().all():
-                    gpp_entries.append(e)
-            except Exception:
-                continue
+    st.markdown("### Batch Train Across Slates")
 
-        if not gpp_entries:
-            st.info("No GPP slates with actuals found in the archive.")
-            return
+    # Find GPP slates with actuals
+    entries = _list_archived_dates()
+    gpp_entries = []
+    for e in entries:
+        if "gpp" not in e["contest_type"].lower():
+            continue
+        try:
+            df = pd.read_parquet(e["file"])
+            if "actual_fp" in df.columns and not df["actual_fp"].isna().all():
+                gpp_entries.append(e)
+        except Exception:
+            continue
 
-        # Slate selection
-        slate_labels = [e["label"] for e in gpp_entries]
-        selected_indices = st.multiselect(
-            "Select slates to train on",
-            options=list(range(len(gpp_entries))),
-            format_func=lambda i: slate_labels[i],
-            default=list(range(len(gpp_entries))),
-            key="batch_train_slates",
-        )
+    if not gpp_entries:
+        st.info("No GPP slates with actuals found in the archive.")
+        return
 
-        if not selected_indices:
-            st.warning("Select at least one slate.")
-            return
+    # Slate selection
+    slate_labels = [e["label"] for e in gpp_entries]
+    selected_indices = st.multiselect(
+        "Step 1: Select slates",
+        options=list(range(len(gpp_entries))),
+        format_func=lambda i: slate_labels[i],
+        default=list(range(len(gpp_entries))),
+        key="batch_train_slates",
+    )
 
-        selected_entries = [gpp_entries[i] for i in selected_indices]
-        # Sort chronologically
-        selected_entries.sort(key=lambda e: e["date"])
+    if not selected_indices:
+        st.warning("Select at least one slate.")
+        return
 
-        st.caption(f"{len(selected_entries)} slate(s) selected, sorted chronologically.")
+    selected_entries = [gpp_entries[i] for i in selected_indices]
+    # Sort chronologically
+    selected_entries.sort(key=lambda e: e["date"])
 
-        if st.button("Batch Train", type="primary", key="batch_train_run"):
-            _run_batch_train(selected_entries, contest_type_key, contest_mode)
+    st.caption(f"{len(selected_entries)} slate(s) selected, sorted chronologically.")
 
-        # Display stored results
-        bt_state = st.session_state.get("batch_train_results")
-        if bt_state:
-            _render_batch_train_results(bt_state, contest_type_key, contest_mode)
+    if st.button("Step 2: Batch Train", type="primary", key="batch_train_run"):
+        _run_batch_train(selected_entries, contest_type_key, contest_mode)
+
+    # Display stored results
+    bt_state = st.session_state.get("batch_train_results")
+    if bt_state:
+        _render_batch_train_results(bt_state, contest_type_key, contest_mode)
 
 
 def _run_batch_train(
@@ -1381,6 +1382,8 @@ def _run_batch_train(
                 "ideal_best": max((lu["total_actual"] for lu in ideal_scored), default=0),
                 "opt_best": max((lu["total_actual"] for lu in opt_scored), default=0),
                 "n_recs": len(actionable),
+                "ideal_top": ideal_scored[0] if ideal_scored else None,
+                "opt_top": opt_scored[0] if opt_scored else None,
             })
 
         except Exception as e:
@@ -1511,6 +1514,56 @@ def _render_batch_train_results(bt_state: Dict[str, Any], contest_type_key: str,
         else:
             st.warning("Backtest returned no results for one or both configs.")
 
+    # View Lineups Per Slate
+    with st.expander("View Lineups Per Slate"):
+        for s in trained_slates:
+            st.markdown(f"**{s['date']}**")
+            col_ideal, col_opt = st.columns(2)
+            with col_ideal:
+                st.markdown("**Ideal (Hindsight)**")
+                if s.get("ideal_top"):
+                    lu = s["ideal_top"]
+                    st.caption(f"Score: {lu['total_actual']:.1f} actual | ${lu['total_salary']:,}")
+                    players_df = pd.DataFrame(lu["players"])[["player_name", "pos", "salary", "actual_fp"]]
+                    st.dataframe(players_df, use_container_width=True, hide_index=True)
+                else:
+                    st.caption("No lineup available")
+            with col_opt:
+                st.markdown("**Optimizer**")
+                if s.get("opt_top"):
+                    lu = s["opt_top"]
+                    st.caption(f"Score: {lu['total_actual']:.1f} actual | ${lu['total_salary']:,}")
+                    players_df = pd.DataFrame(lu["players"])[["player_name", "pos", "salary", "actual_fp"]]
+                    st.dataframe(players_df, use_container_width=True, hide_index=True)
+                else:
+                    st.caption("No lineup available")
+
+    # Action buttons
+    col_apply, col_reset = st.columns(2)
+    with col_apply:
+        if st.button(
+            f"Step 4: Apply {contest_mode} Config to Optimizer",
+            type="primary",
+            key="cal_lab_apply_to_optimizer",
+            help="Push the current tuned config to the optimizer.",
+        ):
+            sliders = st.session_state.get("cal_lab_sliders", dict(DEFAULT_LAB_CONFIG))
+            apply_config_to_optimizer(dict(sliders), contest_type=contest_type_key)
+            active_after = load_active_config()
+            ct_after = active_after.get(contest_type_key, {}) if active_after else {}
+            n_slates = len(ct_after.get("slates_trained", []))
+            st.success(
+                f"{contest_mode} config applied to optimizer. "
+                f"Trained on {n_slates} slate{'s' if n_slates != 1 else ''}. "
+                f"Build lineups to test."
+            )
+    with col_reset:
+        if st.button("Reset to Defaults", key="cal_lab_reset_defaults"):
+            reset_active_config(dict(DEFAULT_LAB_CONFIG), contest_type=contest_type_key)
+            st.session_state["cal_lab_sliders"] = dict(DEFAULT_LAB_CONFIG)
+            st.toast(f"{contest_mode} config reset to defaults.")
+            st.rerun()
+
 
 # ── Main Render Function ─────────────────────────────────────────────────
 
@@ -1518,7 +1571,25 @@ def _render_batch_train_results(bt_state: Dict[str, Any], contest_type_key: str,
 def render_calibration_lab(sport: str) -> None:
     """Render the Calibration Lab tab."""
     st.markdown("## Calibration Lab")
-    st.caption("Load a completed slate, build ideal lineups with hindsight, then tune the optimizer to match.")
+    st.caption("Pick a contest type, batch train across archived slates, review results, apply to optimizer.")
+
+    # Step indicators
+    st.markdown(
+        '<div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:1rem;flex-wrap:wrap;">'
+        '<span style="background:#262730;padding:4px 12px;border-radius:16px;font-size:0.85rem;">'
+        "<b>Step 1:</b> Select contest type</span>"
+        '<span style="color:#555;">→</span>'
+        '<span style="background:#262730;padding:4px 12px;border-radius:16px;font-size:0.85rem;">'
+        "<b>Step 2:</b> Batch Train</span>"
+        '<span style="color:#555;">→</span>'
+        '<span style="background:#262730;padding:4px 12px;border-radius:16px;font-size:0.85rem;">'
+        "<b>Step 3:</b> Review results</span>"
+        '<span style="color:#555;">→</span>'
+        '<span style="background:#262730;padding:4px 12px;border-radius:16px;font-size:0.85rem;">'
+        "<b>Step 4:</b> Apply to Optimizer</span>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
     if sport.upper() != "NBA":
         st.info("Calibration Lab currently supports NBA only. PGA support coming soon.")
@@ -1606,343 +1677,38 @@ def render_calibration_lab(sport: str) -> None:
     if sim90_col:
         pool["breakout"] = pool["actual_fp"] > pd.to_numeric(pool[sim90_col], errors="coerce").fillna(999)
 
-    # ── Section 1: Player Pool with Actuals ─────────────────────────────
-    st.markdown("### Player Pool with Actuals")
+    # ── Player Pool with Actuals ─────────────────────────────────────────
+    with st.expander("Player Pool with Actuals"):
+        display_cols = ["player_name", "pos", "team", "salary", "proj", "actual_fp", "diff", "value"]
+        if "floor" in pool.columns:
+            display_cols.append("floor")
+        if "ceil" in pool.columns:
+            display_cols.append("ceil")
+        if "ownership" in pool.columns:
+            display_cols.append("ownership")
+        display_cols.append("breakout")
 
-    display_cols = ["player_name", "pos", "team", "salary", "proj", "actual_fp", "diff", "value"]
-    if "floor" in pool.columns:
-        display_cols.append("floor")
-    if "ceil" in pool.columns:
-        display_cols.append("ceil")
-    if "ownership" in pool.columns:
-        display_cols.append("ownership")
-    display_cols.append("breakout")
+        avail_cols = [c for c in display_cols if c in pool.columns]
+        display_df = pool[avail_cols].copy().sort_values("actual_fp", ascending=False).reset_index(drop=True)
 
-    avail_cols = [c for c in display_cols if c in pool.columns]
-    display_df = pool[avail_cols].copy().sort_values("actual_fp", ascending=False).reset_index(drop=True)
+        col_config = {
+            "diff": st.column_config.NumberColumn("Diff", format="%.1f"),
+            "value": st.column_config.NumberColumn("Value", format="%.1f"),
+            "actual_fp": st.column_config.NumberColumn("Actual FP", format="%.1f"),
+            "proj": st.column_config.NumberColumn("Proj", format="%.1f"),
+            "breakout": st.column_config.CheckboxColumn("Breakout", disabled=True),
+        }
 
-    # Color coding via column config
-    col_config = {
-        "diff": st.column_config.NumberColumn("Diff", format="%.1f"),
-        "value": st.column_config.NumberColumn("Value", format="%.1f"),
-        "actual_fp": st.column_config.NumberColumn("Actual FP", format="%.1f"),
-        "proj": st.column_config.NumberColumn("Proj", format="%.1f"),
-        "breakout": st.column_config.CheckboxColumn("Breakout", disabled=True),
-    }
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+            height=400,
+            column_config=col_config,
+        )
 
-    st.dataframe(
-        display_df,
-        use_container_width=True,
-        hide_index=True,
-        height=400,
-        column_config=col_config,
-    )
-
-    breakout_count = int(pool["breakout"].sum())
-    st.caption(f"{breakout_count} breakout player(s) (actual > ceiling estimate)")
-
-    # ── Section 2: Manual Lineup Builder ────────────────────────────────
-    st.markdown("### Manual Lineup Builder")
-    st.caption("Build your ideal lineups using hindsight. Select players slot-by-slot.")
-
-    # Initialize session state for manual lineups
-    ss_key = f"cal_lab_lineups_{contest_mode}"
-    if ss_key not in st.session_state:
-        st.session_state[ss_key] = {}
-
-    num_lineups = 3
-    lineup_tabs = st.tabs([f"Lineup {i+1}" for i in range(num_lineups)])
-
-    is_showdown = contest_mode == "Showdown"
-    if is_showdown:
-        slots = ["CPT", "FLEX", "FLEX", "FLEX", "FLEX", "FLEX"]
-        salary_cap = NBA_SALARY_CAP
-    elif contest_mode == "Cash":
-        slots = NBA_POS_SLOTS
-        salary_cap = NBA_SALARY_CAP
-    else:
-        slots = NBA_POS_SLOTS
-        salary_cap = NBA_SALARY_CAP
-
-    # Build player options — show ALL players from the pool, sorted by actual FP.
-    # In the Calibration Lab we want the full archived pool (including DNPs,
-    # injured players, etc.) so the user can see the complete picture.
-    player_opts = pool.sort_values("actual_fp", ascending=False)
-
-    for lu_idx, tab in enumerate(lineup_tabs):
-        with tab:
-            lu_key = f"{ss_key}_{lu_idx}"
-            selected_players: List[Dict[str, Any]] = []
-            running_salary = 0
-
-            for slot_idx, slot in enumerate(slots):
-                slot_key = f"{lu_key}_slot_{slot_idx}"
-
-                # Filter eligible players for this slot.
-                # For Showdown, all players are eligible for all slots.
-                # For classic, check position eligibility — a player's pos
-                # field may contain multiple positions (e.g. "PG/SG"), so
-                # we check if ANY of the player's positions can fill this slot.
-                if is_showdown:
-                    eligible = player_opts.copy()
-                else:
-                    # Determine which base positions can fill this slot
-                    eligible_positions = set()
-                    for pos_key, eligible_slots in _POS_ELIGIBILITY.items():
-                        if slot in eligible_slots:
-                            eligible_positions.add(pos_key)
-
-                    if eligible_positions:
-                        # Handle multi-position players (e.g. "PG/SG", "SF/PF")
-                        # by checking if ANY of the player's listed positions
-                        # is in the eligible set.
-                        def _pos_matches_slot(pos_val: str) -> bool:
-                            if not isinstance(pos_val, str) or not pos_val.strip():
-                                return False
-                            player_positions = [p.strip() for p in pos_val.split("/")]
-                            return bool(set(player_positions) & eligible_positions)
-
-                        mask = player_opts["pos"].apply(_pos_matches_slot)
-                        eligible = player_opts[mask]
-                    else:
-                        eligible = player_opts.copy()
-
-                # Exclude already-selected players in this lineup
-                already_selected = [p["player_name"] for p in selected_players]
-                eligible = eligible[~eligible["player_name"].isin(already_selected)]
-
-                # Build option labels
-                options = ["-- Empty --"] + [
-                    f"{row['player_name']} ({row['pos']}) ${row['salary']:,} — {row['actual_fp']:.1f} actual"
-                    for _, row in eligible.iterrows()
-                ]
-
-                slot_label = f"{'CPT (1.5x)' if slot == 'CPT' else slot} #{slot_idx + 1}" if is_showdown else slot
-
-                choice = st.selectbox(
-                    slot_label,
-                    options=options,
-                    key=slot_key,
-                )
-
-                if choice != "-- Empty --":
-                    name = choice.split(" (")[0]
-                    player_row = pool[pool["player_name"] == name]
-                    if not player_row.empty:
-                        pr = player_row.iloc[0]
-                        multiplier = 1.5 if slot == "CPT" else 1.0
-                        selected_players.append({
-                            "player_name": name,
-                            "pos": pr["pos"],
-                            "salary": int(pr["salary"]),
-                            "proj": float(pr["proj"]),
-                            "actual_fp": float(pr["actual_fp"]),
-                            "multiplier": multiplier,
-                        })
-                        running_salary += int(pr["salary"])
-
-            # Running totals
-            total_actual = sum(p["actual_fp"] * p.get("multiplier", 1.0) for p in selected_players)
-            total_proj = sum(p["proj"] * p.get("multiplier", 1.0) for p in selected_players)
-            remaining = salary_cap - running_salary
-
-            col_a, col_b, col_c, col_d = st.columns(4)
-            col_a.metric("Total Actual", f"{total_actual:.1f}")
-            col_b.metric("Total Proj", f"{total_proj:.1f}")
-            col_c.metric("Salary Used", f"${running_salary:,}")
-            col_d.metric("Remaining", f"${remaining:,}", delta_color="inverse" if remaining < 0 else "off")
-
-            if remaining < 0:
-                st.error("Over salary cap!")
-
-            # Store in session state
-            st.session_state[f"{lu_key}_players"] = selected_players
-
-    # Save manual lineups button
-    if st.button("Save Manual Lineups as Target", key="cal_lab_save_manual"):
-        saved = []
-        for lu_idx in range(num_lineups):
-            lu_key = f"{ss_key}_{lu_idx}"
-            players = st.session_state.get(f"{lu_key}_players", [])
-            if players:
-                saved.append(players)
-        st.session_state[f"cal_lab_saved_lineups_{contest_mode}"] = saved
-        st.success(f"Saved {len(saved)} lineup(s) as target for {contest_mode}.")
-
-    # ── Section 2.5: Analyze My Lineups ─────────────────────────────────
-    st.markdown("---")
-    st.markdown("### Analyze My Lineups")
-    st.caption(
-        "After saving your ideal lineups above, click to auto-analyze their structural DNA "
-        "and get specific slider recommendations."
-    )
-
-    saved_lineups_for_analysis = st.session_state.get(f"cal_lab_saved_lineups_{contest_mode}", [])
-    analysis_sliders = st.session_state.get("cal_lab_sliders", dict(DEFAULT_LAB_CONFIG))
-
-    if not saved_lineups_for_analysis:
-        st.info("Save your manual lineups above first, then click Analyze.")
-
-    if st.button(
-        "Analyze My Lineups",
-        type="primary",
-        key="cal_lab_analyze",
-        disabled=not saved_lineups_for_analysis,
-    ):
-        with st.spinner("Analyzing lineups and running optimizer comparison..."):
-            try:
-                from yak_core.lineups import prepare_pool, build_multiple_lineups_with_exposure
-
-                # Score user lineups
-                user_scored = [_score_lineup(lp, pool) for lp in saved_lineups_for_analysis]
-
-                # Run optimizer with current config
-                opt_pool = pool.copy()
-                tier_adj = _get_tier_adjustments(analysis_sliders)
-                opt_pool = _apply_tier_adjustments(opt_pool, tier_adj)
-                if "player_id" not in opt_pool.columns:
-                    opt_pool["player_id"] = opt_pool["player_name"].str.lower().str.replace(" ", "_")
-
-                cfg = _build_optimizer_config_from_sliders(analysis_sliders, contest_mode.lower())
-                build_pool = prepare_pool(opt_pool, cfg)
-                lineups_df, _ = build_multiple_lineups_with_exposure(build_pool, cfg)
-
-                opt_scored = _score_optimizer_lineups(lineups_df, pool)
-
-                # Run full analysis
-                analysis = _run_auto_analysis(
-                    user_scored, opt_scored, lineups_df, pool, analysis_sliders,
-                )
-                st.session_state["cal_lab_analysis"] = analysis
-            except Exception as e:
-                st.error(f"Analysis error: {e}")
-
-    # Display analysis results
-    analysis: Optional[AnalysisResult] = st.session_state.get("cal_lab_analysis")
-    if analysis is not None:
-        # ── Lineup Profile ──
-        with st.expander("Lineup Profile", expanded=True):
-            up = analysis.user_profile
-            op = analysis.opt_profile
-
-            profile_data = {
-                "Metric": [
-                    "Avg Salary / Slot",
-                    "% Cap Used",
-                    "Studs / Lineup",
-                    "Mids / Lineup",
-                    "Punts / Lineup",
-                    "Avg Ownership %",
-                    "Low-Own Players (<8%)",
-                    "Chalk Players (>20%)",
-                    "Avg SIM90",
-                    "Avg Value (FP/$1K)",
-                    "Max Game Concentration %",
-                ],
-                "Your Lineups": [
-                    f"${up.avg_salary_per_slot:,.0f}",
-                    f"{up.pct_cap_used:.1f}%",
-                    f"{up.n_studs:.1f}",
-                    f"{up.n_mids:.1f}",
-                    f"{up.n_punts:.1f}",
-                    f"{up.avg_ownership:.1f}%",
-                    str(up.n_low_own),
-                    str(up.n_chalk),
-                    f"{up.avg_sim90:.1f}",
-                    f"{up.avg_value:.1f}",
-                    f"{up.max_game_concentration:.0f}%",
-                ],
-                "Optimizer": [
-                    f"${op.avg_salary_per_slot:,.0f}",
-                    f"{op.pct_cap_used:.1f}%",
-                    f"{op.n_studs:.1f}",
-                    f"{op.n_mids:.1f}",
-                    f"{op.n_punts:.1f}",
-                    f"{op.avg_ownership:.1f}%",
-                    str(op.n_low_own),
-                    str(op.n_chalk),
-                    f"{op.avg_sim90:.1f}",
-                    f"{op.avg_value:.1f}",
-                    f"{op.max_game_concentration:.0f}%",
-                ],
-                "Pool Avg": [
-                    "", "", "", "", "", "", "", "",
-                    f"{up.pool_avg_sim90:.1f}" if up.pool_avg_sim90 else "—",
-                    f"{up.pool_avg_value:.1f}" if up.pool_avg_value else "—",
-                    "",
-                ],
-            }
-            st.dataframe(pd.DataFrame(profile_data), use_container_width=True, hide_index=True)
-
-        # ── Blind Spots & Optimizer Noise ──
-        if analysis.blind_spots:
-            with st.expander(f"Blind Spots — {len(analysis.blind_spots)} player(s) you picked that the optimizer missed"):
-                bs_data = [{
-                    "Player": p.player_name,
-                    "Pos": p.pos,
-                    "Salary": f"${p.salary:,}",
-                    "Actual FP": p.actual_fp,
-                    "Proj": p.proj,
-                    "Own %": f"{p.ownership:.1f}",
-                    "GPP Score": p.gpp_score,
-                    "Boom": p.boom,
-                    "Why Missed": p.reason,
-                } for p in analysis.blind_spots]
-                st.dataframe(pd.DataFrame(bs_data), use_container_width=True, hide_index=True)
-
-        if analysis.optimizer_noise:
-            with st.expander(f"Optimizer Noise — {len(analysis.optimizer_noise)} player(s) in optimizer but not your lineups"):
-                noise_df = pd.DataFrame(analysis.optimizer_noise)
-                noise_df.columns = [c.replace("_", " ").title() for c in noise_df.columns]
-                st.dataframe(noise_df, use_container_width=True, hide_index=True)
-
-        # ── Slider Recommendations ──
-        st.markdown("#### Slider Recommendations")
-        confidence_icons = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}
-        actionable_recs = [r for r in analysis.recommendations if r.slider_key]
-
-        if actionable_recs:
-            for rec in actionable_recs:
-                icon = confidence_icons.get(rec.confidence, "")
-                direction = "→"
-                st.markdown(
-                    f"**{icon} {rec.confidence}** | `{rec.slider_label}`: "
-                    f"**{rec.current_value}** {direction} **{rec.recommended_value}**"
-                )
-                st.caption(rec.reason)
-
-            # Apply Recommendations button
-            if st.button(
-                "Apply All Recommendations",
-                type="primary",
-                key="cal_lab_apply_recs",
-            ):
-                old_sliders = dict(st.session_state.get("cal_lab_sliders", DEFAULT_LAB_CONFIG))
-                updated_sliders = dict(old_sliders)
-                for rec in actionable_recs:
-                    if rec.slider_key in updated_sliders:
-                        updated_sliders[rec.slider_key] = rec.recommended_value
-                st.session_state["cal_lab_sliders"] = updated_sliders
-                # Persist to active config for this contest type
-                slate_date = entry.get("date") if entry else None
-                save_active_config(updated_sliders, slate_date=slate_date, contest_type=contest_type_key)
-                append_config_history(
-                    action="apply_recommendations",
-                    values=updated_sliders,
-                    slate_date=slate_date,
-                    old_values=old_sliders,
-                    contest_type=contest_type_key,
-                )
-                active_after = load_active_config()
-                ct_after = active_after.get(contest_type_key, {}) if active_after else {}
-                n_slates = len(ct_after.get("slates_trained", []))
-                st.toast(f"{contest_mode} config updated. Trained on {n_slates} slate{'s' if n_slates != 1 else ''}.")
-                # Clear analysis so user sees fresh state after re-run
-                st.session_state.pop("cal_lab_analysis", None)
-                st.rerun()
-        else:
-            for rec in analysis.recommendations:
-                st.success(rec.reason)
+        breakout_count = int(pool["breakout"].sum())
+        st.caption(f"{breakout_count} breakout player(s) (actual > ceiling estimate)")
 
     # ── Section 3: Config Sliders (Sidebar) ─────────────────────────────
     st.sidebar.markdown("---")
@@ -2028,193 +1794,6 @@ def render_calibration_lab(sport: str) -> None:
 
     st.session_state["cal_lab_sliders"] = sliders
 
-    # ── Section 4: Optimizer Comparison ─────────────────────────────────
-    st.markdown("---")
-    st.markdown("### Optimizer Comparison")
-
-    if st.button("Run Optimizer with Current Config", type="primary", key="cal_lab_run_opt"):
-        with st.spinner("Running optimizer..."):
-            try:
-                from yak_core.lineups import prepare_pool, build_multiple_lineups_with_exposure
-
-                opt_pool = pool.copy()
-                tier_adj = _get_tier_adjustments(sliders)
-                opt_pool = _apply_tier_adjustments(opt_pool, tier_adj)
-
-                if "player_id" not in opt_pool.columns:
-                    opt_pool["player_id"] = opt_pool["player_name"].str.lower().str.replace(" ", "_")
-
-                cfg = _build_optimizer_config_from_sliders(sliders, contest_mode.lower())
-                build_pool = prepare_pool(opt_pool, cfg)
-                lineups_df, exposure_df = build_multiple_lineups_with_exposure(build_pool, cfg)
-
-                st.session_state["cal_lab_opt_lineups"] = lineups_df
-                st.session_state["cal_lab_opt_exposure"] = exposure_df
-            except Exception as e:
-                st.error(f"Optimizer error: {e}")
-
-    # Show comparison if we have both user lineups and optimizer lineups
-    opt_lineups_df = st.session_state.get("cal_lab_opt_lineups")
-    saved_lineups = st.session_state.get(f"cal_lab_saved_lineups_{contest_mode}", [])
-
-    if opt_lineups_df is not None and not opt_lineups_df.empty:
-        opt_scored = _score_optimizer_lineups(opt_lineups_df, pool)
-
-        # Score user lineups
-        user_scored = []
-        for lu_players in saved_lineups:
-            scored = _score_lineup(lu_players, pool)
-            user_scored.append(scored)
-
-        # Comparison metrics
-        if user_scored and opt_scored:
-            st.markdown("#### Side-by-Side Comparison")
-
-            user_best = max(lu["total_actual"] for lu in user_scored)
-            user_avg = sum(lu["total_actual"] for lu in user_scored) / len(user_scored)
-            opt_best = max(lu["total_actual"] for lu in opt_scored)
-            opt_avg = sum(lu["total_actual"] for lu in opt_scored) / len(opt_scored)
-
-            # Players in common
-            user_names = set()
-            for lu in user_scored:
-                for p in lu["players"]:
-                    user_names.add(p["player_name"])
-            opt_names = set()
-            for lu in opt_scored:
-                for p in lu["players"]:
-                    opt_names.add(p["player_name"])
-            common = user_names & opt_names
-            total_unique = user_names | opt_names
-
-            user_breakouts = sum(lu["breakouts_caught"] for lu in user_scored)
-            opt_breakouts = sum(lu["breakouts_caught"] for lu in opt_scored)
-
-            # Tier counts
-            def _tier_counts(lineups):
-                studs = mids = punts = 0
-                n = 0
-                for lu in lineups:
-                    for p in lu["players"]:
-                        if p["tier"] == "stud":
-                            studs += 1
-                        elif p["tier"] == "mid":
-                            mids += 1
-                        else:
-                            punts += 1
-                    n += 1
-                return studs / max(n, 1), mids / max(n, 1), punts / max(n, 1)
-
-            u_studs, u_mids, u_punts = _tier_counts(user_scored)
-            o_studs, o_mids, o_punts = _tier_counts(opt_scored)
-
-            comparison_data = {
-                "Metric": [
-                    "Best Actual", "Avg Actual",
-                    "Players in Common", "Breakout Players Caught",
-                    "Studs/LU (avg)", "Mids/LU (avg)", "Punts/LU (avg)",
-                ],
-                "Your Lineups": [
-                    f"{user_best:.1f}", f"{user_avg:.1f}",
-                    f"{len(user_names)}", f"{user_breakouts}",
-                    f"{u_studs:.1f}", f"{u_mids:.1f}", f"{u_punts:.1f}",
-                ],
-                "Optimizer Lineups": [
-                    f"{opt_best:.1f}", f"{opt_avg:.1f}",
-                    f"{len(common)}/{len(total_unique)} shared",
-                    f"{opt_breakouts}",
-                    f"{o_studs:.1f}", f"{o_mids:.1f}", f"{o_punts:.1f}",
-                ],
-                "Gap": [
-                    f"{opt_best - user_best:+.1f}", f"{opt_avg - user_avg:+.1f}",
-                    "", f"{opt_breakouts - user_breakouts:+d}",
-                    f"{o_studs - u_studs:+.1f}", f"{o_mids - u_mids:+.1f}", f"{o_punts - u_punts:+.1f}",
-                ],
-            }
-            st.dataframe(pd.DataFrame(comparison_data), use_container_width=True, hide_index=True)
-
-            # Player overlap heatmap
-            st.markdown("#### Player Overlap")
-            overlap_data = []
-            for name in sorted(total_unique):
-                in_user = name in user_names
-                in_opt = name in opt_names
-                row = pool[pool["player_name"] == name]
-                actual = float(row["actual_fp"].iloc[0]) if not row.empty else 0
-                status = "Both" if (in_user and in_opt) else ("You only" if in_user else "Optimizer only")
-                overlap_data.append({
-                    "Player": name,
-                    "Actual FP": actual,
-                    "Status": status,
-                })
-
-            overlap_df = pd.DataFrame(overlap_data).sort_values("Actual FP", ascending=False)
-            st.dataframe(overlap_df, use_container_width=True, hide_index=True)
-
-            # Recommendations
-            st.markdown("#### Recommendations")
-            recs = _generate_recommendations(user_scored, opt_scored, pool, sliders)
-            for rec in recs:
-                st.info(rec)
-
-        else:
-            # Show optimizer lineups only
-            st.markdown("#### Optimizer Lineups (scored with actuals)")
-            if not saved_lineups:
-                st.caption("Save your manual lineups above to see the side-by-side comparison.")
-
-            for lu in opt_scored[:5]:
-                players_df = pd.DataFrame(lu["players"])
-                st.markdown(f"**Lineup** — Actual: {lu['total_actual']:.1f} | Proj: {lu['total_proj']:.1f} | ${lu['total_salary']:,}")
-                if not players_df.empty:
-                    st.dataframe(players_df, use_container_width=True, hide_index=True)
-
-    # ── Section 5: Persistent Config Management ────────────────────────
-    st.markdown("---")
-    st.markdown("### Config Management")
-
-    col_ckpt, col_reset = st.columns(2)
-
-    with col_ckpt:
-        if st.button("Save Config Checkpoint", key="cal_lab_save_checkpoint"):
-            old_vals = get_active_slider_values(contest_type=contest_type_key) or dict(DEFAULT_LAB_CONFIG)
-            slate_date = entry.get("date") if entry else None
-            save_active_config(dict(sliders), slate_date=slate_date, contest_type=contest_type_key)
-            append_config_history(
-                action="manual_checkpoint",
-                values=dict(sliders),
-                slate_date=slate_date,
-                old_values=old_vals,
-                contest_type=contest_type_key,
-            )
-            st.toast(f"{contest_mode} config checkpoint saved.")
-            st.rerun()
-
-    with col_reset:
-        if st.button("Reset to Defaults", key="cal_lab_reset_defaults"):
-            reset_active_config(dict(DEFAULT_LAB_CONFIG), contest_type=contest_type_key)
-            st.session_state["cal_lab_sliders"] = dict(DEFAULT_LAB_CONFIG)
-            st.toast(f"{contest_mode} config reset to defaults.")
-            st.rerun()
-
-    # Apply Config to Optimizer — prominent CTA
-    st.markdown("")
-    if st.button(
-        f"Apply {contest_mode} Config to Optimizer",
-        type="primary",
-        key="cal_lab_apply_to_optimizer",
-        help="Push the current tuned config to the optimizer. Build lineups to test.",
-    ):
-        apply_config_to_optimizer(dict(sliders), contest_type=contest_type_key)
-        active_after = load_active_config()
-        ct_after = active_after.get(contest_type_key, {}) if active_after else {}
-        n_slates = len(ct_after.get("slates_trained", []))
-        st.success(
-            f"{contest_mode} config applied to optimizer. "
-            f"Trained on {n_slates} slate{'s' if n_slates != 1 else ''}. "
-            f"Build lineups to test."
-        )
-
     # Config History expander
     history = load_config_history()
     if history:
@@ -2267,46 +1846,3 @@ def render_calibration_lab(sport: str) -> None:
                 if i < len(history) - 1:
                     st.markdown("---")
 
-    # ── Section 6: Save Config & Backtest ───────────────────────────────
-    st.markdown("---")
-    st.markdown("### Save & Backtest")
-
-    col_save, col_bt = st.columns(2)
-
-    with col_save:
-        config_name = st.text_input("Config Name", key="cal_lab_config_name", placeholder="e.g., Breakout Hunter v1")
-        if st.button("Save Config", key="cal_lab_save_config"):
-            if config_name.strip():
-                _save_config(config_name.strip(), dict(sliders))
-                st.success(f"Saved config: {config_name}")
-            else:
-                st.warning("Enter a config name.")
-
-        # Show saved configs
-        saved_configs = _load_saved_configs()
-        if saved_configs:
-            st.markdown("**Saved Configs:**")
-            for name in saved_configs:
-                st.caption(f"- {name}")
-
-    with col_bt:
-        if st.button("Backtest Current Config", key="cal_lab_backtest"):
-            progress = st.progress(0, text="Starting backtest...")
-            bt_results = _run_backtest(dict(sliders), progress)
-            st.session_state["cal_lab_bt_results"] = bt_results
-
-    bt_results = st.session_state.get("cal_lab_bt_results")
-    if bt_results is not None and not bt_results.empty:
-        st.markdown("#### Backtest Results")
-
-        # Summary metrics
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Avg Best Score", f"{bt_results['best_actual'].mean():.1f}")
-        col2.metric("Avg Score", f"{bt_results['avg_actual'].mean():.1f}")
-        total_cashed = bt_results["cashed"].sum()
-        total_lineups = bt_results["n_lineups"].sum()
-        cash_rate = (total_cashed / total_lineups * 100) if total_lineups > 0 else 0
-        col3.metric("Cash Rate", f"{cash_rate:.1f}%")
-        col4.metric("Slates Tested", f"{len(bt_results)}")
-
-        st.dataframe(bt_results, use_container_width=True, hide_index=True)
