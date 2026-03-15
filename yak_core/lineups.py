@@ -336,45 +336,62 @@ def _build_one_lineup(
     k = len(slots)
 
     # Slot eligibility: can player i fill slot s?
+    # Handles multi-position strings like "SG/SF", "PG/SG", "PF/C", "SF/PF".
     def _eligible(player: dict, slot: str) -> bool:
-        nat_pos = str(player.get("position", "")).upper()
-        # UTIL and G/F flex slots accept any position
+        raw_pos = str(player.get("position", "")).upper().strip()
+        positions = {p.strip() for p in raw_pos.split("/") if p.strip()}
+        if not positions:
+            positions = {"UTIL"}
+        # UTIL accepts any position
         if slot == "UTIL":
             return True
+        # G flex accepts PG and SG
         if slot == "G":
-            return nat_pos in ("PG", "SG", "G")
+            return bool(positions & {"PG", "SG", "G"})
+        # F flex accepts SF and PF
         if slot == "F":
-            return nat_pos in ("SF", "PF", "F")
-        # Exact match for PG, SG, SF, PF, C
-        return nat_pos == slot
+            return bool(positions & {"SF", "PF", "F"})
+        # Exact positional slots: PG, SG, SF, PF, C
+        return slot in positions
 
     prob = pulp.LpProblem("dfs_classic", pulp.LpMaximize)
 
-    # Use slot INDEX (j) instead of slot NAME as dict key to avoid
-    # key collision when slots has duplicates (e.g. PGA ["G"]*6).
-    x = {(i, j): pulp.LpVariable(f"x_{i}_{j}", cat="Binary")
-         for i in range(n) for j in range(k)}
+    # Pre-compute eligibility matrix so variables are only created for
+    # valid (player, slot) pairs.  This prevents the solver from setting
+    # ineligible variables to 1 to satisfy salary constraints without
+    # actually filling a roster slot ("phantom player" bug).
+    elig = {(i, j) for i in range(n) for j in range(k)
+            if _eligible(players[i], slots[j])}
+
+    x = {pair: pulp.LpVariable(f"x_{pair[0]}_{pair[1]}", cat="Binary")
+         for pair in elig}
+
+    # Helper: get variable or 0 for ineligible pairs
+    def _x(i: int, j: int):
+        return x.get((i, j), 0)
 
     # Objective: maximise total score
     score_key = score_col
     prob += pulp.lpSum(
-        players[i].get(score_key, players[i].get("proj", 0)) * x[(i, j)]
+        players[i].get(score_key, players[i].get("proj", 0)) * _x(i, j)
         for i in range(n)
         for j in range(k)
     )
 
-    # Each slot must be filled by exactly one player
+    # Each slot must be filled by exactly one eligible player
     for j in range(k):
-        prob += pulp.lpSum(x[(i, j)] for i in range(n) if _eligible(players[i], slots[j])) == 1
+        prob += pulp.lpSum(_x(i, j) for i in range(n) if (i, j) in elig) == 1
 
     # Each player may appear at most once across all slots
     for i in range(n):
-        prob += pulp.lpSum(x[(i, j)] for j in range(k)) <= 1
+        player_vars = [_x(i, j) for j in range(k) if (i, j) in elig]
+        if player_vars:
+            prob += pulp.lpSum(player_vars) <= 1
 
     # Salary cap
     prob += (
         pulp.lpSum(
-            players[i]["salary"] * x[(i, j)]
+            players[i]["salary"] * _x(i, j)
             for i in range(n)
             for j in range(k)
         ) <= salary_cap
@@ -383,7 +400,7 @@ def _build_one_lineup(
     # Salary floor
     prob += (
         pulp.lpSum(
-            players[i]["salary"] * x[(i, j)]
+            players[i]["salary"] * _x(i, j)
             for i in range(n)
             for j in range(k)
         ) >= min_salary
@@ -394,34 +411,34 @@ def _build_one_lineup(
         for nat_pos, cap_val in pos_caps.items():
             eligible_for_pos = [
                 i for i in range(n)
-                if str(players[i].get("position", "")).upper() == nat_pos
+                if nat_pos in {p.strip() for p in str(players[i].get("position", "")).upper().split("/")}
             ]
             if eligible_for_pos:
                 prob += (
-                    pulp.lpSum(x[(i, j)] for i in eligible_for_pos for j in range(k))
+                    pulp.lpSum(_x(i, j) for i in eligible_for_pos for j in range(k))
                     <= cap_val
                 )
 
     # Exposure: each player may appear at most max_appearances[i] more times
     for i, max_app in max_appearances.items():
-        prob += pulp.lpSum(x[(i, j)] for j in range(k)) <= max_app
+        prob += pulp.lpSum(_x(i, j) for j in range(k)) <= max_app
 
     # Forced players (locks)
     if forced_players:
         for fp_idx in forced_players:
-            prob += pulp.lpSum(x[(fp_idx, j)] for j in range(k)) == 1
+            prob += pulp.lpSum(_x(fp_idx, j) for j in range(k)) == 1
 
     # Excluded players
     if excluded_players:
         for ep_idx in excluded_players:
-            prob += pulp.lpSum(x[(ep_idx, j)] for j in range(k)) == 0
+            prob += pulp.lpSum(_x(ep_idx, j) for j in range(k)) == 0
 
     # NOT_WITH pairs
     if not_with_pairs:
         for (idx_a, idx_b) in not_with_pairs:
             prob += (
-                pulp.lpSum(x[(idx_a, j)] for j in range(k))
-                + pulp.lpSum(x[(idx_b, j)] for j in range(k))
+                pulp.lpSum(_x(idx_a, j) for j in range(k))
+                + pulp.lpSum(_x(idx_b, j) for j in range(k))
                 <= 1
             )
 
@@ -434,7 +451,7 @@ def _build_one_lineup(
             punt_idxs = [i for i in range(n) if players[i]["salary"] < 4000]
             if punt_idxs:
                 prob += (
-                    pulp.lpSum(x[(i, j)] for i in punt_idxs for j in range(k))
+                    pulp.lpSum(_x(i, j) for i in punt_idxs for j in range(k))
                     <= max_punt
                 )
 
@@ -444,7 +461,7 @@ def _build_one_lineup(
             mid_idxs = [i for i in range(n) if 4000 <= players[i]["salary"] <= 7000]
             if mid_idxs:
                 prob += (
-                    pulp.lpSum(x[(i, j)] for i in mid_idxs for j in range(k))
+                    pulp.lpSum(_x(i, j) for i in mid_idxs for j in range(k))
                     >= min_mid
                 )
 
@@ -455,7 +472,7 @@ def _build_one_lineup(
             if max(own_vals) > 0:
                 prob += (
                     pulp.lpSum(
-                        own_vals[i] * x[(i, j)]
+                        own_vals[i] * _x(i, j)
                         for i in range(n)
                         for j in range(k)
                     ) <= own_cap
@@ -471,7 +488,7 @@ def _build_one_lineup(
             ]
             if low_own_idxs:
                 prob += (
-                    pulp.lpSum(x[(i, j)] for i in low_own_idxs for j in range(k))
+                    pulp.lpSum(_x(i, j) for i in low_own_idxs for j in range(k))
                     >= min_low_own
                 )
 
@@ -487,7 +504,7 @@ def _build_one_lineup(
                 for gid in game_ids:
                     game_idxs = [i for i in range(n) if players[i].get("game_id") == gid]
                     prob += (
-                        pulp.lpSum(x[(i, j)] for i in game_idxs for j in range(k))
+                        pulp.lpSum(_x(i, j) for i in game_idxs for j in range(k))
                         >= min_game_stack * g_vars[gid]
                     )
 
@@ -501,7 +518,7 @@ def _build_one_lineup(
                 for t in teams:
                     team_idxs = [i for i in range(n) if players[i].get("team") == t]
                     prob += (
-                        pulp.lpSum(x[(i, j)] for i in team_idxs for j in range(k))
+                        pulp.lpSum(_x(i, j) for i in team_idxs for j in range(k))
                         >= min_team_stack * t_vars[t]
                     )
 
@@ -521,8 +538,8 @@ def _build_one_lineup(
                         # Binary: bb_a = 1 if >=2 from team_a selected
                         bb_a = pulp.LpVariable(f"bb_a_{gid}", cat="Binary")
                         bb_b = pulp.LpVariable(f"bb_b_{gid}", cat="Binary")
-                        a_count = pulp.lpSum(x[(i, j)] for i in a_idxs for j in range(k))
-                        b_count = pulp.lpSum(x[(i, j)] for i in b_idxs for j in range(k))
+                        a_count = pulp.lpSum(_x(i, j) for i in a_idxs for j in range(k))
+                        b_count = pulp.lpSum(_x(i, j) for i in b_idxs for j in range(k))
                         # bb_a=1 when a_count >= 2  (big-M: M=8)
                         prob += a_count >= 2 * bb_a
                         prob += a_count <= 1 + 7 * bb_a
@@ -548,12 +565,12 @@ def _build_one_lineup(
                 continue
             if tier in tier_min:
                 prob += (
-                    pulp.lpSum(x[(i, j)] for i in idxs for j in range(k))
+                    pulp.lpSum(_x(i, j) for i in idxs for j in range(k))
                     >= tier_min[tier]
                 )
             if tier in tier_max:
                 prob += (
-                    pulp.lpSum(x[(i, j)] for i in idxs for j in range(k))
+                    pulp.lpSum(_x(i, j) for i in idxs for j in range(k))
                     <= tier_max[tier]
                 )
 
@@ -567,7 +584,7 @@ def _build_one_lineup(
     result = []
     for j in range(k):
         for i in range(n):
-            if _eligible(players[i], slots[j]) and pulp.value(x[(i, j)]) > 0.5:
+            if (i, j) in elig and pulp.value(x[(i, j)]) > 0.5:
                 result.append((players[i], slots[j]))
                 break
     return result if len(result) == k else None
@@ -774,6 +791,8 @@ def build_multiple_lineups_with_exposure(
                 "position": player.get("position", ""),
                 "salary": player["salary"],
                 "proj": player.get("proj", 0),
+                "ceil": player.get("ceil", 0),
+                "floor": player.get("floor", 0),
                 "own_pct": player.get("own_pct", 0),
                 "gpp_score": player.get("gpp_score", 0),
                 "cash_score": player.get("cash_score", 0),
