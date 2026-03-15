@@ -31,7 +31,9 @@ _ARCHIVE_COLS = [
     # Ownership
     "ownership", "own_proj", "own_model", "ext_own", "proj_own",
     # Edge signals
-    "leverage", "edge_score", "edge_category",
+    "leverage", "edge_score", "edge_category", "edge_label",
+    "fp_efficiency", "breakout_score",
+    "pop_catalyst_score", "pop_catalyst_tag",
     # Sim outputs
     "smash_prob", "bust_prob", "sim_eligible",
     # Actuals (filled post-slate)
