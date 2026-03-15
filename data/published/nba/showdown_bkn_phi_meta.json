@@ -2,8 +2,10 @@
   "contest": "Showdown",
   "sport": "NBA",
   "num_lineups": 1,
-  "built_at": "2026-03-15T01:24:11.653693+00:00",
+  "built_at": "2026-03-15T01:24:58.496048+00:00",
   "lock": [],
-  "exclude": [],
+  "exclude": [
+    "Nicolas Claxton"
+  ],
   "matchup": "BKN vs PHI"
 }
