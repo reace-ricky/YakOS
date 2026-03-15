@@ -120,7 +120,17 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "OWN_SOURCE": "auto",      # "auto" (salary-rank if missing), "salary_rank" (always generate)
     "STACK_WEIGHT": 0.0,       # 0 = disabled; 0.1-0.3 = use stack_score to boost stacked players
     "VALUE_WEIGHT": 0.0,       # 0 = disabled; 0.1-0.3 = use value_score to boost value plays
-    # GPP-specific knobs (v6 — backtested on 13 slates 2026-02-02 → 2026-03-08)
+    # GPP scoring formula (v8 — sim-based variance model)
+    # gpp_score = proj * PROJ_W + upside * UPSIDE_W + boom * BOOM_W + own_adj
+    # where upside = SIM90TH (or SIM85TH fallback), boom = SIM99TH - SIM50TH,
+    # and own_adj uses a non-linear (log-based) penalty instead of flat -3.0.
+    "GPP_PROJ_WEIGHT": 0.50,          # projection weight — keeps lineups competitive (300-350+)
+    "GPP_UPSIDE_WEIGHT": 0.30,        # weight on sim 90th pctile (raw ceiling from sims)
+    "GPP_BOOM_WEIGHT": 0.20,          # weight on boom potential (sim99 - sim50 spread)
+    "GPP_OWN_PENALTY_STRENGTH": 1.2,  # scales the log-based ownership penalty
+    "GPP_OWN_LOW_BOOST": 0.5,         # modest boost for low-ownership (<8%) players
+    "GPP_PROJ_FLOOR": 280,            # flag/filter lineups projecting below this total
+    # GPP-specific constraints (v6 — backtested on 13 slates 2026-02-02 → 2026-03-08)
     # Only active when CONTEST_TYPE == "gpp"
     # v5/H5_ForcedDiverse had own_cap=4.8, min_mid=5, min_low_own=3 which
     # caused infeasibility on small-pool slates (e.g. 4-game nights) and
