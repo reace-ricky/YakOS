@@ -985,9 +985,115 @@ def _recheck_pga_withdrawals(pool: pd.DataFrame) -> pd.DataFrame:
         return pool
 
 
+def _fetch_dk_showdown_salaries(away: str, home: str) -> dict:
+    """Fetch Showdown-specific salaries from DK for a single-game matchup.
+
+    Queries the DK lobby for NBA Showdown draft groups (game_type 81),
+    finds the one matching ``away @ home``, then fetches draftables
+    and returns {normalised_player_name: showdown_salary}.
+    Returns an empty dict on any failure so the caller can fall back.
+    """
+    import requests as _req
+    try:
+        resp = _req.get(
+            "https://www.draftkings.com/lobby/getcontests",
+            params={"sport": "NBA"},
+            headers={"User-Agent": "YakOS/1.0"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        print(f"[_fetch_dk_showdown_salaries] lobby fetch failed: {exc}")
+        return {}
+
+    contests = data.get("Contests", data.get("contests", []))
+    dg_info = data.get("DraftGroups", data.get("draftGroups", []))
+
+    # Collect DG IDs with game_type 81 (NBA Showdown Captain)
+    sd_dg_ids = {
+        dg.get("DraftGroupId", dg.get("draftGroupId", 0))
+        for dg in dg_info
+        if dg.get("GameTypeId", dg.get("gameTypeId", 0)) == 81
+    }
+    if not sd_dg_ids:
+        print("[_fetch_dk_showdown_salaries] no Showdown draft groups in lobby")
+        return {}
+
+    # Match draft group to matchup by scanning contest names for "(AWAY @ HOME)"
+    target_tags = [
+        f"({away} @ {home})".upper(),
+        f"({home} @ {away})".upper(),
+        f"({away} vs {home})".upper(),
+        f"({home} vs {away})".upper(),
+    ]
+    matched_dg: int | None = None
+    for c in contests:
+        dg_id = c.get("dg", c.get("draftGroupId", 0))
+        if dg_id not in sd_dg_ids:
+            continue
+        cname = str(c.get("n", c.get("name", ""))).upper()
+        if any(tag in cname for tag in target_tags):
+            matched_dg = dg_id
+            break
+
+    if matched_dg is None:
+        # Fallback: fetch draftables from each Showdown DG and check team membership
+        for dg_id in sd_dg_ids:
+            try:
+                from yak_core.dk_ingest import fetch_dk_draftables
+                dk_pool = fetch_dk_draftables(int(dg_id))
+                if dk_pool.empty:
+                    continue
+                teams_in_dg = set(dk_pool["team"].str.upper())
+                if away.upper() in teams_in_dg and home.upper() in teams_in_dg:
+                    matched_dg = dg_id
+                    break
+            except Exception:
+                continue
+
+    if matched_dg is None:
+        print(f"[_fetch_dk_showdown_salaries] no DG found for {away} @ {home}")
+        return {}
+
+    # Fetch draftables for matched draft group
+    try:
+        from yak_core.dk_ingest import fetch_dk_draftables
+        dk_pool = fetch_dk_draftables(int(matched_dg))
+    except Exception as exc:
+        print(f"[_fetch_dk_showdown_salaries] draftables fetch failed for DG {matched_dg}: {exc}")
+        return {}
+
+    if dk_pool.empty:
+        return {}
+
+    # Build name→salary mapping (normalise to lowercase for fuzzy matching)
+    import re
+    salary_map = {}
+    for _, row in dk_pool.iterrows():
+        name = str(row.get("name", row.get("display_name", ""))).strip()
+        team = str(row.get("team", "")).upper()
+        sal = float(row.get("salary", 0))
+        if name and sal > 0:
+            # Store original, normalised, and last-name+team keys
+            salary_map[name] = sal
+            norm = re.sub(r"[.'`\-]", "", name.lower()).strip()
+            norm = re.sub(r"\s+(jr|sr|ii|iii|iv|v)$", "", norm)
+            norm = re.sub(r"\s+", " ", norm).strip()
+            salary_map[norm] = sal
+            # Last-name + team fallback (handles Dom/Dominick style mismatches)
+            parts = norm.split()
+            if len(parts) >= 2 and team:
+                salary_map[f"_LN_{parts[-1]}_{team}"] = sal
+    print(f"[_fetch_dk_showdown_salaries] DG {matched_dg}: {len(dk_pool)} players, "
+          f"salary range ${dk_pool['salary'].min():.0f}-${dk_pool['salary'].max():.0f}")
+    return salary_map
+
+
 def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None):
     from yak_core.config import CONTEST_PRESETS, merge_config
     from yak_core.lineups import build_multiple_lineups_with_exposure, build_player_pool, build_showdown_lineups
+    import re as _re
 
     pool = pd.read_parquet(out_dir / "slate_pool.parquet")
 
@@ -1010,6 +1116,37 @@ def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, o
     })
     if showdown_teams:
         pool = pool[pool["team"].isin(showdown_teams)].reset_index(drop=True)
+
+        # ── Fetch Showdown-specific salaries from DraftKings ──
+        # DK Showdown contests use different salaries than the main slate.
+        # Tank01 only returns main-slate salaries, so we override with the
+        # real Showdown salary from the DK draftables API.
+        if sport.upper() == "NBA":
+            sd_salary_map = _fetch_dk_showdown_salaries(showdown_teams[0], showdown_teams[1])
+            if sd_salary_map:
+                _updated = 0
+                for idx, row in pool.iterrows():
+                    pname = str(row.get("player_name", "")).strip()
+                    pteam = str(row.get("team", "")).upper()
+                    # Try exact name first, then normalised, then last-name+team
+                    sd_sal = sd_salary_map.get(pname)
+                    if sd_sal is None:
+                        norm = _re.sub(r"[.'`\-]", "", pname.lower()).strip()
+                        norm = _re.sub(r"\s+(jr|sr|ii|iii|iv|v)$", "", norm)
+                        norm = _re.sub(r"\s+", " ", norm).strip()
+                        sd_sal = sd_salary_map.get(norm)
+                    if sd_sal is None and pteam:
+                        # Last-name + team fallback (handles Dom/Dominick mismatches)
+                        norm = _re.sub(r"[.'`\-]", "", pname.lower()).strip()
+                        norm = _re.sub(r"\s+(jr|sr|ii|iii|iv|v)$", "", norm)
+                        norm = _re.sub(r"\s+", " ", norm).strip()
+                        parts = norm.split()
+                        if len(parts) >= 2:
+                            sd_sal = sd_salary_map.get(f"_LN_{parts[-1]}_{pteam}")
+                    if sd_sal is not None:
+                        pool.at[idx, "salary"] = int(sd_sal)
+                        _updated += 1
+                print(f"[_build_lineups] Showdown salary override: {_updated}/{len(pool)} players updated")
 
     _excl_path = out_dir / "excluded_players.json"
     if _excl_path.exists():
