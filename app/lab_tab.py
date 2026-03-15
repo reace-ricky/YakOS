@@ -92,6 +92,22 @@ def render_lab_tab(sport: str) -> None:
                                 _f.write(rg_file.read())
                         except Exception:
                             pass
+                        # Also archive for ownership model training
+                        try:
+                            _rg_archive_dir = os.path.join(
+                                str(Path(__file__).resolve().parent.parent),
+                                "data", "rg_archive", "nba"
+                            )
+                            os.makedirs(_rg_archive_dir, exist_ok=True)
+                            _rg_archive_path = os.path.join(
+                                _rg_archive_dir, f"rg_{slate_date}.csv"
+                            )
+                            if not os.path.isfile(_rg_archive_path):
+                                rg_file.seek(0)
+                                with open(_rg_archive_path, "wb") as _f:
+                                    _f.write(rg_file.read())
+                        except Exception:
+                            pass
                     elif os.path.isfile(_rg_auto_path):
                         try:
                             pool = _merge_rg_csv(pool, _rg_auto_path)
@@ -908,13 +924,9 @@ def _build_bullets(classified: dict, edge_df, sport: str) -> list:
 def _recheck_pga_withdrawals(pool: pd.DataFrame) -> pd.DataFrame:
     """Live re-check of PGA field at lineup-build time.
 
-    Two-pass filter:
-    1. Field-updates pass — removes players who withdrew (dg_id not in
-       the live /field-updates response, or explicit WD flag).
-    2. DFS-projections pass — removes players who missed the cut by
-       cross-referencing the current DFS projections from DataGolf.
-       After the cut, DataGolf's showdown/weekend projections only
-       include players still active in the tournament.
+    Queries the DataGolf /field-updates endpoint to catch players who
+    withdrew AFTER the pool was first loaded and saved to parquet.
+    This mirrors what auto_flag_injuries() does for NBA.
     """
     try:
         from yak_core.datagolf import DataGolfClient
@@ -923,79 +935,45 @@ def _recheck_pga_withdrawals(pool: pd.DataFrame) -> pd.DataFrame:
             print("[_recheck_pga_withdrawals] No DATAGOLF_API_KEY — skipping")
             return pool
 
-        if "dg_id" not in pool.columns:
+        dg = DataGolfClient(api_key)
+        field_df = dg.get_field()
+        if field_df.empty:
+            print("[_recheck_pga_withdrawals] Empty field response — skipping")
+            return pool
+
+        if "dg_id" not in pool.columns or "dg_id" not in field_df.columns:
             print("[_recheck_pga_withdrawals] No dg_id column — skipping")
             return pool
 
-        dg = DataGolfClient(api_key)
-        _remove_mask = pd.Series(False, index=pool.index)
+        field_ids = set(field_df["dg_id"].values)
+        _before = len(pool)
 
-        # ── Pass 1: field-updates (withdrawals) ──
-        try:
-            field_df = dg.get_field()
-            if not field_df.empty and "dg_id" in field_df.columns:
-                field_ids = set(field_df["dg_id"].values)
-                _remove_mask = _remove_mask | ~pool["dg_id"].isin(field_ids)
+        # Players in pool but NOT in the live field → withdrawn
+        _wd_mask = ~pool["dg_id"].isin(field_ids)
 
-                # Explicit WD flags
-                for _wd_col in ["wd", "is_wd", "status"]:
-                    if _wd_col in field_df.columns:
-                        _wd_ids = set(field_df.loc[
-                            field_df[_wd_col].astype(str).str.lower().isin(
-                                ["wd", "true", "1", "withdrawn"]
-                            ),
-                            "dg_id"
-                        ].values)
-                        if _wd_ids:
-                            _remove_mask = _remove_mask | pool["dg_id"].isin(_wd_ids)
-                        break
-        except Exception as _fe:
-            print(f"[_recheck_pga_withdrawals] Field-updates check failed: {_fe}")
+        # Also check for explicit WD flags in field data
+        for _wd_col in ["wd", "is_wd", "status"]:
+            if _wd_col in field_df.columns:
+                _wd_ids = set(field_df.loc[
+                    field_df[_wd_col].astype(str).str.lower().isin(
+                        ["wd", "true", "1", "withdrawn"]
+                    ),
+                    "dg_id"
+                ].values)
+                if _wd_ids:
+                    _wd_mask = _wd_mask | pool["dg_id"].isin(_wd_ids)
+                break
 
-        # ── Pass 2: live DFS projections (missed cut / removed from slate) ──
-        # Try showdown first (single-round slate), fall back to weekend, then main.
-        try:
-            _live_proj = pd.DataFrame()
-            for _slate in ("showdown", "weekend", "main"):
-                try:
-                    _live_proj = dg.get_dfs_projections(
-                        site="draftkings", slate=_slate
-                    )
-                    if not _live_proj.empty:
-                        print(
-                            f"[_recheck_pga_withdrawals] Live DFS projections "
-                            f"(slate={_slate}): {len(_live_proj)} players"
-                        )
-                        break
-                except Exception:
-                    continue
-
-            if not _live_proj.empty and "dg_id" in _live_proj.columns:
-                live_ids = set(_live_proj["dg_id"].values)
-                _mc_mask = ~pool["dg_id"].isin(live_ids) & ~_remove_mask
-                _mc_count = _mc_mask.sum()
-                if _mc_count > 0:
-                    _mc_names = pool.loc[_mc_mask, "player_name"].tolist()
-                    print(
-                        f"[_recheck_pga_withdrawals] {_mc_count} player(s) not in "
-                        f"live DFS projections (likely missed cut): "
-                        f"{', '.join(_mc_names[:10])}"
-                    )
-                _remove_mask = _remove_mask | _mc_mask
-        except Exception as _pe:
-            print(f"[_recheck_pga_withdrawals] DFS projection check failed: {_pe}")
-
-        # ── Apply removals ──
-        _remove_count = _remove_mask.sum()
-        if _remove_count > 0:
-            _removed_names = pool.loc[_remove_mask, "player_name"].tolist()
-            pool = pool[~_remove_mask].reset_index(drop=True)
+        _wd_count = _wd_mask.sum()
+        if _wd_count > 0:
+            _wd_names = pool.loc[_wd_mask, "player_name"].tolist()
+            pool = pool[~_wd_mask].reset_index(drop=True)
             print(
-                f"[_recheck_pga_withdrawals] Removed {_remove_count} player(s) "
-                f"at build time: {', '.join(_removed_names[:15])}"
+                f"[_recheck_pga_withdrawals] Removed {_wd_count} withdrawn player(s) "
+                f"at build time: {', '.join(_wd_names[:10])}"
             )
         else:
-            print("[_recheck_pga_withdrawals] No withdrawals or missed cuts detected")
+            print("[_recheck_pga_withdrawals] No new withdrawals detected")
 
         return pool
     except Exception as e:

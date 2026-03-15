@@ -64,18 +64,8 @@ def render_lab_tab(sport: str) -> None:
                 f"Click **Load Pool** to refresh for {slate_date}."
             )
 
-    if is_pga:
-        pga_slate = st.radio(
-            "DK slate",
-            ["main", "showdown"],
-            horizontal=True,
-            key=f"lab_pga_slate_{sport}",
-            help="'main' = full tournament (4-day GPP). 'showdown' = single-round contests.",
-        )
-    else:
-        pga_slate = "main"
-
     if st.button("Load Pool", key=f"lab_load_{sport}"):
+        pga_slate = "showdown"
         with st.spinner("Loading pool..."):
             try:
                 if is_pga:
@@ -100,6 +90,22 @@ def render_lab_tab(sport: str) -> None:
                             rg_file.seek(0)
                             with open(_rg_auto_path, "wb") as _f:
                                 _f.write(rg_file.read())
+                        except Exception:
+                            pass
+                        # Also archive for ownership model training
+                        try:
+                            _rg_archive_dir = os.path.join(
+                                str(Path(__file__).resolve().parent.parent),
+                                "data", "rg_archive", "nba"
+                            )
+                            os.makedirs(_rg_archive_dir, exist_ok=True)
+                            _rg_archive_path = os.path.join(
+                                _rg_archive_dir, f"rg_{slate_date}.csv"
+                            )
+                            if not os.path.isfile(_rg_archive_path):
+                                rg_file.seek(0)
+                                with open(_rg_archive_path, "wb") as _f:
+                                    _f.write(rg_file.read())
                         except Exception:
                             pass
                     elif os.path.isfile(_rg_auto_path):
@@ -127,19 +133,6 @@ def render_lab_tab(sport: str) -> None:
 
     if pool_path.exists():
         pool = pd.read_parquet(pool_path)
-
-        # Show which slate is loaded and warn if it doesn't match the selector
-        if is_pga and _meta_path_check.exists():
-            try:
-                _loaded_meta = json.loads(_meta_path_check.read_text())
-                _loaded_slate = _loaded_meta.get("slate", "?")
-                if _loaded_slate != pga_slate:
-                    st.warning(
-                        f"Loaded pool is the **{_loaded_slate}** slate. "
-                        f"You selected **{pga_slate}**. Click **Load Pool** to reload."
-                    )
-            except Exception:
-                pass
 
         preview_cols = ["player_name", "pos", "team", "salary", "proj", "floor", "ceil", "ownership", "breakout_score"]
         if is_pga:
@@ -556,6 +549,7 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
         _sal_k = (_sal / 1000.0).clip(lower=3.0)
         _spread_mult = (0.65 - _sal_k * 0.03).clip(lower=0.25, upper=0.55)
         _proj = pd.to_numeric(pool.get("proj", 0), errors="coerce").fillna(0).clip(lower=0)
+        # Blend with rolling variance when available
         if "rolling_fp_5" in pool.columns and "rolling_fp_10" in pool.columns:
             _fp5 = pd.to_numeric(pool["rolling_fp_5"], errors="coerce")
             _fp10 = pd.to_numeric(pool["rolling_fp_10"], errors="coerce")
@@ -635,6 +629,7 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
     try:
         odds_df = fetch_betting_odds(slate_date, api_key)
         if not odds_df.empty and "team" in pool.columns:
+            # Build game_spreads dict for apply_blowout_cascade
             game_spreads = {}
             for _, row in odds_df.iterrows():
                 spread_val = float(row.get("spread", 0))
@@ -642,7 +637,8 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
                 away = str(row.get("away_team", "")).upper()
                 if not home or not away:
                     continue
-                if spread_val < 0:
+                # Determine favorite/underdog
+                if spread_val < 0:  # negative = home is favored
                     fav, dog = home, away
                 else:
                     fav, dog = away, home
@@ -657,6 +653,8 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
                 _n_adj = int((pool.get("blowout_min_adj", pd.Series(0, index=pool.index)).abs() > 0).sum())
                 if _n_adj:
                     print(f"[_load_nba_pool] Blowout risk adjusted minutes for {_n_adj} player(s)")
+
+            # Map spread to each player for b2b/spread minute dampening
             spread_map = {}
             for _, row in odds_df.iterrows():
                 home = str(row.get("home_team", "")).upper()
@@ -926,13 +924,9 @@ def _build_bullets(classified: dict, edge_df, sport: str) -> list:
 def _recheck_pga_withdrawals(pool: pd.DataFrame) -> pd.DataFrame:
     """Live re-check of PGA field at lineup-build time.
 
-    Two-pass filter:
-    1. Field-updates pass — removes players who withdrew (dg_id not in
-       the live /field-updates response, or explicit WD flag).
-    2. DFS-projections pass — removes players who missed the cut by
-       cross-referencing the current DFS projections from DataGolf.
-       After the cut, DataGolf's showdown/weekend projections only
-       include players still active in the tournament.
+    Queries the DataGolf /field-updates endpoint to catch players who
+    withdrew AFTER the pool was first loaded and saved to parquet.
+    This mirrors what auto_flag_injuries() does for NBA.
     """
     try:
         from yak_core.datagolf import DataGolfClient
@@ -941,79 +935,45 @@ def _recheck_pga_withdrawals(pool: pd.DataFrame) -> pd.DataFrame:
             print("[_recheck_pga_withdrawals] No DATAGOLF_API_KEY — skipping")
             return pool
 
-        if "dg_id" not in pool.columns:
+        dg = DataGolfClient(api_key)
+        field_df = dg.get_field()
+        if field_df.empty:
+            print("[_recheck_pga_withdrawals] Empty field response — skipping")
+            return pool
+
+        if "dg_id" not in pool.columns or "dg_id" not in field_df.columns:
             print("[_recheck_pga_withdrawals] No dg_id column — skipping")
             return pool
 
-        dg = DataGolfClient(api_key)
-        _remove_mask = pd.Series(False, index=pool.index)
+        field_ids = set(field_df["dg_id"].values)
+        _before = len(pool)
 
-        # ── Pass 1: field-updates (withdrawals) ──
-        try:
-            field_df = dg.get_field()
-            if not field_df.empty and "dg_id" in field_df.columns:
-                field_ids = set(field_df["dg_id"].values)
-                _remove_mask = _remove_mask | ~pool["dg_id"].isin(field_ids)
+        # Players in pool but NOT in the live field → withdrawn
+        _wd_mask = ~pool["dg_id"].isin(field_ids)
 
-                # Explicit WD flags
-                for _wd_col in ["wd", "is_wd", "status"]:
-                    if _wd_col in field_df.columns:
-                        _wd_ids = set(field_df.loc[
-                            field_df[_wd_col].astype(str).str.lower().isin(
-                                ["wd", "true", "1", "withdrawn"]
-                            ),
-                            "dg_id"
-                        ].values)
-                        if _wd_ids:
-                            _remove_mask = _remove_mask | pool["dg_id"].isin(_wd_ids)
-                        break
-        except Exception as _fe:
-            print(f"[_recheck_pga_withdrawals] Field-updates check failed: {_fe}")
+        # Also check for explicit WD flags in field data
+        for _wd_col in ["wd", "is_wd", "status"]:
+            if _wd_col in field_df.columns:
+                _wd_ids = set(field_df.loc[
+                    field_df[_wd_col].astype(str).str.lower().isin(
+                        ["wd", "true", "1", "withdrawn"]
+                    ),
+                    "dg_id"
+                ].values)
+                if _wd_ids:
+                    _wd_mask = _wd_mask | pool["dg_id"].isin(_wd_ids)
+                break
 
-        # ── Pass 2: live DFS projections (missed cut / removed from slate) ──
-        # Try showdown first (single-round slate), fall back to weekend, then main.
-        try:
-            _live_proj = pd.DataFrame()
-            for _slate in ("showdown", "weekend", "main"):
-                try:
-                    _live_proj = dg.get_dfs_projections(
-                        site="draftkings", slate=_slate
-                    )
-                    if not _live_proj.empty:
-                        print(
-                            f"[_recheck_pga_withdrawals] Live DFS projections "
-                            f"(slate={_slate}): {len(_live_proj)} players"
-                        )
-                        break
-                except Exception:
-                    continue
-
-            if not _live_proj.empty and "dg_id" in _live_proj.columns:
-                live_ids = set(_live_proj["dg_id"].values)
-                _mc_mask = ~pool["dg_id"].isin(live_ids) & ~_remove_mask
-                _mc_count = _mc_mask.sum()
-                if _mc_count > 0:
-                    _mc_names = pool.loc[_mc_mask, "player_name"].tolist()
-                    print(
-                        f"[_recheck_pga_withdrawals] {_mc_count} player(s) not in "
-                        f"live DFS projections (likely missed cut): "
-                        f"{', '.join(_mc_names[:10])}"
-                    )
-                _remove_mask = _remove_mask | _mc_mask
-        except Exception as _pe:
-            print(f"[_recheck_pga_withdrawals] DFS projection check failed: {_pe}")
-
-        # ── Apply removals ──
-        _remove_count = _remove_mask.sum()
-        if _remove_count > 0:
-            _removed_names = pool.loc[_remove_mask, "player_name"].tolist()
-            pool = pool[~_remove_mask].reset_index(drop=True)
+        _wd_count = _wd_mask.sum()
+        if _wd_count > 0:
+            _wd_names = pool.loc[_wd_mask, "player_name"].tolist()
+            pool = pool[~_wd_mask].reset_index(drop=True)
             print(
-                f"[_recheck_pga_withdrawals] Removed {_remove_count} player(s) "
-                f"at build time: {', '.join(_removed_names[:15])}"
+                f"[_recheck_pga_withdrawals] Removed {_wd_count} withdrawn player(s) "
+                f"at build time: {', '.join(_wd_names[:10])}"
             )
         else:
-            print("[_recheck_pga_withdrawals] No withdrawals or missed cuts detected")
+            print("[_recheck_pga_withdrawals] No new withdrawals detected")
 
         return pool
     except Exception as e:
@@ -1275,237 +1235,6 @@ def _fetch_pga_actuals(api_key: str) -> pd.DataFrame:
     return result
 
 
-def _compute_optimal_lineup(
-    out_dir: Path, actuals: pd.DataFrame, sport: str, contest_slug: str,
-) -> tuple:
-    """Compute the hindsight-optimal lineup using actual FP as the objective.
-
-    Returns (optimal_score, optimal_players_df) or (None, None) on failure.
-    """
-    try:
-        import pulp
-        from yak_core.config import (
-            CONTEST_PRESETS, merge_config,
-            DK_POS_SLOTS, DK_PGA_POS_SLOTS,
-            SALARY_CAP, DK_PGA_SALARY_CAP,
-        )
-
-        pool_path = out_dir / "slate_pool.parquet"
-        if not pool_path.exists():
-            return None, None
-        pool = pd.read_parquet(pool_path)
-
-        # Drop placeholder actual_fp before merging real actuals
-        if "actual_fp" in pool.columns:
-            pool = pool.drop(columns=["actual_fp"])
-        pool = pool.merge(
-            actuals[["player_name", "actual_fp"]],
-            on="player_name", how="left",
-        )
-        pool["actual_fp"] = pd.to_numeric(pool["actual_fp"], errors="coerce").fillna(0)
-        pool = pool[pool["actual_fp"] > 0].copy()
-        if pool.empty:
-            return None, None
-
-        # Determine roster constraints from the contest meta
-        meta_path = out_dir / f"{contest_slug}_meta.json"
-        contest_label = ""
-        if meta_path.exists():
-            try:
-                _m = json.loads(meta_path.read_text())
-                contest_label = _m.get("contest", "")
-            except Exception:
-                pass
-
-        preset = CONTEST_PRESETS.get(contest_label, {})
-        cfg = merge_config({**preset, "SPORT": sport.upper()})
-
-        pos_slots = cfg.get("POS_SLOTS", DK_PGA_POS_SLOTS if sport.upper() == "PGA" else DK_POS_SLOTS)
-        salary_cap = int(cfg.get("SALARY_CAP", DK_PGA_SALARY_CAP if sport.upper() == "PGA" else SALARY_CAP))
-
-        # Normalise position column
-        if "position" not in pool.columns and "pos" in pool.columns:
-            pool["position"] = pool["pos"]
-        if "position" not in pool.columns:
-            pool["position"] = "G" if sport.upper() == "PGA" else "UTIL"
-        pool["position"] = pool["position"].astype(str).str.upper().str.strip()
-        pool["salary"] = pd.to_numeric(pool["salary"], errors="coerce").fillna(0).astype(int)
-        pool = pool[pool["salary"] > 0].reset_index(drop=True)
-
-        players = pool.to_dict("records")
-        n = len(players)
-        slots = pos_slots
-        k = len(slots)
-
-        def _eligible(player, slot_name):
-            nat_pos = str(player.get("position", "")).upper()
-            if slot_name == "UTIL":
-                return True
-            if slot_name == "G":
-                return nat_pos in ("PG", "SG", "G")
-            if slot_name == "F":
-                return nat_pos in ("SF", "PF", "F")
-            return nat_pos == slot_name
-
-        prob = pulp.LpProblem("optimal_hindsight", pulp.LpMaximize)
-
-        # Use enumerate for unique (player, slot_index) keys to avoid
-        # dict-key collision when slots has duplicates (e.g. PGA ["G"]*6).
-        x = {
-            (i, j): pulp.LpVariable(f"x_{i}_{j}", cat="Binary")
-            for i in range(n) for j in range(k)
-        }
-
-        # Objective: maximise total actual FP
-        prob += pulp.lpSum(
-            players[i]["actual_fp"] * x[(i, j)]
-            for i in range(n) for j in range(k)
-        )
-
-        # Each slot filled exactly once (only eligible players)
-        for j in range(k):
-            prob += pulp.lpSum(
-                x[(i, j)] for i in range(n) if _eligible(players[i], slots[j])
-            ) == 1
-
-        # Each player at most once across all slots
-        for i in range(n):
-            prob += pulp.lpSum(x[(i, j)] for j in range(k)) <= 1
-
-        # Salary cap
-        prob += pulp.lpSum(
-            players[i]["salary"] * x[(i, j)]
-            for i in range(n) for j in range(k)
-        ) <= salary_cap
-
-        prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=30))
-
-        if prob.status != pulp.constants.LpStatusOptimal:
-            return None, None
-
-        opt_rows = []
-        for i in range(n):
-            for j in range(k):
-                if x[(i, j)].varValue and x[(i, j)].varValue > 0.5:
-                    opt_rows.append({
-                        "slot": slots[j],
-                        "player_name": players[i]["player_name"],
-                        "salary": players[i]["salary"],
-                        "actual_fp": round(players[i]["actual_fp"], 2),
-                        "proj": round(float(players[i].get("proj", 0)), 2),
-                    })
-
-        opt_df = pd.DataFrame(opt_rows)
-        opt_score = opt_df["actual_fp"].sum() if not opt_df.empty else 0
-        return round(opt_score, 2), opt_df
-
-    except Exception as e:
-        print(f"[_compute_optimal_lineup] Error: {e}")
-        return None, None
-
-
-def _show_biggest_misses(
-    lu_df: pd.DataFrame, out_dir: Path, actuals: pd.DataFrame, sport: str,
-) -> None:
-    """Show high-scoring players from the pool that were NOT in any lineup."""
-    try:
-        pool_path = out_dir / "slate_pool.parquet"
-        if not pool_path.exists():
-            return
-        pool = pd.read_parquet(pool_path)
-        if "actual_fp" in pool.columns:
-            pool = pool.drop(columns=["actual_fp"])
-        pool = pool.merge(
-            actuals[["player_name", "actual_fp"]],
-            on="player_name", how="left",
-        )
-        pool["actual_fp"] = pd.to_numeric(pool["actual_fp"], errors="coerce").fillna(0)
-
-        used_names = set(lu_df["player_name"].unique()) if "player_name" in lu_df.columns else set()
-        misses = pool[~pool["player_name"].isin(used_names)].copy()
-        misses = misses[misses["actual_fp"] > 0].sort_values("actual_fp", ascending=False).head(10)
-
-        if misses.empty:
-            return
-
-        with st.expander("Biggest Misses (pool players not in your lineups)"):
-            show_cols = ["player_name", "pos", "salary", "proj", "actual_fp"]
-            avail = [c for c in show_cols if c in misses.columns]
-            st.dataframe(misses[avail], use_container_width=True, hide_index=True)
-    except Exception:
-        pass
-
-
-def _render_record_calibration(
-    out_dir: Path, actuals: pd.DataFrame, sport: str,
-) -> None:
-    """Button to record calibration errors from the replay actuals."""
-    st.markdown("**Record Calibration**")
-    st.caption(
-        "Record projection errors from this slate into the calibration system. "
-        "This updates correction factors for future projections."
-    )
-
-    meta_path = out_dir / "slate_meta.json"
-    slate_date = ""
-    if meta_path.exists():
-        try:
-            _m = json.loads(meta_path.read_text())
-            slate_date = _m.get("date", "")
-        except Exception:
-            pass
-
-    cal_date = st.text_input(
-        "Slate date for calibration",
-        value=slate_date,
-        key=f"replay_cal_date_{sport}",
-    )
-
-    if st.button("Record Calibration", key=f"replay_record_cal_{sport}"):
-        if not cal_date:
-            st.error("Enter a slate date.")
-            return
-
-        pool_path = out_dir / "slate_pool.parquet"
-        if not pool_path.exists():
-            st.error("No slate pool found.")
-            return
-
-        pool = pd.read_parquet(pool_path)
-        if "actual_fp" in pool.columns:
-            pool = pool.drop(columns=["actual_fp"])
-        pool = pool.merge(
-            actuals[["player_name", "actual_fp"]],
-            on="player_name", how="left",
-        )
-        pool["actual_fp"] = pd.to_numeric(pool["actual_fp"], errors="coerce")
-
-        matched = pool["actual_fp"].notna().sum()
-        if matched == 0:
-            st.error("No actuals matched to pool players.")
-            return
-
-        try:
-            from yak_core.calibration_feedback import record_slate_errors, get_calibration_summary
-
-            result = record_slate_errors(cal_date, pool, sport=sport.upper())
-
-            if isinstance(result, dict) and "error" in result:
-                st.warning(f"Calibration rejected: {result['error']}")
-            else:
-                summary = get_calibration_summary(sport=sport.upper())
-                n_slates = summary.get("n_slates", 0)
-                latest_mae = summary.get("latest_mae", "?")
-                overall_bias = summary.get("overall_bias", 0)
-                st.success(
-                    f"Recorded calibration for {cal_date}. "
-                    f"{n_slates} slates total, latest MAE: {latest_mae}, "
-                    f"overall bias correction: {overall_bias:+.2f} FP"
-                )
-        except Exception as e:
-            st.error(f"Calibration error: {e}")
-
-
 def _render_historical_replay(sport: str) -> None:
     st.markdown("### Historical Replay")
     from app.data_loader import published_dir as _pub_dir
@@ -1635,17 +1364,11 @@ def _render_historical_replay(sport: str) -> None:
                 st.markdown("**Lineup Scores**")
                 st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
-                # ── Hindsight optimal lineup ──────────────────────────────────
-                optimal_score, optimal_players = _compute_optimal_lineup(
-                    out_dir, actuals, sport, selected_full_slug,
-                )
-
+                # KPIs
                 avg_actual = summary_df["total_actual"].mean()
                 avg_proj = summary_df["total_proj"].mean()
                 best = summary_df["total_actual"].max()
                 beat_proj_pct = (summary_df["total_actual"] >= summary_df["total_proj"]).mean() * 100
-
-                # KPI row 1: your lineups
                 k1, k2, k3, k4 = st.columns(4)
                 with k1:
                     st.metric("Avg Actual", f"{avg_actual:.1f}")
@@ -1656,32 +1379,6 @@ def _render_historical_replay(sport: str) -> None:
                 with k4:
                     st.metric("Beat Proj %", f"{beat_proj_pct:.0f}%")
 
-                # KPI row 2: vs optimal
-                if optimal_score and optimal_score > 0:
-                    efficiency = (best / optimal_score) * 100 if optimal_score else 0
-                    gap = optimal_score - best
-                    o1, o2, o3, o4 = st.columns(4)
-                    with o1:
-                        st.metric("Optimal Lineup", f"{optimal_score:.1f}")
-                    with o2:
-                        st.metric("Efficiency", f"{efficiency:.0f}%",
-                                  help="Your best lineup ÷ hindsight optimal")
-                    with o3:
-                        st.metric("Gap to Optimal", f"{gap:+.1f}")
-                    with o4:
-                        sal_used = summary_df["salary"].mean()
-                        st.metric("Avg Salary Used", f"${sal_used:,.0f}")
-
-                    # Show optimal lineup
-                    with st.expander("Hindsight Optimal Lineup"):
-                        if optimal_players is not None and not optimal_players.empty:
-                            st.dataframe(optimal_players, use_container_width=True, hide_index=True)
-                        else:
-                            st.caption("Could not compute optimal lineup.")
-
-                    # Biggest misses: players NOT in your lineups who scored big
-                    _show_biggest_misses(lu_df, out_dir, actuals, sport)
-
                 # Detailed player-level view
                 with st.expander("Player-level detail"):
                     detail_cols = ["lineup_index", "player_name", "pos", "salary", "proj", "actual_fp"]
@@ -1689,10 +1386,6 @@ def _render_historical_replay(sport: str) -> None:
                     st.dataframe(lu_df[avail_cols], use_container_width=True, hide_index=True)
             else:
                 st.dataframe(lu_df.head(30), use_container_width=True, hide_index=True)
-
-        # ── Record Calibration ────────────────────────────────────────────
-        st.markdown("---")
-        _render_record_calibration(out_dir, actuals, sport)
 
         if st.button("Clear Actuals", key=f"replay_clear_{sport}"):
             actuals_path.unlink(missing_ok=True)

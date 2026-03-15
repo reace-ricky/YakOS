@@ -363,13 +363,95 @@ def build_ownership_features(pool_df: pd.DataFrame) -> Tuple[pd.DataFrame, list]
 # 4. Predict ownership using trained model
 # ---------------------------------------------------------------------------
 
+def _predict_ownership_v2(pool_df: pd.DataFrame) -> Optional[pd.Series]:
+    """Try the v2 GBM model trained on RG archive data.
+
+    Returns predicted ownership Series if the v2 model is available,
+    or None if it cannot be loaded / features are missing.
+    """
+    from yak_core.config import YAKOS_ROOT
+
+    v2_path = os.path.join(YAKOS_ROOT, "models", "ownership_model_v2.pkl")
+    if not os.path.isfile(v2_path):
+        return None
+
+    try:
+        import joblib
+        gbm = joblib.load(v2_path)
+    except Exception as exc:
+        print(f"[ext_ownership] v2 model load failed: {exc}")
+        return None
+
+    pool = pool_df.copy()
+    _zero = pd.Series(0.0, index=pool.index)
+
+    sal = pd.to_numeric(pool.get("salary", _zero), errors="coerce").fillna(0)
+    fpts = pd.to_numeric(pool.get("proj", pool.get("fpts", _zero)), errors="coerce").fillna(0)
+    minutes = pd.to_numeric(pool.get("proj_minutes", _zero), errors="coerce").fillna(0)
+    floor_v = pd.to_numeric(pool.get("floor", _zero), errors="coerce").fillna(0)
+    ceil_v = pd.to_numeric(pool.get("ceil", _zero), errors="coerce").fillna(0)
+    sim15 = pd.to_numeric(pool.get("sim15", pool.get("SIM15TH", _zero)), errors="coerce").fillna(0)
+    sim50 = pd.to_numeric(pool.get("sim50", pool.get("SIM50TH", _zero)), errors="coerce").fillna(0)
+    sim85 = pd.to_numeric(pool.get("sim85", pool.get("SIM85TH", _zero)), errors="coerce").fillna(0)
+    sim99 = pd.to_numeric(pool.get("sim99", pool.get("SIM99TH", _zero)), errors="coerce").fillna(0)
+    opto = pd.to_numeric(pool.get("opto", pool.get("OPTO", _zero)), errors="coerce").fillna(0)
+    smash = pd.to_numeric(pool.get("smash", pool.get("SMASH", _zero)), errors="coerce").fillna(0)
+
+    sal_k = (sal / 1000).clip(lower=3)
+    value = fpts / sal_k
+
+    pos_map = {"PG": 0, "SG": 1, "SF": 2, "PF": 3, "C": 4}
+    pos_col = pool.get("pos", pd.Series("", index=pool.index))
+    pos_code = pos_col.fillna("SF").apply(
+        lambda p: pos_map.get(str(p).split("/")[0].strip(), 2)
+    )
+
+    X = pd.DataFrame({
+        "salary": sal,
+        "fpts": fpts,
+        "value": value,
+        "proj_minutes": minutes,
+        "floor": floor_v,
+        "ceil": ceil_v,
+        "sim15": sim15,
+        "sim50": sim50,
+        "sim85": sim85,
+        "sim99": sim99,
+        "sim_spread": sim99 - sim15,
+        "ceil_floor_ratio": ceil_v / floor_v.clip(lower=1),
+        "opto": opto,
+        "smash": smash,
+        "slate_size": len(pool),
+        "n_games": pool["team"].nunique() // 2 if "team" in pool.columns else 5,
+        "pos_code": pos_code,
+        "salary_rank_pct": sal.rank(pct=True),
+        "fpts_rank_pct": fpts.rank(pct=True),
+        "value_rank_pct": value.rank(pct=True),
+    }).fillna(0)
+
+    try:
+        preds = gbm.predict(X).clip(0)
+        print(
+            f"[ext_ownership] v2 model: mean={preds.mean():.1f}%, "
+            f"max={preds.max():.1f}%, n={len(preds)}"
+        )
+        return pd.Series(preds, index=pool.index)
+    except Exception as exc:
+        print(f"[ext_ownership] v2 predict failed: {exc}")
+        return None
+
+
 def predict_ownership(
     pool_df: pd.DataFrame,
     model_path: Optional[str] = None,
 ) -> pd.DataFrame:
-    """Predict ``own_model`` for every player using the persisted GBM model.
+    """Predict ``own_model`` for every player using the persisted model.
 
-    Falls back to salary-rank heuristics when the model file is absent.
+    Resolution order:
+      1. v2 GBM model (trained on RG archive — much higher accuracy)
+      2. v1 JSON model (portable Ridge fallback)
+      3. v1 pkl model (sklearn pipeline)
+      4. Heuristic value-score fallback
 
     Parameters
     ----------
@@ -388,6 +470,13 @@ def predict_ownership(
 
     pool = pool_df.copy()
 
+    # ── Try v2 model first (RG-archive-trained GBM) ──
+    v2_preds = _predict_ownership_v2(pool)
+    if v2_preds is not None:
+        pool["own_model"] = np.clip(v2_preds, 0.0, OWN_CLIP_MAX).round(1)
+        return pool
+
+    # ── Fall back to v1 model ──
     if model_path is None:
         model_path = os.path.join(YAKOS_ROOT, "models", "ownership_model.pkl")
 
