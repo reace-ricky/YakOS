@@ -295,7 +295,7 @@ class TestGPPConstraints:
     def test_exposure_cap(self):
         """No player exceeds MAX_EXPOSURE across lineups."""
         pool = _make_pool(n=60)
-        cfg = _make_cfg(MAX_EXPOSURE=0.35, NUM_LINEUPS=20)
+        cfg = _make_cfg(MAX_EXPOSURE=0.35, NUM_LINEUPS=20, TIERED_EXPOSURE=[])
         player_pool = prepare_pool(pool, cfg)
         lineups_df, _ = build_multiple_lineups_with_exposure(player_pool, cfg)
 
