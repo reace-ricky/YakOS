@@ -1232,6 +1232,8 @@ def build_showdown_lineups(
     max_appearances = max(1, int(num_lineups * max_exposure))
     max_pair_appearances = int(cfg.get("MAX_PAIR_APPEARANCES", 0))
 
+    noise_std = float(cfg.get("SD_NOISE_STD", DEFAULT_CONFIG.get("SD_NOISE_STD", 0.10)))
+
     base_players = player_pool.to_dict("records")
     m = len(base_players)
     if m < DK_SHOWDOWN_LINEUP_SIZE:
@@ -1239,36 +1241,78 @@ def build_showdown_lineups(
             f"Showdown pool has only {m} players; need at least {DK_SHOWDOWN_LINEUP_SIZE}"
         )
 
-    # Build augmented player list: each base player appears twice:
-    #   index i      -> FLEX version (salary = base, score = base)
-    #   index i + m  -> CPT version  (salary = 1.5x, score = 1.5x)
+    # ── Compute v8 GPP scores for CPT slot ──────────────────────────────────
+    # The pool already has gpp_score from _add_scores() (v8 formula) for FLEX.
+    # For CPT, we recompute using the 1.5x multiplier on the raw sim inputs
+    # so the upside/boom/ownership components scale correctly.
     cpt_mult = DK_SHOWDOWN_CAPTAIN_MULTIPLIER
+    gpp_proj_w    = float(cfg.get("GPP_PROJ_WEIGHT", DEFAULT_CONFIG["GPP_PROJ_WEIGHT"]))
+    gpp_upside_w  = float(cfg.get("GPP_UPSIDE_WEIGHT", DEFAULT_CONFIG["GPP_UPSIDE_WEIGHT"]))
+    gpp_boom_w    = float(cfg.get("GPP_BOOM_WEIGHT", DEFAULT_CONFIG["GPP_BOOM_WEIGHT"]))
+    own_penalty_k = float(cfg.get("GPP_OWN_PENALTY_STRENGTH", DEFAULT_CONFIG["GPP_OWN_PENALTY_STRENGTH"]))
+    own_low_boost = float(cfg.get("GPP_OWN_LOW_BOOST", DEFAULT_CONFIG["GPP_OWN_LOW_BOOST"]))
 
+    # Resolve sim percentile columns from the DataFrame for CPT v8 scoring
+    _sim90 = _get_sim_col(player_pool, "90")
+    _sim85 = _get_sim_col(player_pool, "85")
+    _sim99 = _get_sim_col(player_pool, "99")
+    _sim50 = _get_sim_col(player_pool, "50")
+
+    def _cpt_gpp_score(idx: int, p: dict) -> float:
+        """Compute v8 GPP score for a CPT-slot player (1.5x on raw inputs)."""
+        proj = float(p.get("proj", 0)) * cpt_mult
+
+        # Upside: SIM90 > SIM85 > ceil > proj, scaled by 1.5x
+        if (_sim90 > 0).any():
+            upside = float(_sim90.iloc[idx]) * cpt_mult
+        elif (_sim85 > 0).any():
+            upside = float(_sim85.iloc[idx]) * cpt_mult
+        elif "ceil" in p:
+            upside = float(p["ceil"]) * cpt_mult
+        else:
+            upside = proj
+
+        # Boom: (SIM99 - SIM50) spread, scaled by 1.5x
+        if (_sim99 > 0).any() and (_sim50 > 0).any():
+            boom = max(0.0, (float(_sim99.iloc[idx]) - float(_sim50.iloc[idx]))) * cpt_mult
+        elif (_sim90 > 0).any() and (_sim50 > 0).any():
+            boom = max(0.0, (float(_sim90.iloc[idx]) - float(_sim50.iloc[idx]))) * cpt_mult
+        elif "ceil" in p:
+            boom = max(0.0, float(p["ceil"]) - float(p.get("proj", 0))) * cpt_mult
+        else:
+            boom = 0.0
+
+        # Ownership adjustment (same log-based as v8, NOT scaled by 1.5x)
+        own = max(0.001, float(p.get("own_pct", 0)))
+        own_adj = -own_penalty_k * np.log(own / 0.15)
+        own_adj += own_low_boost * max(0.0, 0.08 - own) * 10
+
+        return proj * gpp_proj_w + upside * gpp_upside_w + boom * gpp_boom_w + own_adj
+
+    # Build augmented player list: each base player appears twice:
+    #   index i      -> FLEX version (salary = base, score = base gpp_score)
+    #   index i + m  -> CPT version  (salary = 1.5x, score = v8 with 1.5x inputs)
     players: list[dict] = []
     for p in base_players:
-        # FLEX copy
+        # FLEX copy — uses pre-computed v8 gpp_score
         players.append({
             **p,
             "_role": "FLEX",
             "_base_idx": len(players),  # will be overwritten below
+            "_base_gpp_score": float(p.get("gpp_score", p.get("proj", 0))),
         })
     flex_count = len(players)  # == m
-    for p in base_players:
-        # CPT copy
+    for idx, p in enumerate(base_players):
+        # CPT copy — v8 scoring with 1.5x on raw sim inputs
         cpt_salary = int(round(p["salary"] * cpt_mult))
-        cpt_score  = p.get("gpp_score", p.get("proj", 0)) * cpt_mult
-        # Adjust captain score: bonus for ceiling, penalty for high ownership
-        ceil_bonus    = float(cfg.get("SD_CAPTAIN_CEIL_BONUS", 0.2))
-        own_penalty   = float(cfg.get("SD_CAPTAIN_OWN_PENALTY", 10.0))
-        if "ceil" in p:
-            cpt_score += ceil_bonus * float(p["ceil"])
-        cpt_score -= own_penalty * float(p.get("own_pct", 0))
+        cpt_score = _cpt_gpp_score(idx, p)
         players.append({
             **p,
             "salary": cpt_salary,
             "gpp_score": cpt_score,
             "_role": "CPT",
             "_base_idx": len(players) - flex_count,
+            "_base_gpp_score": cpt_score,
         })
 
     # Fix _base_idx for FLEX copies
@@ -1298,9 +1342,24 @@ def build_showdown_lineups(
     pair_appearances: Dict[tuple, int] = {}
     lineups = []
 
+    # ── Per-solve noise for diversity (mirrors Classic GPP builder) ──────────
+    rng = np.random.default_rng(seed=42)
+
     for lineup_num in range(num_lineups):
         if progress_callback:
             progress_callback(lineup_num, num_lineups)
+
+        # Randomize scores each solve so the optimizer explores different combos
+        if num_lineups > 1:
+            noise = rng.normal(1.0, noise_std, size=n)
+            solve_scores = [
+                players[i]["_base_gpp_score"] * noise[i] for i in range(n)
+            ]
+        else:
+            solve_scores = [
+                players[i].get("gpp_score", players[i].get("proj", 0))
+                for i in range(n)
+            ]
 
         # Build extra not-with pairs from pair appearance tracking
         extra_not_with_base: list[tuple[int, int]] = []
@@ -1315,11 +1374,8 @@ def build_showdown_lineups(
         # y[i] = 1 if player i (in augmented list) is selected
         y = [pulp.LpVariable(f"y_{i}", cat="Binary") for i in range(n)]
 
-        # Objective: maximise total adjusted score
-        prob += pulp.lpSum(
-            players[i].get("gpp_score", players[i].get("proj", 0)) * y[i]
-            for i in range(n)
-        )
+        # Objective: maximise total noise-perturbed score
+        prob += pulp.lpSum(solve_scores[i] * y[i] for i in range(n))
 
         # Exactly 1 CPT slot
         prob += pulp.lpSum(y[i] for i in range(flex_count, n)) == 1
@@ -1376,6 +1432,7 @@ def build_showdown_lineups(
                 lineup_rows.append({
                     "lineup_index": lineup_num,
                     "slot": "CPT",
+                    "player_id": p.get("player_id", p["player_name"]),
                     "player_name": p["player_name"],
                     "team": p.get("team", ""),
                     "position": p.get("position", ""),
@@ -1395,6 +1452,7 @@ def build_showdown_lineups(
                 lineup_rows.append({
                     "lineup_index": lineup_num,
                     "slot": "FLEX",
+                    "player_id": p.get("player_id", p["player_name"]),
                     "player_name": p["player_name"],
                     "team": p.get("team", ""),
                     "position": p.get("position", ""),
@@ -1437,6 +1495,7 @@ def build_showdown_lineups(
         )
         if times > 0:
             exp_rows.append({
+                "player_id": p.get("player_id", p["player_name"]),
                 "player_name": p["player_name"],
                 "team": p.get("team", ""),
                 "salary": p["salary"],
@@ -1527,6 +1586,29 @@ def run_lineups_from_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "run_lineups_from_config() was removed in the lineups rewrite. "
         "Use build_run_config() + the new optimizer functions instead."
     )
+
+
+def to_dk_showdown_upload_format(lineups_df: pd.DataFrame) -> pd.DataFrame:
+    """Convert Showdown lineups (long format) to DraftKings CSV upload format.
+
+    Each output row = one lineup with columns: CPT, FLEX1..FLEX5 plus DK meta.
+    """
+    if lineups_df.empty:
+        return pd.DataFrame()
+
+    rows = []
+    for lu_idx in sorted(lineups_df["lineup_index"].unique()):
+        lu = lineups_df[lineups_df["lineup_index"] == lu_idx]
+        row: dict = {"Entry ID": "", "Contest Name": "", "Contest ID": "", "Entry Fee": ""}
+        cpt_rows = lu[lu["slot"] == "CPT"]
+        flex_rows = lu[lu["slot"] == "FLEX"]
+        if not cpt_rows.empty:
+            row["CPT"] = cpt_rows.iloc[0]["player_name"]
+        for i, (_, fr) in enumerate(flex_rows.iterrows()):
+            row[f"FLEX{i + 1}"] = fr["player_name"]
+        rows.append(row)
+
+    return pd.DataFrame(rows)
 
 
 def to_dk_upload_format(lineups_df: pd.DataFrame) -> pd.DataFrame:

@@ -259,6 +259,45 @@ class TestBuildShowdownLineups:
             build_showdown_lineups(pool, _SHOWDOWN_CFG)
 
 
+class TestShowdownDiversity:
+    """Showdown lineups should produce meaningful diversity via per-solve noise."""
+
+    def test_10_lineups_produce_at_least_7_unique(self):
+        """Building 10 Showdown lineups should yield at least 7 unique variants."""
+        pool = _make_showdown_pool(20)
+        cfg = dict(_SHOWDOWN_CFG, NUM_LINEUPS=10, MAX_EXPOSURE=1.0)
+        lu_df, _ = build_showdown_lineups(pool, cfg)
+
+        # Extract unique lineup fingerprints (sorted player names per lineup)
+        lineup_fingerprints = set()
+        for lu_idx in lu_df["lineup_index"].unique():
+            lu = lu_df[lu_df["lineup_index"] == lu_idx]
+            # Include slot info so CPT swaps count as different
+            fingerprint = tuple(sorted(
+                (row["player_name"], row["slot"])
+                for _, row in lu.iterrows()
+            ))
+            lineup_fingerprints.add(fingerprint)
+
+        assert len(lineup_fingerprints) >= 7, (
+            f"Expected at least 7 unique lineups from 10 builds, got {len(lineup_fingerprints)}"
+        )
+
+    def test_noise_std_configurable(self):
+        """SD_NOISE_STD should be configurable."""
+        pool = _make_showdown_pool(20)
+        cfg = dict(_SHOWDOWN_CFG, NUM_LINEUPS=5, SD_NOISE_STD=0.20)
+        lu_df, _ = build_showdown_lineups(pool, cfg)
+        assert lu_df["lineup_index"].nunique() == 5
+
+    def test_single_lineup_no_noise(self):
+        """Building 1 lineup should not crash (noise only applied for >1)."""
+        pool = _make_showdown_pool(20)
+        cfg = dict(_SHOWDOWN_CFG, NUM_LINEUPS=1)
+        lu_df, _ = build_showdown_lineups(pool, cfg)
+        assert lu_df["lineup_index"].nunique() == 1
+
+
 class TestToDkShowdownUploadFormat:
     def _build_lineups(self) -> pd.DataFrame:
         pool = _make_showdown_pool()
