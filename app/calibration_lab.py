@@ -192,10 +192,32 @@ def _clamp_to_bounds(key: str, value: float) -> float:
     return round(max(lo, min(hi, value)), 2)
 
 
+# Step sizes for slider keys — dampened values must snap to these
+_SLIDER_STEPS: Dict[str, float] = {
+    "own_neutral_pct": 1, "max_punt_players": 1, "min_mid_players": 1,
+    "game_diversity_pct": 5, "stud_exposure": 5, "mid_exposure": 5,
+    "value_exposure": 5, "proj_weight": 0.05, "upside_weight": 0.05,
+    "boom_weight": 0.05, "own_penalty_strength": 0.1, "low_own_boost": 0.1,
+    "edge_smash_weight": 0.01, "edge_leverage_weight": 0.01,
+    "edge_form_weight": 0.01, "edge_dvp_weight": 0.01,
+    "edge_catalyst_weight": 0.01, "edge_bust_penalty": 0.01,
+    "edge_efficiency_weight": 0.01,
+}
+
+
 def _dampen(current: float, recommended: float, key: str) -> float:
-    """Apply learning rate dampening and bounds clamping to a recommendation."""
+    """Apply learning rate dampening, bounds clamping, and step snapping."""
     dampened = current + BATCH_LEARNING_RATE * (recommended - current)
-    return _clamp_to_bounds(key, dampened)
+    clamped = _clamp_to_bounds(key, dampened)
+    # Snap to slider step size so Streamlit doesn't crash
+    step = _SLIDER_STEPS.get(key)
+    if step:
+        clamped = round(round(clamped / step) * step, 4)
+    # Integer keys must be int
+    if key in ("own_neutral_pct", "max_punt_players", "min_mid_players",
+               "game_diversity_pct", "stud_exposure", "mid_exposure", "value_exposure"):
+        clamped = int(clamped)
+    return clamped
 
 
 def _build_optimizer_config_from_sliders(sliders: Dict[str, Any], contest_type: str) -> Dict[str, Any]:
@@ -1857,6 +1879,42 @@ def render_calibration_lab(sport: str) -> None:
             st.session_state["cal_lab_sliders"] = dict(DEFAULT_LAB_CONFIG)
 
     sliders = st.session_state["cal_lab_sliders"]
+
+    # ── Coerce slider values (dampening math can produce values that don't
+    #    align with slider step sizes, causing StreamlitAPIException) ──
+    _INT_SLIDER_KEYS = {
+        "own_neutral_pct": (5, 30, 1),
+        "max_punt_players": (0, 3, 1),
+        "min_mid_players": (2, 6, 1),
+        "game_diversity_pct": (50, 100, 5),
+        "stud_exposure": (20, 80, 5),
+        "mid_exposure": (20, 60, 5),
+        "value_exposure": (10, 40, 5),
+    }
+    for _k, (_lo, _hi, _step) in _INT_SLIDER_KEYS.items():
+        if _k in sliders:
+            _v = int(round(sliders[_k]))
+            _v = round(_v / _step) * _step
+            sliders[_k] = max(_lo, min(_hi, _v))
+
+    _FLOAT_SLIDER_KEYS = {
+        "proj_weight": (0.0, 1.0, 0.05),
+        "upside_weight": (0.0, 1.0, 0.05),
+        "boom_weight": (0.0, 1.0, 0.05),
+        "own_penalty_strength": (0.0, 3.0, 0.1),
+        "low_own_boost": (0.0, 2.0, 0.1),
+        "edge_smash_weight": (0.0, 0.5, 0.01),
+        "edge_leverage_weight": (0.0, 0.5, 0.01),
+        "edge_form_weight": (0.0, 0.5, 0.01),
+        "edge_dvp_weight": (0.0, 0.3, 0.01),
+        "edge_catalyst_weight": (0.0, 0.3, 0.01),
+        "edge_bust_penalty": (0.0, 0.5, 0.01),
+        "edge_efficiency_weight": (0.0, 0.3, 0.01),
+    }
+    for _k, (_lo, _hi, _step) in _FLOAT_SLIDER_KEYS.items():
+        if _k in sliders:
+            _v = round(round(float(sliders[_k]) / _step) * _step, 4)
+            sliders[_k] = max(_lo, min(_hi, _v))
 
     st.sidebar.markdown("#### GPP Formula Weights")
     sliders["proj_weight"] = st.sidebar.slider(
