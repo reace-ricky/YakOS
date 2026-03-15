@@ -91,6 +91,15 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "NUM_LINEUPS": 20,
     "SALARY_CAP": SALARY_CAP,
     "MAX_EXPOSURE": 0.6,
+    # Tiered exposure caps: salary-based max exposure overrides.
+    # When enabled (non-empty), these replace the flat MAX_EXPOSURE for players
+    # in each salary tier.  Format: list of (min_salary, max_exposure) tuples,
+    # evaluated top-down (first match wins).
+    "TIERED_EXPOSURE": [
+        (9000, 0.50),   # $9K+ → 50% max exposure
+        (6000, 0.35),   # $6K-$9K → 35% max exposure
+        (0,    0.25),   # <$6K → 25% max exposure
+    ],
     "MIN_TEAM_STACK": 0,
     "MIN_GAME_STACK": 0,
     "LOGIC_PROFILE": "ours",
@@ -112,6 +121,14 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "NOT_WITH": [],        # list of [player_a, player_b] pairs that must not appear together
     # Lineup diversity controls
     "MAX_PAIR_APPEARANCES": 0,   # 0 = disabled; N = max times any two players can share a lineup
+    # Game diversification: cap how often any single game can be the primary stack
+    # (3+ players).  0.0 = disabled; 0.65 = no game stacked in >65% of lineups.
+    "MAX_GAME_STACK_RATE": 0.65,
+    # Value play floor filter: for players under VALUE_FLOOR_SALARY, if their
+    # floor < proj * VALUE_FLOOR_RATIO, cap exposure to VALUE_FLOOR_MAX_EXPOSURE.
+    "VALUE_FLOOR_SALARY": 5000,
+    "VALUE_FLOOR_RATIO": 0.35,
+    "VALUE_FLOOR_MAX_EXPOSURE": 0.15,
     # Model projection tuning
     "MODEL_HIST_WEIGHT": 0.6,   # weight on historical avg vs salary-implied
     "MODEL_POS_REGRESS": 0.2,   # regress toward position-level mean

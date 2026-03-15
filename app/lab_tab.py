@@ -131,6 +131,12 @@ def render_lab_tab(sport: str) -> None:
                             except Exception:
                                 pass
 
+                    # Apply calibration AFTER RG merge so corrections aren't overwritten
+                    from yak_core.calibration_feedback import get_correction_factors, apply_corrections
+                    corrections = get_correction_factors(sport="NBA")
+                    if corrections.get("n_slates", 0) > 0:
+                        pool = apply_corrections(pool, corrections, sport="NBA")
+
                 try:
                     from yak_core.sim_sandbox import score_player_breakout
                     pool["breakout_score"] = score_player_breakout(pool)
@@ -504,7 +510,6 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
         fetch_betting_odds,
     )
     from yak_core.projections import apply_projections, yakos_minutes_projection
-    from yak_core.calibration_feedback import get_correction_factors, apply_corrections
     from yak_core.injury_cascade import apply_injury_cascade
     from yak_core.blowout_risk import apply_blowout_cascade
 
@@ -623,9 +628,8 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
         _proj = pd.to_numeric(pool.get("proj", 0), errors="coerce").fillna(0).clip(lower=0)
         pool["ceil"] = (_proj * (1.0 + _spread_mult)).round(2)
 
-    corrections = get_correction_factors(sport="NBA")
-    if corrections.get("n_slates", 0) > 0:
-        pool = apply_corrections(pool, corrections, sport="NBA")
+    # NOTE: Calibration corrections are applied in render_lab_tab() AFTER
+    # the RG merge so they are not overwritten by raw RG FPTS values.
 
     try:
         from yak_core.ownership_guard import ensure_ownership

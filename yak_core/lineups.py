@@ -233,25 +233,36 @@ def _add_scores(
     has_sim99 = (sim99 > 0).any()
     has_sim50 = (sim50 > 0).any()
 
-    if has_sim90:
-        upside = sim90
-    elif has_sim85:
-        upside = sim85
-    elif "ceil" in df.columns:
-        upside = pd.to_numeric(df["ceil"], errors="coerce").fillna(df["proj"])
+    # Synthetic fallback estimates for players missing sim data
+    upside_fallback = df["proj"] * 1.35
+    if "ceil" in df.columns:
+        ceil_vals = pd.to_numeric(df["ceil"], errors="coerce").fillna(upside_fallback)
+        boom_fallback = (ceil_vals - df["proj"]).clip(lower=0)
     else:
-        upside = df["proj"]
+        ceil_vals = upside_fallback
+        boom_fallback = df["proj"] * 0.50
+
+    if has_sim90:
+        upside = sim90.where(sim90 > 0, ceil_vals).fillna(upside_fallback)
+    elif has_sim85:
+        upside = sim85.where(sim85 > 0, ceil_vals).fillna(upside_fallback)
+    elif "ceil" in df.columns:
+        upside = ceil_vals
+    else:
+        upside = upside_fallback
 
     # ── Boom potential: spread between top sim pctile and median
     # Captures how much variance / explosion a player has
     if has_sim99 and has_sim50:
-        boom = (sim99 - sim50).clip(lower=0)
+        raw_boom = (sim99 - sim50).clip(lower=0)
+        boom = raw_boom.where(raw_boom > 0, boom_fallback).fillna(boom_fallback)
     elif has_sim90 and has_sim50:
-        boom = (sim90 - sim50).clip(lower=0)
+        raw_boom = (sim90 - sim50).clip(lower=0)
+        boom = raw_boom.where(raw_boom > 0, boom_fallback).fillna(boom_fallback)
     elif "ceil" in df.columns:
-        boom = (pd.to_numeric(df["ceil"], errors="coerce").fillna(df["proj"]) - df["proj"]).clip(lower=0)
+        boom = boom_fallback
     else:
-        boom = pd.Series(0.0, index=df.index)
+        boom = df["proj"] * 0.50
 
     # ── Non-linear ownership adjustment (log-based)
     # Instead of flat -3.0 * own_pct which crushes all chalk equally:
@@ -415,6 +426,7 @@ def _build_one_lineup(
     not_with_pairs: list | None = None,
     forced_players: list | None = None,
     excluded_players: list | None = None,
+    game_player_caps: dict | None = None,
 ) -> list | None:
     """Solve one LP and return a list of (player_dict, slot_name) tuples.
 
@@ -663,6 +675,16 @@ def _build_one_lineup(
                     <= tier_max[tier]
                 )
 
+    # Game player caps: limit max players from specific games (diversification)
+    if game_player_caps and "game_id" in (players[0] if players else {}):
+        for gid, max_from_game in game_player_caps.items():
+            gp_idxs = [i for i in range(n) if players[i].get("game_id") == gid]
+            if gp_idxs:
+                prob += (
+                    pulp.lpSum(_x(i, j) for i in gp_idxs for j in range(k))
+                    <= max_from_game
+                )
+
     # Solve
     solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=solver_time_limit)
     prob.solve(solver)
@@ -691,11 +713,23 @@ def build_multiple_lineups_with_exposure(
     own_weight = float(cfg.get("OWN_WEIGHT", 0.0))
     solver_time_limit = int(cfg.get("SOLVER_TIME_LIMIT", 30))
     max_appearances = max(1, int(num_lineups * max_exposure))
+    # Tiered exposure caps: salary-based overrides for max_exposure.
+    # Format: list of (min_salary, max_exposure) tuples, evaluated top-down.
+    tiered_exposure = cfg.get("TIERED_EXPOSURE", [])
     # Per-player exposure overrides: {player_name: max_exposure_float}
     player_max_exp = cfg.get("PLAYER_MAX_EXPOSURE", {})
     pos_caps = cfg.get("POS_CAPS", {})
     lock_names = [n.strip() for n in cfg.get("LOCK", [])]
     max_pair_appearances = int(cfg.get("MAX_PAIR_APPEARANCES", 0))
+    # Value play floor filter: cheap players with low floor get capped exposure
+    vf_salary = float(cfg.get("VALUE_FLOOR_SALARY", 5000))
+    vf_ratio = float(cfg.get("VALUE_FLOOR_RATIO", 0.35))
+    vf_max_exp = float(cfg.get("VALUE_FLOOR_MAX_EXPOSURE", 0.15))
+    # Game diversification: cap how often any single game is the primary stack
+    max_game_stack_rate = float(cfg.get("MAX_GAME_STACK_RATE", 0.0))
+    max_game_stack_appearances = (
+        max(1, int(num_lineups * max_game_stack_rate)) if max_game_stack_rate > 0 else 0
+    )
     # NOT_WITH: list of [player_a, player_b] pairs that must not appear together
     not_with_raw = cfg.get("NOT_WITH", [])
     not_with_pairs: list[tuple[str, str]] = [
@@ -761,8 +795,24 @@ def build_multiple_lineups_with_exposure(
             # Per-player override if provided
             if pname in player_max_exp:
                 cap = max(1, int(num_lineups * float(player_max_exp[pname])))
+            elif tiered_exposure:
+                # Salary-tiered exposure: find first matching tier (top-down)
+                sal = float(p.get("salary", 0))
+                tier_cap = max_appearances  # fallback if no tier matches
+                for tier_min_sal, tier_exp in tiered_exposure:
+                    if sal >= tier_min_sal:
+                        tier_cap = max(1, int(num_lineups * tier_exp))
+                        break
+                cap = tier_cap
             else:
                 cap = max_appearances
+            # Value play floor filter: cheap players with unstable floors
+            sal = float(p.get("salary", 0))
+            floor_val = float(p.get("floor", 0))
+            proj_val = float(p.get("proj", 0))
+            if sal < vf_salary and proj_val > 0 and floor_val < proj_val * vf_ratio:
+                vf_cap = max(1, int(num_lineups * vf_max_exp))
+                cap = min(cap, vf_cap)
             remaining[i] = cap
 
     # Build tier constraint structures
@@ -777,6 +827,9 @@ def build_multiple_lineups_with_exposure(
 
     # Pair-appearances tracking matrix
     pair_appearances: Dict[tuple, int] = {}
+
+    # Game-stack tracking: how many lineups each game has been the primary stack
+    game_stack_counts: Dict[str, int] = {}
 
     # ── Per-solve projection randomization for GPP/MME ──────────────────────
     # Re-seed projections each solve so the optimizer explores different
@@ -830,6 +883,16 @@ def build_multiple_lineups_with_exposure(
             ]
             extra_not_with.extend(over_pairs)
 
+        # Game diversification: cap over-stacked games to 2 players max
+        cur_game_caps = None
+        if max_game_stack_appearances > 0:
+            over_games = {
+                gid for gid, cnt in game_stack_counts.items()
+                if cnt >= max_game_stack_appearances
+            }
+            if over_games:
+                cur_game_caps = {gid: 2 for gid in over_games}
+
         result = _build_one_lineup(
             players=players,
             pos_slots=pos_slots,
@@ -844,6 +907,7 @@ def build_multiple_lineups_with_exposure(
             not_with_pairs=extra_not_with,
             forced_players=lock_indices,
             excluded_players=exclude_indices,
+            game_player_caps=cur_game_caps,
         )
 
         if result is None:
@@ -862,6 +926,7 @@ def build_multiple_lineups_with_exposure(
                 not_with_pairs=not_with_idx_pairs,
                 forced_players=lock_indices,
                 excluded_players=exclude_indices,
+                game_player_caps=cur_game_caps,
             )
 
         if result is None:
@@ -900,6 +965,17 @@ def build_multiple_lineups_with_exposure(
                 for b in selected_indices:
                     if a < b:
                         pair_appearances[(a, b)] = pair_appearances.get((a, b), 0) + 1
+
+        # Track game stack: identify primary stack game (3+ players from one game)
+        if max_game_stack_appearances > 0:
+            from collections import Counter
+            game_counts = Counter(
+                players[idx].get("game_id") for idx in selected_indices
+                if players[idx].get("game_id")
+            )
+            for gid, cnt in game_counts.items():
+                if cnt >= 3:
+                    game_stack_counts[gid] = game_stack_counts.get(gid, 0) + 1
 
     # Flatten lineups into a DataFrame
     if not lineups:
