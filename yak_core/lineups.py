@@ -1157,12 +1157,15 @@ def build_showdown_lineups(
     name_to_cpt  = {p["player_name"]: i for i, p in enumerate(players[flex_count:], start=flex_count)}
 
     lock_flex_indices = [name_to_flex[nm] for nm in lock_names if nm in name_to_flex]
+    exclude_names = [nm.strip() for nm in cfg.get("EXCLUDE", [])]
 
     # Appearance budgets (apply to base-player level, not CPT/FLEX separately)
     base_remaining = {i: max_appearances for i in range(m)}
     for i in range(m):
         pname = base_players[i]["player_name"]
-        if pname in [base_players[li]["player_name"] for li in lock_flex_indices]:
+        if pname in exclude_names:
+            base_remaining[i] = 0
+        elif pname in [base_players[li]["player_name"] for li in lock_flex_indices]:
             base_remaining[i] = num_lineups
 
     pair_appearances: Dict[tuple, int] = {}
