@@ -319,13 +319,17 @@ def apply_calibration_overrides(cfg: Dict[str, Any]) -> Dict[str, Any]:
     values on top of *cfg*.  Returns a **new** dict — the original is not
     mutated.
 
+    Uses the ``CONTEST_TYPE`` key from *cfg* to select the correct
+    per-contest-type overrides section.
+
     Tiered-exposure keys (``TIERED_EXPOSURE_STUD``, ``_MID``, ``_VALUE``)
     are collapsed back into the ``TIERED_EXPOSURE`` list-of-tuples format
     the optimizer expects.
     """
     if load_optimizer_overrides is None:
         return cfg
-    overrides = load_optimizer_overrides()
+    contest_type = cfg.get("CONTEST_TYPE", "gpp")
+    overrides = load_optimizer_overrides(contest_type=contest_type)
     if not overrides:
         return cfg
 

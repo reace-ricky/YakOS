@@ -991,32 +991,6 @@ def render_calibration_lab(sport: str) -> None:
         st.info("Calibration Lab currently supports NBA only. PGA support coming soon.")
         return
 
-    # ── Config Status Bar ────────────────────────────────────────────────
-    active_cfg = load_active_config()
-    if active_cfg:
-        slates = active_cfg.get("slates_trained", [])
-        updated = active_cfg.get("updated", "")
-        cfg_name = active_cfg.get("name", "Working Config")
-        # Format slates list
-        if slates:
-            slate_labels = ", ".join(slates[-5:])  # show last 5
-            if len(slates) > 5:
-                slate_labels = f"...{slate_labels}"
-            trained_text = f"Trained on: {slate_labels} ({len(slates)} slate{'s' if len(slates) != 1 else ''})"
-        else:
-            trained_text = "No slates trained yet"
-        # Format update time
-        updated_text = ""
-        if updated:
-            try:
-                dt = datetime.fromisoformat(updated)
-                updated_text = f" | Last updated: {dt.strftime('%b %d %I:%M%p')}"
-            except ValueError:
-                updated_text = ""
-        st.info(f"**{cfg_name}**{updated_text} | {trained_text}")
-    else:
-        st.caption("Using default config. Analyze a slate and apply recommendations to start tuning.")
-
     # ── Section 0: Date / Slate Selector ────────────────────────────────
     entries = _list_archived_dates()
     if not entries:
@@ -1034,6 +1008,33 @@ def render_calibration_lab(sport: str) -> None:
     with col_contest:
         contest_types = ["GPP", "Showdown", "Cash"]
         contest_mode = st.radio("Contest Type", contest_types, key="cal_lab_contest_type", horizontal=True)
+
+    contest_type_key = contest_mode.lower()  # "gpp", "showdown", or "cash"
+
+    # ── Config Status Bar ────────────────────────────────────────────────
+    active_cfg = load_active_config()
+    if active_cfg:
+        ct_cfg = active_cfg.get(contest_type_key, {})
+        slates = ct_cfg.get("slates_trained", [])
+        updated = ct_cfg.get("updated", "")
+        cfg_name = ct_cfg.get("name", f"{contest_mode} Working Config")
+        if slates:
+            slate_labels = ", ".join(slates[-5:])
+            if len(slates) > 5:
+                slate_labels = f"...{slate_labels}"
+            trained_text = f"Trained on: {slate_labels} ({len(slates)} slate{'s' if len(slates) != 1 else ''})"
+        else:
+            trained_text = "No slates trained yet"
+        updated_text = ""
+        if updated:
+            try:
+                dt = datetime.fromisoformat(updated)
+                updated_text = f" | Last updated: {dt.strftime('%b %d %I:%M%p')}"
+            except ValueError:
+                updated_text = ""
+        st.info(f"**{cfg_name}**{updated_text} | {trained_text}")
+    else:
+        st.caption("Using default config. Analyze a slate and apply recommendations to start tuning.")
 
     entry = entries[selected]
     pool = _load_archived_pool(entry["file"])
@@ -1124,7 +1125,9 @@ def render_calibration_lab(sport: str) -> None:
         slots = NBA_POS_SLOTS
         salary_cap = NBA_SALARY_CAP
 
-    # Build player options sorted by actual FP
+    # Build player options — show ALL players from the pool, sorted by actual FP.
+    # In the Calibration Lab we want the full archived pool (including DNPs,
+    # injured players, etc.) so the user can see the complete picture.
     player_opts = pool.sort_values("actual_fp", ascending=False)
 
     for lu_idx, tab in enumerate(lineup_tabs):
@@ -1136,16 +1139,32 @@ def render_calibration_lab(sport: str) -> None:
             for slot_idx, slot in enumerate(slots):
                 slot_key = f"{lu_key}_slot_{slot_idx}"
 
-                # Filter eligible players for this slot
+                # Filter eligible players for this slot.
+                # For Showdown, all players are eligible for all slots.
+                # For classic, check position eligibility — a player's pos
+                # field may contain multiple positions (e.g. "PG/SG"), so
+                # we check if ANY of the player's positions can fill this slot.
                 if is_showdown:
                     eligible = player_opts.copy()
                 else:
-                    eligible_positions = []
+                    # Determine which base positions can fill this slot
+                    eligible_positions = set()
                     for pos_key, eligible_slots in _POS_ELIGIBILITY.items():
                         if slot in eligible_slots:
-                            eligible_positions.append(pos_key)
+                            eligible_positions.add(pos_key)
+
                     if eligible_positions:
-                        eligible = player_opts[player_opts["pos"].isin(eligible_positions)]
+                        # Handle multi-position players (e.g. "PG/SG", "SF/PF")
+                        # by checking if ANY of the player's listed positions
+                        # is in the eligible set.
+                        def _pos_matches_slot(pos_val: str) -> bool:
+                            if not isinstance(pos_val, str) or not pos_val.strip():
+                                return False
+                            player_positions = [p.strip() for p in pos_val.split("/")]
+                            return bool(set(player_positions) & eligible_positions)
+
+                        mask = player_opts["pos"].apply(_pos_matches_slot)
+                        eligible = player_opts[mask]
                     else:
                         eligible = player_opts.copy()
 
@@ -1365,18 +1384,20 @@ def render_calibration_lab(sport: str) -> None:
                     if rec.slider_key in updated_sliders:
                         updated_sliders[rec.slider_key] = rec.recommended_value
                 st.session_state["cal_lab_sliders"] = updated_sliders
-                # Persist to active config
+                # Persist to active config for this contest type
                 slate_date = entry.get("date") if entry else None
-                save_active_config(updated_sliders, slate_date=slate_date)
+                save_active_config(updated_sliders, slate_date=slate_date, contest_type=contest_type_key)
                 append_config_history(
                     action="apply_recommendations",
                     values=updated_sliders,
                     slate_date=slate_date,
                     old_values=old_sliders,
+                    contest_type=contest_type_key,
                 )
                 active_after = load_active_config()
-                n_slates = len(active_after.get("slates_trained", [])) if active_after else 0
-                st.toast(f"Config updated. Trained on {n_slates} slate{'s' if n_slates != 1 else ''}.")
+                ct_after = active_after.get(contest_type_key, {}) if active_after else {}
+                n_slates = len(ct_after.get("slates_trained", []))
+                st.toast(f"{contest_mode} config updated. Trained on {n_slates} slate{'s' if n_slates != 1 else ''}.")
                 # Clear analysis so user sees fresh state after re-run
                 st.session_state.pop("cal_lab_analysis", None)
                 st.rerun()
@@ -1388,9 +1409,14 @@ def render_calibration_lab(sport: str) -> None:
     st.sidebar.markdown("---")
     st.sidebar.markdown("### Config Tuning")
 
-    # Initialize slider state — load from persistent config if available
+    # Initialize slider state — load from persistent config for the active contest type
+    _slider_ct_key = f"cal_lab_sliders_ct_{contest_type_key}"
+    if st.session_state.get("_cal_lab_last_ct") != contest_type_key:
+        # Contest type changed — reload sliders from persisted config
+        st.session_state.pop("cal_lab_sliders", None)
+        st.session_state["_cal_lab_last_ct"] = contest_type_key
     if "cal_lab_sliders" not in st.session_state:
-        persisted = get_active_slider_values()
+        persisted = get_active_slider_values(contest_type=contest_type_key)
         if persisted:
             merged = dict(DEFAULT_LAB_CONFIG)
             merged.update(persisted)
@@ -1612,38 +1638,40 @@ def render_calibration_lab(sport: str) -> None:
 
     with col_ckpt:
         if st.button("Save Config Checkpoint", key="cal_lab_save_checkpoint"):
-            old_vals = get_active_slider_values() or dict(DEFAULT_LAB_CONFIG)
+            old_vals = get_active_slider_values(contest_type=contest_type_key) or dict(DEFAULT_LAB_CONFIG)
             slate_date = entry.get("date") if entry else None
-            save_active_config(dict(sliders), slate_date=slate_date)
+            save_active_config(dict(sliders), slate_date=slate_date, contest_type=contest_type_key)
             append_config_history(
                 action="manual_checkpoint",
                 values=dict(sliders),
                 slate_date=slate_date,
                 old_values=old_vals,
+                contest_type=contest_type_key,
             )
-            st.toast("Config checkpoint saved.")
+            st.toast(f"{contest_mode} config checkpoint saved.")
             st.rerun()
 
     with col_reset:
         if st.button("Reset to Defaults", key="cal_lab_reset_defaults"):
-            reset_active_config(dict(DEFAULT_LAB_CONFIG))
+            reset_active_config(dict(DEFAULT_LAB_CONFIG), contest_type=contest_type_key)
             st.session_state["cal_lab_sliders"] = dict(DEFAULT_LAB_CONFIG)
-            st.toast("Config reset to defaults.")
+            st.toast(f"{contest_mode} config reset to defaults.")
             st.rerun()
 
     # Apply Config to Optimizer — prominent CTA
     st.markdown("")
     if st.button(
-        "Apply Config to Optimizer",
+        f"Apply {contest_mode} Config to Optimizer",
         type="primary",
         key="cal_lab_apply_to_optimizer",
         help="Push the current tuned config to the optimizer. Build lineups to test.",
     ):
-        apply_config_to_optimizer(dict(sliders))
+        apply_config_to_optimizer(dict(sliders), contest_type=contest_type_key)
         active_after = load_active_config()
-        n_slates = len(active_after.get("slates_trained", [])) if active_after else 0
+        ct_after = active_after.get(contest_type_key, {}) if active_after else {}
+        n_slates = len(ct_after.get("slates_trained", []))
         st.success(
-            f"Config applied to optimizer. "
+            f"{contest_mode} config applied to optimizer. "
             f"Trained on {n_slates} slate{'s' if n_slates != 1 else ''}. "
             f"Build lineups to test."
         )
@@ -1657,6 +1685,7 @@ def render_calibration_lab(sport: str) -> None:
                 action = h.get("action", "").replace("_", " ").title()
                 slate = h.get("slate_date", "")
                 changes = h.get("changes", {})
+                h_ct = h.get("contest_type", "gpp").upper()
 
                 ts_label = ""
                 if ts:
@@ -1666,7 +1695,7 @@ def render_calibration_lab(sport: str) -> None:
                     except ValueError:
                         ts_label = ts
 
-                header = f"**{action}**"
+                header = f"**[{h_ct}] {action}**"
                 if slate:
                     header += f" — Slate: {slate}"
                 if ts_label:
@@ -1682,16 +1711,18 @@ def render_calibration_lab(sport: str) -> None:
                 # Rollback button
                 if st.button(f"Rollback to this state", key=f"cal_lab_rollback_{len(history) - 1 - i}"):
                     rollback_vals = h.get("values", {})
+                    rollback_ct = h.get("contest_type", contest_type_key)
                     merged = dict(DEFAULT_LAB_CONFIG)
                     merged.update(rollback_vals)
                     st.session_state["cal_lab_sliders"] = merged
-                    save_active_config(merged)
+                    save_active_config(merged, contest_type=rollback_ct)
                     append_config_history(
                         action="rollback",
                         values=merged,
-                        old_values=get_active_slider_values(),
+                        old_values=get_active_slider_values(contest_type=rollback_ct),
+                        contest_type=rollback_ct,
                     )
-                    st.toast("Rolled back to selected config.")
+                    st.toast(f"Rolled back {rollback_ct.upper()} to selected config.")
                     st.rerun()
 
                 if i < len(history) - 1:
