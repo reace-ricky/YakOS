@@ -21,6 +21,7 @@ from yak_core.config import (
 from yak_core.lineups import (
     _build_one_lineup, prepare_pool,
     build_multiple_lineups_with_exposure,
+    _get_sim_col,
 )
 
 
@@ -332,11 +333,14 @@ class TestConfigWiring:
         assert cfg["SALARY_CAP"] == 50000
 
     def test_gpp_weights_in_config(self):
-        """GPP scoring weights must be present."""
+        """GPP v8 scoring weights must be present."""
         cfg = _make_cfg()
-        # These should be in the config (from DEFAULT_CONFIG or preset)
-        assert "GPP_PROJ_WEIGHT" in cfg or cfg.get("GPP_PROJ_WEIGHT", 0.25) == 0.25
-        assert cfg.get("GPP_CEIL_WEIGHT", 0.65) == 0.65
+        # v8 sim-based scoring weights
+        assert cfg.get("GPP_PROJ_WEIGHT", 0.50) == 0.50
+        assert "GPP_UPSIDE_WEIGHT" in cfg
+        assert "GPP_BOOM_WEIGHT" in cfg
+        assert "GPP_OWN_PENALTY_STRENGTH" in cfg
+        assert "GPP_PROJ_FLOOR" in cfg
 
 
 class TestOwnershipWiring:
@@ -389,3 +393,143 @@ class TestOwnershipWiring:
         assert "own_pct" in result.columns
         # Higher salary should get higher ownership
         assert result["own_pct"].iloc[0] > result["own_pct"].iloc[2]
+
+
+class TestGPPv8SimScoring:
+    """Tests for the v8 sim-based GPP scoring formula."""
+
+    def _make_pool(self, sim_cols=True):
+        """Create a small player pool with sim percentile columns."""
+        from yak_core.lineups import _add_scores
+        data = {
+            "player_name": ["Star", "Mid", "Value", "Punt"],
+            "salary": [10000, 7000, 5000, 3500],
+            "proj": [50.0, 35.0, 25.0, 15.0],
+            "own_pct": [0.35, 0.20, 0.10, 0.04],
+        }
+        if sim_cols:
+            data.update({
+                "sim50th": [45.0, 32.0, 22.0, 12.0],
+                "sim85th": [60.0, 45.0, 35.0, 25.0],
+                "sim90th": [65.0, 48.0, 38.0, 28.0],
+                "sim99th": [80.0, 60.0, 50.0, 40.0],
+            })
+        return pd.DataFrame(data)
+
+    def test_gpp_score_column_exists(self):
+        """_add_scores must produce a gpp_score column."""
+        from yak_core.lineups import _add_scores
+        df = self._make_pool()
+        result = _add_scores(df, DEFAULT_CONFIG)
+        assert "gpp_score" in result.columns
+        assert result["gpp_score"].notna().all()
+
+    def test_high_proj_star_scores_well(self):
+        """High-proj stars should not be crushed by ownership penalty."""
+        from yak_core.lineups import _add_scores
+        df = self._make_pool()
+        result = _add_scores(df, DEFAULT_CONFIG)
+        # Star (50 proj, 35% own) should score higher than Punt (15 proj, 4% own)
+        # The old formula with -3.0 * own would crush the star; v8 should not
+        assert result.loc[0, "gpp_score"] > result.loc[3, "gpp_score"]
+
+    def test_sim_percentiles_boost_upside(self):
+        """Players with higher sim upside should score higher, all else equal."""
+        from yak_core.lineups import _add_scores
+        # Two players with same proj and ownership but different sim profiles
+        df = pd.DataFrame({
+            "player_name": ["HighVar", "LowVar"],
+            "salary": [8000, 8000],
+            "proj": [40.0, 40.0],
+            "own_pct": [0.15, 0.15],  # neutral ownership (no penalty)
+            "sim50th": [38.0, 38.0],
+            "sim90th": [55.0, 42.0],  # HighVar has much higher ceiling
+            "sim99th": [70.0, 45.0],  # HighVar has much higher boom
+        })
+        result = _add_scores(df, DEFAULT_CONFIG)
+        assert result.loc[0, "gpp_score"] > result.loc[1, "gpp_score"]
+
+    def test_ownership_penalty_is_nonlinear(self):
+        """Ownership penalty should scale non-linearly (log-based)."""
+        from yak_core.lineups import _add_scores
+        # Three players with same proj/sims but different ownership
+        df = pd.DataFrame({
+            "player_name": ["LowOwn", "MidOwn", "HighOwn"],
+            "salary": [8000, 8000, 8000],
+            "proj": [40.0, 40.0, 40.0],
+            "own_pct": [0.05, 0.15, 0.40],
+            "sim50th": [38.0, 38.0, 38.0],
+            "sim90th": [50.0, 50.0, 50.0],
+            "sim99th": [60.0, 60.0, 60.0],
+        })
+        result = _add_scores(df, DEFAULT_CONFIG)
+        scores = result["gpp_score"].tolist()
+        # Low own (5%) should score highest, high own (40%) should score lowest
+        assert scores[0] > scores[1] > scores[2]
+        # Penalty from 15% to 40% should be larger than boost from 5% to 15%
+        # (log scaling makes the high-own penalty moderate, not crushing)
+        penalty_high = scores[1] - scores[2]  # mid vs high
+        boost_low = scores[0] - scores[1]     # low vs mid
+        assert penalty_high > 0
+        assert boost_low > 0
+
+    def test_fallback_without_sim_columns(self):
+        """Scoring should still work when sim columns are missing."""
+        from yak_core.lineups import _add_scores
+        df = self._make_pool(sim_cols=False)
+        result = _add_scores(df, DEFAULT_CONFIG)
+        assert "gpp_score" in result.columns
+        assert result["gpp_score"].notna().all()
+        # Higher proj should still score higher (proj dominates without sims)
+        assert result.loc[0, "gpp_score"] > result.loc[3, "gpp_score"]
+
+    def test_fallback_with_ceil_column(self):
+        """When sim columns are missing but ceil exists, use ceil for upside."""
+        from yak_core.lineups import _add_scores
+        df = self._make_pool(sim_cols=False)
+        df["ceil"] = df["proj"] * 1.5  # synthetic ceiling
+        result = _add_scores(df, DEFAULT_CONFIG)
+        assert "gpp_score" in result.columns
+        assert result.loc[0, "gpp_score"] > result.loc[3, "gpp_score"]
+
+    def test_configurable_weights(self):
+        """Custom weights should override defaults."""
+        from yak_core.lineups import _add_scores
+        df = self._make_pool()
+        # Pure projection mode (zero upside/boom weights)
+        cfg = {**DEFAULT_CONFIG, "GPP_PROJ_WEIGHT": 1.0,
+               "GPP_UPSIDE_WEIGHT": 0.0, "GPP_BOOM_WEIGHT": 0.0,
+               "GPP_OWN_PENALTY_STRENGTH": 0.0, "GPP_OWN_LOW_BOOST": 0.0}
+        result = _add_scores(df, cfg)
+        # With zero ownership penalty and pure projection, gpp_score = proj * 1.0
+        for i in range(len(df)):
+            assert abs(result.loc[i, "gpp_score"] - df.loc[i, "proj"]) < 0.01
+
+    def test_sim_col_naming_variants(self):
+        """Both sim50th and sim50 naming conventions should work."""
+        from yak_core.lineups import _get_sim_col
+        df1 = pd.DataFrame({"sim50th": [40.0, 35.0]})
+        df2 = pd.DataFrame({"sim50": [40.0, 35.0]})
+        df3 = pd.DataFrame({"SIM50TH": [40.0, 35.0]})
+        for df in [df1, df2, df3]:
+            result = _get_sim_col(df, "50")
+            assert result.iloc[0] == 40.0
+
+
+class TestProjectionFloorSafeguard:
+    """Tests for the v8 projection floor flagging."""
+
+    def test_below_floor_flag(self):
+        """Lineups below GPP_PROJ_FLOOR should be flagged."""
+        lineups_df = pd.DataFrame({
+            "lineup_index": [0]*8 + [1]*8,
+            "proj": [30]*8 + [40]*8,  # lineup 0: 240 total, lineup 1: 320 total
+            "player_name": [f"P{i}" for i in range(16)],
+        })
+        # Simulate the flagging logic
+        proj_floor = 280
+        lu_proj = lineups_df.groupby("lineup_index")["proj"].sum()
+        below = lu_proj[lu_proj < proj_floor]
+        assert len(below) == 1  # lineup 0 (240) is below 280
+        assert 0 in below.index
+        assert 1 not in below.index

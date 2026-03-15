@@ -176,28 +176,100 @@ def _add_ownership(
     return df
 
 
+def _get_sim_col(df: pd.DataFrame, pctile: str) -> pd.Series:
+    """Retrieve a sim percentile column, trying both naming conventions.
+
+    Supports ``sim50th`` (from load_pool.py) and ``sim50`` (from ext_ownership.py).
+    Returns a zero Series if neither is found.
+    """
+    for col_name in (f"sim{pctile}th", f"sim{pctile}", f"SIM{pctile}TH"):
+        if col_name in df.columns:
+            return pd.to_numeric(df[col_name], errors="coerce").fillna(0.0)
+    return pd.Series(0.0, index=df.index)
+
+
 def _add_scores(
     df: pd.DataFrame,
     cfg: Dict[str, Any],
 ) -> pd.DataFrame:
-    """Attach gpp_score, cash_score, value_score, stack_score."""
+    """Attach gpp_score, cash_score, value_score, stack_score.
+
+    GPP scoring (v8) uses sim percentiles for upside modeling and a non-linear
+    ownership penalty.  The formula:
+
+        gpp_score = proj * PROJ_W + upside * UPSIDE_W + boom * BOOM_W + own_adj
+
+    Components:
+        projection : raw projection — keeps lineups in competitive 300-350+ range
+        upside     : SIM90TH (or SIM85TH fallback, or ceil, or proj) — ceiling
+        boom       : SIM99TH - SIM50TH spread — variance / explosion potential
+        own_adj    : non-linear ownership adjustment (log-based)
+                     - >30% ownership gets moderate penalty
+                     - 15-30% ownership gets minimal penalty
+                     - <8% ownership gets modest boost
+
+    This replaces the old v7 formula (proj*0.25 + ceil*0.65 + own*-3.0) which
+    over-penalized high-ownership stars and produced low-projection lineups.
+    """
     own_weight   = float(cfg.get("OWN_WEIGHT",   0.0))
     stack_weight = float(cfg.get("STACK_WEIGHT", 0.0))
     value_weight = float(cfg.get("VALUE_WEIGHT", 0.0))
 
-    # ── gpp_score = proj*GPP_PROJ_WEIGHT + ceil*GPP_CEIL_WEIGHT + own*GPP_OWN_WEIGHT
-    # v7: ceil=2.0x proj, so ceiling term now adds real differentiation.
-    # Shifted to 25/65 split to chase ceilings harder in GPP.
-    gpp_proj_weight = float(cfg.get("GPP_PROJ_WEIGHT", 0.25))
-    gpp_ceil_weight = float(cfg.get("GPP_CEIL_WEIGHT", 0.65))
-    gpp_own_weight  = float(cfg.get("GPP_OWN_WEIGHT", -3.0))
+    # ── GPP scoring weights (configurable — tune these during calibration)
+    gpp_proj_w    = float(cfg.get("GPP_PROJ_WEIGHT", 0.50))
+    gpp_upside_w  = float(cfg.get("GPP_UPSIDE_WEIGHT", 0.30))
+    gpp_boom_w    = float(cfg.get("GPP_BOOM_WEIGHT", 0.20))
+    own_penalty_k = float(cfg.get("GPP_OWN_PENALTY_STRENGTH", 1.2))
+    own_low_boost = float(cfg.get("GPP_OWN_LOW_BOOST", 0.5))
 
-    ceil_col = df["ceil"] if "ceil" in df.columns else df["proj"]
-    own_col  = df["own_pct"]
+    # ── Resolve upside column: SIM90TH > SIM85TH > ceil > proj (best available)
+    sim90 = _get_sim_col(df, "90")
+    sim85 = _get_sim_col(df, "85")
+    sim99 = _get_sim_col(df, "99")
+    sim50 = _get_sim_col(df, "50")
+
+    has_sim90 = (sim90 > 0).any()
+    has_sim85 = (sim85 > 0).any()
+    has_sim99 = (sim99 > 0).any()
+    has_sim50 = (sim50 > 0).any()
+
+    if has_sim90:
+        upside = sim90
+    elif has_sim85:
+        upside = sim85
+    elif "ceil" in df.columns:
+        upside = pd.to_numeric(df["ceil"], errors="coerce").fillna(df["proj"])
+    else:
+        upside = df["proj"]
+
+    # ── Boom potential: spread between top sim pctile and median
+    # Captures how much variance / explosion a player has
+    if has_sim99 and has_sim50:
+        boom = (sim99 - sim50).clip(lower=0)
+    elif has_sim90 and has_sim50:
+        boom = (sim90 - sim50).clip(lower=0)
+    elif "ceil" in df.columns:
+        boom = (pd.to_numeric(df["ceil"], errors="coerce").fillna(df["proj"]) - df["proj"]).clip(lower=0)
+    else:
+        boom = pd.Series(0.0, index=df.index)
+
+    # ── Non-linear ownership adjustment (log-based)
+    # Instead of flat -3.0 * own_pct which crushes all chalk equally:
+    #   - High own (>30%): moderate penalty via log scaling
+    #   - Mid own (15-30%): near-zero adjustment (correctly priced)
+    #   - Low own (<8%): modest boost to reward leverage plays
+    own = df["own_pct"].clip(lower=0.001)  # avoid log(0)
+    # Baseline: 15% ownership is the "neutral" point (no penalty, no boost)
+    # ln(own / 0.15): negative when own < 15%, positive when own > 15%
+    own_adj = -own_penalty_k * np.log(own / 0.15)
+    # Add extra boost for very low ownership (< 8%)
+    own_adj = own_adj + own_low_boost * (0.08 - own).clip(lower=0) * 10
+
     df["gpp_score"] = (
-        df["proj"] * gpp_proj_weight
-        + ceil_col * gpp_ceil_weight
-        + own_col * gpp_own_weight
+        df["proj"] * gpp_proj_w
+        + upside * gpp_upside_w
+        + boom * gpp_boom_w
+        + own_adj
     )
 
     # ── cash_score = floor-weighted ─────────────────────────────────────────────
@@ -835,6 +907,25 @@ def build_multiple_lineups_with_exposure(
 
     all_rows = [row for lu in lineups for row in lu]
     lineups_df = pd.DataFrame(all_rows)
+
+    # ── Projection floor safeguard (v8) ─────────────────────────────────────
+    # Flag lineups whose total projection falls below the configured floor.
+    # For NBA DK GPP, competitive winning scores are 300-380+; lineups under
+    # 280 are unlikely to cash and indicate the scoring formula drifted too
+    # contrarian.  Flagged lineups are logged but kept (the user can filter).
+    proj_floor = float(cfg.get("GPP_PROJ_FLOOR", 0))
+    if proj_floor > 0 and not lineups_df.empty and is_gpp:
+        lu_proj = lineups_df.groupby("lineup_index")["proj"].sum()
+        below_floor = lu_proj[lu_proj < proj_floor]
+        if len(below_floor) > 0:
+            print(
+                f"[GPP floor] {len(below_floor)}/{len(lu_proj)} lineup(s) "
+                f"project below {proj_floor:.0f} "
+                f"(min={lu_proj.min():.1f}, median={lu_proj.median():.1f})"
+            )
+        # Add a flag column so downstream code / UI can highlight these
+        flagged_indices = set(below_floor.index)
+        lineups_df["below_proj_floor"] = lineups_df["lineup_index"].isin(flagged_indices)
 
     # Exposure report
     if not lineups_df.empty:
