@@ -5,6 +5,7 @@ Entry point.  Uses ``st.tabs()`` for navigation:
   - Optimizer (public)
   - The Lab (admin)
   - Dashboard (admin)
+  - Calibration Lab (admin)
 
 Sport toggle (NBA/PGA) and admin password gate live in the sidebar.
 """
