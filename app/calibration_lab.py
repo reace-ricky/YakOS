@@ -1241,7 +1241,9 @@ def _render_batch_train(contest_type_key: str, contest_mode: str) -> None:
     entries = _list_archived_dates()
     gpp_entries = []
     for e in entries:
-        if "gpp" not in e["contest_type"].lower():
+        ct = e["contest_type"].lower()
+        # Skip non-GPP slates and PGA slates (pga_gpp)
+        if "gpp" not in ct or "pga" in ct:
             continue
         try:
             df = pd.read_parquet(e["file"])
