@@ -1,0 +1,259 @@
+"""Tests for Calibration Lab persistent config storage."""
+
+import json
+from pathlib import Path
+
+import pytest
+
+from app.calibration_persistence import (
+    ACTIVE_CONFIG_PATH,
+    CONFIG_HISTORY_PATH,
+    OPTIMIZER_OVERRIDES_PATH,
+    _SLIDER_KEYS,
+    append_config_history,
+    apply_config_to_optimizer,
+    get_active_slider_values,
+    load_active_config,
+    load_config_history,
+    load_optimizer_overrides,
+    reset_active_config,
+    save_active_config,
+)
+
+
+@pytest.fixture(autouse=True)
+def _clean_config_files(tmp_path, monkeypatch):
+    """Redirect config paths to tmp_path so tests don't touch real data."""
+    cal_dir = tmp_path / "calibration"
+    cal_dir.mkdir()
+    monkeypatch.setattr("app.calibration_persistence.CALIBRATION_DIR", cal_dir)
+    monkeypatch.setattr("app.calibration_persistence.ACTIVE_CONFIG_PATH", cal_dir / "active_config.json")
+    monkeypatch.setattr("app.calibration_persistence.CONFIG_HISTORY_PATH", cal_dir / "config_history.json")
+    monkeypatch.setattr("app.calibration_persistence.OPTIMIZER_OVERRIDES_PATH", cal_dir / "optimizer_overrides.json")
+
+
+def _sample_values():
+    return {
+        "proj_weight": 0.50,
+        "upside_weight": 0.30,
+        "boom_weight": 0.20,
+        "own_penalty_strength": 1.2,
+        "low_own_boost": 0.5,
+        "own_neutral_pct": 15,
+        "max_punt_players": 1,
+        "min_mid_players": 4,
+        "game_diversity_pct": 65,
+        "stud_exposure": 50,
+        "mid_exposure": 35,
+        "value_exposure": 25,
+    }
+
+
+class TestActiveConfig:
+    def test_load_returns_none_when_missing(self):
+        assert load_active_config() is None
+
+    def test_save_and_load_roundtrip(self):
+        vals = _sample_values()
+        saved = save_active_config(vals, slate_date="2026-03-14")
+        loaded = load_active_config()
+        assert loaded is not None
+        assert loaded["name"] == "Working Config"
+        assert loaded["values"]["proj_weight"] == 0.50
+        assert "2026-03-14" in loaded["slates_trained"]
+
+    def test_save_preserves_existing_slates(self):
+        vals = _sample_values()
+        save_active_config(vals, slate_date="2026-03-14")
+        save_active_config(vals, slate_date="2026-03-15")
+        loaded = load_active_config()
+        assert loaded["slates_trained"] == ["2026-03-14", "2026-03-15"]
+
+    def test_save_deduplicates_slate_dates(self):
+        vals = _sample_values()
+        save_active_config(vals, slate_date="2026-03-14")
+        save_active_config(vals, slate_date="2026-03-14")
+        loaded = load_active_config()
+        assert loaded["slates_trained"].count("2026-03-14") == 1
+
+    def test_save_without_slate_date(self):
+        vals = _sample_values()
+        save_active_config(vals)
+        loaded = load_active_config()
+        assert loaded["slates_trained"] == []
+
+    def test_only_slider_keys_persisted(self):
+        vals = _sample_values()
+        vals["extra_garbage"] = 999
+        save_active_config(vals)
+        loaded = load_active_config()
+        assert "extra_garbage" not in loaded["values"]
+
+    def test_get_active_slider_values(self):
+        save_active_config(_sample_values())
+        vals = get_active_slider_values()
+        assert vals is not None
+        assert vals["proj_weight"] == 0.50
+
+    def test_get_active_slider_values_none_when_missing(self):
+        assert get_active_slider_values() is None
+
+
+class TestConfigHistory:
+    def test_empty_history(self):
+        assert load_config_history() == []
+
+    def test_append_and_load(self):
+        vals = _sample_values()
+        append_config_history("apply_recommendations", vals, slate_date="2026-03-14")
+        history = load_config_history()
+        assert len(history) == 1
+        assert history[0]["action"] == "apply_recommendations"
+        assert history[0]["slate_date"] == "2026-03-14"
+
+    def test_tracks_changes(self):
+        old = _sample_values()
+        new = dict(old)
+        new["proj_weight"] = 0.60
+        append_config_history("apply_recommendations", new, old_values=old)
+        history = load_config_history()
+        assert "proj_weight" in history[0]["changes"]
+        assert history[0]["changes"]["proj_weight"]["from"] == 0.50
+        assert history[0]["changes"]["proj_weight"]["to"] == 0.60
+
+    def test_no_changes_when_identical(self):
+        vals = _sample_values()
+        append_config_history("save_checkpoint", vals, old_values=vals)
+        history = load_config_history()
+        assert history[0]["changes"] == {}
+
+    def test_multiple_entries_append(self):
+        vals = _sample_values()
+        append_config_history("first", vals)
+        append_config_history("second", vals)
+        history = load_config_history()
+        assert len(history) == 2
+        assert history[0]["action"] == "first"
+        assert history[1]["action"] == "second"
+
+
+class TestResetConfig:
+    def test_reset_clears_slates(self):
+        vals = _sample_values()
+        save_active_config(vals, slate_date="2026-03-14")
+        reset_active_config(vals)
+        loaded = load_active_config()
+        assert loaded["slates_trained"] == []
+
+    def test_reset_records_history(self):
+        vals = _sample_values()
+        reset_active_config(vals)
+        history = load_config_history()
+        assert any(e["action"] == "reset_to_defaults" for e in history)
+
+
+class TestApplyToOptimizer:
+    def test_writes_overrides_file(self):
+        vals = _sample_values()
+        save_active_config(vals)
+        apply_config_to_optimizer(vals)
+        overrides = load_optimizer_overrides()
+        assert overrides is not None
+        assert "GPP_PROJ_WEIGHT" in overrides
+
+    def test_gpp_weights_normalized(self):
+        vals = _sample_values()
+        # proj=0.50, upside=0.30, boom=0.20, total=1.0
+        save_active_config(vals)
+        apply_config_to_optimizer(vals)
+        overrides = load_optimizer_overrides()
+        assert overrides["GPP_PROJ_WEIGHT"] == pytest.approx(0.50)
+        assert overrides["GPP_UPSIDE_WEIGHT"] == pytest.approx(0.30)
+        assert overrides["GPP_BOOM_WEIGHT"] == pytest.approx(0.20)
+
+    def test_gpp_weights_normalized_non_unit_sum(self):
+        vals = _sample_values()
+        vals["proj_weight"] = 5.0
+        vals["upside_weight"] = 3.0
+        vals["boom_weight"] = 2.0
+        save_active_config(vals)
+        apply_config_to_optimizer(vals)
+        overrides = load_optimizer_overrides()
+        assert overrides["GPP_PROJ_WEIGHT"] == pytest.approx(0.50)
+        assert overrides["GPP_UPSIDE_WEIGHT"] == pytest.approx(0.30)
+        assert overrides["GPP_BOOM_WEIGHT"] == pytest.approx(0.20)
+
+    def test_exposure_converted_to_decimals(self):
+        vals = _sample_values()
+        save_active_config(vals)
+        apply_config_to_optimizer(vals)
+        overrides = load_optimizer_overrides()
+        assert overrides["TIERED_EXPOSURE_STUD"] == pytest.approx(0.50)
+        assert overrides["TIERED_EXPOSURE_MID"] == pytest.approx(0.35)
+        assert overrides["TIERED_EXPOSURE_VALUE"] == pytest.approx(0.25)
+
+    def test_game_diversity_converted_to_decimal(self):
+        vals = _sample_values()
+        save_active_config(vals)
+        apply_config_to_optimizer(vals)
+        overrides = load_optimizer_overrides()
+        assert overrides["MAX_GAME_STACK_RATE"] == pytest.approx(0.65)
+
+    def test_records_history(self):
+        vals = _sample_values()
+        save_active_config(vals)
+        apply_config_to_optimizer(vals)
+        history = load_config_history()
+        assert any(e["action"] == "apply_to_optimizer" for e in history)
+
+    def test_load_overrides_returns_none_when_missing(self):
+        assert load_optimizer_overrides() is None
+
+
+class TestApplyCalibrationOverrides:
+    def test_no_overrides_returns_cfg_unchanged(self):
+        from yak_core.lineups import apply_calibration_overrides
+        cfg = {"GPP_PROJ_WEIGHT": 0.50, "NUM_LINEUPS": 20}
+        result = apply_calibration_overrides(cfg)
+        assert result == cfg
+
+    def test_overrides_merge_into_cfg(self, tmp_path, monkeypatch):
+        from yak_core.lineups import apply_calibration_overrides
+
+        vals = _sample_values()
+        vals["proj_weight"] = 0.70
+        vals["upside_weight"] = 0.20
+        vals["boom_weight"] = 0.10
+        save_active_config(vals)
+        apply_config_to_optimizer(vals)
+
+        cfg = {"GPP_PROJ_WEIGHT": 0.50, "NUM_LINEUPS": 20}
+        result = apply_calibration_overrides(cfg)
+        assert result["GPP_PROJ_WEIGHT"] == pytest.approx(0.70)
+        assert result["NUM_LINEUPS"] == 20  # non-overridden key preserved
+
+    def test_tiered_exposure_reconstructed(self, tmp_path, monkeypatch):
+        from yak_core.lineups import apply_calibration_overrides
+
+        vals = _sample_values()
+        vals["stud_exposure"] = 60
+        vals["mid_exposure"] = 40
+        vals["value_exposure"] = 30
+        save_active_config(vals)
+        apply_config_to_optimizer(vals)
+
+        cfg = {"TIERED_EXPOSURE": [(9000, 0.50), (6000, 0.35), (0, 0.25)]}
+        result = apply_calibration_overrides(cfg)
+        assert result["TIERED_EXPOSURE"] == [(9000, 0.60), (6000, 0.40), (0, 0.30)]
+
+    def test_original_cfg_not_mutated(self):
+        from yak_core.lineups import apply_calibration_overrides
+
+        vals = _sample_values()
+        save_active_config(vals)
+        apply_config_to_optimizer(vals)
+
+        cfg = {"GPP_PROJ_WEIGHT": 0.50}
+        original_val = cfg["GPP_PROJ_WEIGHT"]
+        apply_calibration_overrides(cfg)
+        assert cfg["GPP_PROJ_WEIGHT"] == original_val

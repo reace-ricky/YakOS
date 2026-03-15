@@ -11,12 +11,23 @@ import math
 import re
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import streamlit as st
+
+from app.calibration_persistence import (
+    append_config_history,
+    apply_config_to_optimizer,
+    get_active_slider_values,
+    load_active_config,
+    load_config_history,
+    reset_active_config,
+    save_active_config,
+)
 
 # ── Constants ────────────────────────────────────────────────────────────
 
@@ -980,6 +991,32 @@ def render_calibration_lab(sport: str) -> None:
         st.info("Calibration Lab currently supports NBA only. PGA support coming soon.")
         return
 
+    # ── Config Status Bar ────────────────────────────────────────────────
+    active_cfg = load_active_config()
+    if active_cfg:
+        slates = active_cfg.get("slates_trained", [])
+        updated = active_cfg.get("updated", "")
+        cfg_name = active_cfg.get("name", "Working Config")
+        # Format slates list
+        if slates:
+            slate_labels = ", ".join(slates[-5:])  # show last 5
+            if len(slates) > 5:
+                slate_labels = f"...{slate_labels}"
+            trained_text = f"Trained on: {slate_labels} ({len(slates)} slate{'s' if len(slates) != 1 else ''})"
+        else:
+            trained_text = "No slates trained yet"
+        # Format update time
+        updated_text = ""
+        if updated:
+            try:
+                dt = datetime.fromisoformat(updated)
+                updated_text = f" | Last updated: {dt.strftime('%b %d %I:%M%p')}"
+            except ValueError:
+                updated_text = ""
+        st.info(f"**{cfg_name}**{updated_text} | {trained_text}")
+    else:
+        st.caption("Using default config. Analyze a slate and apply recommendations to start tuning.")
+
     # ── Section 0: Date / Slate Selector ────────────────────────────────
     entries = _list_archived_dates()
     if not entries:
@@ -1322,11 +1359,24 @@ def render_calibration_lab(sport: str) -> None:
                 type="primary",
                 key="cal_lab_apply_recs",
             ):
-                updated_sliders = dict(st.session_state.get("cal_lab_sliders", DEFAULT_LAB_CONFIG))
+                old_sliders = dict(st.session_state.get("cal_lab_sliders", DEFAULT_LAB_CONFIG))
+                updated_sliders = dict(old_sliders)
                 for rec in actionable_recs:
                     if rec.slider_key in updated_sliders:
                         updated_sliders[rec.slider_key] = rec.recommended_value
                 st.session_state["cal_lab_sliders"] = updated_sliders
+                # Persist to active config
+                slate_date = entry.get("date") if entry else None
+                save_active_config(updated_sliders, slate_date=slate_date)
+                append_config_history(
+                    action="apply_recommendations",
+                    values=updated_sliders,
+                    slate_date=slate_date,
+                    old_values=old_sliders,
+                )
+                active_after = load_active_config()
+                n_slates = len(active_after.get("slates_trained", [])) if active_after else 0
+                st.toast(f"Config updated. Trained on {n_slates} slate{'s' if n_slates != 1 else ''}.")
                 # Clear analysis so user sees fresh state after re-run
                 st.session_state.pop("cal_lab_analysis", None)
                 st.rerun()
@@ -1338,9 +1388,15 @@ def render_calibration_lab(sport: str) -> None:
     st.sidebar.markdown("---")
     st.sidebar.markdown("### Config Tuning")
 
-    # Initialize slider state
+    # Initialize slider state — load from persistent config if available
     if "cal_lab_sliders" not in st.session_state:
-        st.session_state["cal_lab_sliders"] = dict(DEFAULT_LAB_CONFIG)
+        persisted = get_active_slider_values()
+        if persisted:
+            merged = dict(DEFAULT_LAB_CONFIG)
+            merged.update(persisted)
+            st.session_state["cal_lab_sliders"] = merged
+        else:
+            st.session_state["cal_lab_sliders"] = dict(DEFAULT_LAB_CONFIG)
 
     sliders = st.session_state["cal_lab_sliders"]
 
@@ -1548,7 +1604,100 @@ def render_calibration_lab(sport: str) -> None:
                 if not players_df.empty:
                     st.dataframe(players_df, use_container_width=True, hide_index=True)
 
-    # ── Section 5: Save Config & Backtest ───────────────────────────────
+    # ── Section 5: Persistent Config Management ────────────────────────
+    st.markdown("---")
+    st.markdown("### Config Management")
+
+    col_ckpt, col_reset = st.columns(2)
+
+    with col_ckpt:
+        if st.button("Save Config Checkpoint", key="cal_lab_save_checkpoint"):
+            old_vals = get_active_slider_values() or dict(DEFAULT_LAB_CONFIG)
+            slate_date = entry.get("date") if entry else None
+            save_active_config(dict(sliders), slate_date=slate_date)
+            append_config_history(
+                action="manual_checkpoint",
+                values=dict(sliders),
+                slate_date=slate_date,
+                old_values=old_vals,
+            )
+            st.toast("Config checkpoint saved.")
+            st.rerun()
+
+    with col_reset:
+        if st.button("Reset to Defaults", key="cal_lab_reset_defaults"):
+            reset_active_config(dict(DEFAULT_LAB_CONFIG))
+            st.session_state["cal_lab_sliders"] = dict(DEFAULT_LAB_CONFIG)
+            st.toast("Config reset to defaults.")
+            st.rerun()
+
+    # Apply Config to Optimizer — prominent CTA
+    st.markdown("")
+    if st.button(
+        "Apply Config to Optimizer",
+        type="primary",
+        key="cal_lab_apply_to_optimizer",
+        help="Push the current tuned config to the optimizer. Build lineups to test.",
+    ):
+        apply_config_to_optimizer(dict(sliders))
+        active_after = load_active_config()
+        n_slates = len(active_after.get("slates_trained", [])) if active_after else 0
+        st.success(
+            f"Config applied to optimizer. "
+            f"Trained on {n_slates} slate{'s' if n_slates != 1 else ''}. "
+            f"Build lineups to test."
+        )
+
+    # Config History expander
+    history = load_config_history()
+    if history:
+        with st.expander(f"Config History ({len(history)} entries)"):
+            for i, h in enumerate(reversed(history)):
+                ts = h.get("timestamp", "")
+                action = h.get("action", "").replace("_", " ").title()
+                slate = h.get("slate_date", "")
+                changes = h.get("changes", {})
+
+                ts_label = ""
+                if ts:
+                    try:
+                        dt = datetime.fromisoformat(ts)
+                        ts_label = dt.strftime("%b %d %I:%M%p")
+                    except ValueError:
+                        ts_label = ts
+
+                header = f"**{action}**"
+                if slate:
+                    header += f" — Slate: {slate}"
+                if ts_label:
+                    header += f" ({ts_label})"
+
+                st.markdown(header)
+                if changes:
+                    change_parts = []
+                    for k, v in changes.items():
+                        change_parts.append(f"`{k}`: {v['from']} → {v['to']}")
+                    st.caption(" | ".join(change_parts))
+
+                # Rollback button
+                if st.button(f"Rollback to this state", key=f"cal_lab_rollback_{len(history) - 1 - i}"):
+                    rollback_vals = h.get("values", {})
+                    merged = dict(DEFAULT_LAB_CONFIG)
+                    merged.update(rollback_vals)
+                    st.session_state["cal_lab_sliders"] = merged
+                    save_active_config(merged)
+                    append_config_history(
+                        action="rollback",
+                        values=merged,
+                        old_values=get_active_slider_values(),
+                    )
+                    st.toast("Rolled back to selected config.")
+                    st.rerun()
+
+                if i < len(history) - 1:
+                    st.markdown("---")
+
+    # ── Section 6: Save Config & Backtest ───────────────────────────────
     st.markdown("---")
     st.markdown("### Save & Backtest")
 
