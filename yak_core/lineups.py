@@ -198,22 +198,22 @@ def _add_scores(
 ) -> pd.DataFrame:
     """Attach gpp_score, cash_score, value_score, stack_score.
 
-    GPP scoring (v8) uses sim percentiles for upside modeling and a non-linear
-    ownership penalty.  The formula:
+    GPP scoring (v9) uses sim percentiles for upside modeling, a non-linear
+    ownership penalty, and configurable edge signal weights.  The formula:
 
-        gpp_score = proj * PROJ_W + upside * UPSIDE_W + boom * BOOM_W + own_adj
+        gpp_score = proj * PROJ_W + upside * UPSIDE_W + boom * BOOM_W
+                  + own_adj + edge_bonus
 
-    Components:
+    Base components (v8):
         projection : raw projection — keeps lineups in competitive 300-350+ range
         upside     : SIM90TH (or SIM85TH fallback, or ceil, or proj) — ceiling
         boom       : SIM99TH - SIM50TH spread — variance / explosion potential
         own_adj    : non-linear ownership adjustment (log-based)
-                     - >30% ownership gets moderate penalty
-                     - 15-30% ownership gets minimal penalty
-                     - <8% ownership gets modest boost
 
-    This replaces the old v7 formula (proj*0.25 + ceil*0.65 + own*-3.0) which
-    over-penalized high-ownership stars and produced low-projection lineups.
+    Edge signal bonus (v9 — all default to 0 for backward compatibility):
+        smash_prob, leverage, recent_form, dvp_matchup_boost,
+        pop_catalyst_score, bust_prob (penalty), fp_efficiency.
+        Each normalised 0-1 within slate before applying weight.
     """
     own_weight   = float(cfg.get("OWN_WEIGHT",   0.0))
     stack_weight = float(cfg.get("STACK_WEIGHT", 0.0))
@@ -280,11 +280,70 @@ def _add_scores(
     # Add extra boost for very low ownership (< 8%)
     own_adj = own_adj + own_low_boost * (0.08 - own).clip(lower=0) * 10
 
+    # ── v9 Edge Signal Weights (additive on top of base formula) ──
+    gpp_smash_w      = float(cfg.get("GPP_SMASH_WEIGHT", 0.0))
+    gpp_leverage_w   = float(cfg.get("GPP_LEVERAGE_WEIGHT", 0.0))
+    gpp_form_w       = float(cfg.get("GPP_FORM_WEIGHT", 0.0))
+    gpp_dvp_w        = float(cfg.get("GPP_DVP_WEIGHT", 0.0))
+    gpp_catalyst_w   = float(cfg.get("GPP_CATALYST_WEIGHT", 0.0))
+    gpp_bust_pen     = float(cfg.get("GPP_BUST_PENALTY", 0.0))
+    gpp_efficiency_w = float(cfg.get("GPP_EFFICIENCY_WEIGHT", 0.0))
+
+    edge_bonus = pd.Series(0.0, index=df.index)
+
+    # Helper: normalise a series 0-1 within the slate
+    def _norm01(s: pd.Series) -> pd.Series:
+        smin, smax = float(s.min()), float(s.max())
+        rng = smax - smin
+        if rng < 1e-9:
+            return pd.Series(0.0, index=s.index)
+        return ((s - smin) / rng).clip(0.0, 1.0)
+
+    # 1. Smash probability
+    if gpp_smash_w > 0 and "smash_prob" in df.columns:
+        smash = pd.to_numeric(df["smash_prob"], errors="coerce").fillna(0.0)
+        edge_bonus = edge_bonus + _norm01(smash) * gpp_smash_w
+
+    # 2. Leverage (cap outliers at 95th pctile before normalising)
+    if gpp_leverage_w > 0 and "leverage" in df.columns:
+        lev = pd.to_numeric(df["leverage"], errors="coerce").fillna(0.0)
+        cap = float(lev.quantile(0.95)) if len(lev) > 0 else 1.0
+        lev = lev.clip(upper=max(cap, 0.01))
+        edge_bonus = edge_bonus + _norm01(lev) * gpp_leverage_w
+
+    # 3. Recent form (rolling_fp_5 vs rolling_fp_20)
+    if gpp_form_w > 0 and "rolling_fp_5" in df.columns and "rolling_fp_20" in df.columns:
+        rfp5 = pd.to_numeric(df["rolling_fp_5"], errors="coerce").fillna(0.0)
+        rfp20 = pd.to_numeric(df["rolling_fp_20"], errors="coerce").fillna(0.0)
+        form_signal = ((rfp5 - rfp20) / rfp20.clip(lower=1.0))
+        edge_bonus = edge_bonus + _norm01(form_signal) * gpp_form_w
+
+    # 4. DvP matchup boost
+    if gpp_dvp_w > 0 and "dvp_matchup_boost" in df.columns:
+        dvp = pd.to_numeric(df["dvp_matchup_boost"], errors="coerce").fillna(0.0)
+        edge_bonus = edge_bonus + _norm01(dvp) * gpp_dvp_w
+
+    # 5. Pop catalyst score
+    if gpp_catalyst_w > 0 and "pop_catalyst_score" in df.columns:
+        cat = pd.to_numeric(df["pop_catalyst_score"], errors="coerce").fillna(0.0)
+        edge_bonus = edge_bonus + _norm01(cat) * gpp_catalyst_w
+
+    # 6. Bust penalty (subtracted)
+    if gpp_bust_pen > 0 and "bust_prob" in df.columns:
+        bust = pd.to_numeric(df["bust_prob"], errors="coerce").fillna(0.0)
+        edge_bonus = edge_bonus - _norm01(bust) * gpp_bust_pen
+
+    # 7. FP efficiency
+    if gpp_efficiency_w > 0 and "fp_efficiency" in df.columns:
+        eff = pd.to_numeric(df["fp_efficiency"], errors="coerce").fillna(0.0)
+        edge_bonus = edge_bonus + _norm01(eff) * gpp_efficiency_w
+
     df["gpp_score"] = (
         df["proj"] * gpp_proj_w
         + upside * gpp_upside_w
         + boom * gpp_boom_w
         + own_adj
+        + edge_bonus
     )
 
     # ── cash_score = floor-weighted ─────────────────────────────────────────────

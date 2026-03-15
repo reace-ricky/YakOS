@@ -143,6 +143,14 @@ DEFAULT_LAB_CONFIG = {
     "adj_6_7k": 0.0,
     "adj_5_6k": 0.0,
     "adj_4_5k": 0.0,
+    # Edge Signal Weights (v9) — default 0 for backward compat
+    "edge_smash_weight": 0.15,
+    "edge_leverage_weight": 0.10,
+    "edge_form_weight": 0.10,
+    "edge_dvp_weight": 0.05,
+    "edge_catalyst_weight": 0.05,
+    "edge_bust_penalty": 0.10,
+    "edge_efficiency_weight": 0.05,
 }
 
 # ── Batch Training Guardrails ────────────────────────────────────────────
@@ -156,12 +164,19 @@ BATCH_SIZE = 3
 
 # Hard parameter bounds to prevent degenerate configs.
 PARAM_BOUNDS: Dict[str, Dict[str, float]] = {
-    "own_penalty_strength": {"min": 0.3, "max": 5.0},
-    "proj_weight":          {"min": 0.10, "max": 0.80},
-    "boom_weight":          {"min": 0.0, "max": 0.60},
-    "stud_exposure":        {"min": 20, "max": 65},
-    "min_mid_players":      {"min": 3, "max": 6},
-    "max_punt_players":     {"min": 0, "max": 2},
+    "own_penalty_strength":   {"min": 0.3, "max": 5.0},
+    "proj_weight":            {"min": 0.10, "max": 0.80},
+    "boom_weight":            {"min": 0.0, "max": 0.60},
+    "stud_exposure":          {"min": 20, "max": 65},
+    "min_mid_players":        {"min": 3, "max": 6},
+    "max_punt_players":       {"min": 0, "max": 2},
+    "edge_smash_weight":      {"min": 0.0, "max": 0.50},
+    "edge_leverage_weight":   {"min": 0.0, "max": 0.50},
+    "edge_form_weight":       {"min": 0.0, "max": 0.50},
+    "edge_dvp_weight":        {"min": 0.0, "max": 0.30},
+    "edge_catalyst_weight":   {"min": 0.0, "max": 0.30},
+    "edge_bust_penalty":      {"min": 0.0, "max": 0.50},
+    "edge_efficiency_weight": {"min": 0.0, "max": 0.30},
 }
 
 
@@ -228,6 +243,15 @@ def _build_optimizer_config_from_sliders(sliders: Dict[str, Any], contest_type: 
     cfg["PROJ_SOURCE"] = "parquet"
     cfg["LOCK"] = []
     cfg["EXCLUDE"] = []
+
+    # v9 Edge Signal Weights — pass through directly
+    cfg["GPP_SMASH_WEIGHT"] = sliders.get("edge_smash_weight", 0.0)
+    cfg["GPP_LEVERAGE_WEIGHT"] = sliders.get("edge_leverage_weight", 0.0)
+    cfg["GPP_FORM_WEIGHT"] = sliders.get("edge_form_weight", 0.0)
+    cfg["GPP_DVP_WEIGHT"] = sliders.get("edge_dvp_weight", 0.0)
+    cfg["GPP_CATALYST_WEIGHT"] = sliders.get("edge_catalyst_weight", 0.0)
+    cfg["GPP_BUST_PENALTY"] = sliders.get("edge_bust_penalty", 0.0)
+    cfg["GPP_EFFICIENCY_WEIGHT"] = sliders.get("edge_efficiency_weight", 0.0)
 
     return cfg
 
@@ -1885,6 +1909,29 @@ def render_calibration_lab(sport: str) -> None:
     )
     sliders["value_exposure"] = st.sidebar.slider(
         "Value (<$6K) %", 10, 40, sliders["value_exposure"], 5, key="sl_val_exp"
+    )
+
+    st.sidebar.markdown("#### Edge Signal Weights")
+    sliders["edge_smash_weight"] = st.sidebar.slider(
+        "Smash Prob", 0.0, 0.5, sliders.get("edge_smash_weight", 0.15), 0.01, key="sl_edge_smash"
+    )
+    sliders["edge_leverage_weight"] = st.sidebar.slider(
+        "Leverage", 0.0, 0.5, sliders.get("edge_leverage_weight", 0.10), 0.01, key="sl_edge_lev"
+    )
+    sliders["edge_form_weight"] = st.sidebar.slider(
+        "Recent Form", 0.0, 0.5, sliders.get("edge_form_weight", 0.10), 0.01, key="sl_edge_form"
+    )
+    sliders["edge_dvp_weight"] = st.sidebar.slider(
+        "DvP Matchup", 0.0, 0.3, sliders.get("edge_dvp_weight", 0.05), 0.01, key="sl_edge_dvp"
+    )
+    sliders["edge_catalyst_weight"] = st.sidebar.slider(
+        "Pop Catalyst", 0.0, 0.3, sliders.get("edge_catalyst_weight", 0.05), 0.01, key="sl_edge_cat"
+    )
+    sliders["edge_bust_penalty"] = st.sidebar.slider(
+        "Bust Penalty", 0.0, 0.5, sliders.get("edge_bust_penalty", 0.10), 0.01, key="sl_edge_bust"
+    )
+    sliders["edge_efficiency_weight"] = st.sidebar.slider(
+        "FP Efficiency", 0.0, 0.3, sliders.get("edge_efficiency_weight", 0.05), 0.01, key="sl_edge_eff"
     )
 
     st.sidebar.markdown("#### Projection Adjustments (FP)")

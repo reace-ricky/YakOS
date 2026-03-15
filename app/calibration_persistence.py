@@ -40,6 +40,14 @@ _SLIDER_KEYS = [
     "stud_exposure",
     "mid_exposure",
     "value_exposure",
+    # v9 Edge Signal Weights
+    "edge_smash_weight",
+    "edge_leverage_weight",
+    "edge_form_weight",
+    "edge_dvp_weight",
+    "edge_catalyst_weight",
+    "edge_bust_penalty",
+    "edge_efficiency_weight",
 ]
 
 
@@ -268,6 +276,14 @@ def _convert_slider_values_to_optimizer(values: Dict[str, Any]) -> Dict[str, Any
         "stud_exposure": "TIERED_EXPOSURE_STUD",
         "mid_exposure": "TIERED_EXPOSURE_MID",
         "value_exposure": "TIERED_EXPOSURE_VALUE",
+        # v9 Edge Signal Weights
+        "edge_smash_weight": "GPP_SMASH_WEIGHT",
+        "edge_leverage_weight": "GPP_LEVERAGE_WEIGHT",
+        "edge_form_weight": "GPP_FORM_WEIGHT",
+        "edge_dvp_weight": "GPP_DVP_WEIGHT",
+        "edge_catalyst_weight": "GPP_CATALYST_WEIGHT",
+        "edge_bust_penalty": "GPP_BUST_PENALTY",
+        "edge_efficiency_weight": "GPP_EFFICIENCY_WEIGHT",
     }
 
     result: Dict[str, Any] = {}
