@@ -1056,37 +1056,59 @@ def _fetch_dk_showdown_salaries(away: str, home: str) -> dict:
         print(f"[_fetch_dk_showdown_salaries] no DG found for {away} @ {home}")
         return {}
 
-    # Fetch draftables for matched draft group
+    # Fetch raw draftables for matched draft group.
+    # DK Showdown returns TWO rows per player: one for CPT (rosterSlotId 476,
+    # salary = 1.5×) and one for FLEX (rosterSlotId 475, base salary).
+    # We need the FLEX salary since the optimizer applies the 1.5× CPT
+    # multiplier internally.
     try:
-        from yak_core.dk_ingest import fetch_dk_draftables
-        dk_pool = fetch_dk_draftables(int(matched_dg))
+        resp = _req.get(
+            f"https://api.draftkings.com/draftgroups/v1/draftgroups/{matched_dg}/draftables",
+            headers={"User-Agent": "YakOS/1.0"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        raw_draftables = resp.json().get("draftables", [])
     except Exception as exc:
         print(f"[_fetch_dk_showdown_salaries] draftables fetch failed for DG {matched_dg}: {exc}")
         return {}
 
-    if dk_pool.empty:
+    if not raw_draftables:
         return {}
 
-    # Build name→salary mapping (normalise to lowercase for fuzzy matching)
+    # Group by playerId, keep the FLEX (lower) salary for each player.
     import re
-    salary_map = {}
-    for _, row in dk_pool.iterrows():
-        name = str(row.get("name", row.get("display_name", ""))).strip()
-        team = str(row.get("team", "")).upper()
-        sal = float(row.get("salary", 0))
-        if name and sal > 0:
-            # Store original, normalised, and last-name+team keys
-            salary_map[name] = sal
-            norm = re.sub(r"[.'`\-]", "", name.lower()).strip()
-            norm = re.sub(r"\s+(jr|sr|ii|iii|iv|v)$", "", norm)
-            norm = re.sub(r"\s+", " ", norm).strip()
-            salary_map[norm] = sal
-            # Last-name + team fallback (handles Dom/Dominick style mismatches)
-            parts = norm.split()
-            if len(parts) >= 2 and team:
-                salary_map[f"_LN_{parts[-1]}_{team}"] = sal
-    print(f"[_fetch_dk_showdown_salaries] DG {matched_dg}: {len(dk_pool)} players, "
-          f"salary range ${dk_pool['salary'].min():.0f}-${dk_pool['salary'].max():.0f}")
+    player_data: dict[str, dict] = {}  # playerId -> {name, team, salary}
+    for p in raw_draftables:
+        pid = str(p.get("playerId", ""))
+        name = str(p.get("displayName", "")).strip()
+        team = str(p.get("teamAbbreviation", "")).upper()
+        sal = float(p.get("salary", 0))
+        if not pid or sal <= 0:
+            continue
+        if pid not in player_data or sal < player_data[pid]["salary"]:
+            player_data[pid] = {"name": name, "team": team, "salary": sal}
+
+    # Build name→salary mapping (normalise to lowercase for fuzzy matching)
+    salary_map: dict[str, float] = {}
+    for info in player_data.values():
+        name = info["name"]
+        team = info["team"]
+        sal = info["salary"]
+        # Store original, normalised, and last-name+team keys
+        salary_map[name] = sal
+        norm = re.sub(r"[.'`\-]", "", name.lower()).strip()
+        norm = re.sub(r"\s+(jr|sr|ii|iii|iv|v)$", "", norm)
+        norm = re.sub(r"\s+", " ", norm).strip()
+        salary_map[norm] = sal
+        # Last-name + team fallback (handles Dom/Dominick style mismatches)
+        parts = norm.split()
+        if len(parts) >= 2 and team:
+            salary_map[f"_LN_{parts[-1]}_{team}"] = sal
+
+    sals = [info["salary"] for info in player_data.values()]
+    print(f"[_fetch_dk_showdown_salaries] DG {matched_dg}: {len(player_data)} players (FLEX salaries), "
+          f"range ${min(sals):.0f}-${max(sals):.0f}")
     return salary_map
 
 
