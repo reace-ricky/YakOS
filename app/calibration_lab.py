@@ -94,6 +94,89 @@ def _load_archived_pool(file_path: str) -> pd.DataFrame:
     return df
 
 
+def _enrich_archived_pool(pool: pd.DataFrame) -> pd.DataFrame:
+    """Recompute edge signals for archived pools that are missing them.
+
+    ANTI-CIRCULAR SAFEGUARD: This function ONLY uses pre-game data
+    (proj, salary, proj_minutes, ownership) to compute signals. It NEVER
+    reads actual_fp, actual_minutes, mp_actual, or any post-game column.
+    Using actuals to compute signals that are then evaluated against actuals
+    would create circular calibration — the signal effectiveness table
+    would be meaningless.
+
+    Idempotent: if smash_prob already exists with non-null values, returns
+    the pool unchanged.
+    """
+    if "smash_prob" in pool.columns and pool["smash_prob"].notna().any():
+        return pool
+
+    pool = pool.copy()
+
+    from yak_core.edge import compute_empirical_std
+    from scipy.stats import norm
+
+    proj = pd.to_numeric(pool.get("proj", pd.Series(0, index=pool.index)), errors="coerce").fillna(0)
+    salary = pd.to_numeric(pool.get("salary", pd.Series(0, index=pool.index)), errors="coerce").fillna(0)
+
+    # 1. Empirical std from salary brackets (same model used by live edge computation)
+    std = compute_empirical_std(proj, salary)
+    std_safe = np.clip(std, 0.5, None)
+
+    # 2. Ceil / floor from std (approximate — archives may already have these)
+    if "ceil" not in pool.columns or pool["ceil"].isna().all():
+        pool["ceil"] = proj + 1.5 * std_safe
+    if "floor" not in pool.columns or pool["floor"].isna().all():
+        pool["floor"] = (proj - 1.0 * std_safe).clip(lower=0)
+
+    ceil = pd.to_numeric(pool["ceil"], errors="coerce").fillna(proj * 1.4)
+    floor = pd.to_numeric(pool["floor"], errors="coerce").fillna(proj * 0.7)
+
+    # 3. Smash prob: P(outcome >= 5x salary value) via Normal CDF
+    smash_line = salary / 200.0  # 5x DK value, same as edge.py _SMASH_VALUE_DIV
+    smash_z = np.where(std_safe > 0, (smash_line - proj) / std_safe, 0)
+    pool["smash_prob"] = np.clip(1.0 - norm.cdf(smash_z), 0.01, 0.95)
+
+    # 4. Bust prob: P(outcome <= floor)
+    bust_z = np.where(std_safe > 0, (floor - proj) / std_safe, 0)
+    pool["bust_prob"] = np.clip(norm.cdf(bust_z), 0.01, 0.95)
+
+    # 5. FP efficiency: per-minute production normalised by salary tier
+    proj_minutes = pd.to_numeric(
+        pool.get("proj_minutes", pd.Series(0, index=pool.index)), errors="coerce",
+    ).fillna(0)
+    fp_per_min = proj / proj_minutes.clip(lower=10)
+    salary_k = (salary / 1000).clip(lower=3)
+    pool["fp_efficiency"] = fp_per_min / salary_k
+
+    # 6. Leverage: projection / ownership (reward-per-ownership-unit)
+    own = pd.to_numeric(
+        pool.get("ownership", pool.get("own_pct", pd.Series(0, index=pool.index))),
+        errors="coerce",
+    ).fillna(0)
+    # Handle archives where ownership is 0-1 scale instead of 0-100
+    if own.max() > 0 and own.max() <= 1.0:
+        own = own * 100
+    own_safe = own.clip(lower=0.1)
+    pool["leverage"] = proj / own_safe
+    pool.loc[own < 0.1, "leverage"] = np.nan
+    pool.loc[proj < 10, "leverage"] = np.nan
+
+    # 7. Breakout score (simplified): high ceiling magnitude + low ownership
+    ceil_mag = ((ceil - proj) / proj.clip(lower=1) * 100).clip(lower=0)
+    ceil_mag_max = ceil_mag.max()
+    ceil_mag_norm = ceil_mag / max(ceil_mag_max, 0.001)
+    own_max = own.max()
+    own_inv_norm = 1.0 - (own / max(own_max, 0.001))
+    pool["breakout_score"] = ((ceil_mag_norm * 0.6 + own_inv_norm * 0.4) * 100).round(1)
+
+    # 8. Signals that require game-log data (not in archive) — leave as 0
+    for col in ["rolling_fp_5", "rolling_fp_20", "injury_bump_fp"]:
+        if col not in pool.columns:
+            pool[col] = 0.0
+
+    return pool
+
+
 def _load_contest_history() -> Dict[str, Any]:
     """Load contest results history."""
     if CONTEST_RESULTS_PATH.exists():
@@ -1255,6 +1338,7 @@ def _run_backtest(
 
         try:
             pool = pd.read_parquet(entry["file"])
+            pool = _enrich_archived_pool(pool)  # recompute edge signals if missing
             if "actual_fp" not in pool.columns or pool["actual_fp"].isna().all():
                 continue
 
@@ -1588,6 +1672,7 @@ def _run_batch_train(
 
         try:
             pool = pd.read_parquet(entry["file"])
+            pool = _enrich_archived_pool(pool)  # recompute edge signals if missing
             if "actual_fp" not in pool.columns or pool["actual_fp"].isna().all():
                 per_slate_log.append({
                     "date": slate_date, "status": "skipped", "reason": "no actuals",
@@ -2080,6 +2165,7 @@ def render_calibration_lab(sport: str) -> None:
 
     entry = entries[selected]
     pool = _load_archived_pool(entry["file"])
+    pool = _enrich_archived_pool(pool)  # recompute edge signals if missing
 
     if pool.empty:
         st.warning("Selected archive is empty.")

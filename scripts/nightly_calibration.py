@@ -166,14 +166,7 @@ def run_nba_calibration(slate_date: str) -> dict:
         log.error("record_slate_errors failed: %s", e)
         result["calibration_error"] = str(e)
 
-    # 5b. Archive the completed slate for historical replay
-    try:
-        archive_path = archive_slate(pool, slate_date, contest_type="GPP Main")
-        log.info("Slate archived: %s", archive_path)
-    except Exception as e:
-        log.warning("Slate archival failed (non-fatal): %s", e)
-
-    # 6. Score breakout predictions
+    # 5b. Breakout scoring (before archive so signals are included)
     try:
         pool["breakout_score"] = score_player_breakout(pool)
         n_breakout = (pool["breakout_score"] >= 60).sum()
@@ -183,7 +176,7 @@ def run_nba_calibration(slate_date: str) -> dict:
         log.warning("Breakout scoring failed (non-fatal): %s", e)
         pool["breakout_score"] = 0.0
 
-    # 7. Also load edge signals if available for richer outcome logging
+    # 5c. Load edge signals if available (before archive so they're persisted)
     signals_path = _signals_path("nba")
     if signals_path.exists():
         try:
@@ -204,7 +197,14 @@ def run_nba_calibration(slate_date: str) -> dict:
         except Exception as e:
             log.warning("Could not load edge signals: %s", e)
 
-    # 8. Check for contest bands for this date and score lineups against them
+    # 5d. Archive the completed slate WITH edge signals for historical replay
+    try:
+        archive_path = archive_slate(pool, slate_date, contest_type="GPP Main")
+        log.info("Slate archived: %s", archive_path)
+    except Exception as e:
+        log.warning("Slate archival failed (non-fatal): %s", e)
+
+    # 6. Check for contest bands for this date and score lineups against them
     contest_bands = None
     try:
         from yak_core.contest_calibration import (
