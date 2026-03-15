@@ -410,6 +410,147 @@ def _score_optimizer_lineups(lineups_df: pd.DataFrame, pool: pd.DataFrame) -> Li
     return results
 
 
+# ── Missed Player Analysis ───────────────────────────────────────────────
+
+
+def _analyze_missed_players(
+    ideal_scored: List[Dict[str, Any]],
+    opt_scored: List[Dict[str, Any]],
+    pool: pd.DataFrame,
+) -> Dict[str, Any]:
+    """Compare top ideal vs top optimizer lineup and analyze missed players.
+
+    Returns a dict with:
+      - missed_players: list of dicts (one per missed player with stats + reasons)
+      - over_rostered: list of player names in optimizer but not ideal
+      - projection_accuracy: dict with MAE stats
+    """
+    if not ideal_scored or not opt_scored:
+        return {"missed_players": [], "over_rostered": [], "projection_accuracy": {}}
+
+    ideal_names = {p["player_name"] for p in ideal_scored[0].get("players", [])}
+    opt_names = {p["player_name"] for p in opt_scored[0].get("players", [])}
+
+    missed_names = ideal_names - opt_names
+    over_rostered_names = opt_names - ideal_names
+
+    # Helper to safely pull a float column value
+    def _col(row: pd.Series, col_name: str, default: float = 0.0) -> float:
+        if col_name not in row.index:
+            return default
+        val = row[col_name]
+        try:
+            return float(val) if pd.notna(val) else default
+        except (ValueError, TypeError):
+            return default
+
+    missed_players: List[Dict[str, Any]] = []
+    for name in sorted(missed_names):
+        rows = pool[pool["player_name"] == name]
+        if rows.empty:
+            continue
+        r = rows.iloc[0]
+
+        salary = _col(r, "salary")
+        proj = _col(r, "proj")
+        actual_fp = _col(r, "actual_fp")
+        proj_error = actual_fp - proj
+        ownership = _col(r, "ownership", _col(r, "own_pct"))
+        smash_prob = _col(r, "smash_prob")
+        rolling_5 = _col(r, "rolling_fp_5")
+        rolling_20 = _col(r, "rolling_fp_20")
+        form_trend = (
+            ((rolling_5 - rolling_20) / rolling_20 * 100) if rolling_20 > 0 else 0.0
+        )
+        injury_bump = _col(r, "injury_bump_fp")
+        breakout_score = _col(r, "breakout_score")
+        proj_minutes = _col(r, "proj_minutes")
+        actual_minutes = _col(r, "actual_minutes")
+        fp_per_min = (actual_fp / actual_minutes) if actual_minutes > 0 else 0.0
+
+        # Auto-generate "why missed" reasons
+        reasons: List[str] = []
+        if proj > 0 and actual_fp > proj * 1.3:
+            reasons.append("Projection too low")
+        if rolling_20 > 0 and rolling_5 > rolling_20 * 1.15:
+            reasons.append("Form trending up")
+        if ownership > 20:
+            reasons.append("High ownership penalty")
+        if smash_prob > 0 and smash_prob < 15:
+            reasons.append("Low smash prob")
+        if salary > 9000:
+            reasons.append("Salary too high")
+        if salary < 5500 and salary > 0 and (actual_fp / salary * 1000) > 6:
+            reasons.append("Value play missed")
+        if injury_bump > 2:
+            reasons.append("Injury cascade beneficiary")
+        if proj > 0 and actual_fp > proj * 1.5 and breakout_score < 30:
+            reasons.append("Breakout game")
+        if not reasons:
+            reasons.append("Unknown")
+
+        missed_players.append({
+            "Player": name,
+            "Salary": int(salary),
+            "Proj FP": round(proj, 1),
+            "Actual FP": round(actual_fp, 1),
+            "Proj Error": round(proj_error, 1),
+            "Own%": round(ownership, 1),
+            "Smash": round(smash_prob, 1),
+            "Roll5": round(rolling_5, 1),
+            "Roll20": round(rolling_20, 1),
+            "Form%": round(form_trend, 1),
+            "InjBump": round(injury_bump, 1),
+            "Breakout": round(breakout_score, 1),
+            "ProjMin": round(proj_minutes, 1),
+            "FP/Min": round(fp_per_min, 2),
+            "Why Missed": ", ".join(reasons),
+            "_reasons": reasons,
+        })
+
+    # Sort missed players by Actual FP descending
+    missed_players.sort(key=lambda p: p["Actual FP"], reverse=True)
+
+    # Projection accuracy stats
+    proj_accuracy: Dict[str, Any] = {}
+    if "proj" in pool.columns and "actual_fp" in pool.columns:
+        valid = pool[pool["actual_fp"].notna() & pool["proj"].notna()].copy()
+        valid["_abs_err"] = (valid["actual_fp"] - valid["proj"]).abs()
+        valid["_err"] = valid["actual_fp"] - valid["proj"]
+
+        rostered_names = opt_names
+        missed_set = missed_names
+
+        rostered_mask = valid["player_name"].isin(rostered_names)
+        missed_mask = valid["player_name"].isin(missed_set)
+
+        proj_accuracy["mae_all"] = round(valid["_abs_err"].mean(), 2) if len(valid) else 0
+        proj_accuracy["mae_rostered"] = (
+            round(valid.loc[rostered_mask, "_abs_err"].mean(), 2)
+            if rostered_mask.any() else 0
+        )
+        proj_accuracy["mae_missed"] = (
+            round(valid.loc[missed_mask, "_abs_err"].mean(), 2)
+            if missed_mask.any() else 0
+        )
+        proj_accuracy["bias_all"] = round(valid["_err"].mean(), 2) if len(valid) else 0
+        proj_accuracy["bias_missed"] = (
+            round(valid.loc[missed_mask, "_err"].mean(), 2)
+            if missed_mask.any() else 0
+        )
+        if len(valid) > 1:
+            corr = valid[["proj", "actual_fp"]].corr().iloc[0, 1]
+            proj_accuracy["correlation"] = round(corr, 3) if pd.notna(corr) else 0
+        else:
+            proj_accuracy["correlation"] = 0
+
+    return {
+        "missed_players": missed_players,
+        "over_rostered": sorted(over_rostered_names),
+        "projection_accuracy": proj_accuracy,
+    }
+
+
 # ── Auto-Generate Ideal Lineups from Actuals ─────────────────────────────
 
 
@@ -1485,6 +1626,9 @@ def _run_batch_train(
             # 3. Score optimizer lineups
             opt_scored = _score_optimizer_lineups(lineups_df, pool)
 
+            # 3b. Missed player analysis (read-only)
+            missed_analysis = _analyze_missed_players(ideal_scored, opt_scored, pool)
+
             # 4. Run auto-analysis
             analysis = _run_auto_analysis(
                 ideal_scored, opt_scored, lineups_df, pool, working_config,
@@ -1524,6 +1668,7 @@ def _run_batch_train(
                 "n_recs": len(actionable),
                 "ideal_top": ideal_scored[0] if ideal_scored else None,
                 "opt_top": opt_scored[0] if opt_scored else None,
+                "missed_analysis": missed_analysis,
             })
 
         except Exception as e:
@@ -1546,6 +1691,141 @@ def _run_batch_train(
     }
     progress.empty()
     st.rerun()
+
+
+def _render_missed_player_analysis(trained_slates: List[Dict[str, Any]]) -> None:
+    """Render the missed player analysis expander in batch train results."""
+    # Collect all missed analyses from trained slates
+    all_missed: List[Dict[str, Any]] = []
+    all_reasons: List[str] = []
+    all_proj_acc: List[Dict[str, Any]] = []
+
+    for s in trained_slates:
+        ma = s.get("missed_analysis")
+        if not ma or not ma.get("missed_players"):
+            continue
+        all_missed.append({"date": s["date"], **ma})
+        for mp in ma["missed_players"]:
+            all_reasons.extend(mp.get("_reasons", []))
+        if ma.get("projection_accuracy"):
+            all_proj_acc.append(ma["projection_accuracy"])
+
+    if not all_missed:
+        return
+
+    total_missed = sum(len(m["missed_players"]) for m in all_missed)
+
+    with st.expander(f"Missed Player Analysis ({total_missed} players across {len(all_missed)} slates)", expanded=True):
+        # ── Pattern Summary ──────────────────────────────────────────
+        st.markdown("#### Pattern Summary")
+        reason_counts = Counter(all_reasons)
+        top_reasons = reason_counts.most_common(5)
+        reason_parts = [f"{r} ({c})" for r, c in top_reasons]
+        st.markdown(
+            f"Across **{len(all_missed)}** slates, the optimizer missed **{total_missed}** players. "
+            f"Top reasons: {', '.join(reason_parts)}"
+        )
+
+        # Salary tier breakdown of missed players
+        all_mp_flat = [mp for m in all_missed for mp in m["missed_players"]]
+        salary_bins = {"<$5.5K": 0, "$5.5-7K": 0, "$7-9K": 0, "$9K+": 0}
+        for mp in all_mp_flat:
+            sal = mp.get("Salary", 0)
+            if sal < 5500:
+                salary_bins["<$5.5K"] += 1
+            elif sal < 7000:
+                salary_bins["$5.5-7K"] += 1
+            elif sal < 9000:
+                salary_bins["$7-9K"] += 1
+            else:
+                salary_bins["$9K+"] += 1
+        dominant = max(salary_bins, key=salary_bins.get)  # type: ignore[arg-type]
+        if salary_bins[dominant] > 0:
+            st.caption(f"Most commonly missed salary tier: **{dominant}** ({salary_bins[dominant]} players)")
+
+        # ── Signal Effectiveness Table ───────────────────────────────
+        st.markdown("#### Signal Effectiveness")
+        st.caption("Which signals would have identified the missed players?")
+
+        if total_missed > 0:
+            signals = {
+                "Form Trend > 10%": 0,
+                "Smash Prob > 25": 0,
+                "Breakout Score > 40": 0,
+                "Injury Bump > 0": 0,
+                "FP/Min Top Quartile (>1.0)": 0,
+                "Proj Error > 5 FP": 0,
+            }
+            for mp in all_mp_flat:
+                if mp.get("Form%", 0) > 10:
+                    signals["Form Trend > 10%"] += 1
+                if mp.get("Smash", 0) > 25:
+                    signals["Smash Prob > 25"] += 1
+                if mp.get("Breakout", 0) > 40:
+                    signals["Breakout Score > 40"] += 1
+                if mp.get("InjBump", 0) > 0:
+                    signals["Injury Bump > 0"] += 1
+                if mp.get("FP/Min", 0) > 1.0:
+                    signals["FP/Min Top Quartile (>1.0)"] += 1
+                if mp.get("Proj Error", 0) > 5:
+                    signals["Proj Error > 5 FP"] += 1
+
+            sig_rows = []
+            for sig_name, flagged in sorted(signals.items(), key=lambda x: x[1], reverse=True):
+                hit_rate = flagged / total_missed * 100
+                sig_rows.append({
+                    "Signal": sig_name,
+                    "Flagged": flagged,
+                    "Total Missed": total_missed,
+                    "Hit Rate": f"{hit_rate:.0f}%",
+                })
+            st.dataframe(pd.DataFrame(sig_rows), use_container_width=True, hide_index=True)
+
+        # ── Projection Accuracy ──────────────────────────────────────
+        if all_proj_acc:
+            st.markdown("#### Projection Accuracy")
+            avg_mae_all = np.mean([p.get("mae_all", 0) for p in all_proj_acc])
+            avg_mae_rost = np.mean([p.get("mae_rostered", 0) for p in all_proj_acc])
+            avg_mae_missed = np.mean([p.get("mae_missed", 0) for p in all_proj_acc])
+            avg_bias_all = np.mean([p.get("bias_all", 0) for p in all_proj_acc])
+            avg_bias_missed = np.mean([p.get("bias_missed", 0) for p in all_proj_acc])
+            avg_corr = np.mean([p.get("correlation", 0) for p in all_proj_acc])
+
+            pc1, pc2, pc3 = st.columns(3)
+            pc1.metric("MAE (All)", f"{avg_mae_all:.1f}")
+            pc2.metric("MAE (Rostered)", f"{avg_mae_rost:.1f}")
+            pc3.metric("MAE (Missed)", f"{avg_mae_missed:.1f}")
+
+            pc4, pc5, pc6 = st.columns(3)
+            pc4.metric("Bias (All)", f"{avg_bias_all:+.1f}")
+            pc5.metric("Bias (Missed)", f"{avg_bias_missed:+.1f}")
+            pc6.metric("Proj-Actual Corr", f"{avg_corr:.3f}")
+
+            if avg_mae_missed > avg_mae_rost > 0:
+                gap = avg_mae_missed - avg_mae_rost
+                st.caption(
+                    f"Projections were **{gap:.1f} FP less accurate** on missed players vs rostered players."
+                )
+
+        # ── Per-Slate Tabs ───────────────────────────────────────────
+        st.markdown("#### Per-Slate Missed Players")
+        slate_labels = [m["date"] for m in all_missed]
+        tabs = st.tabs(slate_labels)
+        display_cols = [
+            "Player", "Salary", "Proj FP", "Actual FP", "Proj Error",
+            "Own%", "Smash", "Form%", "InjBump", "Breakout", "FP/Min", "Why Missed",
+        ]
+        for tab, missed_data in zip(tabs, all_missed):
+            with tab:
+                mp_list = missed_data["missed_players"]
+                if mp_list:
+                    df = pd.DataFrame(mp_list)
+                    show_cols = [c for c in display_cols if c in df.columns]
+                    st.dataframe(df[show_cols], use_container_width=True, hide_index=True)
+
+                over = missed_data.get("over_rostered", [])
+                if over:
+                    st.caption(f"Over-rostered (in optimizer but not ideal): {', '.join(over)}")
 
 
 def _render_batch_train_results(bt_state: Dict[str, Any], contest_type_key: str, contest_mode: str) -> None:
@@ -1686,6 +1966,9 @@ def _render_batch_train_results(bt_state: Dict[str, Any], contest_type_key: str,
                     st.dataframe(players_df, use_container_width=True, hide_index=True)
                 else:
                     st.caption("No lineup available")
+
+    # Missed Player Analysis
+    _render_missed_player_analysis(trained_slates)
 
     # Action buttons
     col_apply, col_reset = st.columns(2)
