@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -336,3 +337,36 @@ class TestLegacyMigration:
         assert "showdown" in loaded
         assert loaded["gpp"]["values"]["proj_weight"] == 0.60
         assert loaded["gpp"]["slates_trained"] == ["2026-01-01"]
+
+
+class TestGitHubSyncOnSave:
+    """Verify that _sync_to_github is called after every write operation."""
+
+    @patch("app.calibration_persistence._sync_to_github")
+    def test_save_active_config_triggers_sync(self, mock_sync):
+        save_active_config(_sample_values(), slate_date="2026-03-14")
+        mock_sync.assert_called()
+        call_files = mock_sync.call_args[1]["files"]
+        assert "data/calibration/active_config.json" in call_files
+
+    @patch("app.calibration_persistence._sync_to_github")
+    def test_append_config_history_triggers_sync(self, mock_sync):
+        append_config_history("test_action", _sample_values())
+        mock_sync.assert_called()
+        call_files = mock_sync.call_args[1]["files"]
+        assert "data/calibration/config_history.json" in call_files
+
+    @patch("app.calibration_persistence._sync_to_github")
+    def test_apply_config_to_optimizer_triggers_sync(self, mock_sync):
+        apply_config_to_optimizer(_sample_values())
+        mock_sync.assert_called()
+        # Last call should include the optimizer overrides file
+        last_call_files = mock_sync.call_args[1]["files"]
+        assert "data/calibration/optimizer_overrides.json" in last_call_files
+
+    @patch("app.calibration_persistence._sync_to_github")
+    def test_reset_active_config_triggers_sync(self, mock_sync):
+        reset_active_config(_sample_values())
+        mock_sync.assert_called()
+        # Should have been called multiple times (from append_config_history + reset itself)
+        assert mock_sync.call_count >= 2

@@ -47,6 +47,9 @@ _FEEDBACK_FILES = [
     "data/sim_sandbox/breakout_profile.json",
     "data/outcome_log/nba/outcomes.parquet",
     "data/outcome_log/pga/outcomes.parquet",
+    "data/calibration/active_config.json",
+    "data/calibration/config_history.json",
+    "data/calibration/optimizer_overrides.json",
 ]
 
 # Binary file extensions that need base64 encoding directly from bytes
