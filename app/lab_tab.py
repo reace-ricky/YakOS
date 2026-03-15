@@ -141,6 +141,11 @@ def render_lab_tab(sport: str) -> None:
                 with open(out_dir / "slate_meta.json", "w") as f:
                     json.dump(meta, f, indent=2, default=str)
 
+                # Clear stale actuals so Historical Replay won't use wrong-date data
+                _actuals_clear_path = out_dir / "actuals.parquet"
+                if _actuals_clear_path.exists():
+                    _actuals_clear_path.unlink(missing_ok=True)
+
                 st.success(f"Loaded {len(pool)} players \u2192 {out_dir}")
             except Exception as e:
                 st.error(f"Load pool error: {e}")
@@ -1509,6 +1514,31 @@ def _render_historical_replay(sport: str) -> None:
 
     # ── Load or fetch actuals ──
     actuals_path = out_dir / "actuals.parquet"
+    # ── Read slate date from meta for date validation ──
+    _slate_meta_path = out_dir / "slate_meta.json"
+    _slate_date_from_meta = ""
+    if _slate_meta_path.exists():
+        try:
+            _slate_meta = json.loads(_slate_meta_path.read_text())
+            _slate_date_from_meta = _slate_meta.get("date", "")
+        except Exception:
+            pass
+
+    # ── Auto-clear stale actuals if date doesn't match current slate ──
+    if actuals_path.exists() and _slate_date_from_meta:
+        try:
+            _existing_actuals = pd.read_parquet(actuals_path)
+            if "date" in _existing_actuals.columns:
+                _actuals_date = str(_existing_actuals["date"].iloc[0])
+                if _actuals_date != _slate_date_from_meta:
+                    actuals_path.unlink(missing_ok=True)
+                    st.info(
+                        f"Cleared stale actuals from {_actuals_date} "
+                        f"(current slate is {_slate_date_from_meta})."
+                    )
+        except Exception:
+            pass
+
     if not actuals_path.exists():
         st.caption("No actuals loaded yet.")
         is_pga = sport.upper() == "PGA"
@@ -1527,6 +1557,7 @@ def _render_historical_replay(sport: str) -> None:
                     else:
                         event_name = actuals_df["event_name"].iloc[0] if "event_name" in actuals_df.columns else ""
                         actuals_df = actuals_df[["player_name", "actual_fp"]]
+                        actuals_df["date"] = _slate_date_from_meta or date.today().isoformat()
                         actuals_df.to_parquet(str(actuals_path), index=False)
                         st.success(f"Fetched actuals for {len(actuals_df)} players" + (f" ({event_name})" if event_name else "") + ".")
                         st.rerun()
@@ -1563,6 +1594,7 @@ def _render_historical_replay(sport: str) -> None:
                     if actuals_df.empty:
                         st.warning("No box score data found for that date. Games may not have finished yet.")
                     else:
+                        actuals_df["date"] = fetch_date
                         actuals_df.to_parquet(str(actuals_path), index=False)
                         st.success(f"Fetched actuals for {len(actuals_df)} players.")
                         st.rerun()
@@ -1573,6 +1605,8 @@ def _render_historical_replay(sport: str) -> None:
         if actuals_file:
             actuals_df = pd.read_csv(actuals_file)
             if "player_name" in actuals_df.columns and "actual_fp" in actuals_df.columns:
+                if "date" not in actuals_df.columns:
+                    actuals_df["date"] = _slate_date_from_meta or date.today().isoformat()
                 actuals_df.to_parquet(str(actuals_path), index=False)
                 st.success("Actuals saved.")
                 st.rerun()
