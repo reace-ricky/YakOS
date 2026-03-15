@@ -1480,19 +1480,19 @@ def _render_batch_train_results(bt_state: Dict[str, Any], contest_type_key: str,
     st.caption("Running both configs against all training slates...")
 
     col_run, _ = st.columns([1, 3])
-    if col_run.button("Run Backtest Comparison", key="batch_train_backtest"):
+    if col_run.button("Run Backtest Comparison", key="batch_train_backtest_btn"):
         progress = st.progress(0, text="Backtesting default config...")
         default_results = _run_backtest(dict(default_config), progress)
         progress = st.progress(0, text="Backtesting trained config...")
         trained_results = _run_backtest(dict(trained_config), progress)
 
-        st.session_state["batch_train_backtest"] = {
+        st.session_state["batch_train_backtest_results"] = {
             "default": default_results,
             "trained": trained_results,
         }
         st.rerun()
 
-    bt_backtest = st.session_state.get("batch_train_backtest")
+    bt_backtest = st.session_state.get("batch_train_backtest_results")
     if bt_backtest:
         dr = bt_backtest["default"]
         tr = bt_backtest["trained"]
