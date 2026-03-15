@@ -293,6 +293,12 @@ def main(argv: list[str] | None = None) -> pd.DataFrame:
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2, default=str)
 
+    # Clear stale actuals so Historical Replay won't use wrong-date data
+    actuals_clear_path = os.path.join(out_dir, "actuals.parquet")
+    if os.path.isfile(actuals_clear_path):
+        os.remove(actuals_clear_path)
+        print(f"[load_pool] Cleared stale actuals.parquet")
+
     # Validate
     check = pd.read_parquet(pool_path)
     required_cols = {"player_name", "salary", "proj", "pos"}
