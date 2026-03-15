@@ -487,7 +487,7 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
         _TANK01_HOST, auto_flag_injuries, apply_manual_injury_overrides_to_pool,
         fetch_betting_odds,
     )
-    from yak_core.projections import apply_projections
+    from yak_core.projections import apply_projections, yakos_minutes_projection
     from yak_core.calibration_feedback import get_correction_factors, apply_corrections
     from yak_core.injury_cascade import apply_injury_cascade
     from yak_core.blowout_risk import apply_blowout_cascade
@@ -522,6 +522,39 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
         print(f"[_load_nba_pool] fetch_player_game_logs failed (non-fatal): {exc}")
 
     pool = apply_projections(pool, cfg)
+
+    # ── Compute projected minutes per player using rolling minute averages ──
+    # yakos_minutes_projection uses rolling_min_5/10/20 (from game logs above)
+    # with contextual adjustments for B2B and spread.  This populates the
+    # proj_minutes column that injury_cascade, blowout_risk, and
+    # minute-cannibal detection all depend on.
+    # NOTE: We pass only rolling_min columns here — NOT salary, b2b, or spread.
+    # - salary is omitted so the trained model (which over-weights salary and
+    #   under-estimates cheap players with expanding roles) is bypassed in favour
+    #   of the rolling-average formula that reflects actual recent minutes.
+    # - b2b and spread adjustments are applied separately later in the pipeline
+    #   (B2B dampening block and apply_blowout_cascade) so we omit them to avoid
+    #   double-counting.
+    try:
+        _min_features = ["rolling_min_5", "rolling_min_10", "rolling_min_20"]
+        proj_min_vals = []
+        for _, row in pool.iterrows():
+            feats = {k: row.get(k) for k in _min_features if k in pool.columns}
+            # Pass salary=0 so the function uses the rolling-average formula,
+            # falling back to salary / 300 only when rolling data is absent.
+            feats["salary"] = float(row.get("salary", 0)) if not any(
+                k in feats and pd.notna(feats.get(k)) for k in _min_features
+            ) else 0
+            result = yakos_minutes_projection(feats)
+            proj_min_vals.append(result["proj_minutes"])
+        pool["proj_minutes"] = proj_min_vals
+        _n_over_20 = int((pool["proj_minutes"] >= 20).sum())
+        print(f"[_load_nba_pool] Computed proj_minutes for {len(pool)} players "
+              f"({_n_over_20} with >= 20 min, mean={pool['proj_minutes'].mean():.1f})")
+    except Exception as exc:
+        print(f"[_load_nba_pool] yakos_minutes_projection failed (non-fatal): {exc}")
+        if "proj_minutes" not in pool.columns:
+            pool["proj_minutes"] = 0.0
 
     # ── Cross-reference Tank01 injury list to catch OUT players whose DFS
     #    entry lacks an injuryStatus (e.g. Jarrett Allen still on slate but OUT).
