@@ -814,5 +814,103 @@
       "mid_exposure": 35,
       "value_exposure": 25
     }
+  },
+  {
+    "timestamp": "2026-03-15T19:44:57",
+    "contest_type": "gpp",
+    "slate_date": "2026-03-06",
+    "action": "batch_train",
+    "changes": {
+      "min_mid_players": {
+        "from": 3,
+        "to": 2
+      },
+      "stud_exposure": {
+        "from": 70,
+        "to": 80
+      }
+    },
+    "values": {
+      "proj_weight": 1.0,
+      "upside_weight": 0.4,
+      "boom_weight": 1.0,
+      "own_penalty_strength": 0.0,
+      "low_own_boost": 0.5,
+      "own_neutral_pct": 15,
+      "max_punt_players": 1,
+      "min_mid_players": 2,
+      "game_diversity_pct": 65,
+      "stud_exposure": 80,
+      "mid_exposure": 35,
+      "value_exposure": 25
+    }
+  },
+  {
+    "timestamp": "2026-03-15T19:44:59",
+    "contest_type": "gpp",
+    "slate_date": "2026-03-07",
+    "action": "batch_train",
+    "changes": {
+      "max_punt_players": {
+        "from": 1,
+        "to": 0
+      }
+    },
+    "values": {
+      "proj_weight": 1.0,
+      "upside_weight": 0.4,
+      "boom_weight": 1.0,
+      "own_penalty_strength": 0.0,
+      "low_own_boost": 0.5,
+      "own_neutral_pct": 15,
+      "max_punt_players": 0,
+      "min_mid_players": 2,
+      "game_diversity_pct": 65,
+      "stud_exposure": 80,
+      "mid_exposure": 35,
+      "value_exposure": 25
+    }
+  },
+  {
+    "timestamp": "2026-03-15T19:45:01",
+    "contest_type": "gpp",
+    "slate_date": "2026-03-08",
+    "action": "batch_train",
+    "changes": {},
+    "values": {
+      "proj_weight": 1.0,
+      "upside_weight": 0.4,
+      "boom_weight": 1.0,
+      "own_penalty_strength": 0.0,
+      "low_own_boost": 0.5,
+      "own_neutral_pct": 15,
+      "max_punt_players": 0,
+      "min_mid_players": 2,
+      "game_diversity_pct": 65,
+      "stud_exposure": 80,
+      "mid_exposure": 35,
+      "value_exposure": 25
+    }
+  },
+  {
+    "timestamp": "2026-03-15T19:45:04",
+    "contest_type": "gpp",
+    "slate_date": "2026-03-09",
+    "action": "batch_train",
+    "changes": {},
+    "values": {
+      "proj_weight": 1.0,
+      "upside_weight": 0.4,
+      "boom_weight": 1.0,
+      "own_penalty_strength": 0.0,
+      "low_own_boost": 0.5,
+      "own_neutral_pct": 15,
+      "max_punt_players": 0,
+      "min_mid_players": 2,
+      "game_diversity_pct": 65,
+      "stud_exposure": 80,
+      "mid_exposure": 35,
+      "value_exposure": 25
+    }
   }
 ]
