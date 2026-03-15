@@ -911,9 +911,20 @@ def build_multiple_lineups_with_exposure(
     # ── Projection floor safeguard (v8) ─────────────────────────────────────
     # Flag lineups whose total projection falls below the configured floor.
     # For NBA DK GPP, competitive winning scores are 300-380+; lineups under
-    # 280 are unlikely to cash and indicate the scoring formula drifted too
-    # contrarian.  Flagged lineups are logged but kept (the user can filter).
+    # the floor are unlikely to cash.  Flagged lineups are logged but kept.
+    #
+    # Dynamic floor: when contest band history has ≥3 GPP entries, use ~85%
+    # of the recent average cash line instead of the hardcoded default.
     proj_floor = float(cfg.get("GPP_PROJ_FLOOR", 0))
+    if proj_floor > 0 and is_gpp:
+        try:
+            from yak_core.contest_calibration import get_dynamic_proj_floor
+            dynamic = get_dynamic_proj_floor(fallback=proj_floor)
+            if dynamic != proj_floor:
+                print(f"[GPP floor] Using dynamic floor {dynamic:.0f} (was {proj_floor:.0f})")
+                proj_floor = dynamic
+        except Exception:
+            pass  # fall back to config value
     if proj_floor > 0 and not lineups_df.empty and is_gpp:
         lu_proj = lineups_df.groupby("lineup_index")["proj"].sum()
         below_floor = lu_proj[lu_proj < proj_floor]

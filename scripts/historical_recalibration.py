@@ -377,6 +377,117 @@ def print_report(results: list[dict]) -> None:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# BACKFILL: update history.json entries that have scores.best == 0
+# ═════════════════════════════════════════════════════════════════════════════
+
+HISTORY_PATH = _REPO_ROOT / "data" / "contest_results" / "history.json"
+
+
+def backfill_contest_history(num_lineups: int = 20) -> dict:
+    """Backfill history.json entries where scores.best == 0.
+
+    For each entry with zero scores, find the matching archived pool,
+    run the optimizer, score lineups with actuals, and update the entry.
+
+    Returns summary dict with counts of updated/skipped entries.
+    """
+    from yak_core.contest_calibration import ContestResult, score_vs_bands
+
+    if not HISTORY_PATH.exists():
+        print("[backfill] No history.json found — nothing to backfill.")
+        return {"updated": 0, "skipped": 0}
+
+    with open(HISTORY_PATH) as f:
+        history = json.load(f)
+
+    updated = 0
+    skipped = 0
+
+    for key, entry in history.items():
+        scores = entry.get("scores", {})
+        # Skip entries that already have real scores
+        if scores.get("best", 0) > 0:
+            print(f"  SKIP: {key} — already has scores (best={scores['best']})")
+            skipped += 1
+            continue
+
+        slate_date = entry.get("slate_date", "")
+        contest_type = entry.get("contest_type", "gpp")
+
+        # Find archive — try gpp_main first, then contest_type-specific
+        archive_path = find_archive_for_date(slate_date)
+        if archive_path is None:
+            # Try cash_main or showdown variants
+            for suffix in [f"{contest_type}_main", contest_type, "showdown"]:
+                candidate = ARCHIVE_DIR / f"{slate_date}_{suffix}.parquet"
+                if candidate.exists():
+                    archive_path = candidate
+                    break
+
+        if archive_path is None:
+            print(f"  SKIP: {key} — no archive for {slate_date}")
+            skipped += 1
+            continue
+
+        pool = load_archive_pool(archive_path)
+        if "actual_fp" not in pool.columns:
+            print(f"  SKIP: {key} — archive missing actual_fp column")
+            skipped += 1
+            continue
+
+        actual_valid = pool["actual_fp"].dropna()
+        if actual_valid.empty or (actual_valid == 0).all():
+            print(f"  SKIP: {key} — actual_fp is all NaN/zero")
+            skipped += 1
+            continue
+
+        # Run optimizer and score
+        print(f"  Backfilling {key} ...")
+        try:
+            lineups_df = run_optimizer_on_pool(pool, num_lineups=num_lineups)
+            if lineups_df.empty:
+                print(f"    WARNING: Optimizer produced no lineups for {key}")
+                skipped += 1
+                continue
+
+            lineups_df = score_lineups_with_actuals(lineups_df, pool)
+            lu_totals = lineups_df.groupby("lineup_index")["actual_fp"].sum()
+            lineup_actuals = lu_totals.dropna().tolist()
+
+            if not lineup_actuals:
+                print(f"    WARNING: No lineup actuals for {key}")
+                skipped += 1
+                continue
+
+            bands_obj = ContestResult.from_dict(entry)
+            new_scores = score_vs_bands(lineup_actuals, bands_obj)
+
+            # Update the entry in-place
+            entry["scores"] = new_scores
+            updated += 1
+
+            print(
+                f"    Updated: {new_scores['n_lineups']} lineups, "
+                f"cash_rate={new_scores['cash_rate']:.1%}, "
+                f"best={new_scores['best']:.1f}, avg={new_scores['avg']:.1f}"
+            )
+        except Exception as e:
+            print(f"    ERROR backfilling {key}: {e}")
+            skipped += 1
+            continue
+
+    # Write updated history
+    if updated > 0:
+        with open(HISTORY_PATH, "w") as f:
+            json.dump(history, f, indent=2)
+        print(f"\n[backfill] Updated {updated} entries, skipped {skipped}. Saved to {HISTORY_PATH}")
+    else:
+        print(f"\n[backfill] No entries updated (skipped {skipped}).")
+
+    return {"updated": updated, "skipped": skipped}
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -400,7 +511,17 @@ def main():
         "--num-lineups", type=int, default=20,
         help="Number of optimizer lineups to generate per date (default: 20).",
     )
+    parser.add_argument(
+        "--backfill", action="store_true",
+        help="Backfill history.json entries that have scores.best == 0 using archived pools.",
+    )
     args = parser.parse_args()
+
+    # ── Backfill mode ────────────────────────────────────────────────────
+    if args.backfill:
+        result = backfill_contest_history(num_lineups=args.num_lineups)
+        print(f"\nBackfill complete: {result}")
+        sys.exit(0)
 
     # ── Report mode ──────────────────────────────────────────────────────
     if args.report:

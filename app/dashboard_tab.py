@@ -128,13 +128,6 @@ def render_dashboard_tab(sport: str) -> None:
     except Exception as e:
         st.error(f"Post-Slate Feedback error: {e}\n```\n{traceback.format_exc()}\n```")
 
-    # ── Contest Results (entry form) ──────────────────────────────────────
-    st.markdown("---")
-    try:
-        _render_contest_results(sport)
-    except Exception as e:
-        st.error(f"Contest Results error: {e}\n```\n{traceback.format_exc()}\n```")
-
     # ── Historical Backfill ───────────────────────────────────────────────
     st.markdown("---")
     try:
@@ -481,6 +474,8 @@ def _render_contest_band_tracking(data: Dict[str, Any]) -> None:
             "cash_line": entry.get("cash_line", 0),
             "winning": entry.get("winning_score", 0),
             "entries": entry.get("num_entries", 0),
+            "best": sc.get("best", 0),
+            "avg": sc.get("avg", 0),
             "cash_rate": sc.get("cash_rate", ""),
         })
     if table_rows:
@@ -562,12 +557,14 @@ def _render_published_data_status(sport: str) -> None:
 def _render_post_slate_feedback(sport: str) -> None:
     st.markdown("### Post-Slate Feedback")
 
-    feedback_date = st.text_input("Slate date", value=date.today().isoformat(), key=f"dash_fb_date_{sport}")
+    feedback_date = st.date_input(
+        "Slate date", value=date.today(), key=f"dash_fb_date_{sport}"
+    )
 
     if st.button("Run Post-Slate", key=f"dash_postslate_{sport}"):
         with st.spinner("Running post-slate analysis..."):
             try:
-                result = _run_post_slate(sport, feedback_date)
+                result = _run_post_slate(sport, str(feedback_date))
                 if result.get("status") == "ok":
                     st.success(f"Post-slate complete: {result.get('message', '')}")
                     if result.get("calibration_update"):
@@ -576,74 +573,6 @@ def _render_post_slate_feedback(sport: str) -> None:
                     st.warning(result.get("message", "No actuals available for this date."))
             except Exception as e:
                 st.error(f"Post-slate error: {e}")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Contest Results Section (PRESERVED — has user-active forms)
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _render_contest_results(sport: str) -> None:
-    """Contest band entry form and history table."""
-    st.markdown("### Contest Results")
-
-    c1, c2 = st.columns(2)
-    with c1:
-        cr_date = st.date_input("Contest date", value=date.today(), key=f"cr_date_{sport}")
-    with c2:
-        cr_type = st.selectbox("Contest type", ["GPP", "Cash", "Showdown"], key=f"cr_type_{sport}")
-
-    c3, c4 = st.columns(2)
-    with c3:
-        cash_line = st.number_input("Cash Line", min_value=0.0, step=0.5, key=f"cr_cash_{sport}")
-        top_10 = st.number_input("Top 10% Score", min_value=0.0, step=0.5, key=f"cr_top10_{sport}")
-    with c4:
-        winning = st.number_input("Winning Score", min_value=0.0, step=0.5, key=f"cr_win_{sport}")
-        entries = st.number_input("Entry Count", min_value=0, step=1, key=f"cr_entries_{sport}")
-
-    notes = st.text_input("Notes", key=f"cr_notes_{sport}")
-
-    if st.button("Save Contest Result", key=f"cr_save_{sport}"):
-        if cash_line <= 0:
-            st.warning("Cash line must be > 0")
-            return
-
-        from yak_core.contest_calibration import (
-            ContestResult, save_contest_result, score_vs_bands,
-        )
-        from app.data_loader import published_dir
-
-        cr = ContestResult(
-            slate_date=str(cr_date),
-            contest_type=cr_type.lower(),
-            cash_line=cash_line,
-            top_15_score=top_10,
-            top_1_score=0,
-            winning_score=winning,
-            num_entries=entries,
-            notes=notes,
-        )
-
-        # Check for published lineups to auto-score
-        scores = None
-        p_dir = published_dir(sport)
-        lineup_files = list(p_dir.glob("*_lineups.parquet")) if p_dir.exists() else []
-        if lineup_files:
-            try:
-                all_actuals = []
-                for lf in lineup_files:
-                    ldf = pd.read_parquet(lf)
-                    if "actual_fp" in ldf.columns and "lineup_index" in ldf.columns:
-                        lu_totals = ldf.groupby("lineup_index")["actual_fp"].sum()
-                        all_actuals.extend(lu_totals.dropna().tolist())
-                if all_actuals:
-                    scores = score_vs_bands(all_actuals, cr)
-            except Exception:
-                pass
-
-        save_contest_result(cr, scores=scores)
-        st.success(f"Saved contest result for {cr_date} ({cr_type})")
-        if scores and scores.get("n_lineups", 0) > 0:
-            st.json(scores)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

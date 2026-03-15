@@ -336,3 +336,26 @@ def get_hit_rate_summary(
             "top_1_rate": 0.03,     # blueprint target
         },
     }
+
+
+def get_dynamic_proj_floor(
+    fallback: float = 280.0,
+    n_recent: int = 15,
+    multiplier: float = 0.85,
+) -> float:
+    """Compute a dynamic projection floor from recent GPP cash lines.
+
+    Uses ~85% of the average cash line from the last *n_recent* GPP contest
+    band entries.  Falls back to *fallback* when fewer than 3 entries exist.
+    """
+    results = get_calibration_history(contest_type="gpp")
+    if len(results) < 3:
+        return fallback
+
+    recent = results[:n_recent]
+    cash_lines = [r["cash_line"] for r in recent if r.get("cash_line", 0) > 0]
+    if len(cash_lines) < 3:
+        return fallback
+
+    dynamic_floor = round(float(np.mean(cash_lines)) * multiplier, 1)
+    return max(dynamic_floor, 200.0)  # never go below a reasonable minimum

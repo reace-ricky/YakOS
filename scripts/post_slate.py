@@ -248,6 +248,43 @@ def post_slate(sport: str, slate_date: str) -> dict:
     except Exception as e:
         print(f"[post_slate] WARNING: Slate archival failed (non-fatal): {e}")
 
+    # Step 3c: Score lineups against contest bands (if bands exist for this date)
+    try:
+        from yak_core.contest_calibration import (
+            get_calibration_history, ContestResult, score_vs_bands, save_contest_result,
+        )
+        from yak_core.lineups import prepare_pool, build_multiple_lineups_with_exposure
+        from yak_core.config import merge_config
+
+        all_results = get_calibration_history()
+        matched_cr = None
+        for cr in all_results:
+            if cr.get("slate_date") == slate_date:
+                matched_cr = cr
+                break
+
+        if matched_cr and matched_cr.get("cash_line", 0) > 0:
+            opt_cfg = merge_config({"CONTEST_TYPE": "gpp", "NUM_LINEUPS": 20})
+            opt_pool = prepare_pool(pool.copy(), opt_cfg)
+            lu_df, _ = build_multiple_lineups_with_exposure(opt_pool, opt_cfg)
+
+            if not lu_df.empty and "lineup_index" in lu_df.columns:
+                lu_df["actual_fp"] = lu_df["player_name"].map(act_map).fillna(0.0)
+                lu_totals = lu_df.groupby("lineup_index")["actual_fp"].sum()
+                lineup_actuals = lu_totals.dropna().tolist()
+
+                if lineup_actuals:
+                    bands_obj = ContestResult.from_dict(matched_cr)
+                    scores = score_vs_bands(lineup_actuals, bands_obj)
+                    save_contest_result(bands_obj, scores=scores)
+                    print(
+                        f"[post_slate] Contest bands: {scores.get('n_lineups', 0)} lineups, "
+                        f"cash_rate={scores.get('cash_rate', 0):.1%}, "
+                        f"best={scores.get('best', 0):.1f}, avg={scores.get('avg', 0):.1f}"
+                    )
+    except Exception as e:
+        print(f"[post_slate] WARNING: Contest band scoring failed (non-fatal): {e}")
+
     # Step 4: Commit
     print(f"\n[post_slate] Committing feedback to GitHub ...")
     _commit_feedback(sport, slate_date)
