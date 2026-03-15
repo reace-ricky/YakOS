@@ -140,12 +140,29 @@ def _add_ownership(
     df: pd.DataFrame,
     cfg: Dict[str, Any],
 ) -> pd.DataFrame:
-    """Ensure the pool has an ``own_pct`` column (0-1 scale)."""
+    """Ensure the pool has an ``own_pct`` column (0-1 scale).
+
+    Checks multiple source columns in priority order:
+      1. ``own_pct`` — already normalised (e.g. from a previous run)
+      2. ``proj_own`` — RG projected ownership (POWN column)
+      3. ``ownership`` — RG actual/projected ownership (OWNERSHIP column)
+    Falls back to a salary-rank proxy if none are present.
+    """
     own_source = cfg.get("OWN_SOURCE", "auto")
 
-    if "own_pct" in df.columns and own_source != "salary_rank":
-        df["own_pct"] = pd.to_numeric(df["own_pct"], errors="coerce").fillna(0.0)
-        # Convert from percentage to fraction if values look like percentages
+    # Detect the best available ownership column
+    _OWN_CANDIDATES = ["own_pct", "proj_own", "ownership"]
+    src_col = None
+    for col in _OWN_CANDIDATES:
+        if col in df.columns:
+            vals = pd.to_numeric(df[col], errors="coerce")
+            if vals.notna().any() and vals.max() > 0:
+                src_col = col
+                break
+
+    if src_col is not None and own_source != "salary_rank":
+        df["own_pct"] = pd.to_numeric(df[src_col], errors="coerce").fillna(0.0)
+        # Convert from percentage (0-100) to fraction (0-1) if needed
         if df["own_pct"].max() > 1.5:
             df["own_pct"] = df["own_pct"] / 100.0
         return df

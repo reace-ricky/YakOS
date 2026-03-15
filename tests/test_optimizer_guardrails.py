@@ -337,3 +337,55 @@ class TestConfigWiring:
         # These should be in the config (from DEFAULT_CONFIG or preset)
         assert "GPP_PROJ_WEIGHT" in cfg or cfg.get("GPP_PROJ_WEIGHT", 0.25) == 0.25
         assert cfg.get("GPP_CEIL_WEIGHT", 0.65) == 0.65
+
+
+class TestOwnershipWiring:
+    """Ensure RG ownership data flows to own_pct in the optimizer."""
+
+    def test_proj_own_maps_to_own_pct(self):
+        """proj_own column from RG (POWN) should become own_pct."""
+        from yak_core.lineups import _add_ownership
+        df = pd.DataFrame({
+            "player_name": ["A", "B", "C"],
+            "salary": [9000, 7000, 5000],
+            "proj_own": [25.0, 15.0, 8.0],
+        })
+        result = _add_ownership(df, {})
+        assert "own_pct" in result.columns
+        assert abs(result["own_pct"].iloc[0] - 0.25) < 0.01
+        assert abs(result["own_pct"].iloc[1] - 0.15) < 0.01
+
+    def test_ownership_col_maps_to_own_pct(self):
+        """ownership column from RG (OWNERSHIP) should become own_pct."""
+        from yak_core.lineups import _add_ownership
+        df = pd.DataFrame({
+            "player_name": ["A", "B"],
+            "salary": [9000, 7000],
+            "ownership": [30.0, 20.0],
+        })
+        result = _add_ownership(df, {})
+        assert abs(result["own_pct"].iloc[0] - 0.30) < 0.01
+
+    def test_own_pct_takes_priority(self):
+        """own_pct column should take priority over ownership/proj_own."""
+        from yak_core.lineups import _add_ownership
+        df = pd.DataFrame({
+            "player_name": ["A", "B"],
+            "salary": [9000, 7000],
+            "own_pct": [0.25, 0.15],
+            "ownership": [50.0, 40.0],  # should be ignored
+        })
+        result = _add_ownership(df, {})
+        assert abs(result["own_pct"].iloc[0] - 0.25) < 0.01
+
+    def test_salary_rank_fallback(self):
+        """Without ownership data, should use salary-rank proxy."""
+        from yak_core.lineups import _add_ownership
+        df = pd.DataFrame({
+            "player_name": ["A", "B", "C"],
+            "salary": [9000, 7000, 5000],
+        })
+        result = _add_ownership(df, {})
+        assert "own_pct" in result.columns
+        # Higher salary should get higher ownership
+        assert result["own_pct"].iloc[0] > result["own_pct"].iloc[2]
