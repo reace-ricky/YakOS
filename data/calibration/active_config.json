@@ -1,0 +1,42 @@
+{
+  "gpp": {
+    "name": "GPP Working Config",
+    "created": "2026-03-15T18:13:27",
+    "updated": "2026-03-15T19:34:21",
+    "slates_trained": [
+      "2026-01-29",
+      "2026-01-31",
+      "2026-02-01",
+      "2026-02-02",
+      "2026-02-03"
+    ],
+    "values": {
+      "proj_weight": 0.7,
+      "upside_weight": 0.4,
+      "boom_weight": 0.5,
+      "own_penalty_strength": 0.3,
+      "low_own_boost": 0.5,
+      "own_neutral_pct": 15,
+      "max_punt_players": 1,
+      "min_mid_players": 3,
+      "game_diversity_pct": 65,
+      "stud_exposure": 60,
+      "mid_exposure": 35,
+      "value_exposure": 25
+    }
+  },
+  "cash": {
+    "name": "CASH Working Config",
+    "created": "2026-03-15T18:13:27",
+    "updated": "2026-03-15T18:13:27",
+    "slates_trained": [],
+    "values": {}
+  },
+  "showdown": {
+    "name": "SHOWDOWN Working Config",
+    "created": "2026-03-15T18:13:27",
+    "updated": "2026-03-15T18:13:27",
+    "slates_trained": [],
+    "values": {}
+  }
+}

@@ -1,0 +1,342 @@
+[
+  {
+    "timestamp": "2026-03-15T18:13:27",
+    "contest_type": "gpp",
+    "slate_date": "2026-01-29",
+    "action": "apply_recommendations",
+    "changes": {
+      "proj_weight": {
+        "from": 0.5,
+        "to": 0.6
+      },
+      "boom_weight": {
+        "from": 0.2,
+        "to": 0.3
+      },
+      "own_penalty_strength": {
+        "from": 1.2,
+        "to": 0.9
+      },
+      "min_mid_players": {
+        "from": 4,
+        "to": 5
+      },
+      "stud_exposure": {
+        "from": 50,
+        "to": 40
+      }
+    },
+    "values": {
+      "proj_weight": 0.6,
+      "upside_weight": 0.3,
+      "boom_weight": 0.3,
+      "own_penalty_strength": 0.9,
+      "low_own_boost": 0.5,
+      "own_neutral_pct": 15,
+      "max_punt_players": 1,
+      "min_mid_players": 5,
+      "game_diversity_pct": 65,
+      "stud_exposure": 40,
+      "mid_exposure": 35,
+      "value_exposure": 25
+    }
+  },
+  {
+    "timestamp": "2026-03-15T18:16:41",
+    "contest_type": "gpp",
+    "slate_date": "2026-01-31",
+    "action": "apply_recommendations",
+    "changes": {
+      "boom_weight": {
+        "from": 0.2,
+        "to": 0.3
+      },
+      "own_penalty_strength": {
+        "from": 1.2,
+        "to": 0.9
+      },
+      "max_punt_players": {
+        "from": 1,
+        "to": 2
+      },
+      "min_mid_players": {
+        "from": 4,
+        "to": 3
+      },
+      "stud_exposure": {
+        "from": 50,
+        "to": 60
+      }
+    },
+    "values": {
+      "proj_weight": 0.5,
+      "upside_weight": 0.3,
+      "boom_weight": 0.3,
+      "own_penalty_strength": 0.9,
+      "low_own_boost": 0.5,
+      "own_neutral_pct": 15,
+      "max_punt_players": 2,
+      "min_mid_players": 3,
+      "game_diversity_pct": 65,
+      "stud_exposure": 60,
+      "mid_exposure": 35,
+      "value_exposure": 25
+    }
+  },
+  {
+    "timestamp": "2026-03-15T18:19:10",
+    "contest_type": "gpp",
+    "slate_date": "2026-02-01",
+    "action": "apply_recommendations",
+    "changes": {
+      "proj_weight": {
+        "from": 0.5,
+        "to": 0.6
+      },
+      "own_penalty_strength": {
+        "from": 1.2,
+        "to": 0.9
+      },
+      "max_punt_players": {
+        "from": 1,
+        "to": 0
+      },
+      "stud_exposure": {
+        "from": 50,
+        "to": 60
+      }
+    },
+    "values": {
+      "proj_weight": 0.6,
+      "upside_weight": 0.3,
+      "boom_weight": 0.2,
+      "own_penalty_strength": 0.9,
+      "low_own_boost": 0.5,
+      "own_neutral_pct": 15,
+      "max_punt_players": 0,
+      "min_mid_players": 4,
+      "game_diversity_pct": 65,
+      "stud_exposure": 60,
+      "mid_exposure": 35,
+      "value_exposure": 25
+    }
+  },
+  {
+    "timestamp": "2026-03-15T18:22:30",
+    "contest_type": "gpp",
+    "slate_date": "2026-02-02",
+    "action": "apply_recommendations",
+    "changes": {
+      "boom_weight": {
+        "from": 0.2,
+        "to": 0.3
+      },
+      "own_penalty_strength": {
+        "from": 1.2,
+        "to": 0.9
+      },
+      "max_punt_players": {
+        "from": 1,
+        "to": 2
+      },
+      "min_mid_players": {
+        "from": 4,
+        "to": 3
+      },
+      "stud_exposure": {
+        "from": 50,
+        "to": 60
+      }
+    },
+    "values": {
+      "proj_weight": 0.5,
+      "upside_weight": 0.3,
+      "boom_weight": 0.3,
+      "own_penalty_strength": 0.9,
+      "low_own_boost": 0.5,
+      "own_neutral_pct": 15,
+      "max_punt_players": 2,
+      "min_mid_players": 3,
+      "game_diversity_pct": 65,
+      "stud_exposure": 60,
+      "mid_exposure": 35,
+      "value_exposure": 25
+    }
+  },
+  {
+    "timestamp": "2026-03-15T18:22:55",
+    "contest_type": "gpp",
+    "slate_date": "2026-02-02",
+    "action": "manual_checkpoint",
+    "changes": {
+      "boom_weight": {
+        "from": 0.3,
+        "to": 0.2
+      },
+      "own_penalty_strength": {
+        "from": 0.9,
+        "to": 1.2
+      },
+      "max_punt_players": {
+        "from": 2,
+        "to": 1
+      },
+      "min_mid_players": {
+        "from": 3,
+        "to": 4
+      },
+      "stud_exposure": {
+        "from": 60,
+        "to": 50
+      }
+    },
+    "values": {
+      "proj_weight": 0.5,
+      "upside_weight": 0.3,
+      "boom_weight": 0.2,
+      "own_penalty_strength": 1.2,
+      "low_own_boost": 0.5,
+      "own_neutral_pct": 15,
+      "max_punt_players": 1,
+      "min_mid_players": 4,
+      "game_diversity_pct": 65,
+      "stud_exposure": 50,
+      "mid_exposure": 35,
+      "value_exposure": 25
+    }
+  },
+  {
+    "timestamp": "2026-03-15T18:27:59",
+    "contest_type": "gpp",
+    "slate_date": "2026-02-02",
+    "action": "apply_recommendations",
+    "changes": {
+      "boom_weight": {
+        "from": 0.2,
+        "to": 0.3
+      },
+      "own_penalty_strength": {
+        "from": 1.2,
+        "to": 0.9
+      },
+      "max_punt_players": {
+        "from": 1,
+        "to": 2
+      },
+      "min_mid_players": {
+        "from": 4,
+        "to": 3
+      },
+      "stud_exposure": {
+        "from": 50,
+        "to": 60
+      }
+    },
+    "values": {
+      "proj_weight": 0.5,
+      "upside_weight": 0.3,
+      "boom_weight": 0.3,
+      "own_penalty_strength": 0.9,
+      "low_own_boost": 0.5,
+      "own_neutral_pct": 15,
+      "max_punt_players": 2,
+      "min_mid_players": 3,
+      "game_diversity_pct": 65,
+      "stud_exposure": 60,
+      "mid_exposure": 35,
+      "value_exposure": 25
+    }
+  },
+  {
+    "timestamp": "2026-03-15T18:40:33",
+    "contest_type": "gpp",
+    "slate_date": "2026-02-03",
+    "action": "apply_recommendations",
+    "changes": {
+      "proj_weight": {
+        "from": 0.5,
+        "to": 0.6
+      },
+      "upside_weight": {
+        "from": 0.3,
+        "to": 0.4
+      },
+      "boom_weight": {
+        "from": 0.3,
+        "to": 0.4
+      },
+      "own_penalty_strength": {
+        "from": 0.9,
+        "to": 0.6
+      },
+      "min_mid_players": {
+        "from": 3,
+        "to": 2
+      },
+      "stud_exposure": {
+        "from": 60,
+        "to": 70
+      }
+    },
+    "values": {
+      "proj_weight": 0.6,
+      "upside_weight": 0.4,
+      "boom_weight": 0.4,
+      "own_penalty_strength": 0.6,
+      "low_own_boost": 0.5,
+      "own_neutral_pct": 15,
+      "max_punt_players": 2,
+      "min_mid_players": 2,
+      "game_diversity_pct": 65,
+      "stud_exposure": 70,
+      "mid_exposure": 35,
+      "value_exposure": 25
+    }
+  },
+  {
+    "timestamp": "2026-03-15T19:34:21",
+    "contest_type": "gpp",
+    "slate_date": "2026-01-29",
+    "action": "batch_train",
+    "changes": {
+      "proj_weight": {
+        "from": 0.6,
+        "to": 0.7
+      },
+      "boom_weight": {
+        "from": 0.4,
+        "to": 0.5
+      },
+      "own_penalty_strength": {
+        "from": 0.6,
+        "to": 0.3
+      },
+      "max_punt_players": {
+        "from": 2,
+        "to": 1
+      },
+      "min_mid_players": {
+        "from": 2,
+        "to": 3
+      },
+      "stud_exposure": {
+        "from": 70,
+        "to": 60
+      }
+    },
+    "values": {
+      "proj_weight": 0.7,
+      "upside_weight": 0.4,
+      "boom_weight": 0.5,
+      "own_penalty_strength": 0.3,
+      "low_own_boost": 0.5,
+      "own_neutral_pct": 15,
+      "max_punt_players": 1,
+      "min_mid_players": 3,
+      "game_diversity_pct": 65,
+      "stud_exposure": 60,
+      "mid_exposure": 35,
+      "value_exposure": 25
+    }
+  }
+]
