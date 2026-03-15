@@ -17,6 +17,10 @@ from yak_core.config import (
     DK_SHOWDOWN_SLOTS,
     DK_SHOWDOWN_CAPTAIN_MULTIPLIER,
 )
+try:
+    from app.calibration_persistence import load_optimizer_overrides
+except ImportError:
+    load_optimizer_overrides = None  # type: ignore[assignment,misc]
 
 # ── Silence PuLP's default stdout banner ─────────────────────────────────────
 pulp.LpSolverDefault.msg = False  # type: ignore[attr-defined]
@@ -307,6 +311,45 @@ def _add_scores(
     return df
 
 
+def apply_calibration_overrides(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge calibration lab overrides into a config dict.
+
+    Reads ``data/calibration/optimizer_overrides.json`` (written by the
+    Calibration Lab's "Apply Config to Optimizer" button) and layers those
+    values on top of *cfg*.  Returns a **new** dict — the original is not
+    mutated.
+
+    Tiered-exposure keys (``TIERED_EXPOSURE_STUD``, ``_MID``, ``_VALUE``)
+    are collapsed back into the ``TIERED_EXPOSURE`` list-of-tuples format
+    the optimizer expects.
+    """
+    if load_optimizer_overrides is None:
+        return cfg
+    overrides = load_optimizer_overrides()
+    if not overrides:
+        return cfg
+
+    merged = dict(cfg)
+    # Tiered-exposure keys need special reconstruction
+    _TIERED_KEYS = {"TIERED_EXPOSURE_STUD", "TIERED_EXPOSURE_MID", "TIERED_EXPOSURE_VALUE"}
+    tiered_vals: Dict[str, float] = {}
+
+    for key, val in overrides.items():
+        if key in _TIERED_KEYS:
+            tiered_vals[key] = float(val)
+        else:
+            merged[key] = val
+
+    if tiered_vals:
+        base_tiered = cfg.get("TIERED_EXPOSURE", DEFAULT_CONFIG.get("TIERED_EXPOSURE", []))
+        stud_exp = tiered_vals.get("TIERED_EXPOSURE_STUD", base_tiered[0][1] if len(base_tiered) > 0 else 0.50)
+        mid_exp = tiered_vals.get("TIERED_EXPOSURE_MID", base_tiered[1][1] if len(base_tiered) > 1 else 0.35)
+        val_exp = tiered_vals.get("TIERED_EXPOSURE_VALUE", base_tiered[2][1] if len(base_tiered) > 2 else 0.25)
+        merged["TIERED_EXPOSURE"] = [(9000, stud_exp), (6000, mid_exp), (0, val_exp)]
+
+    return merged
+
+
 def prepare_pool(
     df: pd.DataFrame,
     cfg: Dict[str, Any],
@@ -331,6 +374,7 @@ def prepare_pool(
     pd.DataFrame
         Enriched pool, index reset.
     """
+    cfg = apply_calibration_overrides(cfg)
     df = df.copy()
     df.columns = [c.lower().replace(" ", "_") for c in df.columns]
 
@@ -706,6 +750,7 @@ def build_multiple_lineups_with_exposure(
     cfg: Dict[str, Any],
     progress_callback=None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    cfg = apply_calibration_overrides(cfg)
     num_lineups = int(cfg.get("NUM_LINEUPS", 20))
     salary_cap = int(cfg.get("SALARY_CAP", 50000))
     max_exposure = float(cfg.get("MAX_EXPOSURE", 0.35))
