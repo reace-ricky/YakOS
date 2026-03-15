@@ -2,32 +2,35 @@
   "gpp": {
     "name": "GPP Working Config",
     "created": "2026-03-15T18:13:27",
-    "updated": "2026-03-15T21:47:11",
+    "updated": "2026-03-15T21:48:18",
     "slates_trained": [
       "2026-01-29",
       "2026-03-10",
-      "2026-03-11"
+      "2026-03-11",
+      "2026-01-31",
+      "2026-02-23",
+      "2026-03-06"
     ],
     "values": {
-      "proj_weight": 0.6,
+      "proj_weight": 0.75,
       "upside_weight": 0.3,
-      "boom_weight": 0.3,
-      "own_penalty_strength": 0.9,
+      "boom_weight": 0.5,
+      "own_penalty_strength": 0.5,
       "low_own_boost": 0.5,
       "own_neutral_pct": 15,
       "max_punt_players": 1,
-      "min_mid_players": 5,
+      "min_mid_players": 4,
       "game_diversity_pct": 65,
-      "stud_exposure": 40,
+      "stud_exposure": 60,
       "mid_exposure": 35,
       "value_exposure": 25,
-      "edge_smash_weight": 0.15,
-      "edge_leverage_weight": 0.1,
-      "edge_form_weight": 0.1,
-      "edge_dvp_weight": 0.05,
-      "edge_catalyst_weight": 0.05,
-      "edge_bust_penalty": 0.1,
-      "edge_efficiency_weight": 0.05
+      "edge_smash_weight": 0.0,
+      "edge_leverage_weight": 0.0,
+      "edge_form_weight": 0.0,
+      "edge_dvp_weight": 0.0,
+      "edge_catalyst_weight": 0.0,
+      "edge_bust_penalty": 0.0,
+      "edge_efficiency_weight": 0.0
     }
   },
   "cash": {
