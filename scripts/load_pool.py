@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 # Bootstrap env before any yak_core imports
@@ -272,6 +273,21 @@ def main(argv: list[str] | None = None) -> pd.DataFrame:
     out_dir = published_dir(sport)
     pool_path = f"{out_dir}/slate_pool.parquet"
     meta_path = f"{out_dir}/slate_meta.json"
+
+    # Auto-archive the existing pool before overwriting (prevents data loss)
+    if os.path.isfile(pool_path) and os.path.isfile(f"{out_dir}/slate_meta.json"):
+        try:
+            with open(f"{out_dir}/slate_meta.json") as f:
+                old_meta = json.load(f)
+            old_date = old_meta.get("date")
+            if old_date and old_date != slate_date:
+                old_pool = pd.read_parquet(pool_path)
+                from yak_core.slate_archive import archive_slate
+                contest_type = "GPP Main" if sport == "NBA" else "PGA GPP"
+                archive_slate(old_pool, old_date, contest_type=contest_type)
+                print(f"[load_pool] Auto-archived previous pool ({old_date}) before overwrite")
+        except Exception as e:
+            print(f"[load_pool] WARNING: Auto-archive failed (non-fatal): {e}")
 
     pool.to_parquet(pool_path, index=False)
     with open(meta_path, "w") as f:

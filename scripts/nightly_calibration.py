@@ -13,6 +13,7 @@ Defaults: date=yesterday, sport=all
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -72,6 +73,23 @@ def run_nba_calibration(slate_date: str) -> dict:
 
     pool = pd.read_parquet(pool_path)
     log.info("Loaded pool: %d players", len(pool))
+
+    # 1b. Validate pool date matches requested calibration date
+    meta_path = pool_path.parent / "slate_meta.json"
+    if meta_path.exists():
+        with open(meta_path) as f:
+            meta = json.load(f)
+        pool_date = meta.get("date")
+        if pool_date and pool_date != slate_date:
+            log.error(
+                "Pool date mismatch: pool is for %s but calibration requested for %s. "
+                "Use archive-based calibration instead.",
+                pool_date, slate_date,
+            )
+            result["status"] = "error"
+            result["reason"] = f"Pool date mismatch: pool={pool_date}, requested={slate_date}"
+            return result
+        log.info("Pool date validated: %s", pool_date)
 
     # 2. Fetch actuals via Tank01
     api_key = (
@@ -293,6 +311,23 @@ def run_pga_calibration(slate_date: str) -> dict:
 
     pool = pd.read_parquet(pool_path)
     log.info("Loaded PGA pool: %d players", len(pool))
+
+    # 1b. Validate pool date matches requested calibration date
+    meta_path = pool_path.parent / "slate_meta.json"
+    if meta_path.exists():
+        with open(meta_path) as f:
+            meta = json.load(f)
+        pool_date = meta.get("date")
+        if pool_date and pool_date != slate_date:
+            log.error(
+                "PGA pool date mismatch: pool is for %s but calibration requested for %s. "
+                "Use archive-based calibration instead.",
+                pool_date, slate_date,
+            )
+            result["status"] = "error"
+            result["reason"] = f"Pool date mismatch: pool={pool_date}, requested={slate_date}"
+            return result
+        log.info("PGA pool date validated: %s", pool_date)
 
     # 2. Fetch actuals via DataGolf
     try:
