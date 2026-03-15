@@ -1,177 +1,177 @@
 {
   "bullets": [
-    "Core anchors: Nikola Jokic, Luka Doncic, Jalen Johnson",
-    "Leverage plays: Josh Minott, Quentin Grimes",
-    "Value targets: Devin Carter, Jett Howard",
+    "Core anchors: Nikola Jokic, Andre Drummond, Luka Doncic",
+    "Leverage plays: CJ McCollum, Josh Minott",
+    "Value targets: Drake Powell, Kyle Lowry",
     "Fade candidates: Cam Christie, Gary Harris"
   ],
-  "recommendation": "5 core plays anchored at $8,800\u2013$12,600. 5 value plays averaging 7.5 pts/$1K. 5 leverage plays at 0\u20133% ownership.",
+  "recommendation": "5 core plays anchored at $4,400\u2013$12,600. 5 value plays averaging 8.2 pts/$1K. 5 leverage plays at 0\u20134% ownership.",
   "core_plays": [
     {
       "player_name": "Nikola Jokic",
       "salary": 12600,
-      "proj": 66.78,
+      "proj": 67.135,
       "ownership": 29.97,
-      "edge": 0.6131556468735688,
-      "value": 5.3
+      "edge": 0.6165403387079346,
+      "value": 5.328174603174603
+    },
+    {
+      "player_name": "Andre Drummond",
+      "salary": 4400,
+      "proj": 44.535,
+      "ownership": 8.9,
+      "edge": 0.5769067856435638,
+      "value": 10.121590909090907
     },
     {
       "player_name": "Luka Doncic",
       "salary": 12400,
-      "proj": 60.44,
+      "proj": 60.355,
       "ownership": 14.54,
-      "edge": 0.5437557543368348,
-      "value": 4.874193548387097
+      "edge": 0.5424796546075663,
+      "value": 4.867338709677419
     },
     {
       "player_name": "Jalen Johnson",
       "salary": 10700,
-      "proj": 52.32,
-      "ownership": 8.92,
-      "edge": 0.51549639674825,
-      "value": 4.889719626168224
+      "proj": 52.945,
+      "ownership": 8.29,
+      "edge": 0.5234396216676139,
+      "value": 4.948130841121496
     },
     {
-      "player_name": "Paolo Banchero",
-      "salary": 9300,
-      "proj": 45.82,
-      "ownership": 21.38,
-      "edge": 0.4958170243422286,
-      "value": 4.926881720430107
-    },
-    {
-      "player_name": "Jamal Murray",
-      "salary": 8800,
-      "proj": 43.51,
-      "ownership": 20.12,
-      "edge": 0.4910439716727798,
-      "value": 4.944318181818181
+      "player_name": "Victor Wembanyama",
+      "salary": 11200,
+      "proj": 52.565,
+      "ownership": 8.51,
+      "edge": 0.4929854587442054,
+      "value": 4.693303571428571
     }
   ],
   "leverage_plays": [
     {
+      "player_name": "CJ McCollum",
+      "salary": 6600,
+      "proj": 32.855,
+      "ownership": 4.31,
+      "edge": 0.4203632520595948,
+      "value": 4.978030303030303
+    },
+    {
       "player_name": "Josh Minott",
       "salary": 4000,
-      "proj": 21.7,
-      "ownership": 2.39,
-      "edge": 0.39815261904242016,
-      "value": 5.425
+      "proj": 21.865,
+      "ownership": 4.15,
+      "edge": 0.396866431750149,
+      "value": 5.46625
     },
     {
       "player_name": "Quentin Grimes",
       "salary": 7400,
-      "proj": 33.77,
-      "ownership": 3.48,
-      "edge": 0.3941213550244268,
-      "value": 4.563513513513514
-    },
-    {
-      "player_name": "Devin Vassell",
-      "salary": 5100,
-      "proj": 25.44,
-      "ownership": 2.95,
-      "edge": 0.392863308017398,
-      "value": 4.988235294117648
+      "proj": 33.885000000000005,
+      "ownership": 3.7,
+      "edge": 0.3952616436269129,
+      "value": 4.579054054054055
     },
     {
       "player_name": "Precious Achiuwa",
       "salary": 6800,
-      "proj": 23.49,
+      "proj": 23.165,
       "ownership": 0.18,
-      "edge": 0.39127201366440567,
-      "value": 3.454411764705882
+      "edge": 0.388280989904449,
+      "value": 3.4066176470588236
     },
     {
-      "player_name": "Nique Clifford",
-      "salary": 6400,
-      "proj": 25.44,
-      "ownership": 1.83,
-      "edge": 0.32685664594762864,
-      "value": 3.975
+      "player_name": "Devin Vassell",
+      "salary": 5100,
+      "proj": 24.625,
+      "ownership": 3.39,
+      "edge": 0.3789734109712313,
+      "value": 4.82843137254902
     }
   ],
   "value_plays": [
     {
-      "player_name": "Devin Carter",
-      "salary": 3500,
-      "proj": 40.824999999999996,
-      "ownership": 7.71,
-      "edge": 0.5648832148441245,
-      "value": 11.664285714285713
+      "player_name": "Drake Powell",
+      "salary": 3900,
+      "proj": 36.985,
+      "ownership": 6.25,
+      "edge": 0.5360801570427763,
+      "value": 9.483333333333334
     },
     {
-      "player_name": "Jett Howard",
-      "salary": 3600,
-      "proj": 24.455000000000002,
-      "ownership": 4.62,
-      "edge": 0.44383482460405344,
-      "value": 6.793055555555556
+      "player_name": "Kyle Lowry",
+      "salary": 3000,
+      "proj": 35.015,
+      "ownership": 7.04,
+      "edge": 0.534409053922679,
+      "value": 11.671666666666667
     },
     {
       "player_name": "Jalen Pickett",
       "salary": 3000,
-      "proj": 20.115000000000002,
-      "ownership": 5.42,
-      "edge": 0.42956404234398293,
-      "value": 6.705000000000001
-    },
-    {
-      "player_name": "TyTy Washington Jr.",
-      "salary": 3000,
-      "proj": 19.535,
-      "ownership": 3.53,
-      "edge": 0.41683754199388595,
-      "value": 6.511666666666667
+      "proj": 21.584999999999997,
+      "ownership": 5.07,
+      "edge": 0.44923426813674794,
+      "value": 7.194999999999999
     },
     {
       "player_name": "Alex Morales",
       "salary": 3000,
-      "proj": 18.175,
-      "ownership": 3.2,
-      "edge": 0.3985653042575288,
-      "value": 6.058333333333334
+      "proj": 18.794999999999998,
+      "ownership": 2.89,
+      "edge": 0.40444131249359594,
+      "value": 6.265
+    },
+    {
+      "player_name": "Zeke Nnaji",
+      "salary": 3000,
+      "proj": 18.655,
+      "ownership": 3.28,
+      "edge": 0.40287821478767993,
+      "value": 6.218333333333334
     }
   ],
   "fade_candidates": [
     {
       "player_name": "Cam Christie",
       "salary": 3000,
-      "proj": 0.61,
+      "proj": 0.245,
       "ownership": 0.05,
-      "edge": 0.1351474123548916,
-      "value": 0.20333333333333334
+      "edge": 0.12465543802159007,
+      "value": 0.08166666666666667
     },
     {
       "player_name": "Gary Harris",
       "salary": 3000,
-      "proj": 0.67,
-      "ownership": 0.33,
-      "edge": 0.13683633434582676,
-      "value": 0.22333333333333336
+      "proj": 0.30500000000000005,
+      "ownership": 0.35,
+      "edge": 0.12639856285306195,
+      "value": 0.10166666666666668
     },
     {
       "player_name": "Myron Gardner",
       "salary": 3900,
-      "proj": 0.94,
+      "proj": 1.105,
       "ownership": 0.51,
-      "edge": 0.14504153145368584,
-      "value": 0.24102564102564103
-    },
-    {
-      "player_name": "Bronny James",
-      "salary": 3000,
-      "proj": 4.263045686073704,
-      "ownership": 0.01,
-      "edge": 0.15534329941376024,
-      "value": 1.4210152286912345
+      "edge": 0.14949544242115143,
+      "value": 0.2833333333333333
     },
     {
       "player_name": "Jarred Vanderbilt",
       "salary": 3200,
-      "proj": 2.53,
+      "proj": 1.5949999999999998,
       "ownership": 0.23,
-      "edge": 0.16895539468391724,
-      "value": 0.7906249999999999
+      "edge": 0.15398334470974645,
+      "value": 0.4984374999999999
+    },
+    {
+      "player_name": "Bronny James",
+      "salary": 3000,
+      "proj": 4.313045686073703,
+      "ownership": 0.01,
+      "edge": 0.1567614751354607,
+      "value": 1.4376818953579011
     }
   ],
   "signals_df_path": "signals.parquet"

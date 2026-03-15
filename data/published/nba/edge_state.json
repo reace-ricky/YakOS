@@ -3,31 +3,31 @@
   "date": "2026-03-14",
   "core_names": [
     "Nikola Jokic",
+    "Andre Drummond",
     "Luka Doncic",
     "Jalen Johnson",
-    "Paolo Banchero",
-    "Jamal Murray"
+    "Victor Wembanyama"
   ],
   "leverage_names": [
+    "CJ McCollum",
     "Josh Minott",
     "Quentin Grimes",
-    "Devin Vassell",
     "Precious Achiuwa",
-    "Nique Clifford"
+    "Devin Vassell"
   ],
   "value_names": [
-    "Devin Carter",
-    "Jett Howard",
+    "Drake Powell",
+    "Kyle Lowry",
     "Jalen Pickett",
-    "TyTy Washington Jr.",
-    "Alex Morales"
+    "Alex Morales",
+    "Zeke Nnaji"
   ],
   "fade_names": [
     "Cam Christie",
     "Gary Harris",
     "Myron Gardner",
-    "Bronny James",
-    "Jarred Vanderbilt"
+    "Jarred Vanderbilt",
+    "Bronny James"
   ],
   "calibration_slates": 15
 }
