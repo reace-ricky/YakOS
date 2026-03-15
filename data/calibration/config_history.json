@@ -432,5 +432,82 @@
       "mid_exposure": 35,
       "value_exposure": 25
     }
+  },
+  {
+    "timestamp": "2026-03-15T19:41:12",
+    "contest_type": "gpp",
+    "slate_date": "2026-02-08",
+    "action": "batch_train",
+    "changes": {
+      "max_punt_players": {
+        "from": 1,
+        "to": 2
+      },
+      "min_mid_players": {
+        "from": 3,
+        "to": 2
+      }
+    },
+    "values": {
+      "proj_weight": 1.0,
+      "upside_weight": 0.4,
+      "boom_weight": 1.0,
+      "own_penalty_strength": 0.0,
+      "low_own_boost": 0.5,
+      "own_neutral_pct": 15,
+      "max_punt_players": 2,
+      "min_mid_players": 2,
+      "game_diversity_pct": 65,
+      "stud_exposure": 80,
+      "mid_exposure": 35,
+      "value_exposure": 25
+    }
+  },
+  {
+    "timestamp": "2026-03-15T19:41:15",
+    "contest_type": "gpp",
+    "slate_date": "2026-02-22",
+    "action": "batch_train",
+    "changes": {
+      "max_punt_players": {
+        "from": 2,
+        "to": 1
+      }
+    },
+    "values": {
+      "proj_weight": 1.0,
+      "upside_weight": 0.4,
+      "boom_weight": 1.0,
+      "own_penalty_strength": 0.0,
+      "low_own_boost": 0.5,
+      "own_neutral_pct": 15,
+      "max_punt_players": 1,
+      "min_mid_players": 2,
+      "game_diversity_pct": 65,
+      "stud_exposure": 80,
+      "mid_exposure": 35,
+      "value_exposure": 25
+    }
+  },
+  {
+    "timestamp": "2026-03-15T19:41:17",
+    "contest_type": "gpp",
+    "slate_date": "2026-02-23",
+    "action": "batch_train",
+    "changes": {},
+    "values": {
+      "proj_weight": 1.0,
+      "upside_weight": 0.4,
+      "boom_weight": 1.0,
+      "own_penalty_strength": 0.0,
+      "low_own_boost": 0.5,
+      "own_neutral_pct": 15,
+      "max_punt_players": 1,
+      "min_mid_players": 2,
+      "game_diversity_pct": 65,
+      "stud_exposure": 80,
+      "mid_exposure": 35,
+      "value_exposure": 25
+    }
   }
 ]
