@@ -1,7 +1,8 @@
 """Persistent config storage for the Calibration Lab.
 
-Manages active_config.json (current working config) and config_history.json
-(evolution log) so that tuning compounds across sessions and slates.
+Manages active_config.json (per-contest-type working configs) and
+config_history.json (evolution log) so that tuning compounds across
+sessions and slates.
 """
 from __future__ import annotations
 
@@ -15,6 +16,8 @@ CALIBRATION_DIR = REPO_ROOT / "data" / "calibration"
 ACTIVE_CONFIG_PATH = CALIBRATION_DIR / "active_config.json"
 CONFIG_HISTORY_PATH = CALIBRATION_DIR / "config_history.json"
 OPTIMIZER_OVERRIDES_PATH = REPO_ROOT / "data" / "calibration" / "optimizer_overrides.json"
+
+CONTEST_TYPES = ("gpp", "cash", "showdown")
 
 # Keys from lab sliders that map to optimizer config values
 _SLIDER_KEYS = [
@@ -37,12 +40,46 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
 
+def _normalize_contest_type(contest_type: str) -> str:
+    """Normalize a contest type string to a canonical key."""
+    ct = contest_type.strip().lower()
+    if ct in CONTEST_TYPES:
+        return ct
+    return "gpp"
+
+
+def _migrate_legacy_config(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Migrate a flat (legacy) active_config.json to per-contest-type format.
+
+    If the file already has contest-type keys, return as-is.
+    """
+    if any(k in data for k in CONTEST_TYPES):
+        return data
+
+    # Legacy format: a single config dict with name/values/slates_trained
+    migrated: Dict[str, Any] = {}
+    for ct in CONTEST_TYPES:
+        migrated[ct] = {
+            "name": f"{ct.upper()} Working Config",
+            "created": data.get("created", _now_iso()),
+            "updated": data.get("updated", _now_iso()),
+            "slates_trained": list(data.get("slates_trained", [])),
+            "values": dict(data.get("values", {})),
+        }
+    return migrated
+
+
 def load_active_config() -> Optional[Dict[str, Any]]:
-    """Load the active config from disk. Returns None if no file exists."""
+    """Load the active config from disk. Returns None if no file exists.
+
+    Returns a dict keyed by contest type (gpp, cash, showdown), each
+    containing name, updated, slates_trained, and values.
+    """
     if not ACTIVE_CONFIG_PATH.exists():
         return None
     try:
-        return json.loads(ACTIVE_CONFIG_PATH.read_text())
+        data = json.loads(ACTIVE_CONFIG_PATH.read_text())
+        return _migrate_legacy_config(data)
     except (json.JSONDecodeError, OSError):
         return None
 
@@ -51,16 +88,20 @@ def save_active_config(
     values: Dict[str, Any],
     slate_date: Optional[str] = None,
     name: str = "Working Config",
+    contest_type: str = "gpp",
 ) -> Dict[str, Any]:
-    """Save slider values as the active config.
+    """Save slider values as the active config for a specific contest type.
 
-    If an active config already exists, preserves its slates_trained list
-    and adds the new slate_date if provided. Otherwise creates a new config.
+    If an active config already exists for this contest type, preserves its
+    slates_trained list and adds the new slate_date if provided.
 
-    Returns the saved config dict.
+    Returns the full per-contest-type config dict.
     """
-    existing = load_active_config()
+    ct = _normalize_contest_type(contest_type)
+    existing_all = load_active_config() or {}
     now = _now_iso()
+
+    existing = existing_all.get(ct) or {}
 
     if existing:
         slates = existing.get("slates_trained", [])
@@ -69,11 +110,12 @@ def save_active_config(
     else:
         slates = []
         created = now
+        name = f"{ct.upper()} {name}"
 
     if slate_date and slate_date not in slates:
         slates.append(slate_date)
 
-    config = {
+    existing_all[ct] = {
         "name": name,
         "created": created,
         "updated": now,
@@ -81,16 +123,31 @@ def save_active_config(
         "values": {k: values[k] for k in _SLIDER_KEYS if k in values},
     }
 
+    # Ensure all contest types exist
+    for other_ct in CONTEST_TYPES:
+        if other_ct not in existing_all:
+            existing_all[other_ct] = {
+                "name": f"{other_ct.upper()} Working Config",
+                "created": now,
+                "updated": now,
+                "slates_trained": [],
+                "values": {},
+            }
+
     CALIBRATION_DIR.mkdir(parents=True, exist_ok=True)
-    ACTIVE_CONFIG_PATH.write_text(json.dumps(config, indent=2))
-    return config
+    ACTIVE_CONFIG_PATH.write_text(json.dumps(existing_all, indent=2))
+    return existing_all
 
 
-def get_active_slider_values() -> Optional[Dict[str, Any]]:
-    """Return just the slider values from the active config, or None."""
+def get_active_slider_values(contest_type: str = "gpp") -> Optional[Dict[str, Any]]:
+    """Return just the slider values for a contest type, or None."""
     config = load_active_config()
-    if config and "values" in config:
-        return dict(config["values"])
+    if not config:
+        return None
+    ct = _normalize_contest_type(contest_type)
+    ct_config = config.get(ct)
+    if ct_config and "values" in ct_config:
+        return dict(ct_config["values"])
     return None
 
 
@@ -110,8 +167,9 @@ def append_config_history(
     values: Dict[str, Any],
     slate_date: Optional[str] = None,
     old_values: Optional[Dict[str, Any]] = None,
+    contest_type: str = "gpp",
 ) -> None:
-    """Append a snapshot to the config history log."""
+    """Append a snapshot to the config history log, tagged with contest type."""
     history = load_config_history()
 
     changes = {}
@@ -124,6 +182,7 @@ def append_config_history(
 
     entry = {
         "timestamp": _now_iso(),
+        "contest_type": _normalize_contest_type(contest_type),
         "slate_date": slate_date,
         "action": action,
         "changes": changes,
@@ -135,44 +194,48 @@ def append_config_history(
     CONFIG_HISTORY_PATH.write_text(json.dumps(history, indent=2))
 
 
-def reset_active_config(default_values: Dict[str, Any]) -> Dict[str, Any]:
-    """Reset active config to defaults. Keeps history intact."""
+def reset_active_config(
+    default_values: Dict[str, Any],
+    contest_type: str = "gpp",
+) -> Dict[str, Any]:
+    """Reset active config for a contest type to defaults. Keeps history intact."""
+    ct = _normalize_contest_type(contest_type)
+    existing_all = load_active_config() or {}
     now = _now_iso()
-    config = {
-        "name": "Working Config",
+
+    existing_all[ct] = {
+        "name": f"{ct.upper()} Working Config",
         "created": now,
         "updated": now,
         "slates_trained": [],
         "values": {k: default_values[k] for k in _SLIDER_KEYS if k in default_values},
     }
 
+    # Ensure all contest types exist
+    for other_ct in CONTEST_TYPES:
+        if other_ct not in existing_all:
+            existing_all[other_ct] = {
+                "name": f"{other_ct.upper()} Working Config",
+                "created": now,
+                "updated": now,
+                "slates_trained": [],
+                "values": {},
+            }
+
     CALIBRATION_DIR.mkdir(parents=True, exist_ok=True)
-    ACTIVE_CONFIG_PATH.write_text(json.dumps(config, indent=2))
+    ACTIVE_CONFIG_PATH.write_text(json.dumps(existing_all, indent=2))
 
     append_config_history(
         action="reset_to_defaults",
         values=default_values,
+        contest_type=ct,
     )
 
-    return config
+    return existing_all
 
 
-def apply_config_to_optimizer(values: Dict[str, Any]) -> None:
-    """Write the working config values to optimizer_overrides.json.
-
-    The optimizer (lineups.py) checks for this file at runtime and uses
-    its values instead of the hardcoded defaults in config.py.
-    """
-    active = load_active_config()
-    slates_trained = active.get("slates_trained", []) if active else []
-
-    overrides = {
-        "applied_at": _now_iso(),
-        "slates_trained": slates_trained,
-        "values": {},
-    }
-
-    # Map slider keys to optimizer config keys
+def _convert_slider_values_to_optimizer(values: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert slider key/values to optimizer config key/values."""
     _SLIDER_TO_OPTIMIZER = {
         "proj_weight": "GPP_PROJ_WEIGHT",
         "upside_weight": "GPP_UPSIDE_WEIGHT",
@@ -187,10 +250,10 @@ def apply_config_to_optimizer(values: Dict[str, Any]) -> None:
         "value_exposure": "TIERED_EXPOSURE_VALUE",
     }
 
+    result: Dict[str, Any] = {}
     for slider_key, opt_key in _SLIDER_TO_OPTIMIZER.items():
         if slider_key in values:
             val = values[slider_key]
-            # Normalize GPP weights to sum to 1.0
             if slider_key in ("proj_weight", "upside_weight", "boom_weight"):
                 total = (
                     values.get("proj_weight", 0)
@@ -199,28 +262,75 @@ def apply_config_to_optimizer(values: Dict[str, Any]) -> None:
                 )
                 if total > 0:
                     val = val / total
-            # Convert percentages to decimals for exposure/diversity
             elif slider_key == "game_diversity_pct":
                 val = val / 100.0
             elif slider_key in ("stud_exposure", "mid_exposure", "value_exposure"):
                 val = val / 100.0
-            overrides["values"][opt_key] = val
+            result[opt_key] = val
+    return result
+
+
+def apply_config_to_optimizer(
+    values: Dict[str, Any],
+    contest_type: str = "gpp",
+) -> None:
+    """Write the working config values to optimizer_overrides.json.
+
+    The optimizer (lineups.py) checks for this file at runtime and uses
+    its values instead of the hardcoded defaults in config.py.
+
+    The overrides file is keyed by contest type so the optimizer can read
+    the appropriate section based on what it's building.
+    """
+    ct = _normalize_contest_type(contest_type)
+
+    # Load existing overrides to preserve other contest types
+    existing_overrides: Dict[str, Any] = {}
+    if OPTIMIZER_OVERRIDES_PATH.exists():
+        try:
+            existing_overrides = json.loads(OPTIMIZER_OVERRIDES_PATH.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # Migrate flat legacy format to per-contest-type
+    if "values" in existing_overrides and not any(k in existing_overrides for k in CONTEST_TYPES):
+        legacy_values = existing_overrides.get("values", {})
+        existing_overrides = {"gpp": legacy_values, "cash": dict(legacy_values), "showdown": dict(legacy_values)}
+
+    existing_overrides[ct] = _convert_slider_values_to_optimizer(values)
+    existing_overrides["applied_at"] = _now_iso()
 
     CALIBRATION_DIR.mkdir(parents=True, exist_ok=True)
-    OPTIMIZER_OVERRIDES_PATH.write_text(json.dumps(overrides, indent=2))
+    OPTIMIZER_OVERRIDES_PATH.write_text(json.dumps(existing_overrides, indent=2))
 
     append_config_history(
         action="apply_to_optimizer",
         values=values,
+        contest_type=ct,
     )
 
 
-def load_optimizer_overrides() -> Optional[Dict[str, Any]]:
-    """Load optimizer overrides if they exist. Used by lineups.py."""
+def load_optimizer_overrides(contest_type: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Load optimizer overrides if they exist.
+
+    If *contest_type* is given, return overrides for that contest type.
+    If not given, return GPP overrides for backwards compatibility.
+    Used by lineups.py.
+    """
     if not OPTIMIZER_OVERRIDES_PATH.exists():
         return None
     try:
         data = json.loads(OPTIMIZER_OVERRIDES_PATH.read_text())
-        return data.get("values")
     except (json.JSONDecodeError, OSError):
         return None
+
+    # New per-contest-type format
+    ct = _normalize_contest_type(contest_type) if contest_type else "gpp"
+    if ct in data and isinstance(data[ct], dict):
+        return data[ct]
+
+    # Legacy flat format fallback
+    if "values" in data:
+        return data["values"]
+
+    return None

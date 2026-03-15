@@ -58,36 +58,38 @@ class TestActiveConfig:
         saved = save_active_config(vals, slate_date="2026-03-14")
         loaded = load_active_config()
         assert loaded is not None
-        assert loaded["name"] == "Working Config"
-        assert loaded["values"]["proj_weight"] == 0.50
-        assert "2026-03-14" in loaded["slates_trained"]
+        # Now returns per-contest-type dict
+        gpp = loaded["gpp"]
+        assert gpp["name"] == "GPP Working Config"
+        assert gpp["values"]["proj_weight"] == 0.50
+        assert "2026-03-14" in gpp["slates_trained"]
 
     def test_save_preserves_existing_slates(self):
         vals = _sample_values()
         save_active_config(vals, slate_date="2026-03-14")
         save_active_config(vals, slate_date="2026-03-15")
         loaded = load_active_config()
-        assert loaded["slates_trained"] == ["2026-03-14", "2026-03-15"]
+        assert loaded["gpp"]["slates_trained"] == ["2026-03-14", "2026-03-15"]
 
     def test_save_deduplicates_slate_dates(self):
         vals = _sample_values()
         save_active_config(vals, slate_date="2026-03-14")
         save_active_config(vals, slate_date="2026-03-14")
         loaded = load_active_config()
-        assert loaded["slates_trained"].count("2026-03-14") == 1
+        assert loaded["gpp"]["slates_trained"].count("2026-03-14") == 1
 
     def test_save_without_slate_date(self):
         vals = _sample_values()
         save_active_config(vals)
         loaded = load_active_config()
-        assert loaded["slates_trained"] == []
+        assert loaded["gpp"]["slates_trained"] == []
 
     def test_only_slider_keys_persisted(self):
         vals = _sample_values()
         vals["extra_garbage"] = 999
         save_active_config(vals)
         loaded = load_active_config()
-        assert "extra_garbage" not in loaded["values"]
+        assert "extra_garbage" not in loaded["gpp"]["values"]
 
     def test_get_active_slider_values(self):
         save_active_config(_sample_values())
@@ -97,6 +99,33 @@ class TestActiveConfig:
 
     def test_get_active_slider_values_none_when_missing(self):
         assert get_active_slider_values() is None
+
+    def test_save_creates_all_contest_types(self):
+        vals = _sample_values()
+        saved = save_active_config(vals, contest_type="cash")
+        assert "gpp" in saved
+        assert "cash" in saved
+        assert "showdown" in saved
+        assert saved["cash"]["values"]["proj_weight"] == 0.50
+
+    def test_contest_types_independent(self):
+        vals_gpp = _sample_values()
+        vals_cash = _sample_values()
+        vals_cash["proj_weight"] = 0.70
+        save_active_config(vals_gpp, contest_type="gpp")
+        save_active_config(vals_cash, contest_type="cash")
+        loaded = load_active_config()
+        assert loaded["gpp"]["values"]["proj_weight"] == 0.50
+        assert loaded["cash"]["values"]["proj_weight"] == 0.70
+
+    def test_get_active_slider_values_per_contest_type(self):
+        vals_gpp = _sample_values()
+        vals_cash = _sample_values()
+        vals_cash["proj_weight"] = 0.80
+        save_active_config(vals_gpp, contest_type="gpp")
+        save_active_config(vals_cash, contest_type="cash")
+        assert get_active_slider_values(contest_type="gpp")["proj_weight"] == 0.50
+        assert get_active_slider_values(contest_type="cash")["proj_weight"] == 0.80
 
 
 class TestConfigHistory:
@@ -136,6 +165,12 @@ class TestConfigHistory:
         assert history[0]["action"] == "first"
         assert history[1]["action"] == "second"
 
+    def test_history_tagged_with_contest_type(self):
+        vals = _sample_values()
+        append_config_history("test_action", vals, contest_type="showdown")
+        history = load_config_history()
+        assert history[0]["contest_type"] == "showdown"
+
 
 class TestResetConfig:
     def test_reset_clears_slates(self):
@@ -143,13 +178,22 @@ class TestResetConfig:
         save_active_config(vals, slate_date="2026-03-14")
         reset_active_config(vals)
         loaded = load_active_config()
-        assert loaded["slates_trained"] == []
+        assert loaded["gpp"]["slates_trained"] == []
 
     def test_reset_records_history(self):
         vals = _sample_values()
         reset_active_config(vals)
         history = load_config_history()
         assert any(e["action"] == "reset_to_defaults" for e in history)
+
+    def test_reset_only_affects_target_contest_type(self):
+        vals = _sample_values()
+        save_active_config(vals, slate_date="2026-03-14", contest_type="gpp")
+        save_active_config(vals, slate_date="2026-03-14", contest_type="cash")
+        reset_active_config(vals, contest_type="gpp")
+        loaded = load_active_config()
+        assert loaded["gpp"]["slates_trained"] == []
+        assert "2026-03-14" in loaded["cash"]["slates_trained"]
 
 
 class TestApplyToOptimizer:
@@ -209,6 +253,19 @@ class TestApplyToOptimizer:
     def test_load_overrides_returns_none_when_missing(self):
         assert load_optimizer_overrides() is None
 
+    def test_per_contest_type_overrides_isolated(self):
+        vals_gpp = _sample_values()
+        vals_cash = _sample_values()
+        vals_cash["proj_weight"] = 0.80
+        vals_cash["upside_weight"] = 0.10
+        vals_cash["boom_weight"] = 0.10
+        apply_config_to_optimizer(vals_gpp, contest_type="gpp")
+        apply_config_to_optimizer(vals_cash, contest_type="cash")
+        gpp_overrides = load_optimizer_overrides(contest_type="gpp")
+        cash_overrides = load_optimizer_overrides(contest_type="cash")
+        assert gpp_overrides["GPP_PROJ_WEIGHT"] == pytest.approx(0.50)
+        assert cash_overrides["GPP_PROJ_WEIGHT"] == pytest.approx(0.80)
+
 
 class TestApplyCalibrationOverrides:
     def test_no_overrides_returns_cfg_unchanged(self):
@@ -257,3 +314,25 @@ class TestApplyCalibrationOverrides:
         original_val = cfg["GPP_PROJ_WEIGHT"]
         apply_calibration_overrides(cfg)
         assert cfg["GPP_PROJ_WEIGHT"] == original_val
+
+
+class TestLegacyMigration:
+    """Test that legacy flat configs are migrated to per-contest-type format."""
+
+    def test_legacy_active_config_migrated(self, tmp_path, monkeypatch):
+        """A flat active_config.json (no contest-type keys) gets migrated on load."""
+        from app.calibration_persistence import ACTIVE_CONFIG_PATH as acp
+        legacy = {
+            "name": "Old Config",
+            "created": "2026-01-01T00:00:00",
+            "updated": "2026-01-01T00:00:00",
+            "slates_trained": ["2026-01-01"],
+            "values": {"proj_weight": 0.60},
+        }
+        acp.write_text(json.dumps(legacy))
+        loaded = load_active_config()
+        assert "gpp" in loaded
+        assert "cash" in loaded
+        assert "showdown" in loaded
+        assert loaded["gpp"]["values"]["proj_weight"] == 0.60
+        assert loaded["gpp"]["slates_trained"] == ["2026-01-01"]
