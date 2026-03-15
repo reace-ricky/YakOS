@@ -435,6 +435,16 @@ def apply_corrections(
     df["proj"] = (df["proj"] + adjustment).clip(lower=0)
     df["proj_correction"] = adjustment.round(2)
 
+    # Also shift SIM percentile columns by the same correction so that
+    # GPP scoring components (upside=SIM90TH, boom=SIM99TH-SIM50TH) are
+    # consistent with the corrected proj.
+    sim_cols = ["sim15th", "sim33rd", "sim50th", "sim66th", "sim85th", "sim90th", "sim99th"]
+    for sim_col in sim_cols:
+        for col_variant in [sim_col, sim_col.upper(), f"SIM{sim_col[3:].upper()}"]:
+            if col_variant in df.columns:
+                df[col_variant] = (df[col_variant] + adjustment).clip(lower=0)
+                break
+
     return df
 
 

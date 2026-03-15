@@ -100,7 +100,6 @@ def _load_nba_pool(slate_date: str, site: str) -> tuple[pd.DataFrame, dict]:
     )
     from yak_core.live import fetch_live_opt_pool
     from yak_core.projections import apply_projections
-    from yak_core.calibration_feedback import get_correction_factors, apply_corrections
 
     api_key = require_env("RAPIDAPI_KEY", alt_names=("TANK01_RAPIDAPI_KEY",))
 
@@ -124,11 +123,8 @@ def _load_nba_pool(slate_date: str, site: str) -> tuple[pd.DataFrame, dict]:
     if "ceil" not in pool.columns or pool["ceil"].isna().all():
         pool["ceil"] = (pool["proj"] * 1.55).round(2)
 
-    # Calibration corrections
-    corrections = get_correction_factors(sport="NBA")
-    if corrections.get("n_slates", 0) > 0:
-        print(f"[load_pool] Applying calibration ({corrections['n_slates']} slates) ...")
-        pool = apply_corrections(pool, corrections, sport="NBA")
+    # NOTE: Calibration corrections are applied in main() AFTER the RG merge
+    # so they are not overwritten by raw RG FPTS values.
 
     # ── Fetch schedule for matchup labels + opponent column ──
     import requests
@@ -234,6 +230,12 @@ def main(argv: list[str] | None = None) -> pd.DataFrame:
         if args.rg_csv:
             pool = _merge_rg_projections(pool, args.rg_csv)
             meta["proj_source"] = "rotogrinders+tank01"
+        # Apply calibration AFTER RG merge so corrections aren't overwritten
+        from yak_core.calibration_feedback import get_correction_factors, apply_corrections
+        corrections = get_correction_factors(sport="NBA")
+        if corrections.get("n_slates", 0) > 0:
+            print(f"[load_pool] Applying calibration ({corrections['n_slates']} slates) ...")
+            pool = apply_corrections(pool, corrections, sport="NBA")
     else:
         pool, meta = _load_pga_pool(slate_date, args.slate)
 
