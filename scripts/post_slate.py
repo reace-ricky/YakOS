@@ -238,6 +238,16 @@ def post_slate(sport: str, slate_date: str) -> dict:
     pool["actual_fp"] = pool["player_name"].map(act_map)
     sig_result = _run_signal_feedback(pool, sport, slate_date)
 
+    # Step 3b: Archive the completed slate for historical replay
+    try:
+        from yak_core.slate_archive import archive_slate
+
+        contest_type = "GPP Main" if sport == "NBA" else "PGA GPP"
+        archive_path = archive_slate(pool, slate_date, contest_type=contest_type)
+        print(f"[post_slate] Slate archived: {archive_path}")
+    except Exception as e:
+        print(f"[post_slate] WARNING: Slate archival failed (non-fatal): {e}")
+
     # Step 4: Commit
     print(f"\n[post_slate] Committing feedback to GitHub ...")
     _commit_feedback(sport, slate_date)
