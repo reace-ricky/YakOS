@@ -1,7 +1,7 @@
 {
   "sport": "NBA",
   "site": "DK",
-  "date": "2026-03-14",
+  "date": "2026-03-15",
   "salary_cap": 50000,
   "roster_slots": [
     "PG",
@@ -14,50 +14,50 @@
     "UTIL"
   ],
   "lineup_size": 8,
-  "pool_size": 212,
-  "proj_source": "rotogrinders+tank01",
+  "pool_size": 209,
+  "proj_source": "model",
   "matchups": [
     {
-      "away": "DEN",
-      "home": "LAL",
-      "game_id": "20260314_DEN@LAL",
-      "label": "DEN @ LAL"
+      "away": "GS",
+      "home": "NY",
+      "game_id": "20260315_GS@NY",
+      "label": "GS @ NY"
     },
     {
-      "away": "SAC",
-      "home": "LAC",
-      "game_id": "20260314_SAC@LAC",
-      "label": "SAC @ LAC"
+      "away": "IND",
+      "home": "MIL",
+      "game_id": "20260315_IND@MIL",
+      "label": "IND @ MIL"
     },
     {
-      "away": "BKN",
+      "away": "DET",
+      "home": "TOR",
+      "game_id": "20260315_DET@TOR",
+      "label": "DET @ TOR"
+    },
+    {
+      "away": "DAL",
+      "home": "CLE",
+      "game_id": "20260315_DAL@CLE",
+      "label": "DAL @ CLE"
+    },
+    {
+      "away": "UTA",
+      "home": "SAC",
+      "game_id": "20260315_UTA@SAC",
+      "label": "UTA @ SAC"
+    },
+    {
+      "away": "MIN",
+      "home": "OKC",
+      "game_id": "20260315_MIN@OKC",
+      "label": "MIN @ OKC"
+    },
+    {
+      "away": "POR",
       "home": "PHI",
-      "game_id": "20260314_BKN@PHI",
-      "label": "BKN @ PHI"
-    },
-    {
-      "away": "ORL",
-      "home": "MIA",
-      "game_id": "20260314_ORL@MIA",
-      "label": "ORL @ MIA"
-    },
-    {
-      "away": "WAS",
-      "home": "BOS",
-      "game_id": "20260314_WAS@BOS",
-      "label": "WAS @ BOS"
-    },
-    {
-      "away": "CHA",
-      "home": "SA",
-      "game_id": "20260314_CHA@SA",
-      "label": "CHA @ SA"
-    },
-    {
-      "away": "MIL",
-      "home": "ATL",
-      "game_id": "20260314_MIL@ATL",
-      "label": "MIL @ ATL"
+      "game_id": "20260315_POR@PHI",
+      "label": "POR @ PHI"
     }
   ]
 }
