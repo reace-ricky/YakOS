@@ -660,6 +660,31 @@ def _render_historical_backfill(sport: str) -> None:
     else:
         _render_nba_backfill()
 
+    # ── Recalibrate from Archive (sport-agnostic) ─────────────────────
+    st.markdown("---")
+    st.markdown("### Recalibrate from Archive")
+    st.caption(
+        "Rebuild correction factors from archived slate parquets "
+        "(uses YakOS projections vs actuals — not Tank01)."
+    )
+    archive_dir = REPO_ROOT / "data" / "slate_archive"
+    parquets = sorted(archive_dir.glob("*.parquet")) if archive_dir.exists() else []
+
+    # Separate NBA vs PGA archives
+    nba_archives = [p for p in parquets if "pga" not in p.name.lower()]
+    pga_archives = [p for p in parquets if "pga" in p.name.lower()]
+
+    target = nba_archives if sport.upper() != "PGA" else pga_archives
+    sport_label = "NBA" if sport.upper() != "PGA" else "PGA"
+    st.info(f"Found **{len(target)}** {sport_label} archived slates in `data/slate_archive/`.")
+
+    if st.button(
+        f"Recalibrate {sport_label} from Archive",
+        key="recalibrate_archive",
+        type="primary",
+    ):
+        _recalibrate_from_archive(target, sport=sport_label)
+
 
 def _render_pga_backfill() -> None:
     """PGA Historical Events backfill UI."""
@@ -905,6 +930,115 @@ def _run_nba_backfill(api_key: str, start_date: date, end_date: date) -> None:
     status_text.text("Backfill complete.")
     if results:
         st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+
+
+# ── Recalibrate from Archive ────────────────────────────────────────────────
+
+def _recalibrate_from_archive(archive_files: list, sport: str = "NBA") -> None:
+    """Clear existing calibration and rebuild from archived slate parquets.
+
+    Each archive parquet contains YakOS projections (``proj``) and actual
+    fantasy points (``actual_fp``), so this bypasses Tank01 entirely and
+    recalibrates using YakOS's own projection accuracy.
+    """
+    from yak_core.calibration_feedback import (
+        clear_calibration_history,
+        record_slate_errors,
+        get_calibration_summary,
+    )
+
+    if not archive_files:
+        st.warning("No archive files found for this sport.")
+        return
+
+    # 1. Clear existing calibration so we rebuild from scratch
+    clear_calibration_history(sport=sport.upper())
+    st.info(f"Cleared existing {sport} calibration history. Rebuilding...")
+
+    progress = st.progress(0.0)
+    status_text = st.empty()
+    results = []
+    n = len(archive_files)
+
+    for i, fpath in enumerate(archive_files):
+        fname = fpath.name if hasattr(fpath, "name") else os.path.basename(str(fpath))
+        # Extract slate date from filename (e.g. "2026-02-05_gpp_main.parquet" → "2026-02-05")
+        slate_date = fname.split("_")[0]
+        status_text.text(f"Processing {fname} ({i + 1}/{n})...")
+
+        try:
+            df = pd.read_parquet(fpath)
+
+            # Validate required columns
+            required = {"player_name", "pos", "salary", "proj", "actual_fp"}
+            missing = required - set(df.columns)
+            if missing:
+                results.append({
+                    "file": fname, "date": slate_date, "status": "skipped",
+                    "detail": f"Missing columns: {missing}", "n_players": 0,
+                    "MAE": "N/A", "correlation": "N/A",
+                })
+                progress.progress((i + 1) / n)
+                continue
+
+            # Filter to players who actually played
+            df["actual_fp"] = pd.to_numeric(df["actual_fp"], errors="coerce")
+            df["proj"] = pd.to_numeric(df["proj"], errors="coerce")
+            valid = df[df["actual_fp"].notna() & (df["actual_fp"] > 0) & df["proj"].notna()].copy()
+
+            if valid.empty:
+                results.append({
+                    "file": fname, "date": slate_date, "status": "skipped",
+                    "detail": "No valid proj/actual pairs", "n_players": 0,
+                    "MAE": "N/A", "correlation": "N/A",
+                })
+                progress.progress((i + 1) / n)
+                continue
+
+            # Record errors — this appends to history and recomputes corrections
+            cal_result = record_slate_errors(slate_date, valid, sport=sport.upper())
+
+            if "error" in cal_result:
+                results.append({
+                    "file": fname, "date": slate_date, "status": "rejected",
+                    "detail": cal_result["error"], "n_players": len(valid),
+                    "MAE": "N/A", "correlation": "N/A",
+                })
+            else:
+                ov = cal_result.get("overall", {})
+                results.append({
+                    "file": fname, "date": slate_date, "status": "ok",
+                    "detail": "",
+                    "n_players": ov.get("n_players", len(valid)),
+                    "MAE": round(ov.get("mae", 0), 2),
+                    "correlation": round(ov.get("correlation", 0), 4),
+                })
+
+        except Exception as e:
+            results.append({
+                "file": fname, "date": slate_date, "status": "error",
+                "detail": str(e)[:120], "n_players": 0,
+                "MAE": "N/A", "correlation": "N/A",
+            })
+
+        progress.progress((i + 1) / n)
+
+    status_text.text("Recalibration complete.")
+
+    # Show results table
+    if results:
+        res_df = pd.DataFrame(results)
+        ok_count = (res_df["status"] == "ok").sum()
+        st.success(f"Successfully processed {ok_count}/{n} slates.")
+        st.dataframe(res_df, use_container_width=True, hide_index=True)
+
+    # Show updated calibration summary
+    try:
+        summary = get_calibration_summary(sport=sport.upper())
+        st.markdown("#### Updated Calibration")
+        st.json(summary)
+    except Exception:
+        pass
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
