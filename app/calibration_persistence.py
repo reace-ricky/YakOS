@@ -19,6 +19,13 @@ OPTIMIZER_OVERRIDES_PATH = REPO_ROOT / "data" / "calibration" / "optimizer_overr
 
 CONTEST_TYPES = ("gpp", "cash", "showdown")
 
+
+def _sync_to_github(files: list, commit_message: str = "Auto-sync calibration config") -> None:
+    """Lazy-import sync to avoid circular import with yak_core.lineups."""
+    from yak_core.github_persistence import sync_feedback_async
+
+    sync_feedback_async(files=files, commit_message=commit_message)
+
 # Keys from lab sliders that map to optimizer config values
 _SLIDER_KEYS = [
     "proj_weight",
@@ -136,6 +143,10 @@ def save_active_config(
 
     CALIBRATION_DIR.mkdir(parents=True, exist_ok=True)
     ACTIVE_CONFIG_PATH.write_text(json.dumps(existing_all, indent=2))
+    _sync_to_github(
+        files=["data/calibration/active_config.json", "data/calibration/config_history.json"],
+        commit_message="Auto-sync calibration config",
+    )
     return existing_all
 
 
@@ -192,6 +203,10 @@ def append_config_history(
     history.append(entry)
     CALIBRATION_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_HISTORY_PATH.write_text(json.dumps(history, indent=2))
+    _sync_to_github(
+        files=["data/calibration/active_config.json", "data/calibration/config_history.json"],
+        commit_message="Auto-sync calibration config",
+    )
 
 
 def reset_active_config(
@@ -229,6 +244,11 @@ def reset_active_config(
         action="reset_to_defaults",
         values=default_values,
         contest_type=ct,
+    )
+
+    _sync_to_github(
+        files=["data/calibration/active_config.json"],
+        commit_message="Auto-sync calibration config (reset)",
     )
 
     return existing_all
@@ -307,6 +327,15 @@ def apply_config_to_optimizer(
         action="apply_to_optimizer",
         values=values,
         contest_type=ct,
+    )
+
+    _sync_to_github(
+        files=[
+            "data/calibration/active_config.json",
+            "data/calibration/config_history.json",
+            "data/calibration/optimizer_overrides.json",
+        ],
+        commit_message="Auto-sync calibration config (optimizer apply)",
     )
 
 
