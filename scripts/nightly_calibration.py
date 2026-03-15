@@ -57,6 +57,7 @@ def run_nba_calibration(slate_date: str) -> dict:
     from yak_core.live import fetch_actuals_from_api
     from yak_core.outcome_logger import log_slate_outcomes
     from yak_core.sim_sandbox import score_player_breakout
+    from yak_core.slate_archive import archive_slate
 
     log.info("=== NBA Calibration for %s ===", slate_date)
     result = {"sport": "NBA", "slate_date": slate_date, "status": "ok"}
@@ -146,6 +147,13 @@ def run_nba_calibration(slate_date: str) -> dict:
     except Exception as e:
         log.error("record_slate_errors failed: %s", e)
         result["calibration_error"] = str(e)
+
+    # 5b. Archive the completed slate for historical replay
+    try:
+        archive_path = archive_slate(pool, slate_date, contest_type="GPP Main")
+        log.info("Slate archived: %s", archive_path)
+    except Exception as e:
+        log.warning("Slate archival failed (non-fatal): %s", e)
 
     # 6. Score breakout predictions
     try:
@@ -263,6 +271,7 @@ def run_pga_calibration(slate_date: str) -> dict:
     from yak_core.edge_feedback import record_edge_outcomes
     from yak_core.outcome_logger import log_slate_outcomes
     from yak_core.sim_sandbox import score_player_breakout
+    from yak_core.slate_archive import archive_slate
 
     log.info("=== PGA Calibration for %s ===", slate_date)
     result = {"sport": "PGA", "slate_date": slate_date, "status": "ok"}
@@ -367,6 +376,13 @@ def run_pga_calibration(slate_date: str) -> dict:
     except Exception as e:
         log.error("PGA record_slate_errors failed: %s", e)
         result["calibration_error"] = str(e)
+
+    # 5b. Archive the completed slate for historical replay
+    try:
+        archive_path = archive_slate(pool, slate_date, contest_type="PGA GPP")
+        log.info("PGA slate archived: %s", archive_path)
+    except Exception as e:
+        log.warning("PGA slate archival failed (non-fatal): %s", e)
 
     # 6. Score breakouts
     try:
