@@ -145,6 +145,43 @@ DEFAULT_LAB_CONFIG = {
     "adj_4_5k": 0.0,
 }
 
+# ── Batch Training Guardrails ────────────────────────────────────────────
+
+# Learning rate: controls how fast params move toward recommendations.
+# new_value = current + LEARNING_RATE * (recommended - current)
+BATCH_LEARNING_RATE = 0.3
+
+# Max slates processed in a single batch before pausing for review.
+BATCH_SIZE = 3
+
+# Hard parameter bounds to prevent degenerate configs.
+PARAM_BOUNDS: Dict[str, Dict[str, float]] = {
+    "own_penalty_strength": {"min": 0.3, "max": 5.0},
+    "proj_weight":          {"min": 0.10, "max": 0.80},
+    "boom_weight":          {"min": 0.0, "max": 0.60},
+    "stud_exposure":        {"min": 20, "max": 65},
+    "min_mid_players":      {"min": 3, "max": 6},
+    "max_punt_players":     {"min": 0, "max": 2},
+}
+
+
+def _clamp_to_bounds(key: str, value: float) -> float:
+    """Clamp a parameter value to its allowed bounds."""
+    bounds = PARAM_BOUNDS.get(key)
+    if bounds is None:
+        return value
+    lo, hi = bounds["min"], bounds["max"]
+    # For integer params, round after clamping
+    if key in ("min_mid_players", "max_punt_players"):
+        return int(max(lo, min(hi, round(value))))
+    return round(max(lo, min(hi, value)), 2)
+
+
+def _dampen(current: float, recommended: float, key: str) -> float:
+    """Apply learning rate dampening and bounds clamping to a recommendation."""
+    dampened = current + BATCH_LEARNING_RATE * (recommended - current)
+    return _clamp_to_bounds(key, dampened)
+
 
 def _build_optimizer_config_from_sliders(sliders: Dict[str, Any], contest_type: str) -> Dict[str, Any]:
     """Convert lab slider values into an optimizer cfg dict."""
@@ -927,6 +964,11 @@ def _generate_slider_recommendations(
                 confidence="LOW",
             ))
 
+    # Clamp all recommended values to parameter bounds
+    for rec in recs:
+        if rec.slider_key:
+            rec.recommended_value = _clamp_to_bounds(rec.slider_key, rec.recommended_value)
+
     # If no recommendations generated, note the config is close
     if not recs:
         recs.append(SliderRecommendation(
@@ -1274,13 +1316,44 @@ def _render_batch_train(contest_type_key: str, contest_mode: str) -> None:
     # Sort chronologically
     selected_entries.sort(key=lambda e: e["date"])
 
-    st.caption(f"{len(selected_entries)} slate(s) selected, sorted chronologically.")
+    n_batches = math.ceil(len(selected_entries) / BATCH_SIZE)
+    st.caption(
+        f"{len(selected_entries)} slate(s) selected → {n_batches} batch(es) "
+        f"of up to {BATCH_SIZE} slates each. Learning rate: {BATCH_LEARNING_RATE}"
+    )
 
-    if st.button("Step 2: Batch Train", type="primary", key="batch_train_run"):
-        _run_batch_train(selected_entries, contest_type_key, contest_mode)
+    # Determine which batch to run next
+    bt_state = st.session_state.get("batch_train_results")
+    next_batch_idx = bt_state["completed_batches"] if bt_state else 0
+
+    if next_batch_idx == 0:
+        # Fresh start
+        if st.button("Step 2: Start Batch Train", type="primary", key="batch_train_run"):
+            _run_batch_train(selected_entries, contest_type_key, contest_mode, batch_offset=0)
+    elif next_batch_idx < n_batches:
+        # Mid-training: show continue/stop buttons
+        batch_start = next_batch_idx * BATCH_SIZE
+        batch_end = min(batch_start + BATCH_SIZE, len(selected_entries))
+        batch_dates = ", ".join(e["date"] for e in selected_entries[batch_start:batch_end])
+        st.info(f"**Next up:** Batch {next_batch_idx + 1} of {n_batches} — {batch_dates}")
+        col_cont, col_stop = st.columns(2)
+        with col_cont:
+            if st.button(
+                f"Continue to Batch {next_batch_idx + 1}",
+                type="primary",
+                key="batch_train_continue",
+            ):
+                _run_batch_train(
+                    selected_entries, contest_type_key, contest_mode,
+                    batch_offset=next_batch_idx,
+                )
+        with col_stop:
+            if st.button("Stop Here", key="batch_train_stop"):
+                st.toast("Training stopped. Current config preserved.")
+    else:
+        st.success(f"All {n_batches} batch(es) complete.")
 
     # Display stored results
-    bt_state = st.session_state.get("batch_train_results")
     if bt_state:
         _render_batch_train_results(bt_state, contest_type_key, contest_mode)
 
@@ -1289,23 +1362,41 @@ def _run_batch_train(
     selected_entries: List[Dict[str, str]],
     contest_type_key: str,
     contest_mode: str,
+    batch_offset: int = 0,
 ) -> None:
-    """Execute the batch training loop across selected slates."""
+    """Execute one batch of training (up to BATCH_SIZE slates)."""
     from yak_core.lineups import prepare_pool, build_multiple_lineups_with_exposure
 
-    progress = st.progress(0, text="Starting batch train...")
+    # Slice this batch
+    batch_start = batch_offset * BATCH_SIZE
+    batch_end = min(batch_start + BATCH_SIZE, len(selected_entries))
+    batch_entries = selected_entries[batch_start:batch_end]
 
-    # Start with current working config (compounding)
-    working_config = dict(st.session_state.get("cal_lab_sliders", DEFAULT_LAB_CONFIG))
+    batch_dates = ", ".join(e["date"] for e in batch_entries)
+    n_batches = math.ceil(len(selected_entries) / BATCH_SIZE)
+    progress = st.progress(
+        0,
+        text=f"Batch {batch_offset + 1} of {n_batches} ({batch_dates})...",
+    )
+
+    # Carry forward state from previous batches
+    bt_state = st.session_state.get("batch_train_results")
+    if bt_state and batch_offset > 0:
+        working_config = dict(bt_state["trained_config"])
+        per_slate_log = list(bt_state["log"])
+        total_params_changed = bt_state["total_params_changed"]
+    else:
+        working_config = dict(st.session_state.get("cal_lab_sliders", DEFAULT_LAB_CONFIG))
+        per_slate_log = []
+        total_params_changed = 0
+
     default_config = dict(DEFAULT_LAB_CONFIG)
-    per_slate_log: List[Dict[str, Any]] = []
-    total_params_changed = 0
 
-    for i, entry in enumerate(selected_entries):
+    for i, entry in enumerate(batch_entries):
         slate_date = entry["date"]
         progress.progress(
-            (i + 0.5) / len(selected_entries),
-            text=f"Training on {slate_date}... ({i+1}/{len(selected_entries)})",
+            (i + 0.5) / len(batch_entries),
+            text=f"Batch {batch_offset + 1}/{n_batches} — training on {slate_date}... ({i+1}/{len(batch_entries)})",
         )
 
         try:
@@ -1353,16 +1444,17 @@ def _run_batch_train(
                 ideal_scored, opt_scored, lineups_df, pool, working_config,
             )
 
-            # 5. Apply all recommendations (compounding)
+            # 5. Apply recommendations with dampening + bounds clamping
             old_config = dict(working_config)
             actionable = [r for r in analysis.recommendations if r.slider_key]
             changes = {}
             for rec in actionable:
                 if rec.slider_key in working_config:
                     old_val = working_config[rec.slider_key]
-                    working_config[rec.slider_key] = rec.recommended_value
-                    if old_val != rec.recommended_value:
-                        changes[rec.slider_key] = {"from": old_val, "to": rec.recommended_value}
+                    new_val = _dampen(old_val, rec.recommended_value, rec.slider_key)
+                    working_config[rec.slider_key] = new_val
+                    if old_val != new_val:
+                        changes[rec.slider_key] = {"from": old_val, "to": new_val}
 
             # 6. Save config
             save_active_config(
@@ -1393,7 +1485,7 @@ def _run_batch_train(
                 "date": slate_date, "status": "error", "reason": str(e), "changes": {},
             })
 
-    progress.progress(1.0, text="Batch training complete!")
+    progress.progress(1.0, text=f"Batch {batch_offset + 1} of {n_batches} complete!")
 
     # Update session state
     st.session_state["cal_lab_sliders"] = working_config
@@ -1403,6 +1495,8 @@ def _run_batch_train(
         "trained_config": dict(working_config),
         "total_params_changed": total_params_changed,
         "entries": selected_entries,
+        "completed_batches": batch_offset + 1,
+        "total_batches": n_batches,
     }
     progress.empty()
     st.rerun()
@@ -1418,6 +1512,13 @@ def _render_batch_train_results(bt_state: Dict[str, Any], contest_type_key: str,
     trained_slates = [s for s in log if s["status"] == "trained"]
     errored = [s for s in log if s["status"] == "error"]
     skipped = [s for s in log if s["status"] == "skipped"]
+
+    # Batch progress indicator
+    completed_batches = bt_state.get("completed_batches", 0)
+    total_batches = bt_state.get("total_batches", 1)
+    if total_batches > 1:
+        pct = int(completed_batches / total_batches * 100)
+        st.progress(completed_batches / total_batches, text=f"Batch {completed_batches} of {total_batches} ({pct}%)")
 
     # Summary metrics
     st.markdown("#### Training Summary")
