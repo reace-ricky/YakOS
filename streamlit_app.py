@@ -5,6 +5,7 @@ Entry point.  Uses ``st.tabs()`` for navigation:
   - Optimizer (public)
   - The Lab (admin)
   - Dashboard (admin)
+  - Calibration Lab (admin)
 
 Sport toggle (NBA/PGA) and admin password gate live in the sidebar.
 """
@@ -36,13 +37,14 @@ is_admin = check_admin_password()
 
 # ── Tabs ──────────────────────────────────────────────────────────────────
 if is_admin:
-    tab_edge, tab_optimizer, tab_lab, tab_dashboard = st.tabs(
-        ["📐 Ricky's Edge Analysis", "⚙️ Optimizer", "🧪 The Lab", "📊 Dashboard"]
+    tab_edge, tab_optimizer, tab_lab, tab_dashboard, tab_calibration = st.tabs(
+        ["📐 Ricky's Edge Analysis", "⚙️ Optimizer", "🧪 The Lab", "📊 Dashboard", "🔬 Calibration Lab"]
     )
 else:
     tab_edge, tab_optimizer = st.tabs(["📐 Ricky's Edge Analysis", "⚙️ Optimizer"])
     tab_lab = None
     tab_dashboard = None
+    tab_calibration = None
 
 # ── Render tabs ───────────────────────────────────────────────────────────
 from app.edge_tab import render_edge_tab
@@ -63,3 +65,9 @@ if is_admin and tab_lab is not None:
 
     with tab_dashboard:
         render_dashboard_tab(sport)
+
+if is_admin and tab_calibration is not None:
+    from app.calibration_lab import render_calibration_lab
+
+    with tab_calibration:
+        render_calibration_lab(sport)
