@@ -3,25 +3,25 @@
   "date": "2026-03-14",
   "core_names": [
     "Jalen Johnson",
-    "Luka Doncic",
     "Victor Wembanyama",
-    "Nikola Jokic",
+    "Luka Doncic",
+    "Coby White",
     "Kawhi Leonard"
   ],
-  "leverage_names": [
-    "Noah Clowney",
-    "Bruce Brown",
-    "Tristan da Silva",
-    "Cam Thomas",
-    "Rui Hachimura"
-  ],
+  "leverage_names": [],
   "value_names": [
-    "Simone Fontecchio",
     "Jalen Pickett",
-    "Jock Landale",
+    "Simone Fontecchio",
     "Julian Strawther",
-    "Jonas Valanciunas"
+    "Dru Smith",
+    "Jock Landale"
   ],
-  "fade_names": [],
-  "calibration_slates": 12
+  "fade_names": [
+    "Thanasis Antetokounmpo",
+    "Bronny James",
+    "Norchad Omier",
+    "Jordan McLaughlin",
+    "Trevor Keels"
+  ],
+  "calibration_slates": 15
 }
