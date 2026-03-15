@@ -780,5 +780,39 @@
       "mid_exposure": 35,
       "value_exposure": 25
     }
+  },
+  {
+    "timestamp": "2026-03-15T19:44:53",
+    "contest_type": "gpp",
+    "slate_date": "2026-03-05",
+    "action": "batch_train",
+    "changes": {
+      "max_punt_players": {
+        "from": 2,
+        "to": 1
+      },
+      "min_mid_players": {
+        "from": 2,
+        "to": 3
+      },
+      "stud_exposure": {
+        "from": 80,
+        "to": 70
+      }
+    },
+    "values": {
+      "proj_weight": 1.0,
+      "upside_weight": 0.4,
+      "boom_weight": 1.0,
+      "own_penalty_strength": 0.0,
+      "low_own_boost": 0.5,
+      "own_neutral_pct": 15,
+      "max_punt_players": 1,
+      "min_mid_players": 3,
+      "game_diversity_pct": 65,
+      "stud_exposure": 70,
+      "mid_exposure": 35,
+      "value_exposure": 25
+    }
   }
 ]
