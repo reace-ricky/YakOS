@@ -1974,44 +1974,86 @@
   "2026-03-14": {
     "slate_date": "2026-03-14",
     "overall": {
-      "mean_error": 8.83,
-      "mae": 10.16,
-      "rmse": 10.72,
-      "correlation": 0.7995,
-      "n_players": 9
+      "mean_error": 2.01,
+      "mae": 8.53,
+      "rmse": 10.8,
+      "correlation": 0.7261,
+      "n_players": 116
     },
     "by_position": {
       "C": {
-        "mean_error": 14.48,
-        "median_error": 14.48,
-        "n": 2,
-        "mae": 14.48
+        "mean_error": 0.04,
+        "median_error": -1.08,
+        "n": 19,
+        "mae": 9.84
+      },
+      "PF": {
+        "mean_error": 1.13,
+        "median_error": 0.73,
+        "n": 20,
+        "mae": 9.01
+      },
+      "PG": {
+        "mean_error": 4.15,
+        "median_error": 5.75,
+        "n": 22,
+        "mae": 9.34
       },
       "SF": {
-        "mean_error": 6.39,
-        "median_error": 11.72,
-        "n": 3,
-        "mae": 10.38
+        "mean_error": 1.93,
+        "median_error": 0.3,
+        "n": 30,
+        "mae": 6.89
       },
       "SG": {
-        "mean_error": 9.22,
-        "median_error": 9.22,
-        "n": 2,
-        "mae": 9.22
+        "mean_error": 2.4,
+        "median_error": 0.71,
+        "n": 25,
+        "mae": 8.39
       }
     },
     "by_salary_tier": {
       "<4K": {
-        "mean_error": 9.39,
-        "median_error": 9.22,
-        "n": 4,
-        "mae": 9.39
+        "mean_error": -0.66,
+        "median_error": -2.72,
+        "n": 41,
+        "mae": 8.05
       },
       "4-5K": {
-        "mean_error": 11.48,
-        "median_error": 11.72,
-        "n": 3,
-        "mae": 11.48
+        "mean_error": 2.19,
+        "median_error": 0.22,
+        "n": 24,
+        "mae": 9.16
+      },
+      "5-6K": {
+        "mean_error": -0.2,
+        "median_error": 0.57,
+        "n": 11,
+        "mae": 5.31
+      },
+      "6-7K": {
+        "mean_error": 6.06,
+        "median_error": 5.64,
+        "n": 16,
+        "mae": 8.97
+      },
+      "7-8K": {
+        "mean_error": 5.84,
+        "median_error": 5.67,
+        "n": 12,
+        "mae": 9.79
+      },
+      "8-9K": {
+        "mean_error": -4.24,
+        "median_error": 0.09,
+        "n": 5,
+        "mae": 8.14
+      },
+      "9K+": {
+        "mean_error": 9.1,
+        "median_error": 7.73,
+        "n": 7,
+        "mae": 11.31
       }
     }
   }

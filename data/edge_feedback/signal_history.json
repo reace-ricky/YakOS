@@ -502,5 +502,26 @@
         "avg_proj": 24.4
       }
     }
+  },
+  "2026-03-14": {
+    "slate_date": "2026-03-14",
+    "contest_type": "PGA GPP",
+    "n_players": 10,
+    "signals": {
+      "high_leverage": {
+        "n_flagged": 0,
+        "n_hit": 0,
+        "hit_rate": null,
+        "avg_actual": null,
+        "avg_proj": null
+      },
+      "salary_value": {
+        "n_flagged": 0,
+        "n_hit": 0,
+        "hit_rate": null,
+        "avg_actual": null,
+        "avg_proj": null
+      }
+    }
   }
 }
