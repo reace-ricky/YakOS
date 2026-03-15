@@ -130,13 +130,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "GPP_OWN_PENALTY_STRENGTH": 1.2,  # scales the log-based ownership penalty
     "GPP_OWN_LOW_BOOST": 0.5,         # modest boost for low-ownership (<8%) players
     "GPP_PROJ_FLOOR": 280,            # flag/filter lineups projecting below this total
-    # GPP-specific constraints (v6 — backtested on 13 slates 2026-02-02 → 2026-03-08)
+    # GPP-specific constraints (v7 — calibrated against 6 RG winning lineups 2026-03-09 → 2026-03-13)
     # Only active when CONTEST_TYPE == "gpp"
-    # v5/H5_ForcedDiverse had own_cap=4.8, min_mid=5, min_low_own=3 which
-    # caused infeasibility on small-pool slates (e.g. 4-game nights) and
-    # systematically avoided high-ceiling chalk players.
-    "GPP_MAX_PUNT_PLAYERS": 2,      # max players with salary < $4000
-    "GPP_MIN_MID_PLAYERS": 3,       # min players in $4000-$7000 range
+    # v6 had max_punts=2, min_mid=3 which over-represented punts (1.4 avg vs
+    # 0.8 in winners) and under-represented mid-tier (4.0 avg vs 4.8 in winners).
+    "GPP_MAX_PUNT_PLAYERS": 1,      # max players with salary < $4000 (winners avg 0.8)
+    "GPP_MIN_MID_PLAYERS": 4,       # min players in $4000-$7000 range (winners avg 4.8)
     "GPP_OWN_CAP": 7.0,             # max total lineup ownership (8 players)
     "GPP_MIN_LOW_OWN_PLAYERS": 1,   # min players below GPP_LOW_OWN_THRESHOLD
     "GPP_LOW_OWN_THRESHOLD": 0.45,  # ownership threshold for "low-owned"
