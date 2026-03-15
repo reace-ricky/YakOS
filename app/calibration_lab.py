@@ -327,6 +327,111 @@ def _score_optimizer_lineups(lineups_df: pd.DataFrame, pool: pd.DataFrame) -> Li
     return results
 
 
+# ── Auto-Generate Ideal Lineups from Actuals ─────────────────────────────
+
+
+def _build_ideal_lineups_from_actuals(
+    pool: pd.DataFrame,
+    n_lineups: int = 3,
+) -> List[List[Dict]]:
+    """Build ideal hindsight lineups greedily from actual fantasy points.
+
+    Uses a greedy approach: sort by actual_fp descending, fill each DK Classic
+    slot (PG, SG, SF, PF, C, G, F, UTIL) with the best available player who
+    fits that position and hasn't been used yet in this lineup.  Respects the
+    $50K salary cap.  For diversity across lineups, already-used players get a
+    small penalty after the first lineup.
+    """
+    required_cols = {"actual_fp", "salary", "pos", "player_name"}
+    if not required_cols.issubset(pool.columns):
+        return []
+
+    # Only consider players with positive actuals
+    candidates = pool[pool["actual_fp"] > 0].copy()
+    if candidates.empty:
+        return []
+
+    candidates["actual_fp"] = pd.to_numeric(candidates["actual_fp"], errors="coerce").fillna(0)
+    candidates["salary"] = pd.to_numeric(candidates["salary"], errors="coerce").fillna(0).astype(int)
+
+    usage_counts: Counter = Counter()
+    lineups: List[List[Dict]] = []
+
+    # Pre-compute the minimum salary for any player eligible at each slot
+    min_salary_by_slot: Dict[str, int] = {}
+    for slot in NBA_POS_SLOTS:
+        eligible_positions: set = set()
+        for pos_key, eligible_slots in _POS_ELIGIBILITY.items():
+            if slot in eligible_slots:
+                eligible_positions.add(pos_key)
+        eligible_salaries = []
+        for _, row in candidates.iterrows():
+            player_positions = [p.strip() for p in str(row["pos"]).split("/")]
+            if set(player_positions) & eligible_positions:
+                eligible_salaries.append(int(row["salary"]))
+        min_salary_by_slot[slot] = min(eligible_salaries) if eligible_salaries else 0
+
+    for lu_idx in range(n_lineups):
+        # Apply diversity penalty: subtract a small amount for previously used players
+        candidates["_sort_score"] = candidates["actual_fp"] - candidates["player_name"].map(
+            lambda n: usage_counts.get(n, 0) * 3.0
+        )
+        candidates_sorted = candidates.sort_values("_sort_score", ascending=False)
+
+        lineup: List[Dict] = []
+        used_names: set = set()
+        total_salary = 0
+
+        for slot_idx, slot in enumerate(NBA_POS_SLOTS):
+            # Determine which base positions can fill this slot
+            eligible_positions: set = set()
+            for pos_key, eligible_slots in _POS_ELIGIBILITY.items():
+                if slot in eligible_slots:
+                    eligible_positions.add(pos_key)
+
+            # Reserve minimum salary needed for remaining unfilled slots
+            remaining_slots = NBA_POS_SLOTS[slot_idx + 1:]
+            reserved = sum(min_salary_by_slot.get(s, 0) for s in remaining_slots)
+
+            best_player = None
+            for _, row in candidates_sorted.iterrows():
+                name = row["player_name"]
+                if name in used_names:
+                    continue
+
+                salary = int(row["salary"])
+                if total_salary + salary + reserved > NBA_SALARY_CAP:
+                    continue
+
+                # Check position eligibility (handle multi-position like "PG/SG")
+                player_positions = [p.strip() for p in str(row["pos"]).split("/")]
+                if not (set(player_positions) & eligible_positions):
+                    continue
+
+                best_player = row
+                break
+
+            if best_player is not None:
+                name = best_player["player_name"]
+                used_names.add(name)
+                total_salary += int(best_player["salary"])
+                lineup.append({
+                    "player_name": name,
+                    "pos": str(best_player["pos"]),
+                    "salary": int(best_player["salary"]),
+                    "proj": float(best_player.get("proj", 0) or 0),
+                    "actual_fp": float(best_player["actual_fp"]),
+                    "multiplier": 1.0,
+                })
+
+        if len(lineup) == len(NBA_POS_SLOTS):
+            lineups.append(lineup)
+            for p in lineup:
+                usage_counts[p["player_name"]] += 1
+
+    return lineups
+
+
 # ── Auto-Analysis Engine ─────────────────────────────────────────────────
 
 
@@ -1125,6 +1230,288 @@ def _render_config_evolution(contest_type_key: str, contest_mode: str) -> None:
     st.markdown("---")
 
 
+# ── Batch Train ──────────────────────────────────────────────────────────
+
+
+def _render_batch_train(contest_type_key: str, contest_mode: str) -> None:
+    """Render the Batch Train section for training config across multiple slates."""
+    with st.expander("Batch Train Across Slates", expanded=False):
+        # Find GPP slates with actuals
+        entries = _list_archived_dates()
+        gpp_entries = []
+        for e in entries:
+            if "gpp" not in e["contest_type"].lower():
+                continue
+            try:
+                df = pd.read_parquet(e["file"])
+                if "actual_fp" in df.columns and not df["actual_fp"].isna().all():
+                    gpp_entries.append(e)
+            except Exception:
+                continue
+
+        if not gpp_entries:
+            st.info("No GPP slates with actuals found in the archive.")
+            return
+
+        # Slate selection
+        slate_labels = [e["label"] for e in gpp_entries]
+        selected_indices = st.multiselect(
+            "Select slates to train on",
+            options=list(range(len(gpp_entries))),
+            format_func=lambda i: slate_labels[i],
+            default=list(range(len(gpp_entries))),
+            key="batch_train_slates",
+        )
+
+        if not selected_indices:
+            st.warning("Select at least one slate.")
+            return
+
+        selected_entries = [gpp_entries[i] for i in selected_indices]
+        # Sort chronologically
+        selected_entries.sort(key=lambda e: e["date"])
+
+        st.caption(f"{len(selected_entries)} slate(s) selected, sorted chronologically.")
+
+        if st.button("Batch Train", type="primary", key="batch_train_run"):
+            _run_batch_train(selected_entries, contest_type_key, contest_mode)
+
+        # Display stored results
+        bt_state = st.session_state.get("batch_train_results")
+        if bt_state:
+            _render_batch_train_results(bt_state, contest_type_key, contest_mode)
+
+
+def _run_batch_train(
+    selected_entries: List[Dict[str, str]],
+    contest_type_key: str,
+    contest_mode: str,
+) -> None:
+    """Execute the batch training loop across selected slates."""
+    from yak_core.lineups import prepare_pool, build_multiple_lineups_with_exposure
+
+    progress = st.progress(0, text="Starting batch train...")
+
+    # Start with current working config (compounding)
+    working_config = dict(st.session_state.get("cal_lab_sliders", DEFAULT_LAB_CONFIG))
+    default_config = dict(DEFAULT_LAB_CONFIG)
+    per_slate_log: List[Dict[str, Any]] = []
+    total_params_changed = 0
+
+    for i, entry in enumerate(selected_entries):
+        slate_date = entry["date"]
+        progress.progress(
+            (i + 0.5) / len(selected_entries),
+            text=f"Training on {slate_date}... ({i+1}/{len(selected_entries)})",
+        )
+
+        try:
+            pool = pd.read_parquet(entry["file"])
+            if "actual_fp" not in pool.columns or pool["actual_fp"].isna().all():
+                per_slate_log.append({
+                    "date": slate_date, "status": "skipped", "reason": "no actuals",
+                    "changes": {},
+                })
+                continue
+
+            # Ensure numeric columns
+            for col in ["salary", "proj", "actual_fp", "floor", "ceil", "ownership"]:
+                if col in pool.columns:
+                    pool[col] = pd.to_numeric(pool[col], errors="coerce").fillna(0)
+
+            if "player_id" not in pool.columns:
+                pool["player_id"] = pool["player_name"].str.lower().str.replace(" ", "_")
+
+            # 1. Build ideal lineups from actuals
+            ideal_lineups_raw = _build_ideal_lineups_from_actuals(pool, n_lineups=3)
+            if not ideal_lineups_raw:
+                per_slate_log.append({
+                    "date": slate_date, "status": "skipped",
+                    "reason": "could not build ideal lineups", "changes": {},
+                })
+                continue
+            ideal_scored = [_score_lineup(lp, pool) for lp in ideal_lineups_raw]
+
+            # 2. Build optimizer lineups with current working config
+            opt_pool = pool.copy()
+            tier_adj = _get_tier_adjustments(working_config)
+            opt_pool = _apply_tier_adjustments(opt_pool, tier_adj)
+
+            cfg = _build_optimizer_config_from_sliders(working_config, contest_type_key)
+            cfg["NUM_LINEUPS"] = 10
+            build_pool = prepare_pool(opt_pool, cfg)
+            lineups_df, _ = build_multiple_lineups_with_exposure(build_pool, cfg)
+
+            # 3. Score optimizer lineups
+            opt_scored = _score_optimizer_lineups(lineups_df, pool)
+
+            # 4. Run auto-analysis
+            analysis = _run_auto_analysis(
+                ideal_scored, opt_scored, lineups_df, pool, working_config,
+            )
+
+            # 5. Apply all recommendations (compounding)
+            old_config = dict(working_config)
+            actionable = [r for r in analysis.recommendations if r.slider_key]
+            changes = {}
+            for rec in actionable:
+                if rec.slider_key in working_config:
+                    old_val = working_config[rec.slider_key]
+                    working_config[rec.slider_key] = rec.recommended_value
+                    if old_val != rec.recommended_value:
+                        changes[rec.slider_key] = {"from": old_val, "to": rec.recommended_value}
+
+            # 6. Save config
+            save_active_config(
+                dict(working_config), slate_date=slate_date, contest_type=contest_type_key,
+            )
+            append_config_history(
+                action="batch_train",
+                values=dict(working_config),
+                slate_date=slate_date,
+                old_values=old_config,
+                contest_type=contest_type_key,
+            )
+
+            total_params_changed += len(changes)
+            per_slate_log.append({
+                "date": slate_date,
+                "status": "trained",
+                "changes": changes,
+                "ideal_best": max((lu["total_actual"] for lu in ideal_scored), default=0),
+                "opt_best": max((lu["total_actual"] for lu in opt_scored), default=0),
+                "n_recs": len(actionable),
+            })
+
+        except Exception as e:
+            per_slate_log.append({
+                "date": slate_date, "status": "error", "reason": str(e), "changes": {},
+            })
+
+    progress.progress(1.0, text="Batch training complete!")
+
+    # Update session state
+    st.session_state["cal_lab_sliders"] = working_config
+    st.session_state["batch_train_results"] = {
+        "log": per_slate_log,
+        "default_config": default_config,
+        "trained_config": dict(working_config),
+        "total_params_changed": total_params_changed,
+        "entries": selected_entries,
+    }
+    progress.empty()
+    st.rerun()
+
+
+def _render_batch_train_results(bt_state: Dict[str, Any], contest_type_key: str, contest_mode: str) -> None:
+    """Render the batch train results summary."""
+    log = bt_state["log"]
+    default_config = bt_state["default_config"]
+    trained_config = bt_state["trained_config"]
+    entries = bt_state["entries"]
+
+    trained_slates = [s for s in log if s["status"] == "trained"]
+    errored = [s for s in log if s["status"] == "error"]
+    skipped = [s for s in log if s["status"] == "skipped"]
+
+    # Summary metrics
+    st.markdown("#### Training Summary")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Slates Trained", len(trained_slates))
+    col2.metric("Params Changed", bt_state["total_params_changed"])
+    col3.metric("Skipped", len(skipped))
+    col4.metric("Errors", len(errored))
+
+    # Training log
+    st.markdown("#### Training Log")
+    for s in log:
+        if s["status"] == "trained":
+            changes_str = ", ".join(
+                f"`{k}`: {v['from']:.2f} → {v['to']:.2f}" for k, v in s["changes"].items()
+            ) if s["changes"] else "no changes"
+            st.markdown(f"**{s['date']}** — {s['n_recs']} recommendation(s) | {changes_str}")
+        elif s["status"] == "skipped":
+            st.markdown(f"**{s['date']}** — skipped: {s.get('reason', '')}")
+        elif s["status"] == "error":
+            st.markdown(f"**{s['date']}** — error: {s.get('reason', '')}")
+
+    # Before/After table
+    st.markdown("#### Config: Default vs Trained")
+    rows = []
+    for key, default_val in default_config.items():
+        trained_val = trained_config.get(key, default_val)
+        changed = default_val != trained_val
+        if changed:
+            diff = trained_val - default_val
+            arrow = "↑" if diff > 0 else "↓"
+            change_str = f"{arrow} {abs(diff):.2f}"
+        else:
+            change_str = "—"
+        label = PARAM_LABELS.get(key, key)
+        rows.append({
+            "Parameter": label,
+            "Default": f"{default_val:.2f}" if isinstance(default_val, float) else str(default_val),
+            "Trained": f"{trained_val:.2f}" if isinstance(trained_val, float) else str(trained_val),
+            "Change": change_str,
+            "_changed": changed,
+        })
+
+    df = pd.DataFrame(rows)
+    styled = (
+        df[["Parameter", "Default", "Trained", "Change"]]
+        .style.apply(
+            lambda row: (
+                ["background-color: rgba(0, 200, 83, 0.12)"] * len(row)
+                if rows[row.name]["_changed"]
+                else ["color: #888"] * len(row)
+            ),
+            axis=1,
+        )
+    )
+    st.dataframe(styled, use_container_width=True, hide_index=True, height=min(35 * (len(rows) + 1), 500))
+
+    # Backtest comparison: Default vs Trained
+    st.markdown("#### Backtest: Default vs Trained")
+    st.caption("Running both configs against all training slates...")
+
+    col_run, _ = st.columns([1, 3])
+    if col_run.button("Run Backtest Comparison", key="batch_train_backtest"):
+        progress = st.progress(0, text="Backtesting default config...")
+        default_results = _run_backtest(dict(default_config), progress)
+        progress = st.progress(0, text="Backtesting trained config...")
+        trained_results = _run_backtest(dict(trained_config), progress)
+
+        st.session_state["batch_train_backtest"] = {
+            "default": default_results,
+            "trained": trained_results,
+        }
+        st.rerun()
+
+    bt_backtest = st.session_state.get("batch_train_backtest")
+    if bt_backtest:
+        dr = bt_backtest["default"]
+        tr = bt_backtest["trained"]
+
+        if not dr.empty and not tr.empty:
+            d_avg_best = dr["best_actual"].mean()
+            t_avg_best = tr["best_actual"].mean()
+            d_avg_score = dr["avg_actual"].mean()
+            t_avg_score = tr["avg_actual"].mean()
+
+            comp_data = {
+                "Metric": ["Avg Best Score", "Avg Score"],
+                "Default Config": [f"{d_avg_best:.1f}", f"{d_avg_score:.1f}"],
+                "Trained Config": [f"{t_avg_best:.1f}", f"{t_avg_score:.1f}"],
+                "Delta": [
+                    f"{t_avg_best - d_avg_best:+.1f}",
+                    f"{t_avg_score - d_avg_score:+.1f}",
+                ],
+            }
+            st.dataframe(pd.DataFrame(comp_data), use_container_width=True, hide_index=True)
+        else:
+            st.warning("Backtest returned no results for one or both configs.")
+
+
 # ── Main Render Function ─────────────────────────────────────────────────
 
 
@@ -1184,6 +1571,9 @@ def render_calibration_lab(sport: str) -> None:
 
     # ── Config Evolution Section ──────────────────────────────────────────
     _render_config_evolution(contest_type_key, contest_mode)
+
+    # ── Batch Train Section ───────────────────────────────────────────────
+    _render_batch_train(contest_type_key, contest_mode)
 
     entry = entries[selected]
     pool = _load_archived_pool(entry["file"])
