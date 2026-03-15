@@ -25,7 +25,11 @@ def render_lab_tab(sport: str) -> None:
 
     is_pga = sport.upper() == "PGA"
     out_dir = published_dir(sport)
-    today_str = date.today().isoformat()
+    try:
+        from zoneinfo import ZoneInfo
+        today_str = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+    except Exception:
+        today_str = date.today().isoformat()
 
     st.markdown("### Load Pool")
 
