@@ -7,10 +7,14 @@ sliders, and compares their lineups against the optimizer's output.
 from __future__ import annotations
 
 import json
+import math
 import re
+from collections import Counter
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -311,7 +315,544 @@ def _score_optimizer_lineups(lineups_df: pd.DataFrame, pool: pd.DataFrame) -> Li
     return results
 
 
-# ── Recommendations Engine ───────────────────────────────────────────────
+# ── Auto-Analysis Engine ─────────────────────────────────────────────────
+
+
+@dataclass
+class SliderRecommendation:
+    """A single slider recommendation with confidence and reasoning."""
+    slider_key: str
+    slider_label: str
+    current_value: float
+    recommended_value: float
+    reason: str
+    confidence: str  # "HIGH", "MEDIUM", "LOW"
+
+
+@dataclass
+class LineupProfile:
+    """Structural DNA of a set of lineups."""
+    avg_salary_per_slot: float = 0.0
+    pct_cap_used: float = 0.0
+    n_studs: float = 0.0
+    n_mids: float = 0.0
+    n_punts: float = 0.0
+    avg_ownership: float = 0.0
+    n_low_own: int = 0  # <8%
+    n_chalk: int = 0     # >20%
+    game_counts: Dict[str, int] = field(default_factory=dict)
+    max_game_concentration: float = 0.0
+    avg_proj: float = 0.0
+    avg_actual: float = 0.0
+    avg_sim90: float = 0.0
+    avg_sim99: float = 0.0
+    pool_avg_sim90: float = 0.0
+    pool_avg_sim99: float = 0.0
+    avg_value: float = 0.0  # actual FP per $1K
+    pool_avg_value: float = 0.0
+    n_lineups: int = 0
+    player_names: set = field(default_factory=set)
+
+
+@dataclass
+class BlindSpotPlayer:
+    """A player in user lineups but not optimizer lineups."""
+    player_name: str
+    pos: str
+    salary: int
+    actual_fp: float
+    proj: float
+    ownership: float
+    gpp_score: float
+    sim90: float
+    sim99: float
+    boom: float
+    reason: str  # why optimizer missed them
+
+
+@dataclass
+class AnalysisResult:
+    """Full result of the auto-analysis."""
+    user_profile: LineupProfile
+    opt_profile: LineupProfile
+    blind_spots: List[BlindSpotPlayer]
+    optimizer_noise: List[Dict[str, Any]]
+    recommendations: List[SliderRecommendation]
+
+
+def _profile_lineups(
+    scored_lineups: List[Dict[str, Any]],
+    pool: pd.DataFrame,
+) -> LineupProfile:
+    """Analyze the structural DNA of a set of lineups."""
+    profile = LineupProfile()
+    if not scored_lineups:
+        return profile
+
+    profile.n_lineups = len(scored_lineups)
+    all_players = []
+    total_salary = 0
+    total_slots = 0
+    game_counter: Counter = Counter()
+
+    for lu in scored_lineups:
+        for p in lu["players"]:
+            all_players.append(p["player_name"])
+            total_salary += p["salary"]
+            total_slots += 1
+            tier = p.get("tier", _salary_tier_label(p["salary"]))
+            if tier == "stud":
+                profile.n_studs += 1
+            elif tier == "mid":
+                profile.n_mids += 1
+            else:
+                profile.n_punts += 1
+
+    n_lu = max(profile.n_lineups, 1)
+    profile.n_studs /= n_lu
+    profile.n_mids /= n_lu
+    profile.n_punts /= n_lu
+
+    if total_slots > 0:
+        profile.avg_salary_per_slot = total_salary / total_slots
+    profile.pct_cap_used = (total_salary / n_lu) / NBA_SALARY_CAP * 100
+
+    # Ownership, sim, value stats from pool
+    unique_names = set(all_players)
+    profile.player_names = unique_names
+    matched = pool[pool["player_name"].isin(unique_names)]
+
+    if not matched.empty:
+        if "ownership" in matched.columns:
+            own_vals = pd.to_numeric(matched["ownership"], errors="coerce").fillna(0)
+            profile.avg_ownership = float(own_vals.mean())
+            profile.n_low_own = int((own_vals < 8).sum())
+            profile.n_chalk = int((own_vals > 20).sum())
+
+        for col in ["sim90th", "sim_90th", "ceil"]:
+            if col in matched.columns:
+                profile.avg_sim90 = float(pd.to_numeric(matched[col], errors="coerce").fillna(0).mean())
+                break
+        for col in ["sim99th", "sim_99th"]:
+            if col in matched.columns:
+                profile.avg_sim99 = float(pd.to_numeric(matched[col], errors="coerce").fillna(0).mean())
+                break
+
+        if "game_id" in matched.columns:
+            for _, row in matched.iterrows():
+                gid = str(row.get("game_id", ""))
+                if gid:
+                    game_counter[gid] += 1
+            profile.game_counts = dict(game_counter)
+            if game_counter:
+                most_common_count = game_counter.most_common(1)[0][1]
+                profile.max_game_concentration = most_common_count / max(len(unique_names), 1) * 100
+
+    profile.avg_proj = sum(lu["total_proj"] for lu in scored_lineups) / n_lu
+    profile.avg_actual = sum(lu["total_actual"] for lu in scored_lineups) / n_lu
+
+    # Pool averages for comparison
+    if "actual_fp" in pool.columns and "salary" in pool.columns:
+        pool_with_fp = pool[pool["actual_fp"] > 0]
+        if not pool_with_fp.empty:
+            profile.pool_avg_value = float(
+                (pool_with_fp["actual_fp"] / (pool_with_fp["salary"] / 1000)).replace(
+                    [float("inf"), float("-inf")], 0
+                ).mean()
+            )
+
+    if matched.empty or "actual_fp" not in matched.columns:
+        profile.avg_value = 0.0
+    else:
+        sal_k = (matched["salary"] / 1000).replace(0, np.nan)
+        profile.avg_value = float(
+            (matched["actual_fp"] / sal_k).replace([float("inf"), float("-inf")], 0).fillna(0).mean()
+        )
+
+    for col in ["sim90th", "sim_90th", "ceil"]:
+        if col in pool.columns:
+            profile.pool_avg_sim90 = float(pd.to_numeric(pool[col], errors="coerce").fillna(0).mean())
+            break
+    for col in ["sim99th", "sim_99th"]:
+        if col in pool.columns:
+            profile.pool_avg_sim99 = float(pd.to_numeric(pool[col], errors="coerce").fillna(0).mean())
+            break
+
+    return profile
+
+
+def _find_blind_spots(
+    user_profile: LineupProfile,
+    opt_profile: LineupProfile,
+    pool: pd.DataFrame,
+    opt_lineups_df: Optional[pd.DataFrame],
+    sliders: Dict[str, Any],
+) -> Tuple[List[BlindSpotPlayer], List[Dict[str, Any]]]:
+    """Find players in user lineups but not optimizer (blind spots) and vice versa."""
+    blind_spots: List[BlindSpotPlayer] = []
+    optimizer_noise: List[Dict[str, Any]] = []
+
+    user_only = user_profile.player_names - opt_profile.player_names
+    opt_only = opt_profile.player_names - user_profile.player_names
+
+    # Compute GPP score components for blind spot analysis
+    own_penalty_k = sliders.get("own_penalty_strength", 1.2)
+    own_low_boost_val = sliders.get("low_own_boost", 0.5)
+    w_total = sliders["proj_weight"] + sliders["upside_weight"] + sliders["boom_weight"]
+    if w_total > 0:
+        norm_proj_w = sliders["proj_weight"] / w_total
+        norm_upside_w = sliders["upside_weight"] / w_total
+        norm_boom_w = sliders["boom_weight"] / w_total
+    else:
+        norm_proj_w, norm_upside_w, norm_boom_w = 0.5, 0.3, 0.2
+
+    for name in sorted(user_only):
+        row = pool[pool["player_name"] == name]
+        if row.empty:
+            continue
+        r = row.iloc[0]
+        salary = int(r.get("salary", 0) or 0)
+        proj = float(r.get("proj", 0) or 0)
+        actual = float(r.get("actual_fp", 0) or 0)
+        own = float(r.get("ownership", 0) or 0)
+
+        sim90 = 0.0
+        for col in ["sim90th", "sim_90th", "ceil"]:
+            if col in r.index and r[col]:
+                sim90 = float(r[col] or 0)
+                break
+
+        sim99 = 0.0
+        for col in ["sim99th", "sim_99th"]:
+            if col in r.index and r[col]:
+                sim99 = float(r[col] or 0)
+                break
+
+        sim50 = float(r.get("sim50th", r.get("sim_50th", proj)) or proj)
+        boom_val = max(sim99 - sim50, 0) if sim99 > 0 else max(sim90 - proj, 0)
+        upside_val = sim90 if sim90 > 0 else proj * 1.35
+
+        # Compute this player's GPP score
+        own_pct = max(own / 100, 0.001) if own > 1 else max(own, 0.001)
+        own_adj = -own_penalty_k * math.log(own_pct / 0.15)
+        own_adj += own_low_boost_val * max(0.08 - own_pct, 0) * 10
+        gpp_score = proj * norm_proj_w + upside_val * norm_upside_w + boom_val * norm_boom_w + own_adj
+
+        # Diagnose WHY the optimizer missed them
+        reasons = []
+        if proj < 20:
+            reasons.append(f"low projection ({proj:.1f})")
+        if own_pct > 0.25:
+            reasons.append(f"high ownership ({own:.0f}%) causes penalty")
+        elif own_pct < 0.05:
+            reasons.append(f"very low ownership ({own:.1f}%)")
+        if salary < 5000 and sliders.get("max_punt_players", 1) <= 0:
+            reasons.append("punt player excluded by max_punt_players=0")
+        if boom_val < 5:
+            reasons.append(f"low boom potential ({boom_val:.1f})")
+        if not reasons:
+            reasons.append("marginal GPP score — near the optimizer cutoff")
+
+        blind_spots.append(BlindSpotPlayer(
+            player_name=name,
+            pos=str(r.get("pos", "")),
+            salary=salary,
+            actual_fp=actual,
+            proj=proj,
+            ownership=own,
+            gpp_score=round(gpp_score, 2),
+            sim90=round(sim90, 1),
+            sim99=round(sim99, 1),
+            boom=round(boom_val, 1),
+            reason="; ".join(reasons),
+        ))
+
+    # Optimizer noise: players optimizer picked but user didn't
+    for name in sorted(opt_only):
+        row = pool[pool["player_name"] == name]
+        if row.empty:
+            continue
+        r = row.iloc[0]
+        optimizer_noise.append({
+            "player_name": name,
+            "pos": str(r.get("pos", "")),
+            "salary": int(r.get("salary", 0) or 0),
+            "actual_fp": float(r.get("actual_fp", 0) or 0),
+            "proj": float(r.get("proj", 0) or 0),
+            "ownership": float(r.get("ownership", 0) or 0),
+        })
+
+    blind_spots.sort(key=lambda p: p.actual_fp, reverse=True)
+    optimizer_noise.sort(key=lambda p: p["actual_fp"], reverse=True)
+
+    return blind_spots, optimizer_noise
+
+
+def _generate_slider_recommendations(
+    user_profile: LineupProfile,
+    opt_profile: LineupProfile,
+    blind_spots: List[BlindSpotPlayer],
+    pool: pd.DataFrame,
+    sliders: Dict[str, Any],
+) -> List[SliderRecommendation]:
+    """Generate specific slider value recommendations with confidence scores."""
+    recs: List[SliderRecommendation] = []
+
+    # 1. Stud/mid/punt tier distribution
+    stud_diff = user_profile.n_studs - opt_profile.n_studs
+    if abs(stud_diff) > 0.3:
+        if stud_diff < 0:
+            # User uses fewer studs — reduce stud exposure to match
+            new_val = max(sliders["stud_exposure"] - 10, 20)
+            recs.append(SliderRecommendation(
+                slider_key="stud_exposure",
+                slider_label="Stud Exposure %",
+                current_value=sliders["stud_exposure"],
+                recommended_value=new_val,
+                reason=(
+                    f"Your lineups average {user_profile.n_studs:.1f} studs vs optimizer's "
+                    f"{opt_profile.n_studs:.1f}. Reduce stud exposure from "
+                    f"{sliders['stud_exposure']}% to {new_val}% to free salary for mid-tier."
+                ),
+                confidence="HIGH" if abs(stud_diff) > 0.8 else "MEDIUM",
+            ))
+        else:
+            new_val = min(sliders["stud_exposure"] + 10, 80)
+            recs.append(SliderRecommendation(
+                slider_key="stud_exposure",
+                slider_label="Stud Exposure %",
+                current_value=sliders["stud_exposure"],
+                recommended_value=new_val,
+                reason=(
+                    f"Your lineups average {user_profile.n_studs:.1f} studs vs optimizer's "
+                    f"{opt_profile.n_studs:.1f}. Increase stud exposure from "
+                    f"{sliders['stud_exposure']}% to {new_val}% to include more high-salary stars."
+                ),
+                confidence="HIGH" if abs(stud_diff) > 0.8 else "MEDIUM",
+            ))
+
+    # 2. Mid-tier player count
+    mid_diff = user_profile.n_mids - opt_profile.n_mids
+    if mid_diff > 0.5:
+        new_val = min(sliders["min_mid_players"] + 1, 6)
+        if new_val != sliders["min_mid_players"]:
+            recs.append(SliderRecommendation(
+                slider_key="min_mid_players",
+                slider_label="Min Mid-Tier Players",
+                current_value=sliders["min_mid_players"],
+                recommended_value=new_val,
+                reason=(
+                    f"Your lineups use {user_profile.n_mids:.1f} mid-tier players vs "
+                    f"optimizer's {opt_profile.n_mids:.1f}. Increase min_mid_players from "
+                    f"{sliders['min_mid_players']} to {new_val}."
+                ),
+                confidence="HIGH" if mid_diff > 1.0 else "MEDIUM",
+            ))
+    elif mid_diff < -0.5:
+        new_val = max(sliders["min_mid_players"] - 1, 2)
+        if new_val != sliders["min_mid_players"]:
+            recs.append(SliderRecommendation(
+                slider_key="min_mid_players",
+                slider_label="Min Mid-Tier Players",
+                current_value=sliders["min_mid_players"],
+                recommended_value=new_val,
+                reason=(
+                    f"Your lineups use {user_profile.n_mids:.1f} mid-tier players vs "
+                    f"optimizer's {opt_profile.n_mids:.1f}. Decrease min_mid_players from "
+                    f"{sliders['min_mid_players']} to {new_val}."
+                ),
+                confidence="MEDIUM",
+            ))
+
+    # 3. Punt analysis
+    punt_diff = user_profile.n_punts - opt_profile.n_punts
+    if punt_diff < -0.3 and opt_profile.n_punts > 0.5:
+        new_val = max(sliders["max_punt_players"] - 1, 0)
+        if new_val != sliders["max_punt_players"]:
+            recs.append(SliderRecommendation(
+                slider_key="max_punt_players",
+                slider_label="Max Punt Players",
+                current_value=sliders["max_punt_players"],
+                recommended_value=new_val,
+                reason=(
+                    f"Your lineups have {user_profile.n_punts:.1f} punts vs optimizer's "
+                    f"{opt_profile.n_punts:.1f}. Reduce max_punt_players from "
+                    f"{sliders['max_punt_players']} to {new_val} to match your preference."
+                ),
+                confidence="HIGH" if abs(punt_diff) > 0.8 else "MEDIUM",
+            ))
+    elif punt_diff > 0.3:
+        new_val = min(sliders["max_punt_players"] + 1, 3)
+        if new_val != sliders["max_punt_players"]:
+            recs.append(SliderRecommendation(
+                slider_key="max_punt_players",
+                slider_label="Max Punt Players",
+                current_value=sliders["max_punt_players"],
+                recommended_value=new_val,
+                reason=(
+                    f"Your lineups have {user_profile.n_punts:.1f} punts vs optimizer's "
+                    f"{opt_profile.n_punts:.1f}. Increase max_punt_players from "
+                    f"{sliders['max_punt_players']} to {new_val}."
+                ),
+                confidence="MEDIUM",
+            ))
+
+    # 4. Ownership analysis — low-own players missed
+    low_own_blind_spots = [p for p in blind_spots if p.ownership < 8]
+    if len(low_own_blind_spots) >= 2:
+        new_val = max(sliders["own_penalty_strength"] - 0.3, 0.0)
+        recs.append(SliderRecommendation(
+            slider_key="own_penalty_strength",
+            slider_label="Ownership Penalty Strength",
+            current_value=sliders["own_penalty_strength"],
+            recommended_value=round(new_val, 1),
+            reason=(
+                f"{len(low_own_blind_spots)} of your picks had <8% ownership that the optimizer "
+                f"missed. Reduce own_penalty_strength from {sliders['own_penalty_strength']:.1f} "
+                f"to {new_val:.1f} so low-owned players aren't penalized away."
+            ),
+            confidence="HIGH" if len(low_own_blind_spots) >= 3 else "MEDIUM",
+        ))
+
+    # High-chalk analysis
+    chalk_blind_spots = [p for p in blind_spots if p.ownership > 20]
+    if chalk_blind_spots and opt_profile.avg_ownership < user_profile.avg_ownership - 3:
+        new_val = max(sliders["own_penalty_strength"] - 0.2, 0.0)
+        if not any(r.slider_key == "own_penalty_strength" for r in recs):
+            recs.append(SliderRecommendation(
+                slider_key="own_penalty_strength",
+                slider_label="Ownership Penalty Strength",
+                current_value=sliders["own_penalty_strength"],
+                recommended_value=round(new_val, 1),
+                reason=(
+                    f"Your lineups average {user_profile.avg_ownership:.1f}% ownership vs "
+                    f"optimizer's {opt_profile.avg_ownership:.1f}%. The optimizer is over-fading "
+                    f"chalk. Reduce own_penalty_strength from "
+                    f"{sliders['own_penalty_strength']:.1f} to {new_val:.1f}."
+                ),
+                confidence="MEDIUM",
+            ))
+
+    # 5. Boom/breakout analysis — find players with high boom that user picked
+    high_boom_blind_spots = [p for p in blind_spots if p.boom > 10 and p.actual_fp > p.proj * 1.2]
+    if high_boom_blind_spots:
+        new_val = min(sliders["boom_weight"] + 0.10, 1.0)
+        recs.append(SliderRecommendation(
+            slider_key="boom_weight",
+            slider_label="Boom Weight",
+            current_value=sliders["boom_weight"],
+            recommended_value=round(new_val, 2),
+            reason=(
+                f"You picked {len(high_boom_blind_spots)} high-boom player(s) the optimizer "
+                f"missed (e.g., {high_boom_blind_spots[0].player_name} with boom="
+                f"{high_boom_blind_spots[0].boom:.1f}). Increase boom_weight from "
+                f"{sliders['boom_weight']:.2f} to {new_val:.2f} to surface explosive players."
+            ),
+            confidence="HIGH" if len(high_boom_blind_spots) >= 2 else "MEDIUM",
+        ))
+
+    # 6. Ceiling profile — user picks higher-ceiling players
+    if user_profile.avg_sim90 > 0 and opt_profile.avg_sim90 > 0:
+        sim90_diff = user_profile.avg_sim90 - opt_profile.avg_sim90
+        if sim90_diff > 2:
+            new_val = min(sliders["upside_weight"] + 0.10, 1.0)
+            recs.append(SliderRecommendation(
+                slider_key="upside_weight",
+                slider_label="Upside Weight",
+                current_value=sliders["upside_weight"],
+                recommended_value=round(new_val, 2),
+                reason=(
+                    f"Your players average SIM90={user_profile.avg_sim90:.1f} vs optimizer's "
+                    f"{opt_profile.avg_sim90:.1f}. You prefer higher-ceiling players. Increase "
+                    f"upside_weight from {sliders['upside_weight']:.2f} to {new_val:.2f}."
+                ),
+                confidence="MEDIUM" if sim90_diff > 3 else "LOW",
+            ))
+
+    # 7. Game concentration / diversity
+    if user_profile.game_counts and opt_profile.game_counts:
+        user_game_ids = set(user_profile.game_counts.keys())
+        opt_game_ids = set(opt_profile.game_counts.keys())
+        games_user_avoided = opt_game_ids - user_game_ids
+        if games_user_avoided and opt_profile.max_game_concentration > 30:
+            new_val = max(sliders["game_diversity_pct"] - 10, 50)
+            if new_val != sliders["game_diversity_pct"]:
+                recs.append(SliderRecommendation(
+                    slider_key="game_diversity_pct",
+                    slider_label="Game Diversity %",
+                    current_value=sliders["game_diversity_pct"],
+                    recommended_value=new_val,
+                    reason=(
+                        f"You avoided {len(games_user_avoided)} game(s) the optimizer stacked. "
+                        f"Reduce game_diversity_pct from {sliders['game_diversity_pct']}% to "
+                        f"{new_val}% to reduce over-concentration in specific games."
+                    ),
+                    confidence="MEDIUM",
+                ))
+
+    # 8. Projection weight — if user picks mostly high-proj players that hit
+    proj_hit_blind_spots = [
+        p for p in blind_spots if p.proj > 25 and p.actual_fp >= p.proj * 0.9
+    ]
+    if len(proj_hit_blind_spots) >= 2:
+        new_val = min(sliders["proj_weight"] + 0.10, 1.0)
+        if not any(r.slider_key == "proj_weight" for r in recs):
+            recs.append(SliderRecommendation(
+                slider_key="proj_weight",
+                slider_label="Projection Weight",
+                current_value=sliders["proj_weight"],
+                recommended_value=round(new_val, 2),
+                reason=(
+                    f"{len(proj_hit_blind_spots)} of your high-projection picks hit their "
+                    f"number but the optimizer missed them. Increase proj_weight from "
+                    f"{sliders['proj_weight']:.2f} to {new_val:.2f}."
+                ),
+                confidence="LOW",
+            ))
+
+    # If no recommendations generated, note the config is close
+    if not recs:
+        recs.append(SliderRecommendation(
+            slider_key="",
+            slider_label="",
+            current_value=0,
+            recommended_value=0,
+            reason="Your lineups and the optimizer are well-aligned. Current config looks good!",
+            confidence="HIGH",
+        ))
+
+    return recs
+
+
+def _run_auto_analysis(
+    user_lineups: List[Dict[str, Any]],
+    opt_lineups: List[Dict[str, Any]],
+    opt_lineups_df: Optional[pd.DataFrame],
+    pool: pd.DataFrame,
+    sliders: Dict[str, Any],
+) -> AnalysisResult:
+    """Run the full auto-analysis: profile, compare, recommend."""
+    user_profile = _profile_lineups(user_lineups, pool)
+    opt_profile = _profile_lineups(opt_lineups, pool)
+
+    blind_spots, optimizer_noise = _find_blind_spots(
+        user_profile, opt_profile, pool, opt_lineups_df, sliders,
+    )
+
+    recommendations = _generate_slider_recommendations(
+        user_profile, opt_profile, blind_spots, pool, sliders,
+    )
+
+    return AnalysisResult(
+        user_profile=user_profile,
+        opt_profile=opt_profile,
+        blind_spots=blind_spots,
+        optimizer_noise=optimizer_noise,
+        recommendations=recommendations,
+    )
+
+
+# ── Legacy recommendations wrapper (used by Optimizer Comparison section) ──
 
 
 def _generate_recommendations(
@@ -320,95 +861,9 @@ def _generate_recommendations(
     pool: pd.DataFrame,
     sliders: Dict[str, Any],
 ) -> List[str]:
-    """Generate tuning suggestions based on user vs optimizer comparison."""
-    recs = []
-
-    if not user_lineups or not opt_lineups:
-        return recs
-
-    # Aggregate stats
-    user_avg_actual = sum(lu["total_actual"] for lu in user_lineups) / len(user_lineups)
-    opt_avg_actual = sum(lu["total_actual"] for lu in opt_lineups) / len(opt_lineups)
-
-    user_breakouts = sum(lu["breakouts_caught"] for lu in user_lineups)
-    opt_breakouts = sum(lu["breakouts_caught"] for lu in opt_lineups)
-
-    # Tier distribution
-    user_studs = 0
-    user_mids = 0
-    user_punts = 0
-    for lu in user_lineups:
-        for p in lu["players"]:
-            if p["tier"] == "stud":
-                user_studs += 1
-            elif p["tier"] == "mid":
-                user_mids += 1
-            else:
-                user_punts += 1
-
-    opt_studs = 0
-    opt_mids = 0
-    opt_punts = 0
-    for lu in opt_lineups:
-        for p in lu["players"]:
-            if p["tier"] == "stud":
-                opt_studs += 1
-            elif p["tier"] == "mid":
-                opt_mids += 1
-            else:
-                opt_punts += 1
-
-    n_user = max(len(user_lineups), 1)
-    n_opt = max(len(opt_lineups), 1)
-
-    # Breakout detection
-    if user_breakouts > opt_breakouts + 1:
-        recs.append(
-            f"Optimizer missed {user_breakouts - opt_breakouts} breakout player(s) that you caught. "
-            f"Try increasing boom_weight to {min(sliders['boom_weight'] + 0.10, 1.0):.2f}."
-        )
-
-    if opt_breakouts > user_breakouts + 1:
-        recs.append(
-            f"Optimizer caught {opt_breakouts - user_breakouts} more breakout(s) than you. "
-            "Current boom_weight seems effective for breakout capture."
-        )
-
-    # Salary tier analysis
-    if user_studs / n_user > opt_studs / n_opt + 0.5:
-        recs.append(
-            "Your lineups favor higher-salary players. "
-            f"Try increasing proj_weight to {min(sliders['proj_weight'] + 0.10, 1.0):.2f} to match."
-        )
-
-    if user_punts / n_user < opt_punts / n_opt - 0.3:
-        recs.append(
-            "Optimizer is using more punt plays than you. "
-            f"Try reducing max_punt_players to {max(sliders['max_punt_players'] - 1, 0)}."
-        )
-
-    if user_mids / n_user > opt_mids / n_opt + 1.0:
-        recs.append(
-            "You're selecting more mid-tier players. "
-            f"Try increasing min_mid_players to {min(sliders['min_mid_players'] + 1, 6)}."
-        )
-
-    # Ownership analysis
-    if opt_avg_actual < user_avg_actual * 0.75:
-        recs.append(
-            "Optimizer lineups score significantly lower than yours. "
-            f"Try reducing own_penalty_strength to {max(sliders['own_penalty_strength'] - 0.3, 0.0):.1f} "
-            "to prioritize projection over contrarianism."
-        )
-
-    if not recs:
-        gap = abs(user_avg_actual - opt_avg_actual)
-        if gap < 10:
-            recs.append("Optimizer and your lineups are closely matched! Current config looks well-tuned.")
-        else:
-            recs.append("Try adjusting boom_weight and proj_weight to close the gap between your picks and the optimizer.")
-
-    return recs
+    """Generate simple text tuning suggestions for the comparison section."""
+    result = _run_auto_analysis(user_lineups, opt_lineups, None, pool, sliders)
+    return [r.reason for r in result.recommendations]
 
 
 # ── Saved Configs ────────────────────────────────────────────────────────
@@ -718,6 +1173,166 @@ def render_calibration_lab(sport: str) -> None:
                 saved.append(players)
         st.session_state[f"cal_lab_saved_lineups_{contest_mode}"] = saved
         st.success(f"Saved {len(saved)} lineup(s) as target for {contest_mode}.")
+
+    # ── Section 2.5: Analyze My Lineups ─────────────────────────────────
+    st.markdown("---")
+    st.markdown("### Analyze My Lineups")
+    st.caption(
+        "After saving your ideal lineups above, click to auto-analyze their structural DNA "
+        "and get specific slider recommendations."
+    )
+
+    saved_lineups_for_analysis = st.session_state.get(f"cal_lab_saved_lineups_{contest_mode}", [])
+    analysis_sliders = st.session_state.get("cal_lab_sliders", dict(DEFAULT_LAB_CONFIG))
+
+    if not saved_lineups_for_analysis:
+        st.info("Save your manual lineups above first, then click Analyze.")
+
+    if st.button(
+        "Analyze My Lineups",
+        type="primary",
+        key="cal_lab_analyze",
+        disabled=not saved_lineups_for_analysis,
+    ):
+        with st.spinner("Analyzing lineups and running optimizer comparison..."):
+            try:
+                from yak_core.lineups import prepare_pool, build_multiple_lineups_with_exposure
+
+                # Score user lineups
+                user_scored = [_score_lineup(lp, pool) for lp in saved_lineups_for_analysis]
+
+                # Run optimizer with current config
+                opt_pool = pool.copy()
+                tier_adj = _get_tier_adjustments(analysis_sliders)
+                opt_pool = _apply_tier_adjustments(opt_pool, tier_adj)
+                if "player_id" not in opt_pool.columns:
+                    opt_pool["player_id"] = opt_pool["player_name"].str.lower().str.replace(" ", "_")
+
+                cfg = _build_optimizer_config_from_sliders(analysis_sliders, contest_mode.lower())
+                build_pool = prepare_pool(opt_pool, cfg)
+                lineups_df, _ = build_multiple_lineups_with_exposure(build_pool, cfg)
+
+                opt_scored = _score_optimizer_lineups(lineups_df, pool)
+
+                # Run full analysis
+                analysis = _run_auto_analysis(
+                    user_scored, opt_scored, lineups_df, pool, analysis_sliders,
+                )
+                st.session_state["cal_lab_analysis"] = analysis
+            except Exception as e:
+                st.error(f"Analysis error: {e}")
+
+    # Display analysis results
+    analysis: Optional[AnalysisResult] = st.session_state.get("cal_lab_analysis")
+    if analysis is not None:
+        # ── Lineup Profile ──
+        with st.expander("Lineup Profile", expanded=True):
+            up = analysis.user_profile
+            op = analysis.opt_profile
+
+            profile_data = {
+                "Metric": [
+                    "Avg Salary / Slot",
+                    "% Cap Used",
+                    "Studs / Lineup",
+                    "Mids / Lineup",
+                    "Punts / Lineup",
+                    "Avg Ownership %",
+                    "Low-Own Players (<8%)",
+                    "Chalk Players (>20%)",
+                    "Avg SIM90",
+                    "Avg Value (FP/$1K)",
+                    "Max Game Concentration %",
+                ],
+                "Your Lineups": [
+                    f"${up.avg_salary_per_slot:,.0f}",
+                    f"{up.pct_cap_used:.1f}%",
+                    f"{up.n_studs:.1f}",
+                    f"{up.n_mids:.1f}",
+                    f"{up.n_punts:.1f}",
+                    f"{up.avg_ownership:.1f}%",
+                    str(up.n_low_own),
+                    str(up.n_chalk),
+                    f"{up.avg_sim90:.1f}",
+                    f"{up.avg_value:.1f}",
+                    f"{up.max_game_concentration:.0f}%",
+                ],
+                "Optimizer": [
+                    f"${op.avg_salary_per_slot:,.0f}",
+                    f"{op.pct_cap_used:.1f}%",
+                    f"{op.n_studs:.1f}",
+                    f"{op.n_mids:.1f}",
+                    f"{op.n_punts:.1f}",
+                    f"{op.avg_ownership:.1f}%",
+                    str(op.n_low_own),
+                    str(op.n_chalk),
+                    f"{op.avg_sim90:.1f}",
+                    f"{op.avg_value:.1f}",
+                    f"{op.max_game_concentration:.0f}%",
+                ],
+                "Pool Avg": [
+                    "", "", "", "", "", "", "", "",
+                    f"{up.pool_avg_sim90:.1f}" if up.pool_avg_sim90 else "—",
+                    f"{up.pool_avg_value:.1f}" if up.pool_avg_value else "—",
+                    "",
+                ],
+            }
+            st.dataframe(pd.DataFrame(profile_data), use_container_width=True, hide_index=True)
+
+        # ── Blind Spots & Optimizer Noise ──
+        if analysis.blind_spots:
+            with st.expander(f"Blind Spots — {len(analysis.blind_spots)} player(s) you picked that the optimizer missed"):
+                bs_data = [{
+                    "Player": p.player_name,
+                    "Pos": p.pos,
+                    "Salary": f"${p.salary:,}",
+                    "Actual FP": p.actual_fp,
+                    "Proj": p.proj,
+                    "Own %": f"{p.ownership:.1f}",
+                    "GPP Score": p.gpp_score,
+                    "Boom": p.boom,
+                    "Why Missed": p.reason,
+                } for p in analysis.blind_spots]
+                st.dataframe(pd.DataFrame(bs_data), use_container_width=True, hide_index=True)
+
+        if analysis.optimizer_noise:
+            with st.expander(f"Optimizer Noise — {len(analysis.optimizer_noise)} player(s) in optimizer but not your lineups"):
+                noise_df = pd.DataFrame(analysis.optimizer_noise)
+                noise_df.columns = [c.replace("_", " ").title() for c in noise_df.columns]
+                st.dataframe(noise_df, use_container_width=True, hide_index=True)
+
+        # ── Slider Recommendations ──
+        st.markdown("#### Slider Recommendations")
+        confidence_icons = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}
+        actionable_recs = [r for r in analysis.recommendations if r.slider_key]
+
+        if actionable_recs:
+            for rec in actionable_recs:
+                icon = confidence_icons.get(rec.confidence, "")
+                direction = "→"
+                st.markdown(
+                    f"**{icon} {rec.confidence}** | `{rec.slider_label}`: "
+                    f"**{rec.current_value}** {direction} **{rec.recommended_value}**"
+                )
+                st.caption(rec.reason)
+
+            # Apply Recommendations button
+            if st.button(
+                "Apply All Recommendations",
+                type="primary",
+                key="cal_lab_apply_recs",
+            ):
+                updated_sliders = dict(st.session_state.get("cal_lab_sliders", DEFAULT_LAB_CONFIG))
+                for rec in actionable_recs:
+                    if rec.slider_key in updated_sliders:
+                        updated_sliders[rec.slider_key] = rec.recommended_value
+                st.session_state["cal_lab_sliders"] = updated_sliders
+                # Clear analysis so user sees fresh state after re-run
+                st.session_state.pop("cal_lab_analysis", None)
+                st.rerun()
+        else:
+            for rec in analysis.recommendations:
+                st.success(rec.reason)
 
     # ── Section 3: Config Sliders (Sidebar) ─────────────────────────────
     st.sidebar.markdown("---")
