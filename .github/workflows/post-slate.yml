@@ -5,15 +5,22 @@ on:
     - cron: '30 6 * * *'  # 6:30 AM UTC = 1:30 AM EDT (after all games finish)
   workflow_dispatch:
     inputs:
-      sport:
-        description: "Sport"
+      mode:
+        description: "Run mode"
         required: true
+        type: choice
+        options:
+          - "post-slate"
+          - "backfill"
+      sport:
+        description: "Sport (post-slate mode only)"
+        required: false
         type: choice
         options:
           - "NBA"
           - "PGA"
       date:
-        description: "Slate date (YYYY-MM-DD, blank = today)"
+        description: "Slate date (YYYY-MM-DD, blank = today, post-slate mode only)"
         required: false
         type: string
 
@@ -48,7 +55,7 @@ jobs:
           python scripts/nightly_calibration.py --date "$YESTERDAY" --sport all
 
       - name: Run post-slate feedback (manual)
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'post-slate'
         env:
           RAPIDAPI_KEY: ${{ secrets.TANK01_API_KEY }}
           TANK01_API_KEY: ${{ secrets.TANK01_API_KEY }}
@@ -62,3 +69,14 @@ jobs:
           fi
           echo "Running: $CMD"
           eval $CMD
+
+      - name: Run backfill (manual)
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'backfill'
+        env:
+          RAPIDAPI_KEY: ${{ secrets.TANK01_API_KEY }}
+          TANK01_API_KEY: ${{ secrets.TANK01_API_KEY }}
+          DATAGOLF_API_KEY: ${{ secrets.DATAGOLF_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Running backfill for all archived slates with low actuals coverage"
+          python scripts/nightly_calibration.py --backfill
