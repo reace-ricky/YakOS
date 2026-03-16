@@ -56,11 +56,16 @@ def _merge_rg_projections(pool: pd.DataFrame, rg_path: str) -> pd.DataFrame:
             pool.at[idx, "proj_source"] = "rotogrinders"
 
         # Floor / Ceil
+        # For ceiling, prefer sim99 (true 99th-percentile outcome) over RG CEIL
+        # which is typically a conservative estimate (~proj * 1.2).
         rg_floor = float(r.get("FLOOR", 0) or 0)
         rg_ceil = float(r.get("CEIL", 0) or 0)
+        rg_sim99 = float(r.get("SIM99TH", 0) or 0)
         if rg_floor > 0:
             pool.at[idx, "floor"] = rg_floor
-        if rg_ceil > 0:
+        if rg_sim99 > 0:
+            pool.at[idx, "ceil"] = rg_sim99
+        elif rg_ceil > 0:
             pool.at[idx, "ceil"] = rg_ceil
 
         # Ownership — RG POWN is like "12.5%" or "0%"
@@ -121,7 +126,7 @@ def _load_nba_pool(slate_date: str, site: str) -> tuple[pd.DataFrame, dict]:
     if "floor" not in pool.columns or pool["floor"].isna().all():
         pool["floor"] = (pool["proj"] * 0.60).round(2)
     if "ceil" not in pool.columns or pool["ceil"].isna().all():
-        pool["ceil"] = (pool["proj"] * 1.55).round(2)
+        pool["ceil"] = (pool["proj"] * 1.4).round(2)
 
     # NOTE: Calibration corrections are applied in main() AFTER the RG merge
     # so they are not overwritten by raw RG FPTS values.

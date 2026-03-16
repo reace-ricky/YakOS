@@ -1,8 +1,8 @@
 {
   "gpp": {
-    "name": "GPP Working Config",
+    "name": "GPP Working Config (v10 ceiling-chasing)",
     "created": "2026-03-16T13:57:19",
-    "updated": "2026-03-16T14:43:11",
+    "updated": "2026-03-16T18:00:00",
     "slates_trained": [
       "2026-03-09",
       "2026-03-11",
@@ -13,9 +13,9 @@
       "2026-03-08"
     ],
     "values": {
-      "proj_weight": 0.75,
-      "upside_weight": 0.3,
-      "boom_weight": 0.55,
+      "proj_weight": 0.25,
+      "upside_weight": 0.35,
+      "boom_weight": 0.40,
       "own_penalty_strength": 0.4,
       "low_own_boost": 0.5,
       "own_neutral_pct": 15,

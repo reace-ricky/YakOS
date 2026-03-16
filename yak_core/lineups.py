@@ -229,7 +229,8 @@ def _add_scores(
     own_penalty_k = float(cfg.get("GPP_OWN_PENALTY_STRENGTH", 1.2))
     own_low_boost = float(cfg.get("GPP_OWN_LOW_BOOST", 0.5))
 
-    # ── Resolve upside column: SIM90TH > SIM85TH > ceil > proj (best available)
+    # ── Resolve upside column: SIM99TH > SIM90TH > SIM85TH > ceil > proj
+    # GPP needs true ceiling (99th pctile) to chase 350+ lineup totals.
     sim90 = _get_sim_col(df, "90")
     sim85 = _get_sim_col(df, "85")
     sim99 = _get_sim_col(df, "99")
@@ -249,7 +250,9 @@ def _add_scores(
         ceil_vals = upside_fallback
         boom_fallback = df["proj"] * 0.50
 
-    if has_sim90:
+    if has_sim99:
+        upside = sim99.where(sim99 > 0, ceil_vals).fillna(upside_fallback)
+    elif has_sim90:
         upside = sim90.where(sim90 > 0, ceil_vals).fillna(upside_fallback)
     elif has_sim85:
         upside = sim85.where(sim85 > 0, ceil_vals).fillna(upside_fallback)
@@ -762,6 +765,19 @@ def _build_one_lineup(
                         # If stacking team_b (2+), require >=1 from team_a
                         prob += a_count >= bb_b
 
+    # Minimum lineup ceiling constraint (GPP only)
+    min_ceil = (gc or {}).get("min_lineup_ceiling", 0)
+    if min_ceil and min_ceil > 0:
+        ceil_vals_lp = [float(p.get("ceil", p.get("proj", 0))) for p in players]
+        if max(ceil_vals_lp) > 0:
+            prob += (
+                pulp.lpSum(
+                    ceil_vals_lp[i] * _x(i, j)
+                    for i in range(n)
+                    for j in range(k)
+                ) >= min_ceil
+            )
+
     # Tier constraints from edge state
     tc = tier_constraints or {}
     if tc:
@@ -876,6 +892,7 @@ def build_multiple_lineups_with_exposure(
     gpp_min_game_stack   = int(cfg.get("GPP_MIN_GAME_STACK",     DEFAULT_CONFIG["GPP_MIN_GAME_STACK"]))
     gpp_min_team_stack   = int(cfg.get("GPP_MIN_TEAM_STACK",     DEFAULT_CONFIG["GPP_MIN_TEAM_STACK"]))
     gpp_force_bring_back = bool(cfg.get("GPP_FORCE_BRING_BACK",  DEFAULT_CONFIG["GPP_FORCE_BRING_BACK"]))
+    gpp_min_lineup_ceil  = float(cfg.get("GPP_MIN_LINEUP_CEILING", DEFAULT_CONFIG.get("GPP_MIN_LINEUP_CEILING", 0)))
 
     pos_slots = cfg.get("POS_SLOTS", DK_POS_SLOTS)
     players = player_pool.to_dict("records")
@@ -975,6 +992,7 @@ def build_multiple_lineups_with_exposure(
                 "min_game_stack":     gpp_min_game_stack,
                 "min_team_stack":     gpp_min_team_stack,
                 "force_bring_back":   gpp_force_bring_back,
+                "min_lineup_ceiling": gpp_min_lineup_ceil,
             }
 
         tier_constraints_d = None
@@ -1128,6 +1146,25 @@ def build_multiple_lineups_with_exposure(
         # Add a flag column so downstream code / UI can highlight these
         flagged_indices = set(below_floor.index)
         lineups_df["below_proj_floor"] = lineups_df["lineup_index"].isin(flagged_indices)
+
+    # ── Ceiling floor safeguard (v10) ─────────────────────────────────────
+    # Log lineup ceiling totals so we can verify 350+ target.
+    ceil_floor = float(cfg.get("GPP_MIN_LINEUP_CEILING", 0))
+    if ceil_floor > 0 and not lineups_df.empty and is_gpp and "ceil" in lineups_df.columns:
+        lu_ceil = lineups_df.groupby("lineup_index")["ceil"].sum()
+        below_ceil = lu_ceil[lu_ceil < ceil_floor]
+        if len(below_ceil) > 0:
+            print(
+                f"[GPP ceiling] {len(below_ceil)}/{len(lu_ceil)} lineup(s) "
+                f"ceiling below {ceil_floor:.0f} "
+                f"(min={lu_ceil.min():.1f}, median={lu_ceil.median():.1f})"
+            )
+        else:
+            print(
+                f"[GPP ceiling] All {len(lu_ceil)} lineup(s) meet {ceil_floor:.0f} ceiling "
+                f"(min={lu_ceil.min():.1f}, median={lu_ceil.median():.1f})"
+            )
+        lineups_df["below_ceil_floor"] = lineups_df["lineup_index"].isin(set(below_ceil.index))
 
     # Exposure report
     if not lineups_df.empty:
@@ -1464,8 +1501,10 @@ def build_showdown_lineups(
         """Compute v8 GPP score for a CPT-slot player (1.5x on raw inputs)."""
         proj = float(p.get("proj", 0)) * cpt_mult
 
-        # Upside: SIM90 > SIM85 > ceil > proj, scaled by 1.5x
-        if (_sim90 > 0).any():
+        # Upside: SIM99 > SIM90 > SIM85 > ceil > proj, scaled by 1.5x
+        if (_sim99 > 0).any():
+            upside = float(_sim99.iloc[idx]) * cpt_mult
+        elif (_sim90 > 0).any():
             upside = float(_sim90.iloc[idx]) * cpt_mult
         elif (_sim85 > 0).any():
             upside = float(_sim85.iloc[idx]) * cpt_mult
