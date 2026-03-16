@@ -139,7 +139,11 @@ def render_lab_tab(sport: str) -> None:
                     if corrections.get("n_slates", 0) > 0:
                         pool = apply_corrections(pool, corrections, sport="NBA")
 
-                    # Process FantasyPros Cheatsheet if uploaded
+                    # Process FantasyPros Cheatsheet if uploaded (or auto-reload saved file)
+                    _fp_auto_path = os.path.join(
+                        str(Path(__file__).resolve().parent.parent),
+                        "data", "fp_uploads", f"fp_{slate_date}.csv"
+                    )
                     if fp_file is not None:
                         try:
                             from yak_core.fp_cheatsheet import (
@@ -163,6 +167,31 @@ def render_lab_tab(sport: str) -> None:
                                 st.dataframe(fp_raw[[c for c in preview_cols if c in fp_raw.columns]].head(20))
                         except Exception as e:
                             st.warning(f"FP Cheatsheet upload failed: {e}")
+                        # Save FP cheatsheet for auto-reload next time
+                        try:
+                            _fp_save_dir = os.path.join(
+                                str(Path(__file__).resolve().parent.parent),
+                                "data", "fp_uploads"
+                            )
+                            os.makedirs(_fp_save_dir, exist_ok=True)
+                            fp_file.seek(0)
+                            with open(_fp_auto_path, "wb") as _f:
+                                _f.write(fp_file.read())
+                        except Exception:
+                            pass
+                    elif os.path.isfile(_fp_auto_path):
+                        try:
+                            from yak_core.fp_cheatsheet import (
+                                parse_fp_cheatsheet,
+                                compute_cheatsheet_signals,
+                                merge_cheatsheet_into_pool,
+                            )
+                            fp_raw = parse_fp_cheatsheet(_fp_auto_path)
+                            fp_signals = compute_cheatsheet_signals(fp_raw)
+                            pool = merge_cheatsheet_into_pool(pool, fp_signals)
+                            st.info(f"FP Cheatsheet auto-loaded from saved file ({slate_date})")
+                        except Exception as e:
+                            print(f"[render_lab_tab] FP cheatsheet auto-reload failed: {e}")
 
                 try:
                     from yak_core.sim_sandbox import score_player_breakout
