@@ -542,6 +542,51 @@ class TestBuildIdealLineupsFromActuals:
         # PG1 (55 actual) should be in the lineup since it's the top PG
         assert "PG1" in lineup_names
 
+    def test_cash_filters_to_floor_safe_players(self):
+        """Cash mode should exclude players who missed their floor."""
+        pool = _make_full_pool()
+        # Add floor column: PG1 has high actual (55) but floor of 60 -> misses floor
+        pool["floor"] = pool["proj"] * 0.8  # default floors
+        pool.loc[pool["player_name"] == "PG1", "floor"] = 60.0  # PG1 misses floor (55 < 60)
+        lineups = _build_ideal_lineups_from_actuals(pool, n_lineups=1, contest_type="cash")
+        assert len(lineups) == 1
+        lineup_names = {p["player_name"] for p in lineups[0]}
+        # PG1 should be excluded because actual_fp (55) < floor (60)
+        assert "PG1" not in lineup_names
+
+    def test_cash_uses_proj_fallback_when_no_floor_column(self):
+        """Cash mode uses proj * 0.85 as floor when floor column is absent."""
+        pool = _make_full_pool()
+        # PG1: actual=55, proj=40 -> floor=34 -> safe
+        # Add a player who misses the proj-based floor
+        pool.loc[pool["player_name"] == "PG2", "actual_fp"] = 20.0  # actual=20, proj=30 -> floor=25.5 -> misses
+        lineups_cash = _build_ideal_lineups_from_actuals(pool, n_lineups=1, contest_type="cash")
+        lineups_gpp = _build_ideal_lineups_from_actuals(pool, n_lineups=1, contest_type="gpp")
+        assert len(lineups_cash) == 1
+        assert len(lineups_gpp) == 1
+        cash_names = {p["player_name"] for p in lineups_cash[0]}
+        # PG2 should be excluded in cash (20 < 25.5) but might appear in GPP
+        assert "PG2" not in cash_names
+
+    def test_cash_falls_back_if_not_enough_floor_safe(self):
+        """Cash falls back to full pool when too few floor-safe players."""
+        pool = _make_full_pool()
+        # Set impossibly high floor so almost nobody is safe
+        pool["floor"] = 999.0
+        lineups = _build_ideal_lineups_from_actuals(pool, n_lineups=1, contest_type="cash")
+        # Should fall back to GPP-style behavior and still produce lineups
+        assert len(lineups) == 1
+
+    def test_gpp_ignores_floor(self):
+        """GPP mode ignores floor and picks highest actual_fp regardless."""
+        pool = _make_full_pool()
+        pool["floor"] = 60.0  # Most players miss this floor
+        lineups = _build_ideal_lineups_from_actuals(pool, n_lineups=1, contest_type="gpp")
+        assert len(lineups) == 1
+        lineup_names = {p["player_name"] for p in lineups[0]}
+        # PG1 (highest actual at 55) should still be picked in GPP
+        assert "PG1" in lineup_names
+
 
 # ── Batch Train Config Compounding ───────────────────────────────────────
 
