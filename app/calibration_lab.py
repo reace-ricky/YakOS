@@ -1325,22 +1325,43 @@ def _save_config(name: str, config: Dict[str, Any]) -> None:
 # ── Backtest Engine ──────────────────────────────────────────────────────
 
 
+def _filter_entries_by_contest_type(entries: list, contest_type_key: str) -> list:
+    """Filter archived slate entries by the selected contest type key."""
+    matching = []
+    for e in entries:
+        ct = e["contest_type"].lower()
+        if contest_type_key == "gpp":
+            if "gpp" not in ct or "pga" in ct:
+                continue
+        elif contest_type_key == "showdown":
+            if "showdown" not in ct:
+                continue
+        elif contest_type_key == "cash":
+            if "cash" not in ct:
+                continue
+        else:
+            continue
+        matching.append(e)
+    return matching
+
+
 def _run_backtest(
     slider_config: Dict[str, Any],
     progress_bar,
+    contest_type_key: str = "gpp",
 ) -> pd.DataFrame:
-    """Run the current config against all archived GPP dates with actuals."""
+    """Run the current config against all archived dates with actuals for the given contest type."""
     from yak_core.lineups import prepare_pool, build_multiple_lineups_with_exposure
 
     entries = _list_archived_dates()
-    gpp_entries = [e for e in entries if "gpp" in e["contest_type"].lower()]
+    matching_entries = _filter_entries_by_contest_type(entries, contest_type_key)
 
     results = []
     contest_history = _load_contest_history()
     tier_adj = _get_tier_adjustments(slider_config)
 
-    for i, entry in enumerate(gpp_entries):
-        progress_bar.progress((i + 1) / len(gpp_entries), text=f"Backtesting {entry['date']}...")
+    for i, entry in enumerate(matching_entries):
+        progress_bar.progress((i + 1) / len(matching_entries), text=f"Backtesting {entry['date']}...")
 
         try:
             pool = pd.read_parquet(entry["file"])
@@ -1351,7 +1372,7 @@ def _run_backtest(
             # Apply tier adjustments
             pool = _apply_tier_adjustments(pool, tier_adj)
 
-            cfg = _build_optimizer_config_from_sliders(slider_config, "gpp")
+            cfg = _build_optimizer_config_from_sliders(slider_config, contest_type_key)
             cfg["NUM_LINEUPS"] = 10
 
             if "player_id" not in pool.columns:
@@ -1556,32 +1577,29 @@ def _render_batch_train(contest_type_key: str, contest_mode: str) -> None:
     """Render the Batch Train section for training config across multiple slates."""
     st.markdown("### Batch Train Across Slates")
 
-    # Find GPP slates with actuals
+    # Find slates with actuals matching the selected contest type
     entries = _list_archived_dates()
-    gpp_entries = []
-    for e in entries:
-        ct = e["contest_type"].lower()
-        # Skip non-GPP slates and PGA slates (pga_gpp)
-        if "gpp" not in ct or "pga" in ct:
-            continue
+    filtered = _filter_entries_by_contest_type(entries, contest_type_key)
+    matching_entries = []
+    for e in filtered:
         try:
             df = pd.read_parquet(e["file"])
             if "actual_fp" in df.columns and not df["actual_fp"].isna().all():
-                gpp_entries.append(e)
+                matching_entries.append(e)
         except Exception:
             continue
 
-    if not gpp_entries:
-        st.info("No GPP slates with actuals found in the archive.")
+    if not matching_entries:
+        st.info(f"No {contest_mode} slates with actuals found in the archive.")
         return
 
     # Slate selection
-    slate_labels = [e["label"] for e in gpp_entries]
+    slate_labels = [e["label"] for e in matching_entries]
     selected_indices = st.multiselect(
         "Step 1: Select slates",
-        options=list(range(len(gpp_entries))),
+        options=list(range(len(matching_entries))),
         format_func=lambda i: slate_labels[i],
-        default=list(range(len(gpp_entries))),
+        default=list(range(len(matching_entries))),
         key="batch_train_slates",
     )
 
@@ -1589,7 +1607,7 @@ def _render_batch_train(contest_type_key: str, contest_mode: str) -> None:
         st.warning("Select at least one slate.")
         return
 
-    selected_entries = [gpp_entries[i] for i in selected_indices]
+    selected_entries = [matching_entries[i] for i in selected_indices]
     # Sort chronologically
     selected_entries.sort(key=lambda e: e["date"])
 
@@ -2000,9 +2018,9 @@ def _render_batch_train_results(bt_state: Dict[str, Any], contest_type_key: str,
     col_run, _ = st.columns([1, 3])
     if col_run.button("Run Backtest Comparison", key="batch_train_backtest_btn"):
         progress = st.progress(0, text="Backtesting default config...")
-        default_results = _run_backtest(dict(default_config), progress)
+        default_results = _run_backtest(dict(default_config), progress, contest_type_key)
         progress = st.progress(0, text="Backtesting trained config...")
-        trained_results = _run_backtest(dict(trained_config), progress)
+        trained_results = _run_backtest(dict(trained_config), progress, contest_type_key)
 
         st.session_state["batch_train_backtest_results"] = {
             "default": default_results,
