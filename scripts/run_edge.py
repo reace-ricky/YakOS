@@ -195,6 +195,13 @@ def run_edge(sport: str, slate_date: str) -> pd.DataFrame:
             pool = pool[~pool["player_name"].isin(_excl_names)].reset_index(drop=True)
             print(f"[run_edge] Excluded {pre - len(pool)} player(s): {_excl_names}")
 
+    # Pop Catalyst: score situational upside signals before edge computation
+    try:
+        from yak_core.pop_catalyst import compute_pop_catalyst
+        pool = compute_pop_catalyst(pool)
+    except Exception as exc:
+        print(f"[run_edge] compute_pop_catalyst failed (non-fatal): {exc}")
+
     # Load calibration state for edge computation
     calibration_state = get_correction_factors(sport=sport.upper())
 
