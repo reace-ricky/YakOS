@@ -261,18 +261,18 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "CONTEST_TYPE": "cash",
             # Scoring weights
             "PROJ_WEIGHT": 0.50,
-            "CUT_EQUITY_WEIGHT": 0.30,  # TODO: stub — PGA cut-making probability signal
-            "BALL_STRIKING_WEIGHT": 0.15,  # TODO: stub — SG:Approach + SG:OTT stability
+            "CUT_EQUITY_WEIGHT": 0.30,  # uses cut_equity from pga_pool.py
+            "BALL_STRIKING_WEIGHT": 0.15,  # uses ball_striking z-score from pga_pool.py
             "UPSIDE_WEIGHT": 0.05,
             "BOOM_WEIGHT": 0.00,
-            "COURSE_FIT_WEIGHT": 0.10,  # TODO: stub — course history / stat-to-course fit
-            "WAVE_ADVANTAGE_WEIGHT": 0.05,  # TODO: stub — favorable tee time wave
+            "COURSE_FIT_WEIGHT": 0.10,  # uses course_fit_z from pga_pool.py
+            "WAVE_ADVANTAGE_WEIGHT": 0.05,  # uses wave_advantage from pga_pool.py
             # Ownership / leverage — not relevant for cash
             "OWN_PENALTY_STRENGTH": 0.0,
             "LEVERAGE_WEIGHT": 0.0,
             # PGA-specific thresholds
             "BUST_PENALTY": 0.9,
-            "MIN_CUT_PROBABILITY": 0.70,  # TODO: stub — only golfers ≥70% cut prob
+            "MIN_CUT_PROBABILITY": 0.70,  # filter via cut_equity (≥0.70)
             "RECENT_FORM_LOOKBACK": 8,  # last 8 tournaments
             # Lineup controls
             "NUM_LINEUPS": 1,
@@ -288,18 +288,18 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "CONTEST_TYPE": "gpp_single",
             # Scoring weights
             "PROJ_WEIGHT": 0.30,
-            "CUT_EQUITY_WEIGHT": 0.20,  # TODO: stub
-            "BALL_STRIKING_WEIGHT": 0.10,  # TODO: stub
+            "CUT_EQUITY_WEIGHT": 0.20,
+            "BALL_STRIKING_WEIGHT": 0.10,
             "UPSIDE_WEIGHT": 0.25,
             "BOOM_WEIGHT": 0.15,
-            "COURSE_FIT_WEIGHT": 0.15,  # TODO: stub
-            "WAVE_ADVANTAGE_WEIGHT": 0.10,  # TODO: stub
+            "COURSE_FIT_WEIGHT": 0.15,
+            "WAVE_ADVANTAGE_WEIGHT": 0.10,
             # Ownership / leverage
             "OWN_PENALTY_STRENGTH": 0.8,
             "LEVERAGE_WEIGHT": 0.5,
             # PGA-specific thresholds
             "BUST_PENALTY": 0.5,
-            "MIN_CUT_PROBABILITY": 0.55,  # TODO: stub
+            "MIN_CUT_PROBABILITY": 0.55,
             "RECENT_FORM_LOOKBACK": 12,
             # Lineup controls
             "NUM_LINEUPS": 1,
@@ -315,18 +315,18 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "CONTEST_TYPE": "gpp_20max",
             # Scoring weights
             "PROJ_WEIGHT": 0.25,
-            "CUT_EQUITY_WEIGHT": 0.15,  # TODO: stub
-            "BALL_STRIKING_WEIGHT": 0.10,  # TODO: stub
+            "CUT_EQUITY_WEIGHT": 0.15,
+            "BALL_STRIKING_WEIGHT": 0.10,
             "UPSIDE_WEIGHT": 0.25,
             "BOOM_WEIGHT": 0.25,
-            "COURSE_FIT_WEIGHT": 0.15,  # TODO: stub
-            "WAVE_ADVANTAGE_WEIGHT": 0.15,  # TODO: stub
+            "COURSE_FIT_WEIGHT": 0.15,
+            "WAVE_ADVANTAGE_WEIGHT": 0.15,
             # Ownership / leverage
             "OWN_PENALTY_STRENGTH": 1.0,
             "LEVERAGE_WEIGHT": 0.7,
             # PGA-specific thresholds
             "BUST_PENALTY": 0.3,
-            "MIN_CUT_PROBABILITY": 0.45,  # TODO: stub
+            "MIN_CUT_PROBABILITY": 0.45,
             "RECENT_FORM_LOOKBACK": 16,
             # Lineup controls
             "NUM_LINEUPS": 20,

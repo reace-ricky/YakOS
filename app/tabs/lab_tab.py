@@ -36,7 +36,14 @@ def render_lab_tab(sport: str) -> None:
     if is_pga:
         api_key = os.environ.get("DATAGOLF_API_KEY") or _get_secret("DATAGOLF_API_KEY")
         if not api_key:
-            st.error("Missing DATAGOLF_API_KEY. Set it in Streamlit secrets or environment.")
+            api_key = st.text_input(
+                "DataGolf API Key",
+                type="password",
+                key="datagolf_api_key",
+                help="Enter your DataGolf API key. Get one at datagolf.com.",
+            )
+        if not api_key:
+            st.warning("Enter your DataGolf API key above, or set DATAGOLF_API_KEY in environment/secrets.")
             return
     else:
         api_key = (
@@ -188,13 +195,18 @@ def render_lab_tab(sport: str) -> None:
     if pool_path.exists():
         pool = pd.read_parquet(pool_path)
 
-        preview_cols = ["player_name", "pos", "team", "salary", "proj", "floor", "ceil", "ownership", "breakout_score"]
         if is_pga:
-            preview_cols += ["wave", "r1_teetime"]
+            preview_cols = [
+                "player_name", "salary", "proj", "floor", "ceil", "ownership",
+                "cut_equity", "sg_ott", "sg_app", "sg_putt", "ball_striking",
+                "course_fit_z", "ceiling_proxy", "wave", "r1_teetime",
+            ]
             if "early_late_wave" in pool.columns and "wave" not in pool.columns:
                 pool["wave"] = pool["early_late_wave"].map(
                     {0: "Early", 1: "Late", "Early": "Early", "Late": "Late"}
                 ).fillna("")
+        else:
+            preview_cols = ["player_name", "pos", "team", "salary", "proj", "floor", "ceil", "ownership", "breakout_score"]
         if "r1_teetime" in pool.columns:
             def _preview_teetime(v):
                 if isinstance(v, dict):
@@ -894,12 +906,18 @@ def _load_pga_pool(api_key: str, slate_date: str, slate: str) -> tuple:
     from yak_core.config import DK_PGA_LINEUP_SIZE, DK_PGA_POS_SLOTS, DK_PGA_SALARY_CAP
     from yak_core.calibration_feedback import get_correction_factors, apply_corrections
 
+    progress = st.progress(0, text="Connecting to DataGolf...")
     dg = DataGolfClient(api_key)
+
+    progress.progress(10, text="Fetching DFS projections...")
     pool = build_pga_pool(dg, site="draftkings", slate=slate)
+    progress.progress(80, text="Applying corrections...")
 
     corrections = get_correction_factors(sport="PGA")
     if corrections.get("n_slates", 0) > 0:
         pool = apply_corrections(pool, corrections, sport="PGA")
+
+    progress.progress(100, text="Pool ready!")
 
     meta = {
         "sport": "PGA", "site": "DK", "date": slate_date, "slate": slate,

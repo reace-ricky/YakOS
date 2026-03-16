@@ -248,6 +248,59 @@ def build_pga_pool(
             _n_late = (pool["early_late_wave"] == "Late").sum()
             print(f"[pga_pool] Derived early_late_wave from r1_teetime ({_n_early} early, {_n_late} late)")
 
+    # ── 6c. Derived signals for PGA preset scoring ──────────────────
+    from scipy.stats import zscore as _zscore
+
+    # Cut equity (0-1 scale from make_cut probability)
+    if "make_cut_prob" in pool.columns:
+        pool["cut_equity"] = pd.to_numeric(pool["make_cut_prob"], errors="coerce").fillna(0).clip(0, 1)
+    else:
+        pool["cut_equity"] = 0.5  # neutral default
+
+    # Ball-striking composite: z-scored (SG:OTT + SG:Approach)
+    _has_sg_ott = "sg_ott" in pool.columns and pool["sg_ott"].notna().any()
+    _has_sg_app = "sg_app" in pool.columns and pool["sg_app"].notna().any()
+    if _has_sg_ott and _has_sg_app:
+        _bs_raw = (
+            pd.to_numeric(pool["sg_ott"], errors="coerce").fillna(0)
+            + pd.to_numeric(pool["sg_app"], errors="coerce").fillna(0)
+        )
+        _bs_std = _bs_raw.std()
+        pool["ball_striking"] = _zscore(_bs_raw) if _bs_std > 1e-9 else 0.0
+    else:
+        pool["ball_striking"] = 0.0
+
+    # Course fit: z-scored course_fit adjustment from decompositions
+    if "course_fit" in pool.columns and pool["course_fit"].notna().any():
+        _cf_raw = pd.to_numeric(pool["course_fit"], errors="coerce").fillna(0)
+        _cf_std = _cf_raw.std()
+        pool["course_fit_z"] = _zscore(_cf_raw) if _cf_std > 1e-9 else 0.0
+    else:
+        pool["course_fit_z"] = 0.0
+
+    # Ceiling proxy: win% * 3 + top5% * 2 + top10%
+    _has_win = "win_prob" in pool.columns and pool["win_prob"].notna().any()
+    _has_t5 = "top5_prob" in pool.columns and pool["top5_prob"].notna().any()
+    _has_t10 = "top10_prob" in pool.columns and pool["top10_prob"].notna().any()
+    if _has_win and _has_t5 and _has_t10:
+        pool["ceiling_proxy"] = (
+            pd.to_numeric(pool["win_prob"], errors="coerce").fillna(0) * 3
+            + pd.to_numeric(pool["top5_prob"], errors="coerce").fillna(0) * 2
+            + pd.to_numeric(pool["top10_prob"], errors="coerce").fillna(0)
+        )
+    else:
+        pool["ceiling_proxy"] = 0.0
+
+    # Floor proxy: same as cut equity
+    pool["floor_proxy"] = pool["cut_equity"]
+
+    # Wave advantage (placeholder — 0 until tee-time weather model is wired)
+    pool["wave_advantage"] = 0.0
+
+    _n_signals = sum(1 for c in ["cut_equity", "ball_striking", "course_fit_z", "ceiling_proxy"]
+                     if c in pool.columns and (pool[c] != 0).any())
+    print(f"[pga_pool] Derived {_n_signals}/4 PGA signals (cut_equity, ball_striking, course_fit_z, ceiling_proxy)")
+
     # ── 7. Fill YakOS-standard columns ───────────────────────────────
     # Drop any API-returned 'position' before setting 'pos' to avoid
     # duplicate columns after the rename_map in prepare_pool.
