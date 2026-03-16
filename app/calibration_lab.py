@@ -646,6 +646,7 @@ def _analyze_missed_players(
 def _build_ideal_lineups_from_actuals(
     pool: pd.DataFrame,
     n_lineups: int = 3,
+    contest_type: str = "gpp",
 ) -> List[List[Dict]]:
     """Build ideal hindsight lineups greedily from actual fantasy points.
 
@@ -654,6 +655,10 @@ def _build_ideal_lineups_from_actuals(
     fits that position and hasn't been used yet in this lineup.  Respects the
     $50K salary cap.  For diversity across lineups, already-used players get a
     small penalty after the first lineup.
+
+    For cash contest types, filters to "floor-safe" players first — those whose
+    actual_fp met or exceeded their floor (or proj * 0.85 if no floor column).
+    Falls back to the full pool if not enough floor-safe players exist.
     """
     required_cols = {"actual_fp", "salary", "pos", "player_name"}
     if not required_cols.issubset(pool.columns):
@@ -661,6 +666,19 @@ def _build_ideal_lineups_from_actuals(
 
     # Only consider players with positive actuals
     candidates = pool[pool["actual_fp"] > 0].copy()
+
+    # For cash contests, prefer floor-safe players
+    if contest_type == "cash" and not candidates.empty:
+        if "floor" in candidates.columns:
+            floor_vals = pd.to_numeric(candidates["floor"], errors="coerce").fillna(0)
+        else:
+            proj_vals = pd.to_numeric(candidates.get("proj", 0), errors="coerce").fillna(0)
+            floor_vals = proj_vals * 0.85
+        actual_vals = pd.to_numeric(candidates["actual_fp"], errors="coerce").fillna(0)
+        floor_safe = candidates[actual_vals >= floor_vals]
+        # Only use floor-safe pool if enough players to potentially fill a lineup
+        if len(floor_safe) >= NBA_LINEUP_SIZE:
+            candidates = floor_safe
     if candidates.empty:
         return []
 
@@ -1713,7 +1731,7 @@ def _run_batch_train(
                 pool["player_id"] = pool["player_name"].str.lower().str.replace(" ", "_")
 
             # 1. Build ideal lineups from actuals
-            ideal_lineups_raw = _build_ideal_lineups_from_actuals(pool, n_lineups=3)
+            ideal_lineups_raw = _build_ideal_lineups_from_actuals(pool, n_lineups=3, contest_type=contest_type_key)
             if not ideal_lineups_raw:
                 per_slate_log.append({
                     "date": slate_date, "status": "skipped",
