@@ -948,9 +948,14 @@ def _build_one_lineup(
                 )
 
     # Minimum lineup ceiling constraint (GPP only)
+    # Use the same ceiling values as the objective: gpp_ceil_score when in
+    # ceiling mode (SIM99TH), otherwise fall back to ceil → proj.
     min_ceil = (gc or {}).get("min_lineup_ceiling", 0)
     if min_ceil and min_ceil > 0:
-        ceil_vals_lp = [float(p.get("ceil", p.get("proj", 0))) for p in players]
+        ceil_vals_lp = [
+            float(p.get("gpp_ceil_score", p.get("ceil", p.get("proj", 0))))
+            for p in players
+        ]
         if max(ceil_vals_lp) > 0:
             prob += (
                 pulp.lpSum(
@@ -1364,7 +1369,7 @@ def build_multiple_lineups_with_exposure(
         selected_indices = []
         for player, slot in result:
             selected_indices.append(name_to_idx[player["player_name"]])
-            lineup_rows.append({
+            row_dict = {
                 "lineup_index": lineup_num,
                 "slot": slot,
                 "player_name": player["player_name"],
@@ -1378,7 +1383,11 @@ def build_multiple_lineups_with_exposure(
                 "gpp_score": player.get("gpp_score", 0),
                 "cash_score": player.get("cash_score", 0),
                 "gpp_fallback": _gpp_fallback,
-            })
+            }
+            # Include ceiling score when in ceiling objective mode
+            if "gpp_ceil_score" in player:
+                row_dict["gpp_ceil_score"] = player["gpp_ceil_score"]
+            lineup_rows.append(row_dict)
 
         lineups.append(lineup_rows)
 
@@ -1464,9 +1473,11 @@ def build_multiple_lineups_with_exposure(
 
     # ── Ceiling floor safeguard (v10) ─────────────────────────────────────
     # Log lineup ceiling totals so we can verify 350+ target.
+    # Use gpp_ceil_score (SIM99TH) when available, otherwise ceil.
     ceil_floor = float(cfg.get("GPP_MIN_LINEUP_CEILING", 0))
-    if ceil_floor > 0 and not lineups_df.empty and is_gpp and "ceil" in lineups_df.columns:
-        lu_ceil = lineups_df.groupby("lineup_index")["ceil"].sum()
+    _ceil_log_col = "gpp_ceil_score" if "gpp_ceil_score" in lineups_df.columns else "ceil"
+    if ceil_floor > 0 and not lineups_df.empty and is_gpp and _ceil_log_col in lineups_df.columns:
+        lu_ceil = lineups_df.groupby("lineup_index")[_ceil_log_col].sum()
         below_ceil = lu_ceil[lu_ceil < ceil_floor]
         if len(below_ceil) > 0:
             print(
