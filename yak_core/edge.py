@@ -81,6 +81,12 @@ EDGE_DF_COLUMNS = [
     "pop_catalyst_tag",
     "fp_efficiency",
     "dvp_matchup_boost",
+    # FP Cheatsheet signals (present when cheatsheet CSV uploaded)
+    "dvp_boost",
+    "blowout_risk",
+    "pace_environment",
+    "value_signal",
+    "rest_factor",
     "edge_score",
     "edge_label",
     "is_anchor",
@@ -740,19 +746,26 @@ def compute_edge_metrics(
     eff_proj = _apply_calibration_bumps(proj, salary, cal)
 
     # ── DvP matchup boost (applied before smash/bust so adjusted ceiling is used) ──
-    # Load the DvP table (returns None if not yet uploaded).
-    _dvp_df = load_dvp_table()
-    _dvp_boost = pd.Series(0.0, index=df.index)
-    if _dvp_df is not None and not _dvp_df.empty:
-        _pos_col = df.get("pos", pd.Series("", index=df.index))
-        _opp_col = df.get("opponent", pd.Series("", index=df.index))
-        _dvp_boost = pd.Series(
-            [
-                get_dvp_boost(str(p), str(o), _dvp_df)
-                for p, o in zip(_pos_col, _opp_col)
-            ],
-            index=df.index,
-        )
+    # Prefer FP cheatsheet dvp_boost (0-1 scale) when available from pool merge.
+    # Falls back to old DvP baseline table if cheatsheet wasn't uploaded.
+    if "dvp_boost" in df.columns:
+        # Cheatsheet dvp_boost is 0-1 (0.5 = neutral). Map to [-0.15, +0.15]
+        # for ceiling adjustment: 0 → -0.15, 0.5 → 0.0, 1.0 → +0.15
+        _dvp_raw = pd.to_numeric(df["dvp_boost"], errors="coerce").fillna(0.5)
+        _dvp_boost = (_dvp_raw - 0.5) * 0.30  # maps [0,1] → [-0.15, +0.15]
+    else:
+        _dvp_df = load_dvp_table()
+        _dvp_boost = pd.Series(0.0, index=df.index)
+        if _dvp_df is not None and not _dvp_df.empty:
+            _pos_col = df.get("pos", pd.Series("", index=df.index))
+            _opp_col = df.get("opponent", pd.Series("", index=df.index))
+            _dvp_boost = pd.Series(
+                [
+                    get_dvp_boost(str(p), str(o), _dvp_df)
+                    for p, o in zip(_pos_col, _opp_col)
+                ],
+                index=df.index,
+            )
 
     # Apply DvP boost to ceiling: soft matchups raise it, tough matchups lower it.
     ceil = ceil * (1.0 + _dvp_boost)

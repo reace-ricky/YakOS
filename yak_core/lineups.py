@@ -324,10 +324,14 @@ def _add_scores(
         form_signal = ((rfp5 - rfp20) / rfp20.clip(lower=1.0))
         edge_bonus = edge_bonus + _norm01(form_signal) * gpp_form_w
 
-    # 4. DvP matchup boost
-    if gpp_dvp_w > 0 and "dvp_matchup_boost" in df.columns:
-        dvp = pd.to_numeric(df["dvp_matchup_boost"], errors="coerce").fillna(0.0)
-        edge_bonus = edge_bonus + _norm01(dvp) * gpp_dvp_w
+    # 4. DvP matchup boost (prefer cheatsheet dvp_boost over old dvp_matchup_boost)
+    if gpp_dvp_w > 0:
+        if "dvp_boost" in df.columns:
+            dvp = pd.to_numeric(df["dvp_boost"], errors="coerce").fillna(0.5)
+            edge_bonus = edge_bonus + _norm01(dvp) * gpp_dvp_w
+        elif "dvp_matchup_boost" in df.columns:
+            dvp = pd.to_numeric(df["dvp_matchup_boost"], errors="coerce").fillna(0.0)
+            edge_bonus = edge_bonus + _norm01(dvp) * gpp_dvp_w
 
     # 5. Pop catalyst score
     if gpp_catalyst_w > 0 and "pop_catalyst_score" in df.columns:
@@ -343,6 +347,32 @@ def _add_scores(
     if gpp_efficiency_w > 0 and "fp_efficiency" in df.columns:
         eff = pd.to_numeric(df["fp_efficiency"], errors="coerce").fillna(0.0)
         edge_bonus = edge_bonus + _norm01(eff) * gpp_efficiency_w
+
+    # 8-11. FP Cheatsheet signals (active when cheatsheet CSV uploaded)
+    gpp_spread_pen_w = float(cfg.get("GPP_SPREAD_PENALTY_WEIGHT", 0.0))
+    gpp_pace_w       = float(cfg.get("GPP_PACE_ENV_WEIGHT", 0.0))
+    gpp_value_w      = float(cfg.get("GPP_VALUE_WEIGHT", 0.0))
+    gpp_rest_w       = float(cfg.get("GPP_REST_WEIGHT", 0.0))
+
+    # 8. Blowout risk penalty (spread-based)
+    if gpp_spread_pen_w > 0 and "blowout_risk" in df.columns:
+        br = pd.to_numeric(df["blowout_risk"], errors="coerce").fillna(0.0)
+        edge_bonus = edge_bonus - _norm01(br) * gpp_spread_pen_w
+
+    # 9. Pace environment boost (O/U-based)
+    if gpp_pace_w > 0 and "pace_environment" in df.columns:
+        pace = pd.to_numeric(df["pace_environment"], errors="coerce").fillna(0.0)
+        edge_bonus = edge_bonus + _norm01(pace) * gpp_pace_w
+
+    # 10. Value signal (rank diff)
+    if gpp_value_w > 0 and "value_signal" in df.columns:
+        val = pd.to_numeric(df["value_signal"], errors="coerce").fillna(0.0)
+        edge_bonus = edge_bonus + _norm01(val) * gpp_value_w
+
+    # 11. Rest factor
+    if gpp_rest_w > 0 and "rest_factor" in df.columns:
+        rest = pd.to_numeric(df["rest_factor"], errors="coerce").fillna(0.0)
+        edge_bonus = edge_bonus + _norm01(rest) * gpp_rest_w
 
     df["gpp_score"] = (
         df["proj"] * gpp_proj_w

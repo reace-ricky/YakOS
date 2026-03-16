@@ -284,6 +284,11 @@ def _convert_slider_values_to_optimizer(values: Dict[str, Any]) -> Dict[str, Any
         "edge_catalyst_weight": "GPP_CATALYST_WEIGHT",
         "edge_bust_penalty": "GPP_BUST_PENALTY",
         "edge_efficiency_weight": "GPP_EFFICIENCY_WEIGHT",
+        # FP Cheatsheet Signal Weights
+        "edge_spread_penalty_weight": "GPP_SPREAD_PENALTY_WEIGHT",
+        "edge_pace_env_weight": "GPP_PACE_ENV_WEIGHT",
+        "edge_value_weight": "GPP_VALUE_WEIGHT",
+        "edge_rest_weight": "GPP_REST_WEIGHT",
     }
 
     result: Dict[str, Any] = {}

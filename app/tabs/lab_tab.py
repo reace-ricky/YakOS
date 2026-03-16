@@ -52,13 +52,13 @@ def render_lab_tab(sport: str) -> None:
     slate_date = st.text_input("Slate date", value=today_str, key=f"lab_date_{sport}")
 
     rg_file = None
-    dvp_file = None
+    fp_file = None
     if not is_pga:
         _up_col1, _up_col2 = st.columns(2)
         with _up_col1:
             rg_file = st.file_uploader("RotoGrinders CSV (optional)", type=["csv"], key=f"lab_rg_{sport}")
         with _up_col2:
-            dvp_file = st.file_uploader("DvP CSV (optional)", type=["csv"], key=f"lab_dvp_{sport}")
+            fp_file = st.file_uploader("FantasyPros Cheatsheet CSV (optional)", type=["csv"], key=f"lab_fp_{sport}")
 
     pool_path = out_dir / "slate_pool.parquet"
     _meta_path_check = out_dir / "slate_meta.json"
@@ -155,15 +155,30 @@ def render_lab_tab(sport: str) -> None:
                     if corrections.get("n_slates", 0) > 0:
                         pool = apply_corrections(pool, corrections, sport="NBA")
 
-                    # Process DvP file if uploaded
-                    if dvp_file is not None:
+                    # Process FantasyPros Cheatsheet if uploaded
+                    if fp_file is not None:
                         try:
-                            from yak_core.dvp import parse_dvp_upload, save_dvp_table
-                            dvp_df = parse_dvp_upload(dvp_file)
-                            save_dvp_table(dvp_df)
-                            st.success(f"DvP table loaded: {len(dvp_df)} teams, positions: {[c for c in dvp_df.columns if c != 'Team']}")
+                            from yak_core.fp_cheatsheet import (
+                                parse_fp_cheatsheet,
+                                compute_cheatsheet_signals,
+                                merge_cheatsheet_into_pool,
+                            )
+                            fp_raw = parse_fp_cheatsheet(fp_file)
+                            fp_signals = compute_cheatsheet_signals(fp_raw)
+                            pool = merge_cheatsheet_into_pool(pool, fp_signals)
+                            matched = fp_signals["player_name"].str.strip().str.lower()
+                            pool_names = pool["player_name"].astype(str).str.strip().str.lower()
+                            n_matched = pool_names.isin(matched).sum()
+                            st.success(
+                                f"FP Cheatsheet loaded: {len(fp_raw)} players parsed, "
+                                f"{n_matched} matched to pool"
+                            )
+                            with st.expander("FP Cheatsheet Preview"):
+                                preview_cols = ["player_name", "team", "dvp_rank", "spread",
+                                                "over_under", "fp_proj_pts", "rank_diff", "rest_days"]
+                                st.dataframe(fp_raw[[c for c in preview_cols if c in fp_raw.columns]].head(20))
                         except Exception as e:
-                            st.warning(f"DvP upload failed: {e}")
+                            st.warning(f"FP Cheatsheet upload failed: {e}")
 
                 try:
                     from yak_core.sim_sandbox import score_player_breakout

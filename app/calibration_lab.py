@@ -358,6 +358,12 @@ def _build_optimizer_config_from_sliders(sliders: Dict[str, Any], contest_type: 
     cfg["GPP_BUST_PENALTY"] = sliders.get("edge_bust_penalty", 0.0)
     cfg["GPP_EFFICIENCY_WEIGHT"] = sliders.get("edge_efficiency_weight", 0.0)
 
+    # FP Cheatsheet Signal Weights
+    cfg["GPP_SPREAD_PENALTY_WEIGHT"] = sliders.get("edge_spread_penalty_weight", 0.0)
+    cfg["GPP_PACE_ENV_WEIGHT"] = sliders.get("edge_pace_env_weight", 0.0)
+    cfg["GPP_VALUE_WEIGHT"] = sliders.get("edge_value_weight", 0.0)
+    cfg["GPP_REST_WEIGHT"] = sliders.get("edge_rest_weight", 0.0)
+
     return cfg
 
 
