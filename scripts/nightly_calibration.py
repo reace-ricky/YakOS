@@ -201,6 +201,7 @@ def run_nba_calibration(slate_date: str) -> dict:
     try:
         archive_path = archive_slate(pool, slate_date, contest_type="GPP Main")
         log.info("Slate archived: %s", archive_path)
+        result["archive_rel_path"] = os.path.relpath(archive_path, YAKOS_ROOT)
     except Exception as e:
         log.warning("Slate archival failed (non-fatal): %s", e)
 
@@ -451,6 +452,7 @@ def run_pga_calibration(slate_date: str) -> dict:
     try:
         archive_path = archive_slate(pool, slate_date, contest_type="PGA GPP")
         log.info("PGA slate archived: %s", archive_path)
+        result["archive_rel_path"] = os.path.relpath(archive_path, YAKOS_ROOT)
     except Exception as e:
         log.warning("PGA slate archival failed (non-fatal): %s", e)
 
@@ -577,7 +579,7 @@ def _persist_breakout_accuracy(results: list[dict], slate_date: str) -> None:
 
 # ── GitHub Sync ────────────────────────────────────────────────────────────
 
-def sync_to_github(sports: list[str]) -> dict:
+def sync_to_github(sports: list[str], extra_files: list[str] | None = None) -> dict:
     """Push calibration and outcome data to GitHub."""
     from yak_core.github_persistence import sync_feedback_to_github
 
@@ -600,6 +602,12 @@ def sync_to_github(sports: list[str]) -> dict:
         abs_path = os.path.join(YAKOS_ROOT, outcome_path)
         if os.path.isfile(abs_path):
             files.append(outcome_path)
+
+    # Include any extra files (e.g. archive parquets)
+    if extra_files:
+        for f in extra_files:
+            if f not in files and os.path.isfile(os.path.join(YAKOS_ROOT, f)):
+                files.append(f)
 
     log.info("Syncing %d files to GitHub", len(files))
     try:
@@ -680,9 +688,12 @@ def main():
     except Exception as e:
         log.warning("Recalibrated backtest failed (non-fatal): %s", e)
 
+    # Collect archive parquet paths from results for the final sync
+    archive_files = [r["archive_rel_path"] for r in results if "archive_rel_path" in r]
+
     # Sync to GitHub
     if active_sports:
-        gh_result = sync_to_github(active_sports)
+        gh_result = sync_to_github(active_sports, extra_files=archive_files)
         log.info("GitHub sync: %s", gh_result)
 
     # Print summary
