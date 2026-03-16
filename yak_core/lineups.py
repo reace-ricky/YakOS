@@ -1,7 +1,10 @@
 """YakOS Core - data loading, player pool building, and PuLP optimizer."""
+import logging
 import os
 from typing import Dict, Any, Tuple
 from datetime import date
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 import pandas as pd
@@ -1018,8 +1021,11 @@ def build_multiple_lineups_with_exposure(
             game_player_caps=cur_game_caps,
         )
 
+        _gpp_fallback = False
         if result is None:
             # Retry without GPP constraints (fallback)
+            logger.warning("Lineup %d: GPP constraints dropped (infeasible). Built as cash-like.", lineup_num)
+            _gpp_fallback = True
             result = _build_one_lineup(
                 players=players,
                 pos_slots=pos_slots,
@@ -1058,6 +1064,7 @@ def build_multiple_lineups_with_exposure(
                 "own_pct": player.get("own_pct", 0),
                 "gpp_score": player.get("gpp_score", 0),
                 "cash_score": player.get("cash_score", 0),
+                "gpp_fallback": _gpp_fallback,
             })
 
         lineups.append(lineup_rows)

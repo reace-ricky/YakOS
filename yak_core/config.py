@@ -135,7 +135,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         # Ownership model knobs
     "OWN_WEIGHT": 0.0,         # 0 = pure proj, 0.1-0.3 = mild leverage, 0.5+ = heavy contrarian
     "OWN_SOURCE": "auto",      # "auto" (salary-rank if missing), "salary_rank" (always generate)
-    "STACK_WEIGHT": 0.0,       # 0 = disabled; 0.1-0.3 = use stack_score to boost stacked players
+    "STACK_WEIGHT": 0.10,      # prefer high-total games for stacking
     "VALUE_WEIGHT": 0.0,       # 0 = disabled; 0.1-0.3 = use value_score to boost value plays
     # GPP scoring formula (v8 — sim-based variance model)
     # gpp_score = proj * PROJ_W + upside * UPSIDE_W + boom * BOOM_W + own_adj
@@ -146,6 +146,14 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "GPP_BOOM_WEIGHT": 0.20,          # weight on boom potential (sim99 - sim50 spread)
     "GPP_OWN_PENALTY_STRENGTH": 1.2,  # scales the log-based ownership penalty
     "GPP_OWN_LOW_BOOST": 0.5,         # modest boost for low-ownership (<8%) players
+    # v9 edge signal weights (additive on top of base GPP formula)
+    "GPP_SMASH_WEIGHT": 0.8,          # boost high smash probability players
+    "GPP_LEVERAGE_WEIGHT": 0.5,       # prefer underowned edges
+    "GPP_BUST_PENALTY": 0.4,          # penalize high bust risk
+    "GPP_CATALYST_WEIGHT": 0.3,       # reward situational upside
+    "GPP_EFFICIENCY_WEIGHT": 0.3,     # reward FP-per-minute efficiency
+    "GPP_FORM_WEIGHT": 0.2,           # slight recent form boost
+    "GPP_DVP_WEIGHT": 0.2,            # slight matchup boost
     "GPP_PROJ_FLOOR": 280,            # flag/filter lineups projecting below this total
     # GPP-specific constraints (v7 — calibrated against 6 RG winning lineups 2026-03-09 → 2026-03-13)
     # Only active when CONTEST_TYPE == "gpp"
@@ -169,6 +177,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "SD_CAPTAIN_OWN_PENALTY": 10.0,  # penalize high-owned captains
     "SD_CAPTAIN_CEIL_BONUS": 0.2,    # bonus weight on ceiling for captain selection
     "SD_NOISE_STD": 0.10,            # per-solve noise std dev for lineup diversity (±10%)
+    # Auto-sim: run player-level Monte Carlo before lineup build if sim columns missing
+    "AUTO_RUN_SIMS": True,
 }
 
 
