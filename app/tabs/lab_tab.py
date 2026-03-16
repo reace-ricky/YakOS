@@ -285,6 +285,27 @@ def render_lab_tab(sport: str) -> None:
     st.markdown("### Build & Publish")
 
     from yak_core.config import CONTEST_PRESETS
+    from yak_core.presets import OPTIMIZER_PRESET_LABELS, OPTIMIZER_PRESETS, get_preset
+
+    # ── Optimizer profile selector (NBA only) ──
+    # Maps optimizer presets to the underlying contest type used for slate/pool routing.
+    _PRESET_TO_CONTEST: Dict[str, str] = {
+        "Single-Entry GPP": "GPP Main",
+        "20-Max GPP": "GPP Main",
+        "Cash (H2H / 50-50)": "Cash Main",
+        "Showdown GPP": "Showdown",
+        "Cash Showdown": "Showdown",
+        "Custom": "",  # user picks contest type manually
+    }
+
+    optimizer_preset_name = "Custom"
+    if not is_pga:
+        optimizer_preset_name = st.selectbox(
+            "Optimizer profile",
+            options=OPTIMIZER_PRESET_LABELS,
+            key=f"lab_opt_preset_{sport}",
+            help="Auto-configures scoring weights, constraints, and lineup count for the selected contest type.",
+        )
 
     if is_pga:
         try:
@@ -304,24 +325,61 @@ def render_lab_tab(sport: str) -> None:
         "PGA GPP": "PGA GPP (Full Tournament)",
     }
 
+    # Auto-select contest type when an optimizer preset is chosen
+    _auto_contest = _PRESET_TO_CONTEST.get(optimizer_preset_name, "")
+    _auto_contest_idx = 0
+    if _auto_contest and _auto_contest in contest_options:
+        _auto_contest_idx = contest_options.index(_auto_contest)
+
+    _opt_preset_cfg = get_preset(optimizer_preset_name)
+    _preset_num_lineups = int(_opt_preset_cfg.get("NUM_LINEUPS", 1))
+
     col_c, col_n = st.columns(2)
     with col_c:
         contest_label = st.selectbox(
             "Contest type", contest_options,
+            index=_auto_contest_idx,
             format_func=lambda x: _contest_display.get(x, x),
             key=f"lab_contest_{sport}",
         )
     with col_n:
         preset = CONTEST_PRESETS.get(contest_label, {})
-        num_lineups = st.number_input("Lineups", min_value=1, max_value=150, value=1, key=f"lab_nlu_{sport}")
+        num_lineups = st.number_input(
+            "Lineups", min_value=1, max_value=150,
+            value=_preset_num_lineups,
+            key=f"lab_nlu_{sport}",
+        )
+
+    # Show loaded preset weights in an expander
+    if optimizer_preset_name != "Custom" and _opt_preset_cfg:
+        with st.expander(f"Preset: {optimizer_preset_name}", expanded=False):
+            _w_col1, _w_col2, _w_col3 = st.columns(3)
+            with _w_col1:
+                st.caption("**Scoring Weights**")
+                st.text(f"Proj:    {_opt_preset_cfg.get('GPP_PROJ_WEIGHT', '-')}")
+                st.text(f"Upside:  {_opt_preset_cfg.get('GPP_UPSIDE_WEIGHT', '-')}")
+                st.text(f"Boom:    {_opt_preset_cfg.get('GPP_BOOM_WEIGHT', '-')}")
+            with _w_col2:
+                st.caption("**Edge Signals**")
+                st.text(f"Smash:     {_opt_preset_cfg.get('GPP_SMASH_WEIGHT', '-')}")
+                st.text(f"Leverage:  {_opt_preset_cfg.get('GPP_LEVERAGE_WEIGHT', '-')}")
+                st.text(f"Bust pen:  {_opt_preset_cfg.get('GPP_BUST_PENALTY', '-')}")
+            with _w_col3:
+                st.caption("**Constraints**")
+                st.text(f"Own pen:   {_opt_preset_cfg.get('GPP_OWN_PENALTY_STRENGTH', '-')}")
+                st.text(f"Efficiency:{_opt_preset_cfg.get('GPP_EFFICIENCY_WEIGHT', '-')}")
+                st.text(f"Ceiling:   {_opt_preset_cfg.get('GPP_MIN_LINEUP_CEILING', '-')}")
 
     if is_pga and contest_label == "PGA GPP":
         st.info("Full tournament lineup (4 rounds). Projections use multi-day model.")
 
     showdown_teams: list[str] = []
+    _is_showdown_preset = optimizer_preset_name in ("Showdown GPP", "Cash Showdown")
     is_nba_showdown = (
         not is_pga
-        and (preset.get("slate_type") == "Showdown Captain" or "showdown" in contest_label.lower())
+        and (preset.get("slate_type") == "Showdown Captain"
+             or "showdown" in contest_label.lower()
+             or _is_showdown_preset)
     )
     is_nba_matchup_contest = (
         not is_pga
@@ -413,6 +471,7 @@ def render_lab_tab(sport: str) -> None:
                     lineups_df = _build_lineups(
                         sport, contest_label, num_lineups, lock_list, exclude_list, out_dir,
                         showdown_teams=showdown_teams if showdown_teams else None,
+                        optimizer_preset=optimizer_preset_name,
                     )
                     n_built = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else 0
 
@@ -1258,9 +1317,10 @@ def _fetch_dk_showdown_salaries(away: str, home: str) -> dict:
     return salary_map
 
 
-def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None):
+def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None, optimizer_preset="Custom"):
     from yak_core.config import CONTEST_PRESETS, merge_config
     from yak_core.lineups import build_multiple_lineups_with_exposure, build_player_pool, build_showdown_lineups
+    from yak_core.presets import get_preset
     import re as _re
 
     pool = pd.read_parquet(out_dir / "slate_pool.parquet")
@@ -1271,8 +1331,10 @@ def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, o
         pool = _recheck_pga_withdrawals(pool)
 
     preset = CONTEST_PRESETS.get(contest_label, {})
+    opt_preset = get_preset(optimizer_preset)
     cfg = merge_config({
         **preset,
+        **opt_preset,  # optimizer profile weights override contest preset defaults
         "SPORT": sport.upper(),
         "NUM_LINEUPS": num_lineups,
         "LOCK": lock_list,
