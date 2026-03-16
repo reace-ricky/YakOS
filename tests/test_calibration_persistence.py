@@ -35,9 +35,9 @@ def _clean_config_files(tmp_path, monkeypatch):
 
 def _sample_values():
     return {
-        "proj_weight": 0.50,
-        "upside_weight": 0.30,
-        "boom_weight": 0.20,
+        "proj_weight": 0.25,
+        "upside_weight": 0.35,
+        "boom_weight": 0.40,
         "own_penalty_strength": 1.2,
         "low_own_boost": 0.5,
         "own_neutral_pct": 15,
@@ -62,7 +62,7 @@ class TestActiveConfig:
         # Now returns per-contest-type dict
         gpp = loaded["gpp"]
         assert gpp["name"] == "GPP Working Config"
-        assert gpp["values"]["proj_weight"] == 0.50
+        assert gpp["values"]["proj_weight"] == 0.25
         assert "2026-03-14" in gpp["slates_trained"]
 
     def test_save_preserves_existing_slates(self):
@@ -96,7 +96,7 @@ class TestActiveConfig:
         save_active_config(_sample_values())
         vals = get_active_slider_values()
         assert vals is not None
-        assert vals["proj_weight"] == 0.50
+        assert vals["proj_weight"] == 0.25
 
     def test_get_active_slider_values_none_when_missing(self):
         assert get_active_slider_values() is None
@@ -107,7 +107,7 @@ class TestActiveConfig:
         assert "gpp" in saved
         assert "cash" in saved
         assert "showdown" in saved
-        assert saved["cash"]["values"]["proj_weight"] == 0.50
+        assert saved["cash"]["values"]["proj_weight"] == 0.25
 
     def test_contest_types_independent(self):
         vals_gpp = _sample_values()
@@ -116,7 +116,7 @@ class TestActiveConfig:
         save_active_config(vals_gpp, contest_type="gpp")
         save_active_config(vals_cash, contest_type="cash")
         loaded = load_active_config()
-        assert loaded["gpp"]["values"]["proj_weight"] == 0.50
+        assert loaded["gpp"]["values"]["proj_weight"] == 0.25
         assert loaded["cash"]["values"]["proj_weight"] == 0.70
 
     def test_get_active_slider_values_per_contest_type(self):
@@ -125,7 +125,7 @@ class TestActiveConfig:
         vals_cash["proj_weight"] = 0.80
         save_active_config(vals_gpp, contest_type="gpp")
         save_active_config(vals_cash, contest_type="cash")
-        assert get_active_slider_values(contest_type="gpp")["proj_weight"] == 0.50
+        assert get_active_slider_values(contest_type="gpp")["proj_weight"] == 0.25
         assert get_active_slider_values(contest_type="cash")["proj_weight"] == 0.80
 
 
@@ -148,7 +148,7 @@ class TestConfigHistory:
         append_config_history("apply_recommendations", new, old_values=old)
         history = load_config_history()
         assert "proj_weight" in history[0]["changes"]
-        assert history[0]["changes"]["proj_weight"]["from"] == 0.50
+        assert history[0]["changes"]["proj_weight"]["from"] == 0.25
         assert history[0]["changes"]["proj_weight"]["to"] == 0.60
 
     def test_no_changes_when_identical(self):
@@ -212,21 +212,21 @@ class TestApplyToOptimizer:
         save_active_config(vals)
         apply_config_to_optimizer(vals)
         overrides = load_optimizer_overrides()
-        assert overrides["GPP_PROJ_WEIGHT"] == pytest.approx(0.50)
-        assert overrides["GPP_UPSIDE_WEIGHT"] == pytest.approx(0.30)
-        assert overrides["GPP_BOOM_WEIGHT"] == pytest.approx(0.20)
+        assert overrides["GPP_PROJ_WEIGHT"] == pytest.approx(0.25)
+        assert overrides["GPP_UPSIDE_WEIGHT"] == pytest.approx(0.35)
+        assert overrides["GPP_BOOM_WEIGHT"] == pytest.approx(0.40)
 
     def test_gpp_weights_normalized_non_unit_sum(self):
         vals = _sample_values()
-        vals["proj_weight"] = 5.0
-        vals["upside_weight"] = 3.0
-        vals["boom_weight"] = 2.0
+        vals["proj_weight"] = 2.5
+        vals["upside_weight"] = 3.5
+        vals["boom_weight"] = 4.0
         save_active_config(vals)
         apply_config_to_optimizer(vals)
         overrides = load_optimizer_overrides()
-        assert overrides["GPP_PROJ_WEIGHT"] == pytest.approx(0.50)
-        assert overrides["GPP_UPSIDE_WEIGHT"] == pytest.approx(0.30)
-        assert overrides["GPP_BOOM_WEIGHT"] == pytest.approx(0.20)
+        assert overrides["GPP_PROJ_WEIGHT"] == pytest.approx(0.25)
+        assert overrides["GPP_UPSIDE_WEIGHT"] == pytest.approx(0.35)
+        assert overrides["GPP_BOOM_WEIGHT"] == pytest.approx(0.40)
 
     def test_exposure_converted_to_decimals(self):
         vals = _sample_values()
@@ -264,14 +264,14 @@ class TestApplyToOptimizer:
         apply_config_to_optimizer(vals_cash, contest_type="cash")
         gpp_overrides = load_optimizer_overrides(contest_type="gpp")
         cash_overrides = load_optimizer_overrides(contest_type="cash")
-        assert gpp_overrides["GPP_PROJ_WEIGHT"] == pytest.approx(0.50)
+        assert gpp_overrides["GPP_PROJ_WEIGHT"] == pytest.approx(0.25)
         assert cash_overrides["GPP_PROJ_WEIGHT"] == pytest.approx(0.80)
 
 
 class TestApplyCalibrationOverrides:
     def test_no_overrides_returns_cfg_unchanged(self):
         from yak_core.lineups import apply_calibration_overrides
-        cfg = {"GPP_PROJ_WEIGHT": 0.50, "NUM_LINEUPS": 20}
+        cfg = {"GPP_PROJ_WEIGHT": 0.25, "NUM_LINEUPS": 20}
         result = apply_calibration_overrides(cfg)
         assert result == cfg
 
@@ -285,7 +285,7 @@ class TestApplyCalibrationOverrides:
         save_active_config(vals)
         apply_config_to_optimizer(vals)
 
-        cfg = {"GPP_PROJ_WEIGHT": 0.50, "NUM_LINEUPS": 20}
+        cfg = {"GPP_PROJ_WEIGHT": 0.25, "NUM_LINEUPS": 20}
         result = apply_calibration_overrides(cfg)
         assert result["GPP_PROJ_WEIGHT"] == pytest.approx(0.70)
         assert result["NUM_LINEUPS"] == 20  # non-overridden key preserved
@@ -311,7 +311,7 @@ class TestApplyCalibrationOverrides:
         save_active_config(vals)
         apply_config_to_optimizer(vals)
 
-        cfg = {"GPP_PROJ_WEIGHT": 0.50}
+        cfg = {"GPP_PROJ_WEIGHT": 0.25}
         original_val = cfg["GPP_PROJ_WEIGHT"]
         apply_calibration_overrides(cfg)
         assert cfg["GPP_PROJ_WEIGHT"] == original_val

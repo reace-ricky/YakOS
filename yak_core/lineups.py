@@ -339,9 +339,9 @@ def _add_scores(
     value_weight = float(cfg.get("VALUE_WEIGHT", 0.0))
 
     # ── GPP scoring weights (configurable — tune these during calibration)
-    gpp_proj_w    = float(cfg.get("GPP_PROJ_WEIGHT", 0.50))
-    gpp_upside_w  = float(cfg.get("GPP_UPSIDE_WEIGHT", 0.30))
-    gpp_boom_w    = float(cfg.get("GPP_BOOM_WEIGHT", 0.20))
+    gpp_proj_w    = float(cfg.get("GPP_PROJ_WEIGHT", DEFAULT_CONFIG["GPP_PROJ_WEIGHT"]))
+    gpp_upside_w  = float(cfg.get("GPP_UPSIDE_WEIGHT", DEFAULT_CONFIG["GPP_UPSIDE_WEIGHT"]))
+    gpp_boom_w    = float(cfg.get("GPP_BOOM_WEIGHT", DEFAULT_CONFIG["GPP_BOOM_WEIGHT"]))
     own_penalty_k = float(cfg.get("GPP_OWN_PENALTY_STRENGTH", 1.2))
     own_low_boost = float(cfg.get("GPP_OWN_LOW_BOOST", 0.5))
 

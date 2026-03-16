@@ -200,6 +200,10 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "archetype": "Ceiling Hunter",
         "internal_contest": "MME",
         "CONTEST_TYPE": "gpp",
+        # GPP scoring weights (canonical values — must match DEFAULT_CONFIG)
+        "GPP_PROJ_WEIGHT": 0.25,
+        "GPP_UPSIDE_WEIGHT": 0.35,
+        "GPP_BOOM_WEIGHT": 0.40,
         "projection_style": "ceil",
         "volatility": "high",
         "correlation_mode": "stack",
@@ -241,6 +245,10 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "archetype": "Ceiling Hunter",
         "internal_contest": "GPP",
         "CONTEST_TYPE": "gpp",
+        # GPP scoring weights (canonical values — must match DEFAULT_CONFIG)
+        "GPP_PROJ_WEIGHT": 0.25,
+        "GPP_UPSIDE_WEIGHT": 0.35,
+        "GPP_BOOM_WEIGHT": 0.40,
         "projection_style": "ceil",
         "volatility": "high",
         "correlation_mode": "stack",
@@ -282,6 +290,10 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "archetype": "Ceiling Hunter",
         "internal_contest": "GPP",
         "CONTEST_TYPE": "gpp",
+        # GPP scoring weights (canonical values — must match DEFAULT_CONFIG)
+        "GPP_PROJ_WEIGHT": 0.25,
+        "GPP_UPSIDE_WEIGHT": 0.35,
+        "GPP_BOOM_WEIGHT": 0.40,
         "projection_style": "ceil",
         "volatility": "high",
         "correlation_mode": "stack",
