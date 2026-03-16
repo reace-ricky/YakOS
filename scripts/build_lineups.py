@@ -157,6 +157,13 @@ def build_lineups(
     except Exception as exc:
         print(f"[build_lineups] WARNING: injury monitor step failed: {exc}")
 
+    # Pop Catalyst: score situational upside signals
+    try:
+        from yak_core.pop_catalyst import compute_pop_catalyst
+        pool = compute_pop_catalyst(pool)
+    except Exception as exc:
+        print(f"[build_lineups] compute_pop_catalyst failed (non-fatal): {exc}")
+
     # Ensure valid ownership data before building lineups
     pool = ensure_ownership(pool, sport=sport)
 

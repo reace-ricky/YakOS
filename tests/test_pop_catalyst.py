@@ -394,3 +394,30 @@ class TestEdgeIntegration:
             label = hendricks.iloc[0]["edge_label"]
             # Hendricks should have rocket emoji from pop catalyst
             assert "🚀" in label or hendricks.iloc[0]["pop_catalyst_score"] < 0.15
+
+
+# ---------------------------------------------------------------------------
+# Integration: injury_bump_fp > 1.5 produces non-zero pop_catalyst_score
+# ---------------------------------------------------------------------------
+
+class TestInjuryBumpProducesNonZeroScore:
+    """Verify that a pool with injury_bump_fp > 1.5 gets non-zero pop_catalyst_score."""
+
+    def test_injury_bump_above_threshold_produces_nonzero_score(self):
+        pool = pd.DataFrame({
+            "player_name": ["Bumped Player", "Normal Player"],
+            "salary": [5000, 7000],
+            "proj": [18.0, 25.0],
+            "injury_bump_fp": [3.5, 0.0],
+            "rolling_fp_5": [20.0, 24.0],
+            "rolling_fp_10": [17.0, 25.0],
+            "rolling_min_5": [28.0, 32.0],
+            "rolling_min_10": [24.0, 32.0],
+            "vegas_total": [225.0, 225.0],
+            "vegas_spread": [2.0, 2.0],
+        })
+        result = compute_pop_catalyst(pool)
+        bumped = result[result["player_name"] == "Bumped Player"].iloc[0]
+        assert bumped["pop_catalyst_score"] > 0.0, (
+            "Player with injury_bump_fp=3.5 (>1.5) must have non-zero pop_catalyst_score"
+        )

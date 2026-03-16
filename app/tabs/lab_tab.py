@@ -621,6 +621,13 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
     except Exception as exc:
         print(f"[_load_nba_pool] apply_minutes_gap_redistribution failed (non-fatal): {exc}")
 
+    # ── Pop Catalyst: score situational upside signals ──
+    try:
+        from yak_core.pop_catalyst import compute_pop_catalyst
+        pool = compute_pop_catalyst(pool)
+    except Exception as exc:
+        print(f"[_load_nba_pool] compute_pop_catalyst failed (non-fatal): {exc}")
+
     # floor/ceil: proj_model sets these from rolling data; only fill gaps
     # Uses salary-tier spread multiplier (same formula as old _enrich_pool)
     if "floor" not in pool.columns or pool["floor"].isna().all():
