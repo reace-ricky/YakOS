@@ -1162,18 +1162,33 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
     _edge_p50 = float(np.percentile(_edge.dropna(), 50)) if len(_edge.dropna()) > 2 else 0.5
 
     _pick_cols = ["player_name", "salary", "proj", _own_col, "edge", "value"]
-    # Add proj_minutes and sim90th if available
+    # Add proj_minutes, sim90th, ceil if available
     if "proj_minutes" in df.columns:
         _pick_cols.append("proj_minutes")
     if "sim90th" in df.columns:
         _pick_cols.append("sim90th")
-    # Core: premium salary, high ownership consensus, above-median edge
-    core = df[(_sal >= sal_med) & (_own >= own_med) & (_edge >= _edge_p50)][_pick_cols].rename(columns={_own_col: "ownership"})
-    # Leverage: premium salary, under-owned, above-median edge (market misprice)
-    leverage = df[(_sal >= sal_med) & (_own < own_med) & (_edge >= _edge_p50)][_pick_cols].rename(columns={_own_col: "ownership"})
-    # Value: cheaper players with decent pts/$1K
+    if "ceil" in df.columns:
+        _pick_cols.append("ceil")
+
+    # ── Core: high-salary studs with the best ceilings ──
+    sal_p75 = float(np.percentile(_sal.dropna(), 75)) if len(_sal.dropna()) > 2 else 8000.0
+    _ceil = _safe_col(df, "ceil")
+    if _ceil.sum() == 0 and "sim90th" in df.columns:
+        _ceil = _safe_col(df, "sim90th")
+    if _ceil.sum() == 0:
+        _ceil = _proj * 1.3
+    core = df[_sal >= sal_p75][_pick_cols].copy()
+    core["_ceil"] = _ceil[core.index]
+    core = core.rename(columns={_own_col: "ownership"})
+
+    # ── Leverage: above 60th pctl salary, under-owned, high edge ──
+    sal_p60 = float(np.percentile(_sal.dropna(), 60)) if len(_sal.dropna()) > 2 else 6500.0
+    leverage = df[(_sal >= sal_p60) & (_own < own_med) & (_edge >= _edge_p50)][_pick_cols].rename(columns={_own_col: "ownership"})
+
+    # ── Value: below median salary, sorted by pts/$1K ──
     value = df[(_sal < sal_med) & (_value > 0)][_pick_cols].rename(columns={_own_col: "ownership"})
-    # Fade: bottom 20% edge, OR heavily owned but below-median edge (chalk traps)
+
+    # ── Fade: bottom 20% edge, OR chalk traps ──
     fade = df[
         (_edge <= _edge_p20) | ((_own >= own_med * 1.5) & (_edge < _edge_p50))
     ][_pick_cols].rename(columns={_own_col: "ownership"})
@@ -1183,10 +1198,16 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
     def _to_records_asc(frame, n=5):
         """Fade candidates: worst edge first."""
         return frame.sort_values("edge", ascending=True).head(n).to_dict(orient="records")
+    def _to_records_core(frame, n=5):
+        if "_ceil" in frame.columns:
+            return frame.sort_values("_ceil", ascending=False).drop(columns=["_ceil"]).head(n).to_dict(orient="records")
+        return frame.sort_values("edge", ascending=False).head(n).to_dict(orient="records")
+    def _to_records_value(frame, n=5):
+        return frame.sort_values("value", ascending=False).head(n).to_dict(orient="records")
     return {
-        "core_plays": _to_records(core, 5),
-        "leverage_plays": _to_records(leverage, 5),
-        "value_plays": _to_records(value, 5),
+        "core_plays": _to_records_core(core, 5),
+        "leverage_plays": _to_records(leverage, 3),
+        "value_plays": _to_records_value(value, 5),
         "fade_candidates": _to_records_asc(fade, 5),
     }
 
