@@ -195,6 +195,116 @@ def _get_sim_col(df: pd.DataFrame, pctile: str) -> pd.Series:
     return pd.Series(0.0, index=df.index)
 
 
+def _add_pga_scores(
+    df: pd.DataFrame,
+    cfg: Dict[str, Any],
+) -> pd.DataFrame:
+    """PGA-specific scoring using derived signals from pga_pool.py.
+
+    PGA presets use these weight keys:
+        PROJ_WEIGHT, CUT_EQUITY_WEIGHT, BALL_STRIKING_WEIGHT,
+        COURSE_FIT_WEIGHT, WAVE_ADVANTAGE_WEIGHT, UPSIDE_WEIGHT, BOOM_WEIGHT,
+        OWN_PENALTY_STRENGTH, LEVERAGE_WEIGHT, BUST_PENALTY
+    """
+    proj_w      = float(cfg.get("PROJ_WEIGHT", 0.30))
+    cut_eq_w    = float(cfg.get("CUT_EQUITY_WEIGHT", 0.20))
+    bs_w        = float(cfg.get("BALL_STRIKING_WEIGHT", 0.10))
+    cf_w        = float(cfg.get("COURSE_FIT_WEIGHT", 0.15))
+    wave_w      = float(cfg.get("WAVE_ADVANTAGE_WEIGHT", 0.05))
+    upside_w    = float(cfg.get("UPSIDE_WEIGHT", 0.25))
+    boom_w      = float(cfg.get("BOOM_WEIGHT", 0.15))
+    own_pen_k   = float(cfg.get("OWN_PENALTY_STRENGTH", 0.8))
+    leverage_w  = float(cfg.get("LEVERAGE_WEIGHT", 0.5))
+    bust_pen    = float(cfg.get("BUST_PENALTY", 0.3))
+
+    # Helper: normalise a series 0-1 within the slate
+    def _norm01(s: pd.Series) -> pd.Series:
+        smin, smax = float(s.min()), float(s.max())
+        rng = smax - smin
+        if rng < 1e-9:
+            return pd.Series(0.0, index=s.index)
+        return ((s - smin) / rng).clip(0.0, 1.0)
+
+    # -- Base projection component
+    proj = pd.to_numeric(df["proj"], errors="coerce").fillna(0)
+
+    # -- Cut equity signal (0-1)
+    cut_equity = pd.to_numeric(df.get("cut_equity", 0), errors="coerce").fillna(0.5)
+
+    # -- Ball-striking (z-scored, normalise to 0-1 for scoring)
+    ball_striking = _norm01(pd.to_numeric(df.get("ball_striking", 0), errors="coerce").fillna(0))
+
+    # -- Course fit (z-scored, normalise to 0-1)
+    course_fit = _norm01(pd.to_numeric(df.get("course_fit_z", 0), errors="coerce").fillna(0))
+
+    # -- Wave advantage
+    wave_adv = _norm01(pd.to_numeric(df.get("wave_advantage", 0), errors="coerce").fillna(0))
+
+    # -- Upside: ceiling_proxy (win%*3 + top5%*2 + top10%), normalised
+    ceiling_proxy = _norm01(pd.to_numeric(df.get("ceiling_proxy", 0), errors="coerce").fillna(0))
+
+    # -- Boom: use ceil - proj spread, normalised
+    if "ceil" in df.columns:
+        boom_raw = (pd.to_numeric(df["ceil"], errors="coerce").fillna(0) - proj).clip(lower=0)
+    else:
+        boom_raw = proj * 0.20
+    boom = _norm01(boom_raw)
+
+    # -- Ownership penalty (log-based, same principle as NBA)
+    own = pd.to_numeric(df.get("own_pct", df.get("ownership", 0)), errors="coerce").fillna(0).clip(lower=0.001)
+    # Scale to fraction if percentages
+    if own.max() > 1:
+        own = own / 100.0
+    own = own.clip(lower=0.001)
+    own_adj = pd.Series(0.0, index=df.index)
+    if own_pen_k > 0:
+        own_adj = -own_pen_k * np.log(own / 0.15)
+
+    # -- Leverage: low-ownership boost
+    leverage_bonus = pd.Series(0.0, index=df.index)
+    if leverage_w > 0:
+        leverage_bonus = leverage_w * _norm01((0.15 - own).clip(lower=0))
+
+    # -- Bust penalty: penalise low cut probability
+    bust_adj = pd.Series(0.0, index=df.index)
+    if bust_pen > 0:
+        miss_cut = (1.0 - cut_equity).clip(lower=0)
+        bust_adj = -bust_pen * _norm01(miss_cut)
+
+    # -- GPP score: weighted combination of all PGA signals
+    df["gpp_score"] = (
+        proj * proj_w
+        + _norm01(cut_equity) * cut_eq_w * proj.mean()   # scale signal to proj magnitude
+        + ball_striking * bs_w * proj.mean()
+        + course_fit * cf_w * proj.mean()
+        + wave_adv * wave_w * proj.mean()
+        + ceiling_proxy * upside_w * proj.mean()
+        + boom * boom_w * proj.mean()
+        + own_adj
+        + leverage_bonus * proj.mean()
+        + bust_adj * proj.mean()
+    )
+
+    # -- Cash score: projection-heavy with cut equity floor
+    cash_proj_w = float(cfg.get("CASH_PROJ_WEIGHT", proj_w))
+    cash_floor_w = float(cfg.get("CASH_FLOOR_WEIGHT", cut_eq_w))
+    if "floor" in df.columns:
+        df["cash_score"] = (
+            cash_floor_w * pd.to_numeric(df["floor"], errors="coerce").fillna(0)
+            + cash_proj_w * proj
+            + cut_eq_w * _norm01(cut_equity) * proj.mean()
+            + bs_w * ball_striking * proj.mean()
+        )
+    else:
+        df["cash_score"] = proj
+
+    # -- Value & stack scores
+    df["value_score"] = proj / (pd.to_numeric(df["salary"], errors="coerce").fillna(1) / 1000.0 + 1e-9)
+    df["stack_score"] = 0.0  # PGA has no game stacking
+
+    return df
+
+
 def _add_scores(
     df: pd.DataFrame,
     cfg: Dict[str, Any],
@@ -218,6 +328,12 @@ def _add_scores(
         pop_catalyst_score, bust_prob (penalty), fp_efficiency.
         Each normalised 0-1 within slate before applying weight.
     """
+    # ── PGA-specific scoring path ─────────────────────────────────────────────
+    # PGA presets use different weight keys (PROJ_WEIGHT, CUT_EQUITY_WEIGHT, etc.)
+    # to score players via derived signals computed in pga_pool.py.
+    if cfg.get("SPORT", "").upper() == "PGA":
+        return _add_pga_scores(df, cfg)
+
     own_weight   = float(cfg.get("OWN_WEIGHT",   0.0))
     stack_weight = float(cfg.get("STACK_WEIGHT", 0.0))
     value_weight = float(cfg.get("VALUE_WEIGHT", 0.0))
