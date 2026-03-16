@@ -1,11 +1,10 @@
 {
   "contest": "GPP Main",
   "sport": "NBA",
-  "num_lineups": 6,
-  "built_at": "2026-03-15T23:54:59.986170+00:00",
+  "num_lineups": 5,
+  "built_at": "2026-03-16T01:17:29.410844+00:00",
   "lock": [],
   "exclude": [
-    "Kyle Lowry",
-    "Nicolas Claxton"
+    "Kyle Lowry"
   ]
 }
