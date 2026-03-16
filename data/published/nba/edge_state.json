@@ -3,31 +3,31 @@
   "date": "2026-03-16",
   "core_names": [
     "Josh Giddey",
-    "Victor Wembanyama",
     "Luka Doncic",
-    "Jalen Johnson",
-    "Amen Thompson"
+    "Victor Wembanyama",
+    "Amen Thompson",
+    "Deni Avdija"
   ],
   "leverage_names": [
     "Gui Santos",
-    "Devin Booker",
+    "Neemias Queta",
+    "Ziaire Williams",
     "Grayson Allen",
-    "Sam Hauser",
-    "Toumani Camara"
+    "Devin Booker"
   ],
   "value_names": [
     "Gary Payton II",
-    "Tyler Burton",
-    "Josh Minott",
     "Tre Johnson",
-    "Justin Champagnie"
+    "Josh Minott",
+    "Justin Champagnie",
+    "Tyler Burton"
   ],
   "fade_names": [
+    "Max Shulga",
+    "Amari Williams",
     "Yang Hansen",
     "AJ Johnson",
-    "Amari Williams",
-    "Max Shulga",
-    "Jordan Hawkins"
+    "Tyler Smith"
   ],
   "calibration_slates": 15
 }
