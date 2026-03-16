@@ -23,28 +23,39 @@ import pandas as pd
 
 _COL_ALIASES = {
     "player": "Player",
+    "player (team, position)": "Player",
+    "player (team,position)": "Player",
     "rest": "Rest",
     "opp": "Opp",
+    "opponent": "Opp",
     "dvp": "DvP",
+    "dvp rank": "DvP",
     "spread": "Spread",
     "o/u": "O/U",
     "ou": "O/U",
     "over/under": "O/U",
+    "over_under": "O/U",
     "pred score": "Pred Score",
     "pred_score": "Pred Score",
     "predscore": "Pred Score",
+    "predicted score": "Pred Score",
     "proj rank": "Proj Rank",
     "proj_rank": "Proj Rank",
+    "projected rank": "Proj Rank",
     "s rank": "S Rank",
     "s_rank": "S Rank",
+    "salary rank": "S Rank",
     "rank diff": "Rank Diff",
     "rank_diff": "Rank Diff",
     "rankdiff": "Rank Diff",
+    "rank difference": "Rank Diff",
     "proj pts": "Proj Pts",
     "proj_pts": "Proj Pts",
     "projpts": "Proj Pts",
+    "projected points": "Proj Pts",
     "salary": "Salary",
     "cpp": "CPP",
+    "cost per point": "CPP",
 }
 
 
@@ -53,7 +64,12 @@ _COL_ALIASES = {
 # ---------------------------------------------------------------------------
 
 def _normalise_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Map column names to canonical form using case-insensitive aliases."""
+    """Map column names to canonical form using case-insensitive aliases.
+
+    After exact alias matching, applies a prefix-based fallback for critical
+    columns that may appear with extra parenthetical info in FP exports
+    (e.g. ``PLAYER (TEAM, POSITION)``).
+    """
     rename_map = {}
     for col in df.columns:
         key = col.strip().lower()
@@ -63,6 +79,22 @@ def _normalise_columns(df: pd.DataFrame) -> pd.DataFrame:
                 rename_map[col] = canonical
     if rename_map:
         df = df.rename(columns=rename_map)
+
+    # Prefix-based fallback for critical columns that may have extra suffixes
+    _PREFIX_FALLBACKS = {
+        "player": "Player",
+        "dvp": "DvP",
+        "spread": "Spread",
+        "proj": "Proj Pts",
+        "pred": "Pred Score",
+    }
+    for prefix, canonical in _PREFIX_FALLBACKS.items():
+        if canonical not in df.columns:
+            for col in df.columns:
+                if col.strip().lower().startswith(prefix):
+                    df = df.rename(columns={col: canonical})
+                    break
+
     return df
 
 

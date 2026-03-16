@@ -92,6 +92,57 @@ class TestParseFpCheatsheet:
         assert df.loc[0, "player_name"] == "LeBron James"
         assert df.loc[0, "over_under"] == 228.5
 
+    def test_player_team_position_header(self):
+        """FP exports may use 'PLAYER (TEAM, POSITION)' as the header."""
+        csv = _csv_bytes(
+            '"PLAYER (TEAM, POSITION)",Rest,DvP\n'
+            '"LeBron James (LAL - SF)",1,22nd\n'
+        )
+        df = parse_fp_cheatsheet(csv)
+        assert len(df) == 1
+        assert df.loc[0, "player_name"] == "LeBron James"
+        assert df.loc[0, "team"] == "LAL"
+        assert df.loc[0, "dvp_rank"] == 22.0
+
+    def test_player_team_position_no_space(self):
+        """Variant without space after comma: 'PLAYER (TEAM,POSITION)'."""
+        csv = _csv_bytes(
+            "PLAYER (TEAM,POSITION),Rest\n"
+            "Stephen Curry (GSW - PG),2\n"
+        )
+        df = parse_fp_cheatsheet(csv)
+        assert len(df) == 1
+        assert df.loc[0, "player_name"] == "Stephen Curry"
+
+    def test_dvp_rank_alias(self):
+        """'DVP RANK' header should map to DvP."""
+        csv = _csv_bytes(
+            "Player,DVP RANK\n"
+            "LeBron James (LAL - SF),22nd\n"
+        )
+        df = parse_fp_cheatsheet(csv)
+        assert df.loc[0, "dvp_rank"] == 22.0
+
+    def test_prefix_fallback_for_player(self):
+        """Unknown player-prefixed column should still be detected."""
+        csv = _csv_bytes(
+            "Player (Some Other Format),Rest\n"
+            "LeBron James (LAL - SF),1\n"
+        )
+        df = parse_fp_cheatsheet(csv)
+        assert len(df) == 1
+        assert df.loc[0, "player_name"] == "LeBron James"
+
+    def test_additional_aliases(self):
+        """New aliases: over_under, projected points, opponent, etc."""
+        csv = _csv_bytes(
+            "Player,over_under,projected points,opponent,cost per point\n"
+            "LeBron James (LAL - SF),228.5,48.2,@GSW,4.7\n"
+        )
+        df = parse_fp_cheatsheet(csv)
+        assert df.loc[0, "over_under"] == 228.5
+        assert df.loc[0, "fp_proj_pts"] == 48.2
+
     def test_missing_player_column_raises(self):
         bad_csv = _csv_bytes("Name,Rest\nFoo,1\n")
         with pytest.raises(ValueError, match="Player"):
