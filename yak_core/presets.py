@@ -48,7 +48,7 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "GPP_VALUE_WEIGHT": 0.05,
             "GPP_REST_WEIGHT": 0.03,
             # Optimizer constraints
-            "GPP_MIN_LINEUP_CEILING": 350,
+            "GPP_MIN_LINEUP_CEILING": 0,  # disabled — scoring formula chases ceiling naturally
             "GPP_FORCE_GAME_STACK": True,
             "GPP_MIN_TEAM_STACK": 2,
             "GPP_FORCE_BRING_BACK": True,
@@ -95,7 +95,7 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "GPP_VALUE_WEIGHT": 0.05,
             "GPP_REST_WEIGHT": 0.03,
             # Optimizer constraints
-            "GPP_MIN_LINEUP_CEILING": 350,
+            "GPP_MIN_LINEUP_CEILING": 0,  # disabled — scoring formula chases ceiling naturally
             "GPP_FORCE_GAME_STACK": True,
             "GPP_MIN_TEAM_STACK": 2,
             "GPP_FORCE_BRING_BACK": True,
