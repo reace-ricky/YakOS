@@ -87,16 +87,18 @@ def render_lab_tab(sport: str) -> None:
                 if is_pga:
                     pool, meta = _load_pga_pool(api_key, slate_date, pga_slate)
                 else:
-                    pool, meta = _load_nba_pool(api_key, slate_date)
-                    # Auto-merge saved RG file if it exists (from prior upload)
+                    # RG merge now happens INSIDE _load_nba_pool() before
+                    # the injury cascade, so cascade bumps are not overwritten.
                     _rg_auto_path = os.path.join(
                         str(Path(__file__).resolve().parent.parent),
                         "data", "rg_uploads", f"rg_{slate_date}.csv"
                     )
+                    pool, meta = _load_nba_pool(
+                        api_key, slate_date,
+                        rg_file=rg_file, rg_auto_path=_rg_auto_path,
+                    )
+                    # Save uploaded RG file for auto-reload next time
                     if rg_file is not None:
-                        pool = _merge_rg_csv(pool, rg_file)
-                        meta["proj_source"] = "rotogrinders+tank01"
-                        # Save for auto-reload next time
                         try:
                             _rg_save_dir = os.path.join(
                                 str(Path(__file__).resolve().parent.parent),
@@ -124,24 +126,6 @@ def render_lab_tab(sport: str) -> None:
                                     _f.write(rg_file.read())
                         except Exception:
                             pass
-                    elif os.path.isfile(_rg_auto_path):
-                        try:
-                            pool = _merge_rg_csv(pool, _rg_auto_path)
-                            meta["proj_source"] = "rotogrinders+tank01 (saved)"
-                        except Exception:
-                            pass
-                    else:
-                        # Fallback: check rg_archive for today's file
-                        _rg_archive_fallback = os.path.join(
-                            str(Path(__file__).resolve().parent.parent),
-                            "data", "rg_archive", "nba", f"rg_{slate_date}.csv"
-                        )
-                        if os.path.isfile(_rg_archive_fallback):
-                            try:
-                                pool = _merge_rg_csv(pool, _rg_archive_fallback)
-                                meta["proj_source"] = "rotogrinders (archive)"
-                            except Exception:
-                                pass
 
                     # After RG merge, drop players with no RG projection.
                     # The RG file defines the real player pool — unmatched
@@ -162,7 +146,11 @@ def render_lab_tab(sport: str) -> None:
                     if corrections.get("n_slates", 0) > 0:
                         pool = apply_corrections(pool, corrections, sport="NBA")
 
-                    # Process FantasyPros Cheatsheet if uploaded
+                    # Process FantasyPros Cheatsheet if uploaded (or auto-reload saved file)
+                    _fp_auto_path = os.path.join(
+                        str(Path(__file__).resolve().parent.parent),
+                        "data", "fp_uploads", f"fp_{slate_date}.csv"
+                    )
                     if fp_file is not None:
                         try:
                             from yak_core.fp_cheatsheet import (
@@ -186,6 +174,31 @@ def render_lab_tab(sport: str) -> None:
                                 st.dataframe(fp_raw[[c for c in preview_cols if c in fp_raw.columns]].head(20))
                         except Exception as e:
                             st.warning(f"FP Cheatsheet upload failed: {e}")
+                        # Save FP cheatsheet for auto-reload next time
+                        try:
+                            _fp_save_dir = os.path.join(
+                                str(Path(__file__).resolve().parent.parent),
+                                "data", "fp_uploads"
+                            )
+                            os.makedirs(_fp_save_dir, exist_ok=True)
+                            fp_file.seek(0)
+                            with open(_fp_auto_path, "wb") as _f:
+                                _f.write(fp_file.read())
+                        except Exception:
+                            pass
+                    elif os.path.isfile(_fp_auto_path):
+                        try:
+                            from yak_core.fp_cheatsheet import (
+                                parse_fp_cheatsheet,
+                                compute_cheatsheet_signals,
+                                merge_cheatsheet_into_pool,
+                            )
+                            fp_raw = parse_fp_cheatsheet(_fp_auto_path)
+                            fp_signals = compute_cheatsheet_signals(fp_raw)
+                            pool = merge_cheatsheet_into_pool(pool, fp_signals)
+                            st.info(f"FP Cheatsheet auto-loaded from saved file ({slate_date})")
+                        except Exception as e:
+                            print(f"[render_lab_tab] FP cheatsheet auto-reload failed: {e}")
 
                 try:
                     from yak_core.sim_sandbox import score_player_breakout
@@ -652,7 +665,7 @@ def _get_secret(key: str) -> str:
         return ""
 
 
-def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
+def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=None) -> tuple:
     import requests
     from yak_core.config import DEFAULT_CONFIG, DK_LINEUP_SIZE, DK_POS_SLOTS, SALARY_CAP, merge_config
     from yak_core.live import (
@@ -728,6 +741,37 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
         if "proj_minutes" not in pool.columns:
             pool["proj_minutes"] = 0.0
 
+    # ── RG merge: apply RotoGrinders projections as base BEFORE cascade ──
+    # This ensures cascade bumps are computed on top of RG FPTS and not
+    # overwritten by a post-hoc merge.
+    _rg_source_used = None
+    if rg_file is not None:
+        try:
+            pool = _merge_rg_csv(pool, rg_file)
+            _rg_source_used = "rotogrinders+tank01"
+            if hasattr(rg_file, "seek"):
+                rg_file.seek(0)
+        except Exception as exc:
+            print(f"[_load_nba_pool] RG merge (uploaded) failed (non-fatal): {exc}")
+    elif rg_auto_path and os.path.isfile(rg_auto_path):
+        try:
+            pool = _merge_rg_csv(pool, rg_auto_path)
+            _rg_source_used = "rotogrinders+tank01 (saved)"
+        except Exception as exc:
+            print(f"[_load_nba_pool] RG merge (saved) failed (non-fatal): {exc}")
+    else:
+        # Fallback: check rg_archive for today's file
+        _rg_archive_fallback = os.path.join(
+            str(Path(__file__).resolve().parent.parent),
+            "data", "rg_archive", "nba", f"rg_{slate_date}.csv"
+        )
+        if os.path.isfile(_rg_archive_fallback):
+            try:
+                pool = _merge_rg_csv(pool, _rg_archive_fallback)
+                _rg_source_used = "rotogrinders (archive)"
+            except Exception as exc:
+                print(f"[_load_nba_pool] RG merge (archive) failed (non-fatal): {exc}")
+
     # ── Cross-reference Tank01 injury list to catch OUT players whose DFS
     #    entry lacks an injuryStatus (e.g. Jarrett Allen still on slate but OUT).
     try:
@@ -795,8 +839,9 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
         _proj = pd.to_numeric(pool.get("proj", 0), errors="coerce").fillna(0).clip(lower=0)
         pool["ceil"] = (_proj * (1.0 + _spread_mult)).round(2)
 
-    # NOTE: Calibration corrections are applied in render_lab_tab() AFTER
-    # the RG merge so they are not overwritten by raw RG FPTS values.
+    # NOTE: RG merge now runs inside _load_nba_pool() BEFORE the injury
+    # cascade, so cascade bumps are computed on top of RG FPTS.  Calibration
+    # corrections are still applied in render_lab_tab() after pool load.
 
     try:
         from yak_core.ownership_guard import ensure_ownership
@@ -909,7 +954,7 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
     meta = {
         "sport": "NBA", "site": "DK", "date": slate_date,
         "salary_cap": SALARY_CAP, "roster_slots": DK_POS_SLOTS, "lineup_size": DK_LINEUP_SIZE,
-        "pool_size": len(pool), "proj_source": cfg.get("PROJ_SOURCE", "salary_implied"),
+        "pool_size": len(pool), "proj_source": _rg_source_used or cfg.get("PROJ_SOURCE", "salary_implied"),
         "matchups": matchups,
     }
     return pool, meta
@@ -1146,18 +1191,33 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
     _edge_p50 = float(np.percentile(_edge.dropna(), 50)) if len(_edge.dropna()) > 2 else 0.5
 
     _pick_cols = ["player_name", "salary", "proj", _own_col, "edge", "value"]
-    # Add proj_minutes and sim90th if available
+    # Add proj_minutes, sim90th, ceil if available
     if "proj_minutes" in df.columns:
         _pick_cols.append("proj_minutes")
     if "sim90th" in df.columns:
         _pick_cols.append("sim90th")
-    # Core: premium salary, high ownership consensus, above-median edge
-    core = df[(_sal >= sal_med) & (_own >= own_med) & (_edge >= _edge_p50)][_pick_cols].rename(columns={_own_col: "ownership"})
-    # Leverage: premium salary, under-owned, above-median edge (market misprice)
-    leverage = df[(_sal >= sal_med) & (_own < own_med) & (_edge >= _edge_p50)][_pick_cols].rename(columns={_own_col: "ownership"})
-    # Value: cheaper players with decent pts/$1K
+    if "ceil" in df.columns:
+        _pick_cols.append("ceil")
+
+    # ── Core: high-salary studs with the best ceilings ──
+    sal_p75 = float(np.percentile(_sal.dropna(), 75)) if len(_sal.dropna()) > 2 else 8000.0
+    _ceil = _safe_col(df, "ceil")
+    if _ceil.sum() == 0 and "sim90th" in df.columns:
+        _ceil = _safe_col(df, "sim90th")
+    if _ceil.sum() == 0:
+        _ceil = _proj * 1.3
+    core = df[_sal >= sal_p75][_pick_cols].copy()
+    core["_ceil"] = _ceil[core.index]
+    core = core.rename(columns={_own_col: "ownership"})
+
+    # ── Leverage: above 60th pctl salary, under-owned, high edge ──
+    sal_p60 = float(np.percentile(_sal.dropna(), 60)) if len(_sal.dropna()) > 2 else 6500.0
+    leverage = df[(_sal >= sal_p60) & (_own < own_med) & (_edge >= _edge_p50)][_pick_cols].rename(columns={_own_col: "ownership"})
+
+    # ── Value: below median salary, sorted by pts/$1K ──
     value = df[(_sal < sal_med) & (_value > 0)][_pick_cols].rename(columns={_own_col: "ownership"})
-    # Fade: bottom 20% edge, OR heavily owned but below-median edge (chalk traps)
+
+    # ── Fade: bottom 20% edge, OR chalk traps ──
     fade = df[
         (_edge <= _edge_p20) | ((_own >= own_med * 1.5) & (_edge < _edge_p50))
     ][_pick_cols].rename(columns={_own_col: "ownership"})
@@ -1167,10 +1227,16 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
     def _to_records_asc(frame, n=5):
         """Fade candidates: worst edge first."""
         return frame.sort_values("edge", ascending=True).head(n).to_dict(orient="records")
+    def _to_records_core(frame, n=5):
+        if "_ceil" in frame.columns:
+            return frame.sort_values("_ceil", ascending=False).drop(columns=["_ceil"]).head(n).to_dict(orient="records")
+        return frame.sort_values("edge", ascending=False).head(n).to_dict(orient="records")
+    def _to_records_value(frame, n=5):
+        return frame.sort_values("value", ascending=False).head(n).to_dict(orient="records")
     return {
-        "core_plays": _to_records(core, 5),
-        "leverage_plays": _to_records(leverage, 5),
-        "value_plays": _to_records(value, 5),
+        "core_plays": _to_records_core(core, 5),
+        "leverage_plays": _to_records(leverage, 3),
+        "value_plays": _to_records_value(value, 5),
         "fade_candidates": _to_records_asc(fade, 5),
     }
 

@@ -948,9 +948,14 @@ def _build_one_lineup(
                 )
 
     # Minimum lineup ceiling constraint (GPP only)
+    # Use the same ceiling values as the objective: gpp_ceil_score when in
+    # ceiling mode (SIM99TH), otherwise fall back to ceil → proj.
     min_ceil = (gc or {}).get("min_lineup_ceiling", 0)
     if min_ceil and min_ceil > 0:
-        ceil_vals_lp = [float(p.get("ceil", p.get("proj", 0))) for p in players]
+        ceil_vals_lp = [
+            float(p.get("gpp_ceil_score", p.get("ceil", p.get("proj", 0))))
+            for p in players
+        ]
         if max(ceil_vals_lp) > 0:
             prob += (
                 pulp.lpSum(
@@ -1104,33 +1109,21 @@ def build_multiple_lineups_with_exposure(
         if removed > 0:
             print(f"[Minutes filter] Removed {removed} players below {min_minutes} min")
 
-    players = player_pool.to_dict("records")
-    n = len(players)
+    # ── MIN_PROJ_FLOOR pool filter ───────────────────────────────────────────
+    # Remove players whose standard projection is too low to contribute to a
+    # competitive lineup.  Prevents inflated SIM99TH tails on deep-bench
+    # players from pulling the optimizer toward unplayable rosters.
+    min_proj_floor = float(cfg.get("GPP_MIN_PROJ_FLOOR", 0))
+    if min_proj_floor > 0 and "proj" in player_pool.columns:
+        pre_filter = len(player_pool)
+        below_proj = pd.to_numeric(player_pool["proj"], errors="coerce").fillna(0) < min_proj_floor
+        locked = player_pool["player_name"].isin(lock_names_set)
+        keep_mask = ~below_proj | locked
+        player_pool = player_pool[keep_mask].reset_index(drop=True)
+        removed = pre_filter - len(player_pool)
+        if removed > 0:
+            print(f"[Proj floor] Removed {removed} players with proj < {min_proj_floor:.0f}")
 
-    # ── GPP ceiling objective ────────────────────────────────────────────────
-    score_col = "cash_score" if is_cash else "gpp_score"
-    if is_gpp and gpp_objective == "ceiling":
-        # Build ceiling score column from best available sim data
-        _s99 = _get_sim_col(player_pool, "99")
-        _s95 = _get_sim_col(player_pool, "95")
-        _s90 = _get_sim_col(player_pool, "90")
-        _s85 = _get_sim_col(player_pool, "85")
-
-        if (_s99 > 0).any():
-            ceil_base = _s99
-        elif (_s95 > 0).any():
-            ceil_base = _s95
-        elif (_s90 > 0).any():
-            ceil_base = _s90
-        elif (_s85 > 0).any():
-            ceil_base = _s85
-        elif "ceil" in player_pool.columns:
-            ceil_base = pd.to_numeric(player_pool["ceil"], errors="coerce").fillna(player_pool["proj"] * 1.3)
-        else:
-            ceil_base = player_pool["proj"] * 1.3
-
-        # Fill zeros with fallback
-        ceil_base = ceil_base.where(ceil_base > 0, player_pool["proj"] * 1.3)
         player_pool["gpp_ceil_score"] = ceil_base
         score_col = "gpp_ceil_score"
         # Rebuild players list since we added a column
@@ -1364,7 +1357,7 @@ def build_multiple_lineups_with_exposure(
         selected_indices = []
         for player, slot in result:
             selected_indices.append(name_to_idx[player["player_name"]])
-            lineup_rows.append({
+            row_dict = {
                 "lineup_index": lineup_num,
                 "slot": slot,
                 "player_name": player["player_name"],
@@ -1378,7 +1371,11 @@ def build_multiple_lineups_with_exposure(
                 "gpp_score": player.get("gpp_score", 0),
                 "cash_score": player.get("cash_score", 0),
                 "gpp_fallback": _gpp_fallback,
-            })
+            }
+            # Include ceiling score when in ceiling objective mode
+            if "gpp_ceil_score" in player:
+                row_dict["gpp_ceil_score"] = player["gpp_ceil_score"]
+            lineup_rows.append(row_dict)
 
         lineups.append(lineup_rows)
 
@@ -1464,9 +1461,11 @@ def build_multiple_lineups_with_exposure(
 
     # ── Ceiling floor safeguard (v10) ─────────────────────────────────────
     # Log lineup ceiling totals so we can verify 350+ target.
+    # Use gpp_ceil_score (SIM99TH) when available, otherwise ceil.
     ceil_floor = float(cfg.get("GPP_MIN_LINEUP_CEILING", 0))
-    if ceil_floor > 0 and not lineups_df.empty and is_gpp and "ceil" in lineups_df.columns:
-        lu_ceil = lineups_df.groupby("lineup_index")["ceil"].sum()
+    _ceil_log_col = "gpp_ceil_score" if "gpp_ceil_score" in lineups_df.columns else "ceil"
+    if ceil_floor > 0 and not lineups_df.empty and is_gpp and _ceil_log_col in lineups_df.columns:
+        lu_ceil = lineups_df.groupby("lineup_index")[_ceil_log_col].sum()
         below_ceil = lu_ceil[lu_ceil < ceil_floor]
         if len(below_ceil) > 0:
             print(
