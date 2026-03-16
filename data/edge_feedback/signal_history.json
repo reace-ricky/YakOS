@@ -505,29 +505,29 @@
   },
   "2026-03-14": {
     "slate_date": "2026-03-14",
-    "contest_type": "PGA GPP",
-    "n_players": 10,
-    "signals": {
-      "high_leverage": {
-        "n_flagged": 0,
-        "n_hit": 0,
-        "hit_rate": null,
-        "avg_actual": null,
-        "avg_proj": null
-      },
-      "salary_value": {
-        "n_flagged": 0,
-        "n_hit": 0,
-        "hit_rate": null,
-        "avg_actual": null,
-        "avg_proj": null
-      }
-    }
+    "sport": "NBA",
+    "n_players": 30,
+    "signals": {}
   },
   "2026-03-15": {
     "slate_date": "2026-03-15",
-    "sport": "NBA",
+    "contest_type": "GPP Main",
     "n_players": 113,
-    "signals": {}
+    "signals": {
+      "high_leverage": {
+        "n_flagged": 76,
+        "n_hit": 31,
+        "hit_rate": 0.408,
+        "avg_actual": 24.23,
+        "avg_proj": 23.89
+      },
+      "salary_value": {
+        "n_flagged": 18,
+        "n_hit": 6,
+        "hit_rate": 0.333,
+        "avg_actual": 23.49,
+        "avg_proj": 26.47
+      }
+    }
   }
 }
