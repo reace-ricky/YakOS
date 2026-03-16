@@ -1124,48 +1124,6 @@ def build_multiple_lineups_with_exposure(
         if removed > 0:
             print(f"[Proj floor] Removed {removed} players with proj < {min_proj_floor:.0f}")
 
-    players = player_pool.to_dict("records")
-    n = len(players)
-
-    # ── GPP ceiling objective ────────────────────────────────────────────────
-    score_col = "cash_score" if is_cash else "gpp_score"
-    if is_gpp and gpp_objective == "ceiling":
-        # Build ceiling score column from best available sim data
-        _s99 = _get_sim_col(player_pool, "99")
-        _s95 = _get_sim_col(player_pool, "95")
-        _s90 = _get_sim_col(player_pool, "90")
-        _s85 = _get_sim_col(player_pool, "85")
-
-        if (_s99 > 0).any():
-            ceil_base = _s99
-        elif (_s95 > 0).any():
-            ceil_base = _s95
-        elif (_s90 > 0).any():
-            ceil_base = _s90
-        elif (_s85 > 0).any():
-            ceil_base = _s85
-        elif "ceil" in player_pool.columns:
-            ceil_base = pd.to_numeric(player_pool["ceil"], errors="coerce").fillna(player_pool["proj"] * 1.3)
-        else:
-            ceil_base = player_pool["proj"] * 1.3
-
-        # Fill zeros with fallback
-        ceil_base = ceil_base.where(ceil_base > 0, player_pool["proj"] * 1.3)
-
-        # Cap sim ceiling at a reasonable multiple of projection.
-        # Without this, the MC engine (or even RG sims) can produce
-        # wildly inflated 99th-percentile values for cheap players
-        # (e.g. $4300 player projecting 15 FP with SIM99TH of 127),
-        # causing the optimizer to chase deep-bench noise.
-        # Studs are ~1.5-1.7× proj at the 99th pctile; cheap players
-        # should not exceed ~2.0× unless they have real upside signal.
-        _proj_series = pd.to_numeric(player_pool["proj"], errors="coerce").fillna(0)
-        _sim_ceil_cap = _proj_series * 2.0
-        _capped = (ceil_base > _sim_ceil_cap).sum()
-        ceil_base = ceil_base.clip(upper=_sim_ceil_cap)
-        if _capped > 0:
-            print(f"[Ceiling cap] Capped {_capped} players' SIM ceiling to 2.0× proj")
-
         player_pool["gpp_ceil_score"] = ceil_base
         score_col = "gpp_ceil_score"
         # Rebuild players list since we added a column
