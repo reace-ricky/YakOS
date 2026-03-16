@@ -164,6 +164,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "CORE_EXPOSURE_MIN": 0.0,         # min exposure for core (locked) players (0 = disabled)
     "CORE_EXPOSURE_MAX": 0.0,         # max exposure for core (locked) players (0 = disabled)
     "MIN_PLAYER_MINUTES": 0,          # min projected minutes to be included in pool (0 = disabled)
+    "GPP_MIN_PROJ_FLOOR": 7,           # min standard projection (FP) to stay in pool — weeds out deep bench
     # GPP-specific constraints (v7 — calibrated against 6 RG winning lineups 2026-03-09 → 2026-03-13)
     # Only active when CONTEST_TYPE == "gpp"
     # v6 had max_punts=2, min_mid=3 which over-represented punts (1.4 avg vs
