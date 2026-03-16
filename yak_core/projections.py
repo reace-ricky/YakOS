@@ -253,9 +253,16 @@ def proj_model(
     hist = load_historical_pool(slate_date, YAKOS_ROOT)
 
     if len(hist) == 0:
-        # No rolling data AND no historical parquets — pure salary fallback
-        print("[proj_model] No rolling stats or historical data — using salary_implied")
-        return noisy_proj(sal_proj, noise_std=noise_std)
+        # No rolling data AND no historical parquets — non-linear salary fallback
+        # Use salary-bracket curve instead of flat 4.0 FP/$K
+        _sal = df["salary"].astype(float)
+        _knots_sal = [0, 4000, 6000, 8000, 10000, 15000]
+        _knots_fpk = [2.5, 2.5, 3.5, 4.0, 4.5, 5.0]
+        _curve_fpk = np.interp(_sal, _knots_sal, _knots_fpk)
+        _curved_proj = (_sal * _curve_fpk / 1000.0).clip(upper=35.0)
+        pool_df["proj_source"] = "salary_implied"
+        print("[proj_model] No rolling stats or historical data — using salary_implied (non-linear curve, capped 35 FP)")
+        return noisy_proj(_curved_proj, noise_std=noise_std)
 
     # 3. Compute per-player historical averages
     player_hist = hist.groupby("player_name").agg(
@@ -614,6 +621,14 @@ def yakos_ensemble(
     """
     if weights is None:
         weights = {"yakos": 0.40, "tank01": 0.30, "rg": 0.30}
+
+    # Treat 0.0 from tank01 as missing — a zero projection poisons the blend
+    if tank01_proj is not None:
+        try:
+            if float(tank01_proj) == 0.0:
+                tank01_proj = float("nan")
+        except (ValueError, TypeError):
+            pass
 
     sources = [
         (yakos_proj, weights.get("yakos", 0.40)),

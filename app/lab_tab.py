@@ -1304,6 +1304,29 @@ def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, o
         except Exception:
             pass  # graceful fallback — edge signals just won't be available
 
+    # Auto-run player-level Monte Carlo sims if sim columns are missing
+    if cfg.get("AUTO_RUN_SIMS", True) and "sim90th" not in pool.columns and "SIM90TH" not in pool.columns:
+        try:
+            import numpy as np
+            from yak_core.edge import compute_empirical_std
+            _proj = pd.to_numeric(pool["proj"], errors="coerce").fillna(0)
+            _sal = pd.to_numeric(pool["salary"], errors="coerce").fillna(0)
+            _std = compute_empirical_std(_proj.values, _sal.values, variance_mult=1.0)
+            _n_sims = 5000
+            _rng = np.random.default_rng(42)
+            _sim_matrix = _rng.normal(
+                loc=_proj.values[None, :],
+                scale=_std[None, :],
+                size=(_n_sims, len(_proj)),
+            )
+            _sim_matrix = np.maximum(_sim_matrix, 0.0)
+            for _pct, _col in [(15, "sim15th"), (33, "sim33rd"), (50, "sim50th"),
+                                (66, "sim66th"), (85, "sim85th"), (90, "sim90th"), (99, "sim99th")]:
+                pool[_col] = np.percentile(_sim_matrix, _pct, axis=0).round(2)
+            print(f"[_build_lineups] Auto-ran {_n_sims} player sims → sim columns populated")
+        except Exception as _sim_err:
+            print(f"[_build_lineups] Auto-sim failed ({_sim_err}), continuing with fallback upside estimates")
+
     player_pool = build_player_pool(pool, cfg)
     if cfg.get("captain_aware"):
         lineups_df, exposure_df = build_showdown_lineups(player_pool, cfg)
