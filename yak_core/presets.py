@@ -48,13 +48,19 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "GPP_VALUE_WEIGHT": 0.05,
             "GPP_REST_WEIGHT": 0.03,
             # Optimizer constraints
-            "GPP_MIN_LINEUP_CEILING": 0,  # disabled — scoring formula chases ceiling naturally
+            "GPP_MIN_STUD_PLAYERS": 3,
+            "GPP_STUD_SALARY_THRESHOLD": 8000,
+            "GPP_OBJECTIVE": "ceiling",
+            "GPP_OWN_CAP": 2.4,
+            "GPP_LOW_OWN_THRESHOLD": 0.10,
+            "GPP_MIN_LOW_OWN_PLAYERS": 1,
+            "GPP_MIN_LINEUP_CEILING": 360,
             "GPP_FORCE_GAME_STACK": True,
             "GPP_MIN_TEAM_STACK": 2,
             "GPP_FORCE_BRING_BACK": True,
             "MIN_SALARY_USED": 49000,
             "MAX_SALARY_REMAINING": 1000,  # TODO: enforce in solver
-            "MIN_PLAYER_MINUTES": 20,  # TODO: filter pool by proj_minutes
+            "MIN_PLAYER_MINUTES": 20,
             # Lineup controls
             "NUM_LINEUPS": 1,
             "MAX_EXPOSURE": 1.0,
@@ -95,19 +101,25 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "GPP_VALUE_WEIGHT": 0.05,
             "GPP_REST_WEIGHT": 0.03,
             # Optimizer constraints
-            "GPP_MIN_LINEUP_CEILING": 0,  # disabled — scoring formula chases ceiling naturally
+            "GPP_MIN_STUD_PLAYERS": 2,
+            "GPP_STUD_SALARY_THRESHOLD": 8000,
+            "GPP_OBJECTIVE": "ceiling",
+            "GPP_OWN_CAP": 2.0,
+            "GPP_LOW_OWN_THRESHOLD": 0.08,
+            "GPP_MIN_LOW_OWN_PLAYERS": 2,
+            "GPP_MIN_LINEUP_CEILING": 350,
             "GPP_FORCE_GAME_STACK": True,
             "GPP_MIN_TEAM_STACK": 2,
             "GPP_FORCE_BRING_BACK": True,
             "MIN_SALARY_USED": 48500,
             "MAX_SALARY_REMAINING": 1500,  # TODO: enforce in solver
-            "MIN_PLAYER_MINUTES": 18,  # TODO: filter pool by proj_minutes
+            "MIN_PLAYER_MINUTES": 18,
+            "MIN_UNIQUES": 3,
+            "CORE_EXPOSURE_MIN": 0.40,
+            "CORE_EXPOSURE_MAX": 0.80,
             # Lineup controls
             "NUM_LINEUPS": 20,
             "MAX_EXPOSURE": 0.80,
-            "MIN_UNIQUES": 3,  # TODO: enforce in multi-lineup builder
-            "CORE_EXPOSURE_MIN": 0.40,  # TODO: enforce core locks
-            "CORE_EXPOSURE_MAX": 0.80,  # TODO: enforce core locks
             # Ownership & stacking
             "OWN_WEIGHT": 0.10,
             "STACK_WEIGHT": 0.10,
@@ -148,13 +160,14 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "GPP_VALUE_WEIGHT": 0.03,
             "GPP_REST_WEIGHT": 0.06,
             # Optimizer constraints
+            "GPP_OBJECTIVE": "blended",
             "GPP_MIN_LINEUP_CEILING": 0,
             "GPP_FORCE_GAME_STACK": False,
             "GPP_MIN_TEAM_STACK": 0,
             "GPP_FORCE_BRING_BACK": False,
             "MIN_SALARY_USED": 49500,
             "MAX_SALARY_REMAINING": 500,  # TODO: enforce in solver
-            "MIN_PLAYER_MINUTES": 30,  # TODO: filter pool by proj_minutes
+            "MIN_PLAYER_MINUTES": 30,
             # Lineup controls
             "NUM_LINEUPS": 1,
             "MAX_EXPOSURE": 1.0,
@@ -194,13 +207,14 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "GPP_VALUE_WEIGHT": 0.05,
             "GPP_REST_WEIGHT": 0.03,
             # Optimizer constraints
-            "GPP_MIN_LINEUP_CEILING": 0,
+            "GPP_OBJECTIVE": "ceiling",
+            "GPP_MIN_LINEUP_CEILING": 0,  # different dynamics for showdown
             "GPP_FORCE_GAME_STACK": False,
             "GPP_MIN_TEAM_STACK": 0,
             "GPP_FORCE_BRING_BACK": False,
             "MIN_SALARY_USED": 49000,
             "MAX_SALARY_REMAINING": 1000,  # TODO: enforce in solver
-            "MIN_PLAYER_MINUTES": 15,  # TODO: filter pool by proj_minutes
+            "MIN_PLAYER_MINUTES": 15,
             # Captain strategy
             "CPT_STRATEGY": "ceiling",  # TODO: implement in build_showdown_lineups
             "MIN_LEVERAGE_PIECES": 1,  # TODO: constraint in solver
@@ -249,6 +263,7 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "GPP_VALUE_WEIGHT": 0.03,
             "GPP_REST_WEIGHT": 0.06,
             # Optimizer constraints
+            "GPP_OBJECTIVE": "blended",
             "GPP_MIN_LINEUP_CEILING": 0,
             "GPP_FORCE_GAME_STACK": False,
             "GPP_MIN_TEAM_STACK": 0,

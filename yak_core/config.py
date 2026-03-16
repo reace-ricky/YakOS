@@ -141,11 +141,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # gpp_score = proj * PROJ_W + upside * UPSIDE_W + boom * BOOM_W + own_adj
     # where upside = SIM99TH (true ceiling), boom = SIM99TH - SIM50TH,
     # and own_adj uses a non-linear (log-based) penalty instead of flat -3.0.
-    "GPP_PROJ_WEIGHT": 0.25,          # projection weight — reduced to let ceiling dominate
-    "GPP_UPSIDE_WEIGHT": 0.35,        # weight on sim 99th pctile (true ceiling from sims)
-    "GPP_BOOM_WEIGHT": 0.40,          # weight on boom potential (sim99 - sim50 spread)
-    "GPP_OWN_PENALTY_STRENGTH": 1.2,  # scales the log-based ownership penalty
-    "GPP_OWN_LOW_BOOST": 0.5,         # modest boost for low-ownership (<8%) players
+    "GPP_PROJ_WEIGHT": 0.60,          # projection weight
+    "GPP_UPSIDE_WEIGHT": 0.25,        # weight on sim 99th pctile (true ceiling from sims)
+    "GPP_BOOM_WEIGHT": 0.15,          # weight on boom potential (sim99 - sim50 spread)
+    "GPP_OWN_PENALTY_STRENGTH": 0.6,  # scales the log-based ownership penalty
+    "GPP_OWN_LOW_BOOST": 0.2,         # modest boost for low-ownership (<8%) players
     # v9 edge signal weights (additive on top of base GPP formula)
     "GPP_SMASH_WEIGHT": 0.8,          # boost high smash probability players
     "GPP_LEVERAGE_WEIGHT": 0.5,       # prefer underowned edges
@@ -155,21 +155,24 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "GPP_FORM_WEIGHT": 0.2,           # slight recent form boost
     "GPP_DVP_WEIGHT": 0.2,            # slight matchup boost
     "GPP_PROJ_FLOOR": 280,            # flag/filter lineups projecting below this total
-    "GPP_MIN_LINEUP_CEILING": 0,      # DISABLED — was 350 but caused mass infeasibility (39% of lineups
-                                      # fell back to cash-like mode once high-ceil players exhausted
-                                      # exposure budgets).  The scoring formula (UPSIDE_W=0.35 on sim99,
-                                      # BOOM_W=0.40 on sim99-sim50) already chases ceiling naturally.
-                                      # Median lineup ceiling without constraint: ~336; with it: lineups
-                                      # 5-19 go infeasible → garbage cash-like fallbacks.
+    "GPP_MIN_LINEUP_CEILING": 350,    # re-enabled — studs constraint + ceiling objective prevent infeasibility
+    # GPP optimizer overhaul keys
+    "GPP_MIN_STUD_PLAYERS": 3,        # min players with salary >= GPP_STUD_SALARY_THRESHOLD
+    "GPP_STUD_SALARY_THRESHOLD": 8000,# salary cutoff for "stud"
+    "GPP_OBJECTIVE": "ceiling",        # "ceiling" (LP optimizes on sim ceiling) or "blended" (gpp_score)
+    "MIN_UNIQUES": 0,                  # min unique players between each lineup pair (0 = disabled)
+    "CORE_EXPOSURE_MIN": 0.0,         # min exposure for core (locked) players (0 = disabled)
+    "CORE_EXPOSURE_MAX": 0.0,         # max exposure for core (locked) players (0 = disabled)
+    "MIN_PLAYER_MINUTES": 0,          # min projected minutes to be included in pool (0 = disabled)
     # GPP-specific constraints (v7 — calibrated against 6 RG winning lineups 2026-03-09 → 2026-03-13)
     # Only active when CONTEST_TYPE == "gpp"
     # v6 had max_punts=2, min_mid=3 which over-represented punts (1.4 avg vs
     # 0.8 in winners) and under-represented mid-tier (4.0 avg vs 4.8 in winners).
     "GPP_MAX_PUNT_PLAYERS": 1,      # max players with salary < $4000 (winners avg 0.8)
     "GPP_MIN_MID_PLAYERS": 4,       # min players in $4000-$7000 range (winners avg 4.8)
-    "GPP_OWN_CAP": 7.0,             # max total lineup ownership (8 players)
+    "GPP_OWN_CAP": 2.0,             # max total lineup ownership (0-1 scale, 2.0 = ~25% avg)
     "GPP_MIN_LOW_OWN_PLAYERS": 1,   # min players below GPP_LOW_OWN_THRESHOLD
-    "GPP_LOW_OWN_THRESHOLD": 0.45,  # ownership threshold for "low-owned"
+    "GPP_LOW_OWN_THRESHOLD": 0.10,  # ownership threshold for "low-owned" (under 10%)
     "GPP_FORCE_GAME_STACK": True,   # require 3+ players from one game
     "GPP_MIN_GAME_STACK": 3,        # min players from stacked game
     "GPP_MIN_TEAM_STACK": 2,        # min players from same team (0=disabled)

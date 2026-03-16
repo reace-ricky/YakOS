@@ -653,6 +653,29 @@ def prepare_pool(
         df["team"] = "UNK"
     df["team"] = df["team"].astype(str).str.upper().str.strip()
 
+    # ---- Derive game_id from game_info (DK export: "ATL@BOS 07:00PM ET") ----
+    if "game_id" not in df.columns and "game_info" in df.columns:
+        # Extract the matchup portion (e.g. "ATL@BOS") as game_id
+        df["game_id"] = (
+            df["game_info"]
+            .astype(str)
+            .str.strip()
+            .str.split(r"\s+", n=1)
+            .str[0]
+            .str.upper()
+        )
+        # Normalise so both teams map to the same game_id (sort the two teams)
+        def _normalize_game_id(gid):
+            if not gid or gid in ("NAN", "NONE", ""):
+                return ""
+            for sep in ("@", "VS", "VS."):
+                if sep in gid:
+                    parts = gid.split(sep, 1)
+                    return "@".join(sorted(p.strip() for p in parts))
+            return gid
+        df["game_id"] = df["game_id"].apply(_normalize_game_id)
+        df.loc[df["game_id"] == "", "game_id"] = pd.NA
+
     # ---- Projections ----
     df = _add_projections(df, cfg)
 
@@ -686,6 +709,8 @@ def _build_one_lineup(
     forced_players: list | None = None,
     excluded_players: list | None = None,
     game_player_caps: dict | None = None,
+    prev_lineups: list | None = None,
+    min_uniques: int = 0,
 ) -> list | None:
     """Solve one LP and return a list of (player_dict, slot_name) tuples.
 
@@ -911,6 +936,17 @@ def _build_one_lineup(
                         # If stacking team_b (2+), require >=1 from team_a
                         prob += a_count >= bb_b
 
+        # Min stud players (salary >= threshold)
+        min_studs = gc.get("min_stud_players")
+        stud_threshold = gc.get("stud_salary_threshold", 8000)
+        if min_studs is not None and min_studs > 0:
+            stud_idxs = [i for i in range(n) if players[i]["salary"] >= stud_threshold]
+            if stud_idxs:
+                prob += (
+                    pulp.lpSum(_x(i, j) for i in stud_idxs for j in range(k))
+                    >= min_studs
+                )
+
     # Minimum lineup ceiling constraint (GPP only)
     min_ceil = (gc or {}).get("min_lineup_ceiling", 0)
     if min_ceil and min_ceil > 0:
@@ -956,6 +992,15 @@ def _build_one_lineup(
                     pulp.lpSum(_x(i, j) for i in gp_idxs for j in range(k))
                     <= max_from_game
                 )
+
+    # Uniqueness constraints: each new lineup must differ from all previous
+    # lineups by at least min_uniques players.
+    if min_uniques > 0 and prev_lineups:
+        for prev_idx, prev_set in enumerate(prev_lineups):
+            prob += (
+                pulp.lpSum(_x(i, j) for i in prev_set for j in range(k))
+                <= len(slots) - min_uniques
+            )
 
     # Solve
     solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=solver_time_limit)
@@ -1039,12 +1084,57 @@ def build_multiple_lineups_with_exposure(
     gpp_min_team_stack   = int(cfg.get("GPP_MIN_TEAM_STACK",     DEFAULT_CONFIG["GPP_MIN_TEAM_STACK"]))
     gpp_force_bring_back = bool(cfg.get("GPP_FORCE_BRING_BACK",  DEFAULT_CONFIG["GPP_FORCE_BRING_BACK"]))
     gpp_min_lineup_ceil  = float(cfg.get("GPP_MIN_LINEUP_CEILING", DEFAULT_CONFIG.get("GPP_MIN_LINEUP_CEILING", 0)))
+    gpp_min_stud_players = int(cfg.get("GPP_MIN_STUD_PLAYERS", DEFAULT_CONFIG.get("GPP_MIN_STUD_PLAYERS", 0)))
+    gpp_stud_salary_threshold = int(cfg.get("GPP_STUD_SALARY_THRESHOLD", DEFAULT_CONFIG.get("GPP_STUD_SALARY_THRESHOLD", 8000)))
+    gpp_objective        = cfg.get("GPP_OBJECTIVE", DEFAULT_CONFIG.get("GPP_OBJECTIVE", "ceiling"))
+    min_uniques          = int(cfg.get("MIN_UNIQUES", DEFAULT_CONFIG.get("MIN_UNIQUES", 0)))
 
     pos_slots = cfg.get("POS_SLOTS", DK_POS_SLOTS)
+
+    # ── MIN_PLAYER_MINUTES pool filter (GPP only) ────────────────────────────
+    min_minutes = float(cfg.get("MIN_PLAYER_MINUTES", 0))
+    lock_names_set = set(n.strip() for n in cfg.get("LOCK", []))
+    if min_minutes > 0 and is_gpp and "proj_minutes" in player_pool.columns:
+        pre_filter = len(player_pool)
+        below_min = pd.to_numeric(player_pool["proj_minutes"], errors="coerce").fillna(0) < min_minutes
+        locked = player_pool["player_name"].isin(lock_names_set)
+        keep_mask = ~below_min | locked
+        player_pool = player_pool[keep_mask].reset_index(drop=True)
+        removed = pre_filter - len(player_pool)
+        if removed > 0:
+            print(f"[Minutes filter] Removed {removed} players below {min_minutes} min")
+
     players = player_pool.to_dict("records")
     n = len(players)
 
+    # ── GPP ceiling objective ────────────────────────────────────────────────
     score_col = "cash_score" if is_cash else "gpp_score"
+    if is_gpp and gpp_objective == "ceiling":
+        # Build ceiling score column from best available sim data
+        _s99 = _get_sim_col(player_pool, "99")
+        _s95 = _get_sim_col(player_pool, "95")
+        _s90 = _get_sim_col(player_pool, "90")
+        _s85 = _get_sim_col(player_pool, "85")
+
+        if (_s99 > 0).any():
+            ceil_base = _s99
+        elif (_s95 > 0).any():
+            ceil_base = _s95
+        elif (_s90 > 0).any():
+            ceil_base = _s90
+        elif (_s85 > 0).any():
+            ceil_base = _s85
+        elif "ceil" in player_pool.columns:
+            ceil_base = pd.to_numeric(player_pool["ceil"], errors="coerce").fillna(player_pool["proj"] * 1.3)
+        else:
+            ceil_base = player_pool["proj"] * 1.3
+
+        # Fill zeros with fallback
+        ceil_base = ceil_base.where(ceil_base > 0, player_pool["proj"] * 1.3)
+        player_pool["gpp_ceil_score"] = ceil_base
+        score_col = "gpp_ceil_score"
+        # Rebuild players list since we added a column
+        players = player_pool.to_dict("records")
 
     # Build name-to-index maps
     name_to_idx = {p["player_name"]: i for i, p in enumerate(players)}
@@ -1089,6 +1179,14 @@ def build_multiple_lineups_with_exposure(
                 cap = min(cap, vf_cap)
             remaining[i] = cap
 
+    # CORE_EXPOSURE_MIN/MAX: boost exposure caps for locked (core) players
+    core_exp_min = float(cfg.get("CORE_EXPOSURE_MIN", 0))
+    core_exp_max = float(cfg.get("CORE_EXPOSURE_MAX", 0))
+    if core_exp_max > 0 and lock_indices:
+        core_max_apps = max(1, int(num_lineups * core_exp_max))
+        for i in lock_indices:
+            remaining[i] = core_max_apps
+
     # Build tier constraint structures
     tier_dict: Dict[str, list] = {}
     tier_min_d: Dict[str, int] = {}
@@ -1109,7 +1207,9 @@ def build_multiple_lineups_with_exposure(
     # Re-seed projections each solve so the optimizer explores different
     # player combos.  Without this, exposure limits are the ONLY source of
     # lineup diversity and all lineups converge to the same core.
-    rng = np.random.default_rng(seed=42)
+    rng = np.random.default_rng()
+
+    built_player_sets: list[set[int]] = []  # track player indices per lineup for MIN_UNIQUES
 
     lineups = []
     for lineup_num in range(num_lineups):
@@ -1117,8 +1217,18 @@ def build_multiple_lineups_with_exposure(
             progress_callback(lineup_num, num_lineups)
 
         # Randomize scores for GPP/MME — each solve sees a different surface
+        # Salary-tiered variance: studs ±10%, mid-tier ±18%, cheap ±28%
         if is_gpp and num_lineups > 1:
-            noise = rng.normal(1.0, 0.10, size=n)  # ±10% noise
+            noise = np.ones(n)
+            for i in range(n):
+                sal = float(players[i].get("salary", 5000))
+                if sal >= 8000:
+                    std = 0.10
+                elif sal >= 5500:
+                    std = 0.18
+                else:
+                    std = 0.28
+                noise[i] = rng.normal(1.0, std)
             for i in range(n):
                 base_score = players[i].get(score_col, players[i].get("proj", 0))
                 players[i]["_solve_score"] = base_score * noise[i]
@@ -1139,6 +1249,8 @@ def build_multiple_lineups_with_exposure(
                 "min_team_stack":     gpp_min_team_stack,
                 "force_bring_back":   gpp_force_bring_back,
                 "min_lineup_ceiling": gpp_min_lineup_ceil,
+                "min_stud_players":   gpp_min_stud_players,
+                "stud_salary_threshold": gpp_stud_salary_threshold,
             }
 
         tier_constraints_d = None
@@ -1183,11 +1295,46 @@ def build_multiple_lineups_with_exposure(
             forced_players=lock_indices,
             excluded_players=exclude_indices,
             game_player_caps=cur_game_caps,
+            prev_lineups=built_player_sets if min_uniques > 0 else None,
+            min_uniques=min_uniques,
         )
 
         _gpp_fallback = False
-        if result is None:
-            # Retry without GPP constraints (fallback)
+        if result is None and is_gpp and gpp_constraints_d:
+            # Progressive relaxation: drop constraints one at a time
+            # Order: ceiling floor → stud count → ownership cap → all GPP
+            _relax_steps = [
+                ("min_lineup_ceiling", 0, "ceiling floor"),
+                ("min_stud_players", 0, "stud count"),
+                ("own_cap", 0, "ownership cap"),
+            ]
+            for _rkey, _rval, _rlabel in _relax_steps:
+                relaxed = dict(gpp_constraints_d)
+                relaxed[_rkey] = _rval
+                result = _build_one_lineup(
+                    players=players,
+                    pos_slots=pos_slots,
+                    salary_cap=salary_cap,
+                    min_salary=min_salary,
+                    max_appearances=remaining,
+                    score_col=_solve_score_col,
+                    pos_caps=pos_caps,
+                    solver_time_limit=solver_time_limit,
+                    gpp_constraints=relaxed,
+                    tier_constraints=tier_constraints_d,
+                    not_with_pairs=extra_not_with,
+                    forced_players=lock_indices,
+                    excluded_players=exclude_indices,
+                    game_player_caps=cur_game_caps,
+                    prev_lineups=built_player_sets if min_uniques > 0 else None,
+                    min_uniques=min_uniques,
+                )
+                if result is not None:
+                    logger.warning("Lineup %d: relaxed GPP constraint '%s' to solve.", lineup_num, _rlabel)
+                    _gpp_fallback = True
+                    break
+        if result is None and is_gpp:
+            # Full fallback: drop all GPP constraints
             logger.warning("Lineup %d: GPP constraints dropped (infeasible). Built as cash-like.", lineup_num)
             _gpp_fallback = True
             result = _build_one_lineup(
@@ -1205,6 +1352,8 @@ def build_multiple_lineups_with_exposure(
                 forced_players=lock_indices,
                 excluded_players=exclude_indices,
                 game_player_caps=cur_game_caps,
+                prev_lineups=built_player_sets if min_uniques > 0 else None,
+                min_uniques=min_uniques,
             )
 
         if result is None:
@@ -1233,6 +1382,10 @@ def build_multiple_lineups_with_exposure(
 
         lineups.append(lineup_rows)
 
+        # Track player sets for MIN_UNIQUES
+        if min_uniques > 0:
+            built_player_sets.append(set(selected_indices))
+
         # Update remaining appearances
         for idx in selected_indices:
             if idx not in lock_indices:
@@ -1255,6 +1408,22 @@ def build_multiple_lineups_with_exposure(
             for gid, cnt in game_counts.items():
                 if cnt >= 3:
                     game_stack_counts[gid] = game_stack_counts.get(gid, 0) + 1
+
+    # CORE_EXPOSURE_MIN check: warn if any core player fell below minimum
+    if core_exp_min > 0 and lock_indices and len(lineups) > 1:
+        core_min_apps = max(1, int(num_lineups * core_exp_min))
+        all_selected = [set() for _ in range(len(lineups))]
+        for li, lu in enumerate(lineups):
+            for row in lu:
+                if row["player_name"] in name_to_idx:
+                    all_selected[li].add(name_to_idx[row["player_name"]])
+        for i in lock_indices:
+            appearances = sum(1 for s in all_selected if i in s)
+            if appearances < core_min_apps:
+                logger.warning(
+                    "Core player %s appeared in %d/%d lineups (min target: %d)",
+                    players[i]["player_name"], appearances, len(lineups), core_min_apps,
+                )
 
     # Flatten lineups into a DataFrame
     if not lineups:
