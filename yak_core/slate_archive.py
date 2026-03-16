@@ -36,6 +36,8 @@ _ARCHIVE_COLS = [
     "pop_catalyst_score", "pop_catalyst_tag",
     # Sim outputs
     "smash_prob", "bust_prob", "sim_eligible",
+    # Sim percentiles (critical for gpp_score upside/boom calculation)
+    "sim15th", "sim33rd", "sim50th", "sim66th", "sim85th", "sim90th", "sim99th",
     # Actuals (filled post-slate)
     "actual_fp", "actual_own", "mp_actual",
     # Status / injury
@@ -245,6 +247,32 @@ def backfill_archives() -> dict:
                 df[col] = ""
                 patched = True
                 columns_added[col] = columns_added.get(col, 0) + 1
+
+        # ── Sim percentiles (regenerate from proj + salary) ────────────
+        if "sim90th" not in df.columns and "proj" in df.columns and "salary" in df.columns:
+            try:
+                import numpy as np
+                from yak_core.edge import compute_empirical_std
+                _proj = pd.to_numeric(df["proj"], errors="coerce").fillna(0)
+                _sal = pd.to_numeric(df["salary"], errors="coerce").fillna(0)
+                _std = compute_empirical_std(_proj.values, _sal.values, variance_mult=1.0)
+                _n_sims = 5000
+                _rng = np.random.default_rng(42)
+                _sim_matrix = _rng.normal(
+                    loc=_proj.values[None, :],
+                    scale=_std[None, :],
+                    size=(_n_sims, len(_proj)),
+                )
+                _sim_matrix = np.maximum(_sim_matrix, 0.0)
+                for _pct, _col in [
+                    (15, "sim15th"), (33, "sim33rd"), (50, "sim50th"),
+                    (66, "sim66th"), (85, "sim85th"), (90, "sim90th"), (99, "sim99th"),
+                ]:
+                    df[_col] = np.percentile(_sim_matrix, _pct, axis=0).round(2)
+                    columns_added[_col] = columns_added.get(_col, 0) + 1
+                patched = True
+            except Exception:
+                pass  # skip if edge module not available
 
         # ── FP per minute ────────────────────────────────────────────────
         if "fp_per_min" not in df.columns and "proj" in df.columns and "proj_minutes" in df.columns:
