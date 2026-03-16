@@ -2081,7 +2081,7 @@ def _render_batch_train_results(bt_state: Dict[str, Any], contest_type_key: str,
                 f"Build lineups to test."
             )
     with col_reset:
-        if st.button("Reset to Defaults", key="cal_lab_reset_defaults"):
+        if st.button("Reset to Defaults", key="cal_lab_reset_defaults_batch"):
             reset_active_config(dict(DEFAULT_LAB_CONFIG), contest_type=contest_type_key)
             st.session_state["cal_lab_sliders"] = dict(DEFAULT_LAB_CONFIG)
             st.toast(f"{contest_mode} config reset to defaults.")
@@ -2188,6 +2188,12 @@ def render_calibration_lab(sport: str) -> None:
         st.info(f"**{cfg_name}**{updated_text} | {trained_text}")
     else:
         st.caption("Using default config. Analyze a slate and apply recommendations to start tuning.")
+
+    if st.button("Reset to Defaults", key="cal_lab_reset_defaults_main"):
+        reset_active_config(dict(DEFAULT_LAB_CONFIG), contest_type=contest_type_key)
+        st.session_state["cal_lab_sliders"] = dict(DEFAULT_LAB_CONFIG)
+        st.toast(f"{contest_mode} config reset to defaults.")
+        st.rerun()
 
     # ── Config Evolution Section ──────────────────────────────────────────
     _render_config_evolution(contest_type_key, contest_mode)
