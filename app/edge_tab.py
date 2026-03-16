@@ -90,13 +90,19 @@ def _render_player_card_html(player: Dict[str, Any], is_pga: bool) -> str:
     edge = player.get("edge", 0)
     value = player.get("value", 0)
 
+    proj_min = player.get("proj_minutes", 0)
+    sim90 = player.get("sim90th", 0)
+
     stats_parts = [
         f"${salary:,}",
         f"{proj:.1f} pts",
+        f"{proj_min:.0f} min" if proj_min > 0 else None,
         f"{own:.1f}% own",
         f"{edge:.2f} edge",
         f"{value:.2f} pts/$1K",
+        f"{sim90:.1f} ceil" if sim90 > 0 else None,
     ]
+    stats_parts = [s for s in stats_parts if s is not None]
 
     wave_html = ""
     if is_pga:

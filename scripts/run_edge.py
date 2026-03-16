@@ -75,6 +75,8 @@ def _classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
                 "ownership": round(float(row.get("_own", 0)), 1),
                 "edge": round(float(row.get("_edge", 0)), 2),
                 "value": round(float(row.get("_val", 0)), 2),
+                "proj_minutes": round(float(row.get("proj_minutes", 0)), 1),
+                "sim90th": round(float(row.get("sim90th", 0)), 1),
             }
             # PGA wave data
             if is_pga:

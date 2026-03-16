@@ -48,7 +48,7 @@ _FRONTCOURT = {"SF", "PF", "C", "F"}
 _OUT_STATUSES = {"OUT", "IR"}
 
 # Threshold: only players projected for >= this many minutes are "key injuries"
-KEY_INJURY_MIN_MINUTES: float = 20.0
+KEY_INJURY_MIN_MINUTES: float = 15.0
 
 # Hard cap on any player's total projected minutes after all bumps
 MAX_PLAYER_MINUTES: float = 40.0
@@ -553,6 +553,129 @@ def apply_injury_cascade(
     df["proj"] = df["adjusted_proj"]
 
     return df, cascade_report
+
+
+# ---------------------------------------------------------------------------
+# Minutes Gap Detection & Redistribution
+# ---------------------------------------------------------------------------
+# When multiple players are injured/removed from the DK slate entirely
+# (long-term injuries not in the pool), the cascade can't see them.
+# This detects teams whose active players project well below 240 total
+# minutes and redistributes the gap using headroom/rotation_tier weighting.
+
+_TEAM_TOTAL_MINUTES: float = 240.0
+_MINUTES_GAP_THRESHOLD: float = 30.0
+
+
+def apply_minutes_gap_redistribution(pool_df: pd.DataFrame) -> pd.DataFrame:
+    """Redistribute unaccounted team minutes to active players.
+
+    Runs AFTER ``apply_injury_cascade``.  For each team whose active players
+    project to well below 240 total minutes (gap > 30), the missing minutes
+    are distributed proportionally using headroom × rotation_tier weighting.
+
+    Parameters
+    ----------
+    pool_df : pd.DataFrame
+        Player pool (post-cascade).  Must contain ``proj_minutes``, ``proj``,
+        ``team``, ``status`` columns.
+
+    Returns
+    -------
+    pd.DataFrame
+        Pool with updated ``proj_minutes`` and ``proj``, plus new columns
+        ``minutes_gap_bump_min`` and ``minutes_gap_bump_fp``.
+    """
+    if pool_df is None or pool_df.empty:
+        return pool_df
+
+    df = pool_df.copy()
+
+    # Ensure required columns
+    if "proj_minutes" not in df.columns:
+        return df
+    if "proj" not in df.columns:
+        return df
+
+    df["proj_minutes"] = pd.to_numeric(df["proj_minutes"], errors="coerce").fillna(0.0)
+    df["proj"] = pd.to_numeric(df["proj"], errors="coerce").fillna(0.0)
+
+    # Initialise tracking columns
+    df["minutes_gap_bump_min"] = 0.0
+    df["minutes_gap_bump_fp"] = 0.0
+
+    # Identify active players (not OUT/IR)
+    if "status" in df.columns:
+        active_mask = ~df["status"].fillna("").str.strip().str.upper().isin(_OUT_STATUSES)
+    else:
+        active_mask = pd.Series(True, index=df.index)
+
+    teams = df.loc[active_mask, "team"].fillna("").str.upper().unique()
+
+    for team in teams:
+        if not team:
+            continue
+
+        team_active_mask = (
+            active_mask
+            & (df["team"].fillna("").str.upper() == team)
+        )
+        team_idx = df.index[team_active_mask]
+        if len(team_idx) == 0:
+            continue
+
+        total_proj_min = float(df.loc[team_idx, "proj_minutes"].sum())
+        gap = _TEAM_TOTAL_MINUTES - total_proj_min
+
+        if gap <= _MINUTES_GAP_THRESHOLD:
+            continue
+
+        # Compute weights: headroom × rotation_tier for each active player
+        weights: Dict[int, float] = {}
+        for idx in team_idx:
+            pm = float(df.at[idx, "proj_minutes"])
+            hr = max(MAX_PLAYER_MINUTES - pm, 0.0)
+            if hr <= 0:
+                continue
+            rt = _rotation_tier(pm)
+            w = hr * rt
+            weights[idx] = max(w, 0.1)
+
+        total_weight = sum(weights.values())
+        if total_weight <= 0:
+            continue
+
+        # Distribute gap minutes proportionally
+        for idx, w in weights.items():
+            share = w / total_weight
+            extra_min = gap * share
+
+            # Cap at MAX_PLAYER_MINUTES
+            current_min = float(df.at[idx, "proj_minutes"])
+            space = max(MAX_PLAYER_MINUTES - current_min, 0.0)
+            extra_min = min(extra_min, space)
+
+            if extra_min <= 0:
+                continue
+
+            # FP bump: use player's fp_per_min rate
+            current_proj = float(df.at[idx, "proj"])
+            if current_min > 0:
+                fp_per_min = current_proj / current_min
+            else:
+                fp_per_min = 1.0
+            bump_fp = round(extra_min * fp_per_min, 2)
+
+            df.at[idx, "proj_minutes"] = round(current_min + extra_min, 1)
+            df.at[idx, "proj"] = round(current_proj + bump_fp, 2)
+            df.at[idx, "minutes_gap_bump_min"] = round(extra_min, 1)
+            df.at[idx, "minutes_gap_bump_fp"] = bump_fp
+
+            # Update adjusted_proj if it exists (keep in sync)
+            if "adjusted_proj" in df.columns:
+                df.at[idx, "adjusted_proj"] = df.at[idx, "proj"]
+
+    return df
 
 
 # ---------------------------------------------------------------------------

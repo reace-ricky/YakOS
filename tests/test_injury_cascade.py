@@ -11,6 +11,7 @@ from yak_core.injury_cascade import (
     _find_primary_backup_idx,
     _primary_backup_boost,
     apply_injury_cascade,
+    apply_minutes_gap_redistribution,
     find_key_injuries,
 )
 from yak_core.sims import _INELIGIBLE_STATUSES
@@ -702,3 +703,204 @@ class TestPrimaryBackupBoostIntegration:
         bumps = {b["name"]: b["bump"] for b in report[0]["beneficiaries"]}
         assert bumps["SG A"] > 0
         assert bumps["SF A"] > 0
+
+
+# ---------------------------------------------------------------------------
+# apply_minutes_gap_redistribution tests
+# ---------------------------------------------------------------------------
+
+class TestApplyMinutesGapRedistribution:
+    """Tests for the minutes gap redistribution function that catches
+    structural gaps from players not on the DK slate."""
+
+    def _make_gap_pool(self, total_proj_minutes: float = 160.0) -> pd.DataFrame:
+        """Build a pool for one team with a specified total of projected minutes.
+
+        Creates 5 active players whose proj_minutes sum to ``total_proj_minutes``.
+        Each player gets an equal share of the total minutes.
+        """
+        per_player = total_proj_minutes / 5
+        rows = [
+            {"player_name": f"Player {i}", "team": "LAL", "pos": pos,
+             "salary": 5000 + i * 500, "proj": per_player * 1.0,
+             "proj_minutes": per_player, "status": "Active"}
+            for i, pos in enumerate(["PG", "SG", "SF", "PF", "C"])
+        ]
+        return pd.DataFrame(rows)
+
+    def test_gap_detected_and_minutes_redistributed(self):
+        """Team with 160 projected minutes → 80 min gap > 30 threshold → redistribution fires."""
+        pool = self._make_gap_pool(total_proj_minutes=160.0)
+        result = apply_minutes_gap_redistribution(pool)
+        # All players should receive a bump
+        assert (result["minutes_gap_bump_min"] > 0).all()
+        assert (result["minutes_gap_bump_fp"] > 0).all()
+        # proj_minutes should increase
+        assert result["proj_minutes"].sum() > 160.0
+        # proj should increase
+        assert result["proj"].sum() > pool["proj"].sum()
+
+    def test_no_gap_below_threshold(self):
+        """Team with 230 projected minutes → gap = 10 < 30 threshold → no redistribution."""
+        pool = self._make_gap_pool(total_proj_minutes=230.0)
+        result = apply_minutes_gap_redistribution(pool)
+        assert (result["minutes_gap_bump_min"] == 0).all()
+        assert (result["minutes_gap_bump_fp"] == 0).all()
+        # Projections unchanged
+        assert result["proj"].sum() == pytest.approx(pool["proj"].sum())
+
+    def test_no_gap_at_240(self):
+        """Team already at 240 projected minutes → gap = 0 → no redistribution."""
+        pool = self._make_gap_pool(total_proj_minutes=240.0)
+        result = apply_minutes_gap_redistribution(pool)
+        assert (result["minutes_gap_bump_min"] == 0).all()
+        assert (result["minutes_gap_bump_fp"] == 0).all()
+
+    def test_no_player_exceeds_40_minutes(self):
+        """After redistribution, no player should exceed MAX_PLAYER_MINUTES (40)."""
+        pool = self._make_gap_pool(total_proj_minutes=160.0)
+        result = apply_minutes_gap_redistribution(pool)
+        assert (result["proj_minutes"] <= MAX_PLAYER_MINUTES + 0.1).all(), (
+            f"Players exceeded 40 min cap: {result[['player_name','proj_minutes']].to_dict('records')}"
+        )
+
+    def test_no_player_exceeds_40_with_high_base_minutes(self):
+        """Players starting near 40 min should be capped, not over-boosted."""
+        rows = [
+            {"player_name": "Star", "team": "LAL", "pos": "PG",
+             "salary": 9000, "proj": 50.0, "proj_minutes": 38.0, "status": "Active"},
+            {"player_name": "Bench1", "team": "LAL", "pos": "SG",
+             "salary": 4000, "proj": 15.0, "proj_minutes": 12.0, "status": "Active"},
+            {"player_name": "Bench2", "team": "LAL", "pos": "SF",
+             "salary": 4500, "proj": 18.0, "proj_minutes": 14.0, "status": "Active"},
+        ]
+        pool = pd.DataFrame(rows)
+        # Total = 64 min, gap = 176 → huge gap, but Star is nearly capped
+        result = apply_minutes_gap_redistribution(pool)
+        assert (result["proj_minutes"] <= MAX_PLAYER_MINUTES + 0.1).all()
+
+    def test_empty_pool_returns_empty(self):
+        """Empty DataFrame should be returned unchanged."""
+        result = apply_minutes_gap_redistribution(pd.DataFrame())
+        assert isinstance(result, pd.DataFrame)
+        assert result.empty
+
+    def test_none_pool_returns_none(self):
+        """None input should be returned as-is."""
+        result = apply_minutes_gap_redistribution(None)
+        assert result is None
+
+    def test_missing_proj_minutes_column_noop(self):
+        """Pool without proj_minutes column should be returned unchanged."""
+        pool = self._make_gap_pool()
+        pool = pool.drop(columns=["proj_minutes"])
+        result = apply_minutes_gap_redistribution(pool)
+        assert "minutes_gap_bump_min" not in result.columns
+
+    def test_missing_proj_column_noop(self):
+        """Pool without proj column should be returned unchanged."""
+        pool = self._make_gap_pool()
+        pool = pool.drop(columns=["proj"])
+        result = apply_minutes_gap_redistribution(pool)
+        assert "minutes_gap_bump_min" not in result.columns
+
+    def test_other_team_unaffected(self):
+        """Players on a team with normal minutes should not be redistributed."""
+        gap_pool = self._make_gap_pool(total_proj_minutes=160.0)
+        # Add a GSW team with normal minutes (~240)
+        gsw_rows = pd.DataFrame([
+            {"player_name": "GSW PG", "team": "GSW", "pos": "PG",
+             "salary": 7000, "proj": 35.0, "proj_minutes": 30.0, "status": "Active"},
+            {"player_name": "GSW SG", "team": "GSW", "pos": "SG",
+             "salary": 6000, "proj": 30.0, "proj_minutes": 28.0, "status": "Active"},
+            {"player_name": "GSW SF", "team": "GSW", "pos": "SF",
+             "salary": 6500, "proj": 32.0, "proj_minutes": 26.0, "status": "Active"},
+            {"player_name": "GSW PF", "team": "GSW", "pos": "PF",
+             "salary": 5500, "proj": 28.0, "proj_minutes": 25.0, "status": "Active"},
+            {"player_name": "GSW C", "team": "GSW", "pos": "C",
+             "salary": 7500, "proj": 38.0, "proj_minutes": 32.0, "status": "Active"},
+            {"player_name": "GSW Bench1", "team": "GSW", "pos": "PG",
+             "salary": 4000, "proj": 15.0, "proj_minutes": 18.0, "status": "Active"},
+            {"player_name": "GSW Bench2", "team": "GSW", "pos": "SG",
+             "salary": 3800, "proj": 12.0, "proj_minutes": 16.0, "status": "Active"},
+            {"player_name": "GSW Bench3", "team": "GSW", "pos": "SF",
+             "salary": 3500, "proj": 10.0, "proj_minutes": 15.0, "status": "Active"},
+            {"player_name": "GSW Bench4", "team": "GSW", "pos": "C",
+             "salary": 3600, "proj": 11.0, "proj_minutes": 14.0, "status": "Active"},
+            {"player_name": "GSW Bench5", "team": "GSW", "pos": "PF",
+             "salary": 3700, "proj": 10.0, "proj_minutes": 12.0, "status": "Active"},
+        ])
+        pool = pd.concat([gap_pool, gsw_rows], ignore_index=True)
+        result = apply_minutes_gap_redistribution(pool)
+        # GSW players should have zero bump
+        gsw_mask = result["team"] == "GSW"
+        assert (result.loc[gsw_mask, "minutes_gap_bump_min"] == 0).all()
+        # LAL players should have bumps
+        lal_mask = result["team"] == "LAL"
+        assert (result.loc[lal_mask, "minutes_gap_bump_min"] > 0).all()
+
+    def test_out_players_excluded_from_redistribution(self):
+        """OUT players should not receive any gap redistribution."""
+        rows = [
+            {"player_name": "OUT Star", "team": "LAL", "pos": "PG",
+             "salary": 9000, "proj": 48.0, "proj_minutes": 28.0, "status": "OUT"},
+            {"player_name": "Active PG", "team": "LAL", "pos": "PG",
+             "salary": 5000, "proj": 20.0, "proj_minutes": 18.0, "status": "Active"},
+            {"player_name": "Active SG", "team": "LAL", "pos": "SG",
+             "salary": 5500, "proj": 22.0, "proj_minutes": 20.0, "status": "Active"},
+        ]
+        pool = pd.DataFrame(rows)
+        # Active total = 38 min, gap = 202 → redistribution fires
+        result = apply_minutes_gap_redistribution(pool)
+        out_row = result[result["player_name"] == "OUT Star"].iloc[0]
+        assert out_row["minutes_gap_bump_min"] == 0
+        assert out_row["minutes_gap_bump_fp"] == 0
+
+    def test_fp_bump_uses_fp_per_min_rate(self):
+        """The FP bump should equal extra_minutes × (original_proj / original_proj_minutes)."""
+        rows = [
+            {"player_name": "Player A", "team": "LAL", "pos": "PG",
+             "salary": 5000, "proj": 30.0, "proj_minutes": 20.0, "status": "Active"},
+            {"player_name": "Player B", "team": "LAL", "pos": "SG",
+             "salary": 5000, "proj": 20.0, "proj_minutes": 20.0, "status": "Active"},
+        ]
+        pool = pd.DataFrame(rows)
+        # Total = 40 min, gap = 200 → redistribution
+        original_proj_a = 30.0
+        original_min_a = 20.0
+        fp_per_min_a = original_proj_a / original_min_a  # 1.5
+
+        result = apply_minutes_gap_redistribution(pool)
+        row_a = result[result["player_name"] == "Player A"].iloc[0]
+        extra_min = row_a["minutes_gap_bump_min"]
+        expected_fp = round(extra_min * fp_per_min_a, 2)
+        assert row_a["minutes_gap_bump_fp"] == pytest.approx(expected_fp, abs=0.1)
+
+    def test_adjusted_proj_column_updated(self):
+        """If adjusted_proj column exists (post-cascade), it should be updated."""
+        pool = self._make_gap_pool(total_proj_minutes=160.0)
+        pool["adjusted_proj"] = pool["proj"]
+        result = apply_minutes_gap_redistribution(pool)
+        # adjusted_proj should match proj after redistribution
+        assert (result["proj"] == result["adjusted_proj"]).all()
+
+    def test_exactly_at_threshold_no_redistribution(self):
+        """Team with gap exactly == 30 (threshold) should NOT trigger redistribution."""
+        pool = self._make_gap_pool(total_proj_minutes=210.0)
+        # gap = 240 - 210 = 30, threshold is 30, condition is gap <= 30 → skip
+        result = apply_minutes_gap_redistribution(pool)
+        assert (result["minutes_gap_bump_min"] == 0).all()
+
+    def test_gap_just_above_threshold(self):
+        """Team with gap = 31 (just above threshold) should trigger redistribution."""
+        # Use 8 players so each has ~26 min (well below 40 cap), ensuring headroom > 0
+        rows = [
+            {"player_name": f"P{i}", "team": "LAL", "pos": pos,
+             "salary": 5000, "proj": 26.0, "proj_minutes": 26.125,
+             "status": "Active"}
+            for i, pos in enumerate(["PG", "SG", "SF", "PF", "C", "PG", "SG", "SF"])
+        ]
+        pool = pd.DataFrame(rows)
+        # Total = 26.125 * 8 = 209 min, gap = 31 > 30 → fires
+        result = apply_minutes_gap_redistribution(pool)
+        assert (result["minutes_gap_bump_min"] > 0).any()

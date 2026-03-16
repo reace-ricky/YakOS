@@ -523,7 +523,7 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
         fetch_betting_odds,
     )
     from yak_core.projections import apply_projections, yakos_minutes_projection
-    from yak_core.injury_cascade import apply_injury_cascade
+    from yak_core.injury_cascade import apply_injury_cascade, apply_minutes_gap_redistribution
     from yak_core.blowout_risk import apply_blowout_cascade
 
     cfg = merge_config({
@@ -611,6 +611,15 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
             print(f"[_load_nba_pool] Injury cascade boosted {_n_bumped} player(s)")
     except Exception as exc:
         print(f"[_load_nba_pool] apply_injury_cascade failed (non-fatal): {exc}")
+
+    # ── Minutes gap redistribution: catch teams missing off-slate players ──
+    try:
+        pool = apply_minutes_gap_redistribution(pool)
+        _n_gap = int((pool.get("minutes_gap_bump_min", pd.Series(0, index=pool.index)) > 0).sum())
+        if _n_gap:
+            print(f"[_load_nba_pool] Minutes gap redistribution boosted {_n_gap} player(s)")
+    except Exception as exc:
+        print(f"[_load_nba_pool] apply_minutes_gap_redistribution failed (non-fatal): {exc}")
 
     # floor/ceil: proj_model sets these from rolling data; only fill gaps
     # Uses salary-tier spread multiplier (same formula as old _enrich_pool)
@@ -986,6 +995,11 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
     _edge_p50 = float(np.percentile(_edge.dropna(), 50)) if len(_edge.dropna()) > 2 else 0.5
 
     _pick_cols = ["player_name", "salary", "proj", _own_col, "edge", "value"]
+    # Add proj_minutes and sim90th if available
+    if "proj_minutes" in df.columns:
+        _pick_cols.append("proj_minutes")
+    if "sim90th" in df.columns:
+        _pick_cols.append("sim90th")
     # Core: premium salary, high ownership consensus, above-median edge
     core = df[(_sal >= sal_med) & (_own >= own_med) & (_edge >= _edge_p50)][_pick_cols].rename(columns={_own_col: "ownership"})
     # Leverage: premium salary, under-owned, above-median edge (market misprice)
