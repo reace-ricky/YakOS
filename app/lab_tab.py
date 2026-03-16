@@ -131,6 +131,19 @@ def render_lab_tab(sport: str) -> None:
                             except Exception:
                                 pass
 
+                    # After RG merge, drop players with no RG projection.
+                    # The RG file defines the real player pool — unmatched
+                    # players are deep bench / DNPs with salary-implied projections.
+                    if "rg_proj" in pool.columns:
+                        pre_filter = len(pool)
+                        pool = pool[pool["rg_proj"].notna() & (pool["rg_proj"] > 0)].copy()
+                        dropped = pre_filter - len(pool)
+                        if dropped > 0:
+                            st.info(
+                                f"Filtered pool: dropped {dropped} players with no RG projection "
+                                f"({len(pool)} remaining)"
+                            )
+
                     # Apply calibration AFTER RG merge so corrections aren't overwritten
                     from yak_core.calibration_feedback import get_correction_factors, apply_corrections
                     corrections = get_correction_factors(sport="NBA")
@@ -796,6 +809,7 @@ def _merge_rg_csv(pool, rg_file):
 
     rg["_join_name"] = rg["PLAYER"].astype(str).str.strip().str.lower()
     pool["_join_name"] = pool["player_name"].astype(str).str.strip().str.lower()
+    pool["rg_proj"] = float("nan")  # Track which players matched the RG file
     rg_lookup = rg.set_index("_join_name")
 
     n_merged = 0
@@ -811,6 +825,7 @@ def _merge_rg_csv(pool, rg_file):
         rg_proj = float(r.get("FPTS", 0) or 0)
         if rg_proj > 0:
             pool.at[idx, "proj"] = rg_proj
+            pool.at[idx, "rg_proj"] = rg_proj
             pool.at[idx, "proj_source"] = "rotogrinders"
             n_merged += 1
         rg_floor = float(r.get("FLOOR", 0) or 0)
