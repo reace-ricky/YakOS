@@ -1,7 +1,7 @@
 {
   "sport": "NBA",
   "site": "DK",
-  "date": "2026-03-15",
+  "date": "2026-03-16",
   "salary_cap": 50000,
   "roster_slots": [
     "PG",
@@ -14,50 +14,56 @@
     "UTIL"
   ],
   "lineup_size": 8,
-  "pool_size": 209,
+  "pool_size": 279,
   "proj_source": "rotogrinders+tank01",
   "matchups": [
     {
-      "away": "GS",
-      "home": "NY",
-      "game_id": "20260315_GS@NY",
-      "label": "GS @ NY"
+      "away": "SA",
+      "home": "LAC",
+      "game_id": "20260316_SA@LAC",
+      "label": "SA @ LAC"
     },
     {
-      "away": "IND",
-      "home": "MIL",
-      "game_id": "20260315_IND@MIL",
-      "label": "IND @ MIL"
+      "away": "PHO",
+      "home": "BOS",
+      "game_id": "20260316_PHO@BOS",
+      "label": "PHO @ BOS"
     },
     {
-      "away": "DET",
-      "home": "TOR",
-      "game_id": "20260315_DET@TOR",
-      "label": "DET @ TOR"
+      "away": "ORL",
+      "home": "ATL",
+      "game_id": "20260316_ORL@ATL",
+      "label": "ORL @ ATL"
     },
     {
-      "away": "DAL",
-      "home": "CLE",
-      "game_id": "20260315_DAL@CLE",
-      "label": "DAL @ CLE"
-    },
-    {
-      "away": "UTA",
-      "home": "SAC",
-      "game_id": "20260315_UTA@SAC",
-      "label": "UTA @ SAC"
-    },
-    {
-      "away": "MIN",
-      "home": "OKC",
-      "game_id": "20260315_MIN@OKC",
-      "label": "MIN @ OKC"
+      "away": "LAL",
+      "home": "HOU",
+      "game_id": "20260316_LAL@HOU",
+      "label": "LAL @ HOU"
     },
     {
       "away": "POR",
-      "home": "PHI",
-      "game_id": "20260315_POR@PHI",
-      "label": "POR @ PHI"
+      "home": "BKN",
+      "game_id": "20260316_POR@BKN",
+      "label": "POR @ BKN"
+    },
+    {
+      "away": "DAL",
+      "home": "NO",
+      "game_id": "20260316_DAL@NO",
+      "label": "DAL @ NO"
+    },
+    {
+      "away": "GS",
+      "home": "WAS",
+      "game_id": "20260316_GS@WAS",
+      "label": "GS @ WAS"
+    },
+    {
+      "away": "MEM",
+      "home": "CHI",
+      "game_id": "20260316_MEM@CHI",
+      "label": "MEM @ CHI"
     }
   ]
 }
