@@ -80,16 +80,18 @@ def render_lab_tab(sport: str) -> None:
                 if is_pga:
                     pool, meta = _load_pga_pool(api_key, slate_date, pga_slate)
                 else:
-                    pool, meta = _load_nba_pool(api_key, slate_date)
-                    # Auto-merge saved RG file if it exists (from prior upload)
+                    # RG merge now happens INSIDE _load_nba_pool() before
+                    # the injury cascade, so cascade bumps are not overwritten.
                     _rg_auto_path = os.path.join(
                         str(Path(__file__).resolve().parent.parent),
                         "data", "rg_uploads", f"rg_{slate_date}.csv"
                     )
+                    pool, meta = _load_nba_pool(
+                        api_key, slate_date,
+                        rg_file=rg_file, rg_auto_path=_rg_auto_path,
+                    )
+                    # Save uploaded RG file for auto-reload next time
                     if rg_file is not None:
-                        pool = _merge_rg_csv(pool, rg_file)
-                        meta["proj_source"] = "rotogrinders+tank01"
-                        # Save for auto-reload next time
                         try:
                             _rg_save_dir = os.path.join(
                                 str(Path(__file__).resolve().parent.parent),
@@ -117,24 +119,6 @@ def render_lab_tab(sport: str) -> None:
                                     _f.write(rg_file.read())
                         except Exception:
                             pass
-                    elif os.path.isfile(_rg_auto_path):
-                        try:
-                            pool = _merge_rg_csv(pool, _rg_auto_path)
-                            meta["proj_source"] = "rotogrinders+tank01 (saved)"
-                        except Exception:
-                            pass
-                    else:
-                        # Fallback: check rg_archive for today's file
-                        _rg_archive_fallback = os.path.join(
-                            str(Path(__file__).resolve().parent.parent),
-                            "data", "rg_archive", "nba", f"rg_{slate_date}.csv"
-                        )
-                        if os.path.isfile(_rg_archive_fallback):
-                            try:
-                                pool = _merge_rg_csv(pool, _rg_archive_fallback)
-                                meta["proj_source"] = "rotogrinders (archive)"
-                            except Exception:
-                                pass
 
                     # After RG merge, drop players with no RG projection.
                     # The RG file defines the real player pool — unmatched
@@ -543,7 +527,7 @@ def _get_secret(key: str) -> str:
         return ""
 
 
-def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
+def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=None) -> tuple:
     import requests
     from yak_core.config import DEFAULT_CONFIG, DK_LINEUP_SIZE, DK_POS_SLOTS, SALARY_CAP, merge_config
     from yak_core.live import (
@@ -619,6 +603,37 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
         if "proj_minutes" not in pool.columns:
             pool["proj_minutes"] = 0.0
 
+    # ── RG merge: apply RotoGrinders projections as base BEFORE cascade ──
+    # This ensures cascade bumps are computed on top of RG FPTS and not
+    # overwritten by a post-hoc merge.
+    _rg_source_used = None
+    if rg_file is not None:
+        try:
+            pool = _merge_rg_csv(pool, rg_file)
+            _rg_source_used = "rotogrinders+tank01"
+            if hasattr(rg_file, "seek"):
+                rg_file.seek(0)
+        except Exception as exc:
+            print(f"[_load_nba_pool] RG merge (uploaded) failed (non-fatal): {exc}")
+    elif rg_auto_path and os.path.isfile(rg_auto_path):
+        try:
+            pool = _merge_rg_csv(pool, rg_auto_path)
+            _rg_source_used = "rotogrinders+tank01 (saved)"
+        except Exception as exc:
+            print(f"[_load_nba_pool] RG merge (saved) failed (non-fatal): {exc}")
+    else:
+        # Fallback: check rg_archive for today's file
+        _rg_archive_fallback = os.path.join(
+            str(Path(__file__).resolve().parent.parent),
+            "data", "rg_archive", "nba", f"rg_{slate_date}.csv"
+        )
+        if os.path.isfile(_rg_archive_fallback):
+            try:
+                pool = _merge_rg_csv(pool, _rg_archive_fallback)
+                _rg_source_used = "rotogrinders (archive)"
+            except Exception as exc:
+                print(f"[_load_nba_pool] RG merge (archive) failed (non-fatal): {exc}")
+
     # ── Cross-reference Tank01 injury list to catch OUT players whose DFS
     #    entry lacks an injuryStatus (e.g. Jarrett Allen still on slate but OUT).
     try:
@@ -686,8 +701,9 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
         _proj = pd.to_numeric(pool.get("proj", 0), errors="coerce").fillna(0).clip(lower=0)
         pool["ceil"] = (_proj * (1.0 + _spread_mult)).round(2)
 
-    # NOTE: Calibration corrections are applied in render_lab_tab() AFTER
-    # the RG merge so they are not overwritten by raw RG FPTS values.
+    # NOTE: RG merge now runs inside _load_nba_pool() BEFORE the injury
+    # cascade, so cascade bumps are computed on top of RG FPTS.  Calibration
+    # corrections are still applied in render_lab_tab() after pool load.
 
     try:
         from yak_core.ownership_guard import ensure_ownership
@@ -800,7 +816,7 @@ def _load_nba_pool(api_key: str, slate_date: str) -> tuple:
     meta = {
         "sport": "NBA", "site": "DK", "date": slate_date,
         "salary_cap": SALARY_CAP, "roster_slots": DK_POS_SLOTS, "lineup_size": DK_LINEUP_SIZE,
-        "pool_size": len(pool), "proj_source": cfg.get("PROJ_SOURCE", "salary_implied"),
+        "pool_size": len(pool), "proj_source": _rg_source_used or cfg.get("PROJ_SOURCE", "salary_implied"),
         "matchups": matchups,
     }
     return pool, meta
