@@ -2,10 +2,10 @@
   "gpp": {
     "name": "GPP Working Config",
     "created": "2026-03-16T13:57:19",
-    "updated": "2026-03-16T13:57:47",
+    "updated": "2026-03-16T13:57:51",
     "slates_trained": [
       "2026-03-09",
-      "2026-03-10"
+      "2026-03-11"
     ],
     "values": {
       "proj_weight": 0.75,
