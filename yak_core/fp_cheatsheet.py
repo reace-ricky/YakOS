@@ -27,6 +27,7 @@ _COL_ALIASES = {
     "player (team,position)": "Player",
     "rest": "Rest",
     "opp": "Opp",
+    "opp (et)": "Opp",
     "opponent": "Opp",
     "dvp": "DvP",
     "dvp rank": "DvP",
@@ -42,6 +43,7 @@ _COL_ALIASES = {
     "proj rank": "Proj Rank",
     "proj_rank": "Proj Rank",
     "projected rank": "Proj Rank",
+    "$ rank": "S Rank",
     "s rank": "S Rank",
     "s_rank": "S Rank",
     "salary rank": "S Rank",
@@ -66,10 +68,16 @@ _COL_ALIASES = {
 def _normalise_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Map column names to canonical form using case-insensitive aliases.
 
-    After exact alias matching, applies a prefix-based fallback for critical
-    columns that may appear with extra parenthetical info in FP exports
-    (e.g. ``PLAYER (TEAM, POSITION)``).
+    Handles non-breaking spaces (``\\xa0``) and newlines in column names
+    that appear in FantasyPros CSV exports, then applies case-insensitive
+    alias matching and prefix-based fallback for critical columns.
     """
+    # First clean up whitespace artifacts in column names
+    df.columns = [
+        col.replace("\xa0", " ").replace("\n", " ").strip()
+        for col in df.columns
+    ]
+
     rename_map = {}
     for col in df.columns:
         key = col.strip().lower()
@@ -126,11 +134,32 @@ def _parse_currency(val) -> float:
         return float("nan")
 
 
+def _parse_spread(val) -> float:
+    """Parse spread value, stripping optional team abbreviation prefix.
+
+    Handles formats like ``'ATL -3'``, ``'-3'``, ``'+3.5'``, ``'3'``.
+    Returns NaN for unparseable values.
+    """
+    if pd.isna(val):
+        return float("nan")
+    s = str(val).strip()
+    m = re.search(r"([+-]?\d+\.?\d*)$", s)
+    if m:
+        return float(m.group(1))
+    return float("nan")
+
+
 def _extract_player_name(val: str) -> str:
-    """Extract player name from 'First Last (TEAM - POS)' format."""
+    """Extract player name from 'First Last (TEAM - POS)' format.
+
+    Handles non-breaking spaces before the parenthesis and ``\\nDTD``
+    injury suffixes that appear in FantasyPros exports.
+    """
     if pd.isna(val):
         return ""
-    s = str(val).strip()
+    s = str(val).replace("\xa0", " ").replace("\n", " ").strip()
+    # Remove trailing DTD / O / GTD injury tags
+    s = re.sub(r"\s+(DTD|O|GTD)\s*$", "", s)
     idx = s.find(" (")
     if idx > 0:
         return s[:idx].strip()
@@ -141,7 +170,7 @@ def _extract_team(val: str) -> str:
     """Extract team abbreviation from 'First Last (TEAM - POS)' format."""
     if pd.isna(val):
         return ""
-    s = str(val).strip()
+    s = str(val).replace("\xa0", " ").strip()
     m = re.search(r"\((\w+)", s)
     if m:
         return m.group(1).upper()
@@ -184,9 +213,9 @@ def parse_fp_cheatsheet(file_obj) -> pd.DataFrame:
     else:
         result["dvp_rank"] = float("nan")
 
-    # Parse numeric spread
+    # Parse numeric spread (handles team-prefixed values like 'ATL -3')
     if "Spread" in df.columns:
-        result["spread"] = pd.to_numeric(df["Spread"], errors="coerce")
+        result["spread"] = df["Spread"].apply(_parse_spread)
     else:
         result["spread"] = float("nan")
 
