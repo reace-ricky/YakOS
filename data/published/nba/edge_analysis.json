@@ -1,18 +1,18 @@
 {
   "bullets": [
     "Core anchors: Josh Giddey, Luka Doncic, Victor Wembanyama",
-    "Leverage plays: Gui Santos, Ziaire Williams",
-    "Value targets: Gary Payton II, Tyler Burton",
+    "Leverage plays: Gui Santos, Neemias Queta",
+    "Value targets: Gary Payton II, Tre Johnson",
     "Fade candidates: Max Shulga, Amari Williams"
   ],
-  "recommendation": "5 core plays anchored at $7,700\u2013$12,200. 5 value plays averaging 5.6 pts/$1K. 5 leverage plays at 0\u20131% ownership.",
+  "recommendation": "5 core plays anchored at $8,800\u2013$12,200. 5 value plays averaging 5.6 pts/$1K. 5 leverage plays at 0\u20130% ownership.",
   "core_plays": [
     {
       "player_name": "Josh Giddey",
       "salary": 9000,
       "proj": 48.75,
       "ownership": 34.37,
-      "edge": 0.6000169928421456,
+      "edge": 0.5813224748005652,
       "value": 5.416666666666667,
       "proj_minutes": 30.1,
       "sim90th": 62.099999999999994
@@ -21,8 +21,8 @@
       "player_name": "Luka Doncic",
       "salary": 12200,
       "proj": 56.94,
-      "ownership": 5.39,
-      "edge": 0.5804737718035606,
+      "ownership": 5.29,
+      "edge": 0.5804844858876582,
       "value": 4.667213114754098,
       "proj_minutes": 34.3,
       "sim90th": 71.44
@@ -31,31 +31,31 @@
       "player_name": "Victor Wembanyama",
       "salary": 11000,
       "proj": 53.660000000000004,
-      "ownership": 5.87,
-      "edge": 0.5802891340339611,
+      "ownership": 5.74,
+      "edge": 0.5802715784141101,
       "value": 4.878181818181819,
       "proj_minutes": 29.7,
       "sim90th": 66.98
+    },
+    {
+      "player_name": "Jalen Johnson",
+      "salary": 10900,
+      "proj": 50.78,
+      "ownership": 11.74,
+      "edge": 0.5431719554049534,
+      "value": 4.658715596330275,
+      "proj_minutes": 36.0,
+      "sim90th": 64.17
     },
     {
       "player_name": "Deni Avdija",
       "salary": 8800,
       "proj": 41.69,
       "ownership": 24.26,
-      "edge": 0.5769523894161129,
+      "edge": 0.5425738507739852,
       "value": 4.737499999999999,
       "proj_minutes": 32.5,
       "sim90th": 54.269999999999996
-    },
-    {
-      "player_name": "Dejounte Murray",
-      "salary": 7700,
-      "proj": 38.739999999999995,
-      "ownership": 17.46,
-      "edge": 0.5489315246384219,
-      "value": 5.031168831168831,
-      "proj_minutes": 31.9,
-      "sim90th": 51.14
     }
   ],
   "leverage_plays": [
@@ -64,50 +64,50 @@
       "salary": 7300,
       "proj": 34.02,
       "ownership": 0.12,
-      "edge": 0.6150402647818585,
+      "edge": 0.5488430968479223,
       "value": 4.660273972602741,
-      "proj_minutes": 28.1,
+      "proj_minutes": 29.1,
       "sim90th": 45.28
-    },
-    {
-      "player_name": "Ziaire Williams",
-      "salary": 4700,
-      "proj": 19.88,
-      "ownership": 0.23,
-      "edge": 0.4532154729166787,
-      "value": 4.229787234042552,
-      "proj_minutes": 24.0,
-      "sim90th": 29.05
     },
     {
       "player_name": "Neemias Queta",
       "salary": 6400,
       "proj": 26.2,
       "ownership": 0.4,
-      "edge": 0.4075864265085316,
+      "edge": 0.4100407800306594,
       "value": 4.09375,
       "proj_minutes": 27.5,
       "sim90th": 36.059999999999995
     },
     {
-      "player_name": "Javon Small",
-      "salary": 6000,
-      "proj": 25.459999999999997,
-      "ownership": 1.09,
-      "edge": 0.4054283536078546,
-      "value": 4.243333333333333,
-      "proj_minutes": 20.1,
-      "sim90th": 35.78
+      "player_name": "Grayson Allen",
+      "salary": 6700,
+      "proj": 26.119999999999997,
+      "ownership": 0.2,
+      "edge": 0.40419858841711515,
+      "value": 3.898507462686567,
+      "proj_minutes": 30.2,
+      "sim90th": 36.65
     },
     {
-      "player_name": "Toumani Camara",
-      "salary": 6000,
-      "proj": 26.169999999999998,
-      "ownership": 0.84,
-      "edge": 0.40361121969011887,
-      "value": 4.361666666666666,
-      "proj_minutes": 31.5,
-      "sim90th": 36.28
+      "player_name": "Devin Booker",
+      "salary": 9200,
+      "proj": 36.480000000000004,
+      "ownership": 0.38,
+      "edge": 0.4009420224846336,
+      "value": 3.9652173913043485,
+      "proj_minutes": 33.4,
+      "sim90th": 48.27
+    },
+    {
+      "player_name": "Ziaire Williams",
+      "salary": 4700,
+      "proj": 19.88,
+      "ownership": 0.23,
+      "edge": 0.3999138117954877,
+      "value": 4.229787234042552,
+      "proj_minutes": 24.0,
+      "sim90th": 29.05
     }
   ],
   "value_plays": [
@@ -116,50 +116,50 @@
       "salary": 4500,
       "proj": 25.31,
       "ownership": 27.08,
-      "edge": 0.5095165684741139,
+      "edge": 0.46608431131096184,
       "value": 5.624444444444444,
-      "proj_minutes": 14.6,
+      "proj_minutes": 20.2,
       "sim90th": 34.92
-    },
-    {
-      "player_name": "Tyler Burton",
-      "salary": 3300,
-      "proj": 20.93,
-      "ownership": 23.45,
-      "edge": 0.47321292742103976,
-      "value": 6.342424242424243,
-      "proj_minutes": 28.0,
-      "sim90th": 29.74
     },
     {
       "player_name": "Tre Johnson",
       "salary": 4200,
       "proj": 23.09,
       "ownership": 22.78,
-      "edge": 0.4676945674290813,
+      "edge": 0.4637541255787136,
       "value": 5.497619047619048,
-      "proj_minutes": 28.6,
+      "proj_minutes": 26.2,
       "sim90th": 32.839999999999996
-    },
-    {
-      "player_name": "Justin Champagnie",
-      "salary": 4500,
-      "proj": 21.95,
-      "ownership": 0.44,
-      "edge": 0.4450581447499497,
-      "value": 4.877777777777777,
-      "proj_minutes": 23.0,
-      "sim90th": 31.18
     },
     {
       "player_name": "Josh Minott",
       "salary": 4300,
       "proj": 23.32,
       "ownership": 9.52,
-      "edge": 0.44485538527165125,
+      "edge": 0.44219258664129035,
       "value": 5.423255813953489,
       "proj_minutes": 13.4,
       "sim90th": 33.43
+    },
+    {
+      "player_name": "Tyler Burton",
+      "salary": 3300,
+      "proj": 20.93,
+      "ownership": 23.45,
+      "edge": 0.43483157971432823,
+      "value": 6.342424242424243,
+      "proj_minutes": 28.0,
+      "sim90th": 29.74
+    },
+    {
+      "player_name": "Justin Champagnie",
+      "salary": 4500,
+      "proj": 21.95,
+      "ownership": 0.44,
+      "edge": 0.4250315038286807,
+      "value": 4.877777777777777,
+      "proj_minutes": 23.0,
+      "sim90th": 31.18
     }
   ],
   "fade_candidates": [
@@ -168,7 +168,7 @@
       "salary": 3000,
       "proj": 0.0,
       "ownership": 0.18,
-      "edge": 0.08504310344827587,
+      "edge": 0.12110000000000001,
       "value": 0.0,
       "proj_minutes": 1.8,
       "sim90th": 0.0
@@ -178,19 +178,9 @@
       "salary": 3000,
       "proj": 0.0,
       "ownership": 0.05,
-      "edge": 0.12057586206896553,
+      "edge": 0.12215000000000001,
       "value": 0.0,
       "proj_minutes": 5.9,
-      "sim90th": 0.0
-    },
-    {
-      "player_name": "AJ Johnson",
-      "salary": 3000,
-      "proj": 0.0,
-      "ownership": 0.05,
-      "edge": 0.12882241379310344,
-      "value": 0.0,
-      "proj_minutes": 9.1,
       "sim90th": 0.0
     },
     {
@@ -198,20 +188,30 @@
       "salary": 3000,
       "proj": 0.0,
       "ownership": 0.28,
-      "edge": 0.13871724137931035,
+      "edge": 0.13145,
       "value": 0.0,
       "proj_minutes": 8.5,
       "sim90th": 0.3699999999999999
     },
     {
-      "player_name": "Jarred Vanderbilt",
+      "player_name": "Tyler Smith",
       "salary": 3000,
-      "proj": 0.48,
-      "ownership": 0.84,
-      "edge": 0.14126403318060599,
-      "value": 0.16,
-      "proj_minutes": 17.1,
-      "sim90th": 1.3499999999999999
+      "proj": 0.29999999999999993,
+      "ownership": 1.03,
+      "edge": 0.13676183087737154,
+      "value": 0.09999999999999998,
+      "proj_minutes": 4.6,
+      "sim90th": 1.02
+    },
+    {
+      "player_name": "AJ Johnson",
+      "salary": 3000,
+      "proj": 0.0,
+      "ownership": 0.05,
+      "edge": 0.137,
+      "value": 0.0,
+      "proj_minutes": 9.1,
+      "sim90th": 0.0
     }
   ],
   "signals_df_path": "signals.parquet"
