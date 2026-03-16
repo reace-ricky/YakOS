@@ -285,27 +285,38 @@ def render_lab_tab(sport: str) -> None:
     st.markdown("### Build & Publish")
 
     from yak_core.config import CONTEST_PRESETS
-    from yak_core.presets import OPTIMIZER_PRESET_LABELS, OPTIMIZER_PRESETS, get_preset
+    from yak_core.presets import OPTIMIZER_PRESET_LABELS, OPTIMIZER_PRESETS, get_preset, preset_labels_for_sport
 
-    # ── Optimizer profile selector (NBA only) ──
+    # ── Optimizer profile selector (sport-aware) ──
     # Maps optimizer presets to the underlying contest type used for slate/pool routing.
     _PRESET_TO_CONTEST: Dict[str, str] = {
+        # NBA (flat keys — backward compat)
         "Single-Entry GPP": "GPP Main",
         "20-Max GPP": "GPP Main",
         "Cash (H2H / 50-50)": "Cash Main",
         "Showdown GPP": "Showdown",
         "Cash Showdown": "Showdown",
+        # NBA (sport-qualified keys)
+        "NBA — Single-Entry GPP": "GPP Main",
+        "NBA — 20-Max GPP": "GPP Main",
+        "NBA — Cash (H2H / 50-50)": "Cash Main",
+        "NBA — Showdown GPP": "Showdown",
+        "NBA — Cash Showdown": "Showdown",
+        # PGA (sport-qualified keys)
+        "PGA — Cash": "PGA Cash",
+        "PGA — Single-Entry GPP": "PGA GPP",
+        "PGA — 20-Max GPP": "PGA GPP",
+        "PGA — Showdown": "PGA Showdown",
         "Custom": "",  # user picks contest type manually
     }
 
-    optimizer_preset_name = "Custom"
-    if not is_pga:
-        optimizer_preset_name = st.selectbox(
-            "Optimizer profile",
-            options=OPTIMIZER_PRESET_LABELS,
-            key=f"lab_opt_preset_{sport}",
-            help="Auto-configures scoring weights, constraints, and lineup count for the selected contest type.",
-        )
+    _sport_preset_labels = preset_labels_for_sport(sport)
+    optimizer_preset_name = st.selectbox(
+        "Optimizer profile",
+        options=_sport_preset_labels,
+        key=f"lab_opt_preset_{sport}",
+        help="Auto-configures scoring weights, constraints, and lineup count for the selected contest type.",
+    )
 
     if is_pga:
         try:
@@ -351,30 +362,56 @@ def render_lab_tab(sport: str) -> None:
         )
 
     # Show loaded preset weights in an expander
+    _is_pga_preset = _opt_preset_cfg.get("SPORT") == "PGA"
     if optimizer_preset_name != "Custom" and _opt_preset_cfg:
         with st.expander(f"Preset: {optimizer_preset_name}", expanded=False):
-            _w_col1, _w_col2, _w_col3 = st.columns(3)
-            with _w_col1:
-                st.caption("**Scoring Weights**")
-                st.text(f"Proj:    {_opt_preset_cfg.get('GPP_PROJ_WEIGHT', '-')}")
-                st.text(f"Upside:  {_opt_preset_cfg.get('GPP_UPSIDE_WEIGHT', '-')}")
-                st.text(f"Boom:    {_opt_preset_cfg.get('GPP_BOOM_WEIGHT', '-')}")
-            with _w_col2:
-                st.caption("**Edge Signals**")
-                st.text(f"Smash:     {_opt_preset_cfg.get('GPP_SMASH_WEIGHT', '-')}")
-                st.text(f"Leverage:  {_opt_preset_cfg.get('GPP_LEVERAGE_WEIGHT', '-')}")
-                st.text(f"Bust pen:  {_opt_preset_cfg.get('GPP_BUST_PENALTY', '-')}")
-            with _w_col3:
-                st.caption("**Constraints**")
-                st.text(f"Own pen:   {_opt_preset_cfg.get('GPP_OWN_PENALTY_STRENGTH', '-')}")
-                st.text(f"Efficiency:{_opt_preset_cfg.get('GPP_EFFICIENCY_WEIGHT', '-')}")
-                st.text(f"Ceiling:   {_opt_preset_cfg.get('GPP_MIN_LINEUP_CEILING', '-')}")
+            if _is_pga_preset:
+                _w_col1, _w_col2, _w_col3 = st.columns(3)
+                with _w_col1:
+                    st.caption("**Scoring Weights**")
+                    st.text(f"Proj:       {_opt_preset_cfg.get('PROJ_WEIGHT', '-')}")
+                    st.text(f"Cut equity: {_opt_preset_cfg.get('CUT_EQUITY_WEIGHT', '-')}")
+                    st.text(f"Ball-strike:{_opt_preset_cfg.get('BALL_STRIKING_WEIGHT', '-')}")
+                    st.text(f"Course fit: {_opt_preset_cfg.get('COURSE_FIT_WEIGHT', '-')}")
+                with _w_col2:
+                    st.caption("**Ceiling / Leverage**")
+                    st.text(f"Upside:     {_opt_preset_cfg.get('UPSIDE_WEIGHT', '-')}")
+                    st.text(f"Boom:       {_opt_preset_cfg.get('BOOM_WEIGHT', '-')}")
+                    st.text(f"Leverage:   {_opt_preset_cfg.get('LEVERAGE_WEIGHT', '-')}")
+                    st.text(f"Wave adv:   {_opt_preset_cfg.get('WAVE_ADVANTAGE_WEIGHT', '-')}")
+                with _w_col3:
+                    st.caption("**Thresholds**")
+                    st.text(f"Own pen:    {_opt_preset_cfg.get('OWN_PENALTY_STRENGTH', '-')}")
+                    st.text(f"Bust pen:   {_opt_preset_cfg.get('BUST_PENALTY', '-')}")
+                    st.text(f"Min cut %:  {_opt_preset_cfg.get('MIN_CUT_PROBABILITY', '-')}")
+                    st.text(f"Form look:  {_opt_preset_cfg.get('RECENT_FORM_LOOKBACK', '-')}")
+            else:
+                _w_col1, _w_col2, _w_col3 = st.columns(3)
+                with _w_col1:
+                    st.caption("**Scoring Weights**")
+                    st.text(f"Proj:    {_opt_preset_cfg.get('GPP_PROJ_WEIGHT', '-')}")
+                    st.text(f"Upside:  {_opt_preset_cfg.get('GPP_UPSIDE_WEIGHT', '-')}")
+                    st.text(f"Boom:    {_opt_preset_cfg.get('GPP_BOOM_WEIGHT', '-')}")
+                with _w_col2:
+                    st.caption("**Edge Signals**")
+                    st.text(f"Smash:     {_opt_preset_cfg.get('GPP_SMASH_WEIGHT', '-')}")
+                    st.text(f"Leverage:  {_opt_preset_cfg.get('GPP_LEVERAGE_WEIGHT', '-')}")
+                    st.text(f"Bust pen:  {_opt_preset_cfg.get('GPP_BUST_PENALTY', '-')}")
+                with _w_col3:
+                    st.caption("**Constraints**")
+                    st.text(f"Own pen:   {_opt_preset_cfg.get('GPP_OWN_PENALTY_STRENGTH', '-')}")
+                    st.text(f"Efficiency:{_opt_preset_cfg.get('GPP_EFFICIENCY_WEIGHT', '-')}")
+                    st.text(f"Ceiling:   {_opt_preset_cfg.get('GPP_MIN_LINEUP_CEILING', '-')}")
 
     if is_pga and contest_label == "PGA GPP":
         st.info("Full tournament lineup (4 rounds). Projections use multi-day model.")
 
     showdown_teams: list[str] = []
-    _is_showdown_preset = optimizer_preset_name in ("Showdown GPP", "Cash Showdown")
+    _is_showdown_preset = optimizer_preset_name in (
+        "Showdown GPP", "Cash Showdown",
+        "NBA — Showdown GPP", "NBA — Cash Showdown",
+        "PGA — Showdown",
+    )
     is_nba_showdown = (
         not is_pga
         and (preset.get("slate_type") == "Showdown Captain"
