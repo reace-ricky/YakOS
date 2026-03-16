@@ -144,7 +144,7 @@ def render_optimizer_tab(sport: str) -> None:
     if is_pga:
         contest_options = ["PGA GPP", "PGA Cash", "PGA Showdown"]
     else:
-        contest_options = ["GPP Main", "GPP Early", "Showdown", "Cash Main"]
+        contest_options = ["GPP Main", "GPP Early", "Showdown", "Cash Main", "Cash Game"]
 
     contest_options = [c for c in contest_options if c in CONTEST_PRESETS]
 
