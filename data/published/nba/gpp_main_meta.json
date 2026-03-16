@@ -1,10 +1,10 @@
 {
   "contest": "GPP Main",
   "sport": "NBA",
-  "num_lineups": 5,
-  "built_at": "2026-03-16T18:08:49.605526+00:00",
-  "lock": [
-    "Josh Giddey"
-  ],
-  "exclude": []
+  "num_lineups": 3,
+  "built_at": "2026-03-16T20:08:30.240969+00:00",
+  "lock": [],
+  "exclude": [
+    "Taylor Hendricks"
+  ]
 }
