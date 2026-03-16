@@ -52,8 +52,13 @@ def render_lab_tab(sport: str) -> None:
     slate_date = st.text_input("Slate date", value=today_str, key=f"lab_date_{sport}")
 
     rg_file = None
+    dvp_file = None
     if not is_pga:
-        rg_file = st.file_uploader("RotoGrinders CSV (optional)", type=["csv"], key=f"lab_rg_{sport}")
+        _up_col1, _up_col2 = st.columns(2)
+        with _up_col1:
+            rg_file = st.file_uploader("RotoGrinders CSV (optional)", type=["csv"], key=f"lab_rg_{sport}")
+        with _up_col2:
+            dvp_file = st.file_uploader("DvP CSV (optional)", type=["csv"], key=f"lab_dvp_{sport}")
 
     pool_path = out_dir / "slate_pool.parquet"
     _meta_path_check = out_dir / "slate_meta.json"
@@ -149,6 +154,16 @@ def render_lab_tab(sport: str) -> None:
                     corrections = get_correction_factors(sport="NBA")
                     if corrections.get("n_slates", 0) > 0:
                         pool = apply_corrections(pool, corrections, sport="NBA")
+
+                    # Process DvP file if uploaded
+                    if dvp_file is not None:
+                        try:
+                            from yak_core.dvp import parse_dvp_upload, save_dvp_table
+                            dvp_df = parse_dvp_upload(dvp_file)
+                            save_dvp_table(dvp_df)
+                            st.success(f"DvP table loaded: {len(dvp_df)} teams, positions: {[c for c in dvp_df.columns if c != 'Team']}")
+                        except Exception as e:
+                            st.warning(f"DvP upload failed: {e}")
 
                 try:
                     from yak_core.sim_sandbox import score_player_breakout
