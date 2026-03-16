@@ -17,7 +17,7 @@ ACTIVE_CONFIG_PATH = CALIBRATION_DIR / "active_config.json"
 CONFIG_HISTORY_PATH = CALIBRATION_DIR / "config_history.json"
 OPTIMIZER_OVERRIDES_PATH = REPO_ROOT / "data" / "calibration" / "optimizer_overrides.json"
 
-CONTEST_TYPES = ("gpp", "cash", "showdown")
+CONTEST_TYPES = ("gpp", "cash", "cash_main", "cash_game", "showdown")
 
 
 def _sync_to_github(files: list, commit_message: str = "Auto-sync calibration config") -> None:

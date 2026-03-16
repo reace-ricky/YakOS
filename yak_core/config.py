@@ -380,6 +380,37 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         # Ownership sim contest type
         "ownership_contest_type": "cash",
     },
+    "Cash Game": {
+        "description": "Cash / 50-50 / Double-Up for single-game slates — high-floor, small pool",
+        "slate_type": "Classic",
+        "archetype": "Floor Lock",
+        "internal_contest": "50/50",
+        "CONTEST_TYPE": "cash",
+        "projection_style": "floor",
+        "volatility": "low",
+        "correlation_mode": "none",
+        "default_lineups": 1,
+        "default_max_exposure": 0.8,
+        "min_salary": 49000,
+        # Pool sizing — game slates have fewer players
+        "pool_size_min": 10,
+        "pool_size_max": 16,
+        # Tagging mode
+        "tagging_mode": "floor",
+        "show_leverage": False,
+        # Ownership strategy — less important in cash
+        "eat_chalk": True,
+        "target_avg_ownership_min": None,
+        "target_avg_ownership_max": None,
+        "ownership_caps_by_tier": None,
+        # Correlation rules — no stacking in cash
+        "not_with_auto": False,
+        "max_per_team": None,
+        # Exposure
+        "exposure_rules": False,
+        # Ownership sim contest type
+        "ownership_contest_type": "cash",
+    },
 }
 
 # ----- PGA contest presets -----
@@ -517,10 +548,11 @@ CONTEST_PRESET_LABELS: List[str] = list(CONTEST_PRESETS.keys())
 
 # User-facing contest type labels — sport-aware.
 # NBA gets GPP/Cash/Showdown, PGA gets GPP only.
-UI_CONTEST_LABELS: List[str] = ["GPP", "Cash", "Showdown"]
+UI_CONTEST_LABELS: List[str] = ["GPP", "Cash", "Cash Game", "Showdown"]
 UI_CONTEST_MAP: Dict[str, str] = {
     "GPP": "GPP Main",
     "Cash": "Cash Main",
+    "Cash Game": "Cash Game",
     "Showdown": "Showdown",
 }
 
@@ -539,6 +571,7 @@ CONTEST_PRESET_ARCH_LABELS: Dict[str, str] = {
     "GPP Late": "GPP-L",
     "Showdown": "SD",
     "Cash Main": "CASH",
+    "Cash Game": "CASH-G",
     "PGA GPP": "PGA",
     "PGA Cash": "PGA-C",
     "PGA Showdown": "PGA-SD",
@@ -577,6 +610,14 @@ DK_CONTEST_MATCH_RULES: Dict[str, Dict[str, Any]] = {
         "prefer": "highest_prize",
     },
     "Cash Main": {
+        "game_type": "classic",
+        "max_entries_per_user": None,
+        "name_contains": ["Double Up", "50/50"],
+        "name_excludes": ["Showdown"],
+        "is_single_entry": None,
+        "prefer": "highest_entries",
+    },
+    "Cash Game": {
         "game_type": "classic",
         "max_entries_per_user": None,
         "name_contains": ["Double Up", "50/50"],

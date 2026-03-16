@@ -336,7 +336,7 @@ def _build_optimizer_config_from_sliders(sliders: Dict[str, Any], contest_type: 
     ]
 
     # Contest type
-    if contest_type == "cash":
+    if contest_type in ("cash", "cash_main", "cash_game"):
         cfg["CONTEST_TYPE"] = "cash"
     elif contest_type == "showdown":
         cfg["CONTEST_TYPE"] = "showdown"
@@ -668,7 +668,7 @@ def _build_ideal_lineups_from_actuals(
     candidates = pool[pool["actual_fp"] > 0].copy()
 
     # For cash contests, prefer floor-safe players
-    if contest_type == "cash" and not candidates.empty:
+    if contest_type in ("cash", "cash_main", "cash_game") and not candidates.empty:
         if "floor" in candidates.columns:
             floor_vals = pd.to_numeric(candidates["floor"], errors="coerce").fillna(0)
         else:
@@ -1354,8 +1354,11 @@ def _filter_entries_by_contest_type(entries: list, contest_type_key: str) -> lis
         elif contest_type_key == "showdown":
             if "showdown" not in ct:
                 continue
-        elif contest_type_key == "cash":
-            if "cash" not in ct:
+        elif contest_type_key == "cash_main":
+            if ct != "cash_main":
+                continue
+        elif contest_type_key == "cash_game":
+            if ct != "cash_game":
                 continue
         else:
             continue
@@ -2195,10 +2198,10 @@ def render_calibration_lab(sport: str) -> None:
             key="cal_lab_slate",
         )
     with col_contest:
-        contest_types = ["GPP", "Showdown", "Cash"]
+        contest_types = ["GPP", "Showdown", "Cash Main", "Cash Game"]
         contest_mode = st.radio("Contest Type", contest_types, key="cal_lab_contest_type", horizontal=True)
 
-    contest_type_key = contest_mode.lower()  # "gpp", "showdown", or "cash"
+    contest_type_key = contest_mode.lower().replace(" ", "_")  # "gpp", "showdown", "cash_main", "cash_game"
 
     # ── Config Status Bar ────────────────────────────────────────────────
     active_cfg = load_active_config()
