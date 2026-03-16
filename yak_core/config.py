@@ -137,13 +137,13 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "OWN_SOURCE": "auto",      # "auto" (salary-rank if missing), "salary_rank" (always generate)
     "STACK_WEIGHT": 0.10,      # prefer high-total games for stacking
     "VALUE_WEIGHT": 0.0,       # 0 = disabled; 0.1-0.3 = use value_score to boost value plays
-    # GPP scoring formula (v8 — sim-based variance model)
+    # GPP scoring formula (v10 — ceiling-chasing for 350+ lineup totals)
     # gpp_score = proj * PROJ_W + upside * UPSIDE_W + boom * BOOM_W + own_adj
-    # where upside = SIM90TH (or SIM85TH fallback), boom = SIM99TH - SIM50TH,
+    # where upside = SIM99TH (true ceiling), boom = SIM99TH - SIM50TH,
     # and own_adj uses a non-linear (log-based) penalty instead of flat -3.0.
-    "GPP_PROJ_WEIGHT": 0.50,          # projection weight — keeps lineups competitive (300-350+)
-    "GPP_UPSIDE_WEIGHT": 0.30,        # weight on sim 90th pctile (raw ceiling from sims)
-    "GPP_BOOM_WEIGHT": 0.20,          # weight on boom potential (sim99 - sim50 spread)
+    "GPP_PROJ_WEIGHT": 0.25,          # projection weight — reduced to let ceiling dominate
+    "GPP_UPSIDE_WEIGHT": 0.35,        # weight on sim 99th pctile (true ceiling from sims)
+    "GPP_BOOM_WEIGHT": 0.40,          # weight on boom potential (sim99 - sim50 spread)
     "GPP_OWN_PENALTY_STRENGTH": 1.2,  # scales the log-based ownership penalty
     "GPP_OWN_LOW_BOOST": 0.5,         # modest boost for low-ownership (<8%) players
     # v9 edge signal weights (additive on top of base GPP formula)
@@ -155,6 +155,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "GPP_FORM_WEIGHT": 0.2,           # slight recent form boost
     "GPP_DVP_WEIGHT": 0.2,            # slight matchup boost
     "GPP_PROJ_FLOOR": 280,            # flag/filter lineups projecting below this total
+    "GPP_MIN_LINEUP_CEILING": 350,    # minimum sum(ceil) for GPP lineups — optimizer constraint
     # GPP-specific constraints (v7 — calibrated against 6 RG winning lineups 2026-03-09 → 2026-03-13)
     # Only active when CONTEST_TYPE == "gpp"
     # v6 had max_punts=2, min_mid=3 which over-represented punts (1.4 avg vs
