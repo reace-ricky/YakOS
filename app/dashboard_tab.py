@@ -121,19 +121,18 @@ def render_dashboard_tab(sport: str) -> None:
     except Exception as e:
         st.error(f"Published Data Status error: {e}\n```\n{traceback.format_exc()}\n```")
 
-    # ── Post-Slate Feedback ───────────────────────────────────────────────
+    # ── Maintenance Tools ─────────────────────────────────────────────────
     st.markdown("---")
-    try:
-        _render_post_slate_feedback(sport)
-    except Exception as e:
-        st.error(f"Post-Slate Feedback error: {e}\n```\n{traceback.format_exc()}\n```")
-
-    # ── Historical Backfill ───────────────────────────────────────────────
-    st.markdown("---")
-    try:
-        _render_historical_backfill(sport)
-    except Exception as e:
-        st.error(f"Historical Backfill error: {e}\n```\n{traceback.format_exc()}\n```")
+    with st.expander("Maintenance Tools", expanded=False):
+        try:
+            _render_post_slate_feedback(sport)
+        except Exception as e:
+            st.error(f"Post-Slate Feedback error: {e}\n```\n{traceback.format_exc()}\n```")
+        st.markdown("---")
+        try:
+            _render_recalibrate_from_archive(sport)
+        except Exception as e:
+            st.error(f"Recalibrate from Archive error: {e}\n```\n{traceback.format_exc()}\n```")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -587,8 +586,10 @@ def _render_historical_backfill(sport: str) -> None:
     if sport.upper() == "PGA":
         _render_pga_backfill()
 
-    # ── Recalibrate from Archive (sport-agnostic) ─────────────────────
-    st.markdown("---")
+
+
+def _render_recalibrate_from_archive(sport: str) -> None:
+    """Recalibrate from Archive UI (sport-agnostic)."""
     st.markdown("### Recalibrate from Archive")
     st.caption(
         "Rebuild correction factors from archived slate parquets "
