@@ -119,7 +119,7 @@ def build_lineups(
     # teammate projections when a key player is ruled out.
     try:
         from yak_core.injury_monitor import InjuryMonitorState, apply_monitor_to_pool
-        from yak_core.injury_cascade import apply_injury_cascade
+        from yak_core.injury_cascade import apply_injury_cascade, apply_minutes_gap_redistribution
 
         injury_state = InjuryMonitorState.load(today_str())
         pool = apply_monitor_to_pool(pool, injury_state)
@@ -143,6 +143,15 @@ def build_lineups(
                     f"[build_lineups] Injury cascade applied: "
                     f"{len(cascade_report)} key injury/ies redistributed"
                 )
+        # Minutes gap redistribution
+        try:
+            pool = apply_minutes_gap_redistribution(pool)
+            _n_gap = int((pool.get("minutes_gap_bump_min", 0) > 0).sum()) if "minutes_gap_bump_min" in pool.columns else 0
+            if _n_gap:
+                print(f"[build_lineups] Minutes gap redistribution boosted {_n_gap} player(s)")
+        except Exception as gap_exc:
+            print(f"[build_lineups] WARNING: minutes gap redistribution failed: {gap_exc}")
+
     except FileNotFoundError:
         pass  # No monitor state on disk yet — first run of the day
     except Exception as exc:
