@@ -1,0 +1,10 @@
+{
+  "contest": "GPP Main",
+  "sport": "NBA",
+  "num_lineups": 5,
+  "built_at": "2026-03-16T18:08:49.605526+00:00",
+  "lock": [
+    "Josh Giddey"
+  ],
+  "exclude": []
+}
