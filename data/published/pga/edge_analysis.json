@@ -1,177 +1,161 @@
 {
   "bullets": [
-    "Core anchors: Ryan Gerard, J.J. Spaun, Scottie Scheffler",
-    "Leverage plays: Si Woo Kim, Corey Conners",
-    "Value targets: Max McGreevy, Andrew Putnam",
-    "Fade candidates: Justin Thomas, Danny Walker"
+    "Core anchors: Matt Fitzpatrick, J.J. Spaun, Ryo Hisatsune",
+    "Leverage plays: Corey Conners, Bud Cauley",
+    "Value targets: Andrew Putnam, Max McGreevy",
+    "Fade candidates: Danny Walker, Joe Highsmith"
   ],
-  "recommendation": "5 core plays anchored at $7,400\u2013$14,000. 5 value plays averaging 3.3 pts/$1K. 5 leverage plays at 1\u20138% ownership.",
+  "recommendation": "5 core plays anchored at $7,300\u2013$9,000. 5 value plays averaging 3.5 pts/$1K. 3 leverage plays at 8\u201312% ownership.",
   "core_plays": [
     {
-      "player_name": "Ryan Gerard",
-      "salary": 7500,
-      "proj": 30.07,
-      "ownership": 11.02,
-      "edge": 0.5228044773410665,
-      "value": 3.06
+      "player_name": "Matt Fitzpatrick",
+      "salary": 9000,
+      "proj": 32.22,
+      "ownership": 21.27,
+      "edge": 0.5335018878850104,
+      "value": 2.75
     },
     {
       "player_name": "J.J. Spaun",
       "salary": 7400,
-      "proj": 29.7,
-      "ownership": 10.52,
-      "edge": 0.5010708271559776,
-      "value": 3.05
+      "proj": 31.02,
+      "ownership": 19.93,
+      "edge": 0.5327187940936948,
+      "value": 3.18
     },
     {
-      "player_name": "Scottie Scheffler",
-      "salary": 14000,
-      "proj": 30.08,
-      "ownership": 10.67,
-      "edge": 0.47896491540545305,
-      "value": 1.86
+      "player_name": "Ryo Hisatsune",
+      "salary": 7300,
+      "proj": 30.68,
+      "ownership": 15.27,
+      "edge": 0.5261084535176086,
+      "value": 3.18
     },
     {
-      "player_name": "Matt Fitzpatrick",
-      "salary": 9000,
-      "proj": 30.509999999999998,
-      "ownership": 12.82,
-      "edge": 0.4670935508963028,
-      "value": 2.6
+      "player_name": "Akshay Bhatia",
+      "salary": 8700,
+      "proj": 31.67,
+      "ownership": 20.88,
+      "edge": 0.5061045870927438,
+      "value": 2.78
     },
     {
-      "player_name": "Viktor Hovland",
-      "salary": 9300,
-      "proj": 30.18,
-      "ownership": 9.08,
-      "edge": 0.45687868859749525,
-      "value": 2.48
+      "player_name": "Patrick Cantlay",
+      "salary": 8100,
+      "proj": 31.4,
+      "ownership": 20.05,
+      "edge": 0.49740417162466805,
+      "value": 2.95
     }
   ],
   "leverage_plays": [
     {
-      "player_name": "Si Woo Kim",
-      "salary": 9700,
-      "proj": 27.79,
-      "ownership": 3.53,
-      "edge": 0.5274873079776825,
-      "value": 2.44
-    },
-    {
       "player_name": "Corey Conners",
-      "salary": 7500,
-      "proj": 29.36,
-      "ownership": 7.08,
-      "edge": 0.5167014106100674,
-      "value": 2.97
+      "salary": 8000,
+      "proj": 30.56,
+      "ownership": 12.37,
+      "edge": 0.5140656729992631,
+      "value": 2.88
     },
     {
-      "player_name": "Russell Henley",
-      "salary": 9600,
-      "proj": 27.53,
-      "ownership": 2.81,
-      "edge": 0.5131960427658991,
-      "value": 2.44
+      "player_name": "Bud Cauley",
+      "salary": 6900,
+      "proj": 29.96,
+      "ownership": 7.89,
+      "edge": 0.5103070165334617,
+      "value": 3.26
     },
     {
-      "player_name": "Alex Noren",
-      "salary": 7400,
-      "proj": 29.83,
-      "ownership": 8.46,
-      "edge": 0.5091128578712472,
-      "value": 3.07
-    },
-    {
-      "player_name": "Daniel Berger",
-      "salary": 7700,
-      "proj": 26.529999999999998,
-      "ownership": 1.21,
-      "edge": 0.4658366768281239,
-      "value": 2.94
+      "player_name": "Austin Smotherman",
+      "salary": 7200,
+      "proj": 30.09,
+      "ownership": 8.66,
+      "edge": 0.4970599516590421,
+      "value": 3.14
     }
   ],
   "value_plays": [
     {
-      "player_name": "Max McGreevy",
-      "salary": 6500,
-      "proj": 29.14,
-      "ownership": 9.49,
-      "edge": 0.5666695368107041,
-      "value": 3.39
-    },
-    {
       "player_name": "Andrew Putnam",
       "salary": 6300,
-      "proj": 28.18,
-      "ownership": 9.84,
-      "edge": 0.5665985075499125,
-      "value": 3.34
+      "proj": 29.23,
+      "ownership": 5.17,
+      "edge": 0.5913492440814718,
+      "value": 3.45
     },
     {
-      "player_name": "Takumi Kanaya",
-      "salary": 6300,
-      "proj": 28.52,
-      "ownership": 9.57,
-      "edge": 0.5419178358649258,
-      "value": 3.4
+      "player_name": "Max McGreevy",
+      "salary": 6500,
+      "proj": 30.22,
+      "ownership": 15.86,
+      "edge": 0.573179173666489,
+      "value": 3.5
     },
     {
       "player_name": "Nick Taylor",
       "salary": 6700,
-      "proj": 29.3,
-      "ownership": 8.44,
-      "edge": 0.535839170880253,
-      "value": 3.31
+      "proj": 30.47,
+      "ownership": 17.29,
+      "edge": 0.569651529076275,
+      "value": 3.43
     },
     {
-      "player_name": "Nico Echavarria",
-      "salary": 6800,
-      "proj": 29.3,
-      "ownership": 10.16,
-      "edge": 0.5310745723270285,
-      "value": 3.26
+      "player_name": "Takumi Kanaya",
+      "salary": 6200,
+      "proj": 29.21,
+      "ownership": 6.6,
+      "edge": 0.527941926033806,
+      "value": 3.5
+    },
+    {
+      "player_name": "Kevin Roy",
+      "salary": 6100,
+      "proj": 29.72,
+      "ownership": 13.62,
+      "edge": 0.515200345736276,
+      "value": 3.64
     }
   ],
   "fade_candidates": [
     {
-      "player_name": "Justin Thomas",
-      "salary": 7600,
-      "proj": 26.14,
-      "ownership": 1.02,
-      "edge": 0.3407082033085109,
-      "value": 2.93
-    },
-    {
       "player_name": "Danny Walker",
-      "salary": 6100,
-      "proj": 27.82,
-      "ownership": 11.74,
-      "edge": 0.352083683398806,
-      "value": 3.4
-    },
-    {
-      "player_name": "Brooks Koepka",
-      "salary": 7800,
-      "proj": 25.68,
-      "ownership": 0.87,
-      "edge": 0.35518821225615393,
-      "value": 2.79
-    },
-    {
-      "player_name": "Chris Gotterup",
-      "salary": 8900,
-      "proj": 30.06,
-      "ownership": 11.26,
-      "edge": 0.3669146180172223,
-      "value": 2.58
+      "salary": 6000,
+      "proj": 28.52,
+      "ownership": 12.52,
+      "edge": 0.3475342042054211,
+      "value": 3.5
     },
     {
       "player_name": "Joe Highsmith",
-      "salary": 6300,
-      "proj": 27.58,
-      "ownership": 9.51,
-      "edge": 0.37960251715704507,
+      "salary": 6100,
+      "proj": 28.54,
+      "ownership": 12.37,
+      "edge": 0.3780112460931026,
+      "value": 3.45
+    },
+    {
+      "player_name": "Michael Brennan",
+      "salary": 6500,
+      "proj": 29.91,
+      "ownership": 13.89,
+      "edge": 0.3994076959212323,
+      "value": 3.45
+    },
+    {
+      "player_name": "Matti Schmid",
+      "salary": 6800,
+      "proj": 29.57,
+      "ownership": 6.94,
+      "edge": 0.40229173621596964,
       "value": 3.25
+    },
+    {
+      "player_name": "Tony Finau",
+      "salary": 7000,
+      "proj": 29.56,
+      "ownership": 4.63,
+      "edge": 0.4049283177906699,
+      "value": 3.15
     }
   ],
   "signals_df_path": "signals.parquet"

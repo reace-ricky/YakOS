@@ -1,33 +1,31 @@
 {
   "sport": "PGA",
-  "date": "2026-03-14",
+  "date": "2026-03-12",
   "core_names": [
-    "Ryan Gerard",
-    "J.J. Spaun",
-    "Scottie Scheffler",
     "Matt Fitzpatrick",
-    "Viktor Hovland"
+    "J.J. Spaun",
+    "Ryo Hisatsune",
+    "Akshay Bhatia",
+    "Patrick Cantlay"
   ],
   "leverage_names": [
-    "Si Woo Kim",
     "Corey Conners",
-    "Russell Henley",
-    "Alex Noren",
-    "Daniel Berger"
+    "Bud Cauley",
+    "Austin Smotherman"
   ],
   "value_names": [
-    "Max McGreevy",
     "Andrew Putnam",
-    "Takumi Kanaya",
+    "Max McGreevy",
     "Nick Taylor",
-    "Nico Echavarria"
+    "Takumi Kanaya",
+    "Kevin Roy"
   ],
   "fade_names": [
-    "Justin Thomas",
     "Danny Walker",
-    "Brooks Koepka",
-    "Chris Gotterup",
-    "Joe Highsmith"
+    "Joe Highsmith",
+    "Michael Brennan",
+    "Matti Schmid",
+    "Tony Finau"
   ],
-  "calibration_slates": 8
+  "calibration_slates": 15
 }
