@@ -50,10 +50,13 @@
   "showdown": {
     "name": "SHOWDOWN Working Config",
     "created": "2026-03-15T18:13:27",
-    "updated": "2026-03-15T23:43:56",
+    "updated": "2026-03-16T06:50:30",
     "slates_trained": [
       "2026-03-05",
-      "2026-03-06"
+      "2026-03-06",
+      "2026-01-31",
+      "2026-03-09",
+      "2026-03-10"
     ],
     "values": {
       "proj_weight": 0.75,
@@ -68,7 +71,7 @@
       "stud_exposure": 60,
       "mid_exposure": 35,
       "value_exposure": 25,
-      "edge_smash_weight": 0.15,
+      "edge_smash_weight": 0.45,
       "edge_leverage_weight": 0.1,
       "edge_form_weight": 0.1,
       "edge_dvp_weight": 0.05,
