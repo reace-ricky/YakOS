@@ -202,10 +202,10 @@ def _salary_tier_label(salary: int) -> str:
 # ── Config Slider Defaults ───────────────────────────────────────────────
 
 DEFAULT_LAB_CONFIG = {
-    # GPP Formula Weights
-    "proj_weight": 0.50,
-    "upside_weight": 0.30,
-    "boom_weight": 0.20,
+    # GPP Formula Weights (must match DEFAULT_CONFIG in yak_core/config.py)
+    "proj_weight": 0.25,
+    "upside_weight": 0.35,
+    "boom_weight": 0.40,
     # Ownership
     "own_penalty_strength": 1.2,
     "low_own_boost": 0.5,

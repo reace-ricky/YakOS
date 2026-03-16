@@ -336,7 +336,7 @@ class TestConfigWiring:
         """GPP v8 scoring weights must be present."""
         cfg = _make_cfg()
         # v8 sim-based scoring weights
-        assert cfg.get("GPP_PROJ_WEIGHT", 0.50) == 0.50
+        assert cfg.get("GPP_PROJ_WEIGHT") == 0.25
         assert "GPP_UPSIDE_WEIGHT" in cfg
         assert "GPP_BOOM_WEIGHT" in cfg
         assert "GPP_OWN_PENALTY_STRENGTH" in cfg

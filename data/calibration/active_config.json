@@ -9,9 +9,9 @@
       "2026-03-05"
     ],
     "values": {
-      "proj_weight": 0.7,
-      "upside_weight": 0.3,
-      "boom_weight": 0.4,
+      "proj_weight": 0.25,
+      "upside_weight": 0.35,
+      "boom_weight": 0.40,
       "own_penalty_strength": 0.7,
       "low_own_boost": 0.5,
       "own_neutral_pct": 15,
@@ -107,9 +107,9 @@
     "updated": "2026-03-16T17:36:11",
     "slates_trained": [],
     "values": {
-      "proj_weight": 0.5,
-      "upside_weight": 0.3,
-      "boom_weight": 0.2,
+      "proj_weight": 0.25,
+      "upside_weight": 0.35,
+      "boom_weight": 0.40,
       "own_penalty_strength": 1.2,
       "low_own_boost": 0.5,
       "own_neutral_pct": 15,
