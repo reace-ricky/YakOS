@@ -4690,5 +4690,33 @@
       "edge_bust_penalty": 0.1,
       "edge_efficiency_weight": 0.05
     }
+  },
+  {
+    "timestamp": "2026-03-16T23:52:09",
+    "contest_type": "gpp",
+    "slate_date": null,
+    "action": "reset_to_defaults",
+    "changes": {},
+    "values": {
+      "proj_weight": 0.25,
+      "upside_weight": 0.35,
+      "boom_weight": 0.4,
+      "own_penalty_strength": 1.2,
+      "low_own_boost": 0.5,
+      "own_neutral_pct": 15,
+      "max_punt_players": 1,
+      "min_mid_players": 4,
+      "game_diversity_pct": 65,
+      "stud_exposure": 50,
+      "mid_exposure": 35,
+      "value_exposure": 25,
+      "edge_smash_weight": 0.15,
+      "edge_leverage_weight": 0.1,
+      "edge_form_weight": 0.1,
+      "edge_dvp_weight": 0.05,
+      "edge_catalyst_weight": 0.05,
+      "edge_bust_penalty": 0.1,
+      "edge_efficiency_weight": 0.05
+    }
   }
 ]
