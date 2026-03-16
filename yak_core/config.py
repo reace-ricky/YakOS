@@ -155,7 +155,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "GPP_FORM_WEIGHT": 0.2,           # slight recent form boost
     "GPP_DVP_WEIGHT": 0.2,            # slight matchup boost
     "GPP_PROJ_FLOOR": 280,            # flag/filter lineups projecting below this total
-    "GPP_MIN_LINEUP_CEILING": 350,    # minimum sum(ceil) for GPP lineups — optimizer constraint
+    "GPP_MIN_LINEUP_CEILING": 0,      # DISABLED — was 350 but caused mass infeasibility (39% of lineups
+                                      # fell back to cash-like mode once high-ceil players exhausted
+                                      # exposure budgets).  The scoring formula (UPSIDE_W=0.35 on sim99,
+                                      # BOOM_W=0.40 on sim99-sim50) already chases ceiling naturally.
+                                      # Median lineup ceiling without constraint: ~336; with it: lineups
+                                      # 5-19 go infeasible → garbage cash-like fallbacks.
     # GPP-specific constraints (v7 — calibrated against 6 RG winning lineups 2026-03-09 → 2026-03-13)
     # Only active when CONTEST_TYPE == "gpp"
     # v6 had max_punts=2, min_mid=3 which over-represented punts (1.4 avg vs
