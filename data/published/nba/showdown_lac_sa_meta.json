@@ -1,0 +1,14 @@
+{
+  "contest": "Showdown",
+  "sport": "NBA",
+  "num_lineups": 1,
+  "built_at": "2026-03-16T18:09:21.233525+00:00",
+  "lock": [
+    "Josh Giddey"
+  ],
+  "exclude": [
+    "Olivier-Maxence Prosper",
+    "Cedric Coward"
+  ],
+  "matchup": "SA vs LAC"
+}
