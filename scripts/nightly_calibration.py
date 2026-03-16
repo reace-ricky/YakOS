@@ -27,6 +27,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
 from yak_core.config import YAKOS_ROOT
+from yak_core.name_utils import normalize_player_name
 
 logging.basicConfig(
     level=logging.INFO,
@@ -63,33 +64,47 @@ def run_nba_calibration(slate_date: str) -> dict:
     log.info("=== NBA Calibration for %s ===", slate_date)
     result = {"sport": "NBA", "slate_date": slate_date, "status": "ok"}
 
-    # 1. Load published pool
-    pool_path = _published_pool_path("nba")
-    if not pool_path.exists():
-        log.warning("No published NBA pool at %s — skipping", pool_path)
-        result["status"] = "skipped"
-        result["reason"] = "No published pool"
-        return result
+    # 1. Try loading from archive first (immune to published pool overwrite)
+    from yak_core.slate_archive import _ARCHIVE_DIR
+    archive_candidates = [
+        os.path.join(_ARCHIVE_DIR, f"{slate_date}_gpp_main.parquet"),
+        os.path.join(_ARCHIVE_DIR, f"{slate_date}_gpp.parquet"),
+    ]
+    pool = None
+    for candidate in archive_candidates:
+        if os.path.exists(candidate):
+            pool = pd.read_parquet(candidate)
+            log.info("Loaded pool from archive: %s (%d players)", candidate, len(pool))
+            break
 
-    pool = pd.read_parquet(pool_path)
-    log.info("Loaded pool: %d players", len(pool))
-
-    # 1b. Validate pool date matches requested calibration date
-    meta_path = pool_path.parent / "slate_meta.json"
-    if meta_path.exists():
-        with open(meta_path) as f:
-            meta = json.load(f)
-        pool_date = meta.get("date")
-        if pool_date and pool_date != slate_date:
-            log.error(
-                "Pool date mismatch: pool is for %s but calibration requested for %s. "
-                "Use archive-based calibration instead.",
-                pool_date, slate_date,
-            )
-            result["status"] = "error"
-            result["reason"] = f"Pool date mismatch: pool={pool_date}, requested={slate_date}"
+    # 1b. Fall back to published pool if no archive found
+    if pool is None:
+        pool_path = _published_pool_path("nba")
+        if not pool_path.exists():
+            log.warning("No published NBA pool at %s — skipping", pool_path)
+            result["status"] = "skipped"
+            result["reason"] = "No published pool"
             return result
-        log.info("Pool date validated: %s", pool_date)
+
+        pool = pd.read_parquet(pool_path)
+        log.info("Loaded pool from published: %d players", len(pool))
+
+        # Validate pool date (soft warning — skip if mismatch and no archive)
+        meta_path = pool_path.parent / "slate_meta.json"
+        if meta_path.exists():
+            with open(meta_path) as f:
+                meta = json.load(f)
+            pool_date = meta.get("date")
+            if pool_date and pool_date != slate_date:
+                log.warning(
+                    "Pool date mismatch: pool is for %s but calibration requested for %s. "
+                    "No archive found — skipping.",
+                    pool_date, slate_date,
+                )
+                result["status"] = "error"
+                result["reason"] = f"Pool date mismatch and no archive: pool={pool_date}, requested={slate_date}"
+                return result
+            log.info("Pool date validated: %s", pool_date)
 
     # 2. Fetch actuals via Tank01
     api_key = (
@@ -118,11 +133,14 @@ def run_nba_calibration(slate_date: str) -> dict:
 
     log.info("Fetched actuals for %d players", len(actuals))
 
-    # 3. Merge actuals into pool on player_name
-    act_map = actuals.set_index("player_name")["actual_fp"].to_dict()
-    pool["actual_fp"] = pool["player_name"].map(act_map)
+    # 3. Merge actuals into pool using normalized player names
+    pool["_norm_name"] = pool["player_name"].apply(normalize_player_name)
+    actuals["_norm_name"] = actuals["player_name"].apply(normalize_player_name)
+    act_map = actuals.set_index("_norm_name")["actual_fp"].to_dict()
+    pool["actual_fp"] = pool["_norm_name"].map(act_map)
+    pool.drop(columns=["_norm_name"], inplace=True)
     matched = pool["actual_fp"].notna().sum()
-    log.info("Matched actuals for %d / %d players", matched, len(pool))
+    log.info("Matched actuals for %d / %d players (normalized names)", matched, len(pool))
 
     if matched == 0:
         log.warning("No player matches — skipping calibration")
@@ -337,33 +355,47 @@ def run_pga_calibration(slate_date: str) -> dict:
         result["reason"] = "Missing DATAGOLF_API_KEY"
         return result
 
-    # 1. Load published pool
-    pool_path = _published_pool_path("pga")
-    if not pool_path.exists():
-        log.warning("No published PGA pool at %s — skipping", pool_path)
-        result["status"] = "skipped"
-        result["reason"] = "No published pool"
-        return result
+    # 1. Try loading from archive first (immune to published pool overwrite)
+    from yak_core.slate_archive import _ARCHIVE_DIR
+    archive_candidates = [
+        os.path.join(_ARCHIVE_DIR, f"{slate_date}_pga_gpp.parquet"),
+        os.path.join(_ARCHIVE_DIR, f"{slate_date}_pga.parquet"),
+    ]
+    pool = None
+    for candidate in archive_candidates:
+        if os.path.exists(candidate):
+            pool = pd.read_parquet(candidate)
+            log.info("Loaded PGA pool from archive: %s (%d players)", candidate, len(pool))
+            break
 
-    pool = pd.read_parquet(pool_path)
-    log.info("Loaded PGA pool: %d players", len(pool))
-
-    # 1b. Validate pool date matches requested calibration date
-    meta_path = pool_path.parent / "slate_meta.json"
-    if meta_path.exists():
-        with open(meta_path) as f:
-            meta = json.load(f)
-        pool_date = meta.get("date")
-        if pool_date and pool_date != slate_date:
-            log.error(
-                "PGA pool date mismatch: pool is for %s but calibration requested for %s. "
-                "Use archive-based calibration instead.",
-                pool_date, slate_date,
-            )
-            result["status"] = "error"
-            result["reason"] = f"Pool date mismatch: pool={pool_date}, requested={slate_date}"
+    # 1b. Fall back to published pool if no archive found
+    if pool is None:
+        pool_path = _published_pool_path("pga")
+        if not pool_path.exists():
+            log.warning("No published PGA pool at %s — skipping", pool_path)
+            result["status"] = "skipped"
+            result["reason"] = "No published pool"
             return result
-        log.info("PGA pool date validated: %s", pool_date)
+
+        pool = pd.read_parquet(pool_path)
+        log.info("Loaded PGA pool from published: %d players", len(pool))
+
+        # Validate pool date (soft warning — skip if mismatch and no archive)
+        meta_path = pool_path.parent / "slate_meta.json"
+        if meta_path.exists():
+            with open(meta_path) as f:
+                meta = json.load(f)
+            pool_date = meta.get("date")
+            if pool_date and pool_date != slate_date:
+                log.warning(
+                    "PGA pool date mismatch: pool is for %s but calibration requested for %s. "
+                    "No archive found — skipping.",
+                    pool_date, slate_date,
+                )
+                result["status"] = "error"
+                result["reason"] = f"Pool date mismatch and no archive: pool={pool_date}, requested={slate_date}"
+                return result
+            log.info("PGA pool date validated: %s", pool_date)
 
     # 2. Fetch actuals via DataGolf
     try:
@@ -401,13 +433,16 @@ def run_pga_calibration(slate_date: str) -> dict:
 
     log.info("Fetched actuals for %d players", len(actuals))
 
-    # 3. Merge actuals into pool
+    # 3. Merge actuals into pool (prefer dg_id, fall back to normalized name)
     if "dg_id" in pool.columns and "dg_id" in actuals.columns:
         act_map = actuals.set_index("dg_id")["actual_fp"].to_dict()
         pool["actual_fp"] = pool["dg_id"].map(act_map)
     elif "player_name" in pool.columns and "player_name" in actuals.columns:
-        act_map = actuals.set_index("player_name")["actual_fp"].to_dict()
-        pool["actual_fp"] = pool["player_name"].map(act_map)
+        pool["_norm_name"] = pool["player_name"].apply(normalize_player_name)
+        actuals["_norm_name"] = actuals["player_name"].apply(normalize_player_name)
+        act_map = actuals.set_index("_norm_name")["actual_fp"].to_dict()
+        pool["actual_fp"] = pool["_norm_name"].map(act_map)
+        pool.drop(columns=["_norm_name"], inplace=True)
 
     matched = pool["actual_fp"].notna().sum() if "actual_fp" in pool.columns else 0
     log.info("Matched actuals for %d / %d players", matched, len(pool))
@@ -622,6 +657,113 @@ def sync_to_github(sports: list[str], extra_files: list[str] | None = None) -> d
         return {"status": "error", "reason": str(e)}
 
 
+# ── Backfill ───────────────────────────────────────────────────────────────
+
+def backfill_actuals(min_coverage: float = 0.8) -> list[dict]:
+    """Re-fetch actuals for archived slates with poor coverage and re-archive."""
+    from yak_core.slate_archive import _ARCHIVE_DIR, archive_slate
+
+    if not os.path.isdir(_ARCHIVE_DIR):
+        log.warning("No archive directory at %s", _ARCHIVE_DIR)
+        return []
+
+    results = []
+    for fname in sorted(os.listdir(_ARCHIVE_DIR)):
+        if not fname.endswith(".parquet"):
+            continue
+        path = os.path.join(_ARCHIVE_DIR, fname)
+        df = pd.read_parquet(path)
+        if "actual_fp" not in df.columns:
+            continue
+        coverage = df["actual_fp"].notna().mean()
+        if coverage >= min_coverage:
+            continue
+
+        slate_date = fname[:10]
+        # Determine sport from filename
+        fname_lower = fname.lower()
+        if "pga" in fname_lower:
+            sport = "PGA"
+        else:
+            sport = "NBA"
+
+        # Determine contest_type from filename (e.g. "gpp_main", "pga_gpp")
+        contest_type_raw = fname[11:].replace(".parquet", "")  # after "YYYY-MM-DD_"
+        contest_type = contest_type_raw.replace("_", " ").title()  # e.g. "Gpp Main"
+
+        log.info(
+            "Backfilling %s (%s, coverage: %.0f%%)",
+            fname, sport, coverage * 100,
+        )
+
+        try:
+            if sport == "NBA":
+                api_key = (
+                    os.environ.get("RAPIDAPI_KEY")
+                    or os.environ.get("TANK01_RAPIDAPI_KEY")
+                )
+                if not api_key:
+                    log.warning("No RAPIDAPI_KEY — skipping NBA backfill for %s", fname)
+                    continue
+
+                from yak_core.live import fetch_actuals_from_api
+                actuals = fetch_actuals_from_api(slate_date, {"RAPIDAPI_KEY": api_key})
+            else:
+                api_key = os.environ.get("DATAGOLF_API_KEY")
+                if not api_key:
+                    log.warning("No DATAGOLF_API_KEY — skipping PGA backfill for %s", fname)
+                    continue
+
+                from yak_core.datagolf import DataGolfClient
+                from yak_core.pga_calibration import fetch_pga_actuals, get_pga_event_list
+
+                dg = DataGolfClient(api_key)
+                events = get_pga_event_list(dg)
+                if events.empty:
+                    log.warning("No PGA events for backfill of %s", fname)
+                    continue
+                event_row = events.iloc[0]
+                event_id = int(event_row["event_id"])
+                year = int(event_row.get("calendar_year", int(slate_date[:4])))
+                actuals = fetch_pga_actuals(dg, event_id, year)
+
+            if actuals.empty:
+                log.warning("No actuals returned for %s — skipping", fname)
+                continue
+
+            # Merge with name normalization
+            if sport == "PGA" and "dg_id" in df.columns and "dg_id" in actuals.columns:
+                act_map = actuals.set_index("dg_id")["actual_fp"].to_dict()
+                df["actual_fp"] = df["dg_id"].map(act_map)
+            else:
+                df["_norm_name"] = df["player_name"].apply(normalize_player_name)
+                actuals["_norm_name"] = actuals["player_name"].apply(normalize_player_name)
+                act_map = actuals.set_index("_norm_name")["actual_fp"].to_dict()
+                df["actual_fp"] = df["_norm_name"].map(act_map)
+                df.drop(columns=["_norm_name"], inplace=True)
+
+            new_coverage = df["actual_fp"].notna().mean()
+            log.info(
+                "Backfill %s: coverage %.0f%% → %.0f%%",
+                fname, coverage * 100, new_coverage * 100,
+            )
+
+            # Re-archive the updated data
+            archive_slate(df, slate_date, contest_type=contest_type)
+
+            results.append({
+                "file": fname,
+                "sport": sport,
+                "old_coverage": round(coverage, 3),
+                "new_coverage": round(new_coverage, 3),
+            })
+        except Exception as e:
+            log.warning("Backfill failed for %s: %s", fname, e)
+            results.append({"file": fname, "sport": sport, "error": str(e)})
+
+    return results
+
+
 # ── Main ───────────────────────────────────────────────────────────────────
 
 def main():
@@ -637,7 +779,25 @@ def main():
         choices=["NBA", "PGA", "all"],
         help="Sport to calibrate. Default: all.",
     )
+    parser.add_argument(
+        "--backfill",
+        action="store_true",
+        help="Re-fetch actuals for archived slates with <80%% coverage.",
+    )
     args = parser.parse_args()
+
+    if args.backfill:
+        log.info("Running backfill mode — re-fetching actuals for low-coverage archives")
+        bf_results = backfill_actuals()
+        for bf in bf_results:
+            if "error" in bf:
+                log.warning("Backfill %s: %s", bf["file"], bf["error"])
+            else:
+                log.info(
+                    "Backfill %s: %.0f%% → %.0f%%",
+                    bf["file"], bf["old_coverage"] * 100, bf["new_coverage"] * 100,
+                )
+        return
 
     slate_date = args.date
     sport = args.sport.upper()

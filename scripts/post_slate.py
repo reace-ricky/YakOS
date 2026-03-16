@@ -23,6 +23,8 @@ from _env import published_dir, require_env, today_str  # noqa: E402
 
 import pandas as pd
 
+from yak_core.name_utils import normalize_player_name
+
 
 def _fetch_nba_actuals(slate_date: str) -> pd.DataFrame:
     """Fetch NBA actuals from Tank01 box scores."""
@@ -72,12 +74,15 @@ def _run_calibration(pool: pd.DataFrame, actuals: pd.DataFrame,
     """Merge actuals into pool and run calibration feedback."""
     from yak_core.calibration_feedback import record_slate_errors, get_correction_factors
 
-    # Merge actuals into pool
+    # Merge actuals into pool using normalized player names
     if actuals.empty or "actual_fp" not in actuals.columns:
         return {"error": "No actuals to calibrate against"}
 
-    act_map = actuals.set_index("player_name")["actual_fp"].to_dict()
-    pool["actual_fp"] = pool["player_name"].map(act_map)
+    pool["_norm_name"] = pool["player_name"].apply(normalize_player_name)
+    actuals["_norm_name"] = actuals["player_name"].apply(normalize_player_name)
+    act_map = actuals.set_index("_norm_name")["actual_fp"].to_dict()
+    pool["actual_fp"] = pool["_norm_name"].map(act_map)
+    pool.drop(columns=["_norm_name"], inplace=True)
 
     played = pool["actual_fp"].notna() & (pool["actual_fp"] > 0)
     n_played = played.sum()
@@ -207,15 +212,36 @@ def _commit_feedback(sport: str, slate_date: str) -> None:
 
 def post_slate(sport: str, slate_date: str) -> dict:
     """Run the full post-slate feedback pipeline."""
-    out_dir = published_dir(sport)
-    pool_path = f"{out_dir}/slate_pool.parquet"
+    from yak_core.slate_archive import _ARCHIVE_DIR
 
-    try:
-        pool = pd.read_parquet(pool_path)
-    except FileNotFoundError:
-        sys.exit(f"ERROR: No published pool at {pool_path}. Run publish first.")
+    # Try loading from archive first (immune to published pool overwrite)
+    pool = None
+    if sport == "NBA":
+        archive_candidates = [
+            os.path.join(_ARCHIVE_DIR, f"{slate_date}_gpp_main.parquet"),
+            os.path.join(_ARCHIVE_DIR, f"{slate_date}_gpp.parquet"),
+        ]
+    else:
+        archive_candidates = [
+            os.path.join(_ARCHIVE_DIR, f"{slate_date}_pga_gpp.parquet"),
+            os.path.join(_ARCHIVE_DIR, f"{slate_date}_pga.parquet"),
+        ]
 
-    print(f"[post_slate] Loaded {len(pool)} players from {pool_path}")
+    for candidate in archive_candidates:
+        if os.path.exists(candidate):
+            pool = pd.read_parquet(candidate)
+            print(f"[post_slate] Loaded {len(pool)} players from archive: {candidate}")
+            break
+
+    # Fall back to published pool
+    if pool is None:
+        out_dir = published_dir(sport)
+        pool_path = f"{out_dir}/slate_pool.parquet"
+        try:
+            pool = pd.read_parquet(pool_path)
+        except FileNotFoundError:
+            sys.exit(f"ERROR: No published pool at {pool_path} and no archive found. Run publish first.")
+        print(f"[post_slate] Loaded {len(pool)} players from {pool_path}")
 
     # Step 1: Fetch actuals
     if sport == "NBA":
@@ -233,9 +259,12 @@ def post_slate(sport: str, slate_date: str) -> dict:
 
     # Step 3: Signal feedback
     print(f"\n[post_slate] Recording signal feedback ...")
-    # Re-merge actuals for signal feedback
-    act_map = actuals.set_index("player_name")["actual_fp"].to_dict()
-    pool["actual_fp"] = pool["player_name"].map(act_map)
+    # Re-merge actuals for signal feedback using normalized names
+    pool["_norm_name"] = pool["player_name"].apply(normalize_player_name)
+    actuals["_norm_name"] = actuals["player_name"].apply(normalize_player_name)
+    act_map = actuals.set_index("_norm_name")["actual_fp"].to_dict()
+    pool["actual_fp"] = pool["_norm_name"].map(act_map)
+    pool.drop(columns=["_norm_name"], inplace=True)
     sig_result = _run_signal_feedback(pool, sport, slate_date)
 
     # Step 3b: Archive the completed slate for historical replay
