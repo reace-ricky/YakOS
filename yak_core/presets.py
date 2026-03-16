@@ -42,6 +42,11 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "GPP_BUST_PENALTY": 0.4,
             "GPP_FORM_WEIGHT": 0.2,
             "GPP_DVP_WEIGHT": 0.2,
+            # FP Cheatsheet signal weights (GPP: higher pace/dvp for ceiling)
+            "GPP_SPREAD_PENALTY_WEIGHT": 0.05,
+            "GPP_PACE_ENV_WEIGHT": 0.10,
+            "GPP_VALUE_WEIGHT": 0.05,
+            "GPP_REST_WEIGHT": 0.03,
             # Optimizer constraints
             "GPP_MIN_LINEUP_CEILING": 350,
             "GPP_FORCE_GAME_STACK": True,
@@ -84,6 +89,11 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "GPP_BUST_PENALTY": 0.3,
             "GPP_FORM_WEIGHT": 0.2,
             "GPP_DVP_WEIGHT": 0.2,
+            # FP Cheatsheet signal weights (GPP: higher pace/dvp for ceiling)
+            "GPP_SPREAD_PENALTY_WEIGHT": 0.05,
+            "GPP_PACE_ENV_WEIGHT": 0.10,
+            "GPP_VALUE_WEIGHT": 0.05,
+            "GPP_REST_WEIGHT": 0.03,
             # Optimizer constraints
             "GPP_MIN_LINEUP_CEILING": 350,
             "GPP_FORCE_GAME_STACK": True,
@@ -131,7 +141,12 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "GPP_EFFICIENCY_WEIGHT": 0.5,
             "GPP_BUST_PENALTY": 0.8,
             "GPP_FORM_WEIGHT": 0.2,
-            "GPP_DVP_WEIGHT": 0.2,
+            "GPP_DVP_WEIGHT": 0.15,
+            # FP Cheatsheet signal weights (Cash: higher rest/spread for safety)
+            "GPP_SPREAD_PENALTY_WEIGHT": 0.08,
+            "GPP_PACE_ENV_WEIGHT": 0.05,
+            "GPP_VALUE_WEIGHT": 0.03,
+            "GPP_REST_WEIGHT": 0.06,
             # Optimizer constraints
             "GPP_MIN_LINEUP_CEILING": 0,
             "GPP_FORCE_GAME_STACK": False,
@@ -173,6 +188,11 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "GPP_BUST_PENALTY": 0.3,
             "GPP_FORM_WEIGHT": 0.2,
             "GPP_DVP_WEIGHT": 0.2,
+            # FP Cheatsheet signal weights (Showdown GPP)
+            "GPP_SPREAD_PENALTY_WEIGHT": 0.05,
+            "GPP_PACE_ENV_WEIGHT": 0.10,
+            "GPP_VALUE_WEIGHT": 0.05,
+            "GPP_REST_WEIGHT": 0.03,
             # Optimizer constraints
             "GPP_MIN_LINEUP_CEILING": 0,
             "GPP_FORCE_GAME_STACK": False,
@@ -222,7 +242,12 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "GPP_EFFICIENCY_WEIGHT": 0.6,
             "GPP_BUST_PENALTY": 0.9,
             "GPP_FORM_WEIGHT": 0.2,
-            "GPP_DVP_WEIGHT": 0.2,
+            "GPP_DVP_WEIGHT": 0.15,
+            # FP Cheatsheet signal weights (Cash Showdown: safety-focused)
+            "GPP_SPREAD_PENALTY_WEIGHT": 0.08,
+            "GPP_PACE_ENV_WEIGHT": 0.05,
+            "GPP_VALUE_WEIGHT": 0.03,
+            "GPP_REST_WEIGHT": 0.06,
             # Optimizer constraints
             "GPP_MIN_LINEUP_CEILING": 0,
             "GPP_FORCE_GAME_STACK": False,
