@@ -1,10 +1,13 @@
-"""Tab 4: Dashboard (admin only).
+"""Tab 4: Dashboard – Smash / Bust Explorer.
 
-Visual command center: calibration trends, signal lift, contest band tracking,
-breakout identification, and operational controls.
+Interactive scatter explorer showing historical YakOS signal outcomes
+(caught vs missed smashes/busts) plus live slate players.  Replaces
+the old summary-chart dashboard.  Maintenance tools preserved at bottom.
 """
 from __future__ import annotations
 
+import glob as _glob
+import html as _html
 import json
 import os
 import time
@@ -13,15 +16,15 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List
 
-import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-# ── Data Loading Helpers ─────────────────────────────────────────────────────
+# ── Data Loading ─────────────────────────────────────────────────────────────
 
 def _load_json(path: Path) -> Any:
     """Load a JSON file, returning empty dict on failure."""
@@ -33,45 +36,346 @@ def _load_json(path: Path) -> Any:
     return {}
 
 
-def _load_all_dashboard_data(sport: str) -> Dict[str, Any]:
-    """Load every data source once at the top of the render cycle."""
+@st.cache_data(ttl=300)
+def _load_explorer_data(sport: str) -> list:
+    """Load historical archive + live slate into a flat list of dicts."""
     sport_lower = sport.lower()
+    archive_dir = REPO_ROOT / "data" / "slate_archive"
+    records: list = []
 
-    # Calibration slate errors (per-sport)
-    nba_errors = _load_json(REPO_ROOT / "data" / "calibration_feedback" / "nba" / "slate_errors.json")
-    pga_errors = _load_json(REPO_ROOT / "data" / "calibration_feedback" / "pga" / "slate_errors.json")
-    slate_errors = nba_errors if sport_lower == "nba" else pga_errors
+    # ── Historical archives ──────────────────────────────────────────────
+    pattern = "*_gpp_main.parquet"
+    if sport_lower == "pga":
+        pattern = "*_pga_gpp.parquet"
 
-    # Signal data
-    signal_history = _load_json(REPO_ROOT / "data" / "edge_feedback" / "signal_history.json")
-    signal_weights = _load_json(REPO_ROOT / "data" / "edge_feedback" / "signal_weights.json")
+    parquets = sorted(archive_dir.glob(pattern)) if archive_dir.exists() else []
+    for pq in parquets:
+        try:
+            df = pd.read_parquet(pq)
+        except Exception:
+            continue
 
-    # Contest results
-    contest_history = _load_json(REPO_ROOT / "data" / "contest_results" / "history.json")
+        # Must have actuals
+        if "actual_fp" not in df.columns:
+            continue
+        df = df[df["actual_fp"].notna()].copy()
+        if df.empty:
+            continue
 
-    # Breakout profile
-    breakout_profile = _load_json(REPO_ROOT / "data" / "sim_sandbox" / "breakout_profile.json")
+        for _, row in df.iterrows():
+            proj = float(row.get("proj", 0) or 0)
+            actual = float(row.get("actual_fp", 0) or 0)
+            diff = round(actual - proj, 2)
 
-    # Breakout accuracy (persisted by nightly calibration)
-    breakout_accuracy = _load_json(REPO_ROOT / "data" / "calibration_feedback" / "breakout_accuracy.json")
+            # Category
+            if diff <= -12:
+                cat = "B"
+            elif diff >= 12:
+                cat = "S"
+            else:
+                cat = "N"
 
-    # Recalibrated backtest (all slates re-projected through current corrections)
-    recal_backtest = _load_json(REPO_ROOT / "data" / "calibration_feedback" / "recalibrated_backtest.json")
+            # YakOS signals
+            smash_prob = float(row.get("smash_prob", 0) or 0)
+            bust_prob = float(row.get("bust_prob", 0) or 0)
+            breakout = float(row.get("breakout_score", 0) or 0)
+            edge_label = str(row.get("edge_label", "") or "")
+            edge_score = float(row.get("edge_score", 0) or 0)
+            leverage = float(row.get("leverage", 0) or 0)
+            ceil_mag = float(row.get("ceil_magnitude", 0) or 0)
+            pop_cat = float(row.get("pop_catalyst_score", 0) or 0)
+            pop_tag = str(row.get("pop_catalyst_tag", "") or "")
+            own = float(row.get("ownership", 0) or row.get("own_proj", 0) or 0)
+            value = float(row.get("value", 0) or 0)
 
-    # RG baseline MAE data (standalone file + inline in slate_errors)
-    rg_baseline = _load_json(REPO_ROOT / "data" / "calibration_feedback" / "rg_baseline.json")
+            # Caught / missed flags
+            is_anchor = "Anchor" in edge_label or "Core" in edge_label
+            smash_flag = smash_prob > 0.25 or breakout > 30 or is_anchor
+            bust_flag = bust_prob > 0.25 or "Fade" in edge_label
 
-    return {
-        "slate_errors": slate_errors,
-        "signal_history": signal_history,
-        "signal_weights": signal_weights,
-        "contest_history": contest_history,
-        "breakout_profile": breakout_profile,
-        "breakout_accuracy": breakout_accuracy,
-        "recal_backtest": recal_backtest,
-        "rg_baseline": rg_baseline,
-        "sport": sport_lower,
-    }
+            records.append({
+                "n": str(row.get("player_name", "")),
+                "t": str(row.get("team", "")),
+                "o": str(row.get("opp", row.get("team", ""))),
+                "p": str(row.get("pos", "")),
+                "d": str(row.get("slate_date", "")),
+                "sal": int(row.get("salary", 0) or 0),
+                "cat": cat,
+                "proj": round(proj, 1),
+                "act": round(actual, 1),
+                "diff": diff,
+                "own": round(own, 1),
+                "es": round(edge_score, 3),
+                "el": edge_label,
+                "sp": round(smash_prob, 3),
+                "bp": round(bust_prob, 3),
+                "br": round(breakout, 1),
+                "lev": round(leverage, 1),
+                "cm": round(ceil_mag, 3),
+                "pc": round(pop_cat, 3),
+                "pt": pop_tag,
+                "val": round(value, 2),
+                "sf": smash_flag,
+                "bf": bust_flag,
+            })
+
+    # ── Live slate (no actuals yet) ──────────────────────────────────────
+    live_path = REPO_ROOT / "data" / "published" / sport_lower / "signals.parquet"
+    if live_path.exists():
+        try:
+            ldf = pd.read_parquet(live_path)
+            for _, row in ldf.iterrows():
+                records.append({
+                    "n": str(row.get("player_name", "")),
+                    "t": str(row.get("team", "")),
+                    "o": str(row.get("opp", "")),
+                    "p": str(row.get("pos", "")),
+                    "d": "LIVE",
+                    "sal": int(row.get("salary", 0) or 0),
+                    "cat": "L",
+                    "proj": round(float(row.get("proj", 0) or 0), 1),
+                    "act": 0,
+                    "diff": 0,
+                    "own": round(float(row.get("ownership", 0) or 0), 1),
+                    "es": round(float(row.get("edge_score", 0) or 0), 3),
+                    "el": str(row.get("edge_label", "") or ""),
+                    "sp": round(float(row.get("smash_prob", 0) or 0), 3),
+                    "bp": round(float(row.get("bust_prob", 0) or 0), 3),
+                    "br": round(float(row.get("breakout_score", 0) or 0), 1),
+                    "lev": round(float(row.get("leverage", 0) or 0), 1),
+                    "cm": round(float(row.get("ceil_magnitude", 0) or 0), 3),
+                    "pc": round(float(row.get("pop_catalyst_score", 0) or 0), 3),
+                    "pt": str(row.get("pop_catalyst_tag", "") or ""),
+                    "val": round(float(row.get("value", 0) or 0), 2),
+                    "sf": False,
+                    "bf": False,
+                })
+        except Exception:
+            pass
+
+    return records
+
+
+# ── Explorer HTML Builder ────────────────────────────────────────────────────
+
+def _build_explorer_html(data: list) -> str:
+    """Return self-contained HTML/JS for the scatter explorer."""
+    # Clean NaN values
+    for r in data:
+        for k, v in r.items():
+            if isinstance(v, float) and v != v:
+                r[k] = 0
+
+    data_json = json.dumps(data, separators=(",", ":"))
+
+    return f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:#0f1117;color:#c8ccd4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;overflow:hidden;height:100vh}}
+.wrap{{display:grid;grid-template-columns:230px 1fr;grid-template-rows:auto 1fr auto;height:100vh}}
+.header{{grid-column:1/3;background:#161921;border-bottom:1px solid #2a2d38;padding:8px 16px;display:flex;align-items:center;gap:16px}}
+.header h1{{font-size:14px;color:#e2e5ec;font-weight:600;white-space:nowrap}}
+.header .cs{{display:flex;gap:14px;margin-left:auto}}
+.cs-item{{text-align:center}}
+.cs-item .csl{{font-size:9px;color:#6b7280;text-transform:uppercase;letter-spacing:.4px}}
+.cs-item .csv{{font-size:16px;font-weight:700}}
+.cs-item .css{{font-size:9px;color:#4b5060}}
+.green{{color:#22c55e}}.red{{color:#ef4444}}.amber{{color:#f59e0b}}
+.sidebar{{grid-row:2/4;background:#161921;border-right:1px solid #2a2d38;padding:12px;overflow-y:auto}}
+.sidebar h3{{font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}}
+.ct{{display:flex;align-items:center;gap:7px;padding:4px 6px;border-radius:4px;cursor:pointer;user-select:none;border:1px solid transparent;margin-bottom:3px}}
+.ct:hover{{background:#1e2130}}.ct.on{{border-color:#2a2d38;background:#1a1d28}}
+.ct .dot{{width:9px;height:9px;border-radius:50%;flex-shrink:0}}
+.ct .ctl{{font-size:11px;flex:1}}.ct .ctc{{font-size:10px;color:#4b5060;font-family:monospace}}
+.divider{{height:1px;background:#2a2d38;margin:10px 0}}
+.asel{{margin-bottom:10px}}
+.asel label{{font-size:9px;color:#6b7280;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:2px}}
+.asel select{{width:100%;background:#1e2130;border:1px solid #2a2d38;color:#c8ccd4;padding:4px 6px;border-radius:4px;font-size:11px;cursor:pointer}}
+.sl{{margin-bottom:10px}}
+.sl .slh{{display:flex;justify-content:space-between;margin-bottom:3px}}
+.sl .sll{{font-size:11px;color:#9ca3af}}.sl .slv{{font-size:10px;color:#4b5060;font-family:monospace}}
+.sl input[type=range]{{width:100%;height:3px;-webkit-appearance:none;background:#2a2d38;border-radius:2px;outline:none}}
+.sl input[type=range]::-webkit-slider-thumb{{-webkit-appearance:none;width:11px;height:11px;background:#4f6df0;border-radius:50%;cursor:pointer;border:2px solid #0f1117}}
+.rbtn{{width:100%;padding:4px;background:#1e2130;border:1px solid #2a2d38;color:#6b7280;border-radius:4px;cursor:pointer;font-size:10px;margin-bottom:10px}}
+.rbtn:hover{{border-color:#4f6df0;color:#4f6df0}}
+.chart-area{{position:relative;padding:6px 10px}}
+.chart-area canvas{{width:100%!important;height:100%!important}}
+.bottom{{grid-column:2;background:#161921;border-top:1px solid #2a2d38;padding:6px 16px;display:flex;align-items:center;gap:24px;font-size:11px}}
+.sb .sbl{{font-size:8px;color:#4b5060;text-transform:uppercase;letter-spacing:.3px}}
+.sb .sbv{{font-size:13px;font-weight:600;color:#e2e5ec}}
+.tip{{position:absolute;background:#1a1d28ee;border:1px solid #2a2d38;border-radius:6px;padding:8px 10px;font-size:10px;pointer-events:none;z-index:100;min-width:200px;box-shadow:0 4px 12px rgba(0,0,0,.5)}}
+.tip .tn{{font-size:12px;font-weight:600;margin-bottom:2px}}
+.tip .ts{{color:#4b5060;margin-bottom:5px;font-size:9px}}
+.tip .tr{{display:flex;justify-content:space-between;gap:14px;line-height:1.6}}
+.tip .tl{{color:#6b7280}}.tip .tv{{color:#c8ccd4;font-family:monospace;font-size:10px}}
+.tip .tag{{display:inline-block;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:600;margin-left:6px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="header">
+  <h1>Smash / Bust Explorer</h1>
+  <div class="cs" id="hdr"></div>
+</div>
+<div class="sidebar">
+  <h3>Categories</h3>
+  <div id="cats"></div>
+  <div class="divider"></div>
+  <h3>Axes</h3>
+  <div class="asel"><label>X Axis</label><select id="xA" onchange="rebuild()"></select></div>
+  <div class="asel"><label>Y Axis</label><select id="yA" onchange="rebuild()"></select></div>
+  <div class="divider"></div>
+  <h3>Filters</h3>
+  <button class="rbtn" onclick="resetF()">Reset Filters</button>
+  <div id="sls"></div>
+</div>
+<div class="chart-area">
+  <canvas id="sc"></canvas>
+  <div class="tip" id="tip" style="display:none"></div>
+</div>
+<div class="bottom" id="bot"></div>
+</div>
+<script>
+const D=''' + data_json + ''';
+const CATS=[
+  {{id:"sc",l:"Smash Caught",c:"#22c55e",t:r=>r.cat==="S"&&r.sf,rad:6}},
+  {{id:"sm",l:"Smash Missed",c:"#86efac",t:r=>r.cat==="S"&&!r.sf,rad:6,bdr:"#22c55e"}},
+  {{id:"bc",l:"Bust Caught",c:"#ef4444",t:r=>r.cat==="B"&&r.bf,rad:6}},
+  {{id:"bm",l:"Bust Missed",c:"#fca5a5",t:r=>r.cat==="B"&&!r.bf,rad:6,bdr:"#ef4444"}},
+  {{id:"lv",l:"Live",c:"#3b82f6",t:r=>r.cat==="L",rad:5}},
+  {{id:"n",l:"Normal",c:"#6b7280",t:r=>r.cat==="N",rad:2}},
+];
+let show={{}};CATS.forEach(c=>show[c.id]=true);
+const F={{
+  diff:{{l:"Actual vs Proj",f:v=>(v>=0?"+":"")+v.toFixed(1)}},
+  sal:{{l:"Salary",f:v=>"$"+v.toLocaleString()}},
+  own:{{l:"Ownership %",f:v=>v.toFixed(1)+"%"}},
+  proj:{{l:"Projection",f:v=>v.toFixed(1)}},
+  act:{{l:"Actual FPTS",f:v=>v.toFixed(1)}},
+  es:{{l:"Edge Score",f:v=>v.toFixed(3)}},
+  sp:{{l:"Smash Prob",f:v=>v.toFixed(3)}},
+  bp:{{l:"Bust Prob",f:v=>v.toFixed(3)}},
+  br:{{l:"Breakout",f:v=>v.toFixed(1)}},
+  lev:{{l:"Leverage",f:v=>v.toFixed(1)}},
+  cm:{{l:"Ceil Magnitude",f:v=>v.toFixed(3)}},
+  pc:{{l:"Pop Catalyst",f:v=>v.toFixed(3)}},
+  val:{{l:"Value",f:v=>v.toFixed(2)}},
+}};
+const SL=[
+  {{f:"es",l:"Edge Score",mn:0,mx:.7,st:.01}},
+  {{f:"sp",l:"Smash Prob",mn:0,mx:1,st:.01}},
+  {{f:"bp",l:"Bust Prob",mn:0,mx:.5,st:.01}},
+  {{f:"br",l:"Breakout",mn:0,mx:55,st:1}},
+  {{f:"sal",l:"Salary",mn:0,mx:17000,st:500}},
+  {{f:"own",l:"Ownership %",mn:0,mx:70,st:1}},
+];
+let flt={{}};
+// Build cats
+const cd=document.getElementById("cats");
+CATS.forEach(c=>{{
+  const n=D.filter(c.t).length;
+  const e=document.createElement("div");e.className="ct on";e.dataset.id=c.id;
+  const sty=c.bdr?"border:2px dashed "+c.bdr+";background:transparent":"background:"+c.c;
+  e.innerHTML='<div class="dot" style="'+sty+'"></div><span class="ctl">'+c.l+'</span><span class="ctc">'+n+'</span>';
+  e.onclick=()=>{{show[c.id]=!show[c.id];e.classList.toggle("on");rebuild();}};
+  cd.appendChild(e);
+}});
+// Axes
+const ak=Object.keys(F);
+["xA","yA"].forEach((id,i)=>{{
+  const s=document.getElementById(id);
+  ak.forEach(f=>{{const o=document.createElement("option");o.value=f;o.textContent=F[f].l;s.appendChild(o);}});
+  s.value=i===0?"es":"diff";
+}});
+// Sliders
+const sd=document.getElementById("sls");
+SL.forEach(s=>{{
+  flt[s.f]=s.mn;
+  const d=document.createElement("div");d.className="sl";
+  d.innerHTML='<div class="slh"><span class="sll">'+s.l+'</span><span class="slv" id="sv-'+s.f+'">\\u2265 '+s.mn+'</span></div><input type="range" min="'+s.mn+'" max="'+s.mx+'" step="'+s.st+'" value="'+s.mn+'" id="sl-'+s.f+'">';
+  sd.appendChild(d);
+  d.querySelector("input").addEventListener("input",function(){{flt[s.f]=parseFloat(this.value);document.getElementById("sv-"+s.f).textContent="\\u2265 "+this.value;rebuild();}});
+}});
+function resetF(){{SL.forEach(s=>{{document.getElementById("sl-"+s.f).value=s.mn;flt[s.f]=s.mn;document.getElementById("sv-"+s.f).textContent="\\u2265 "+s.mn;}});rebuild();}}
+let chart=null;
+function rebuild(){{
+  const xf=document.getElementById("xA").value,yf=document.getElementById("yA").value;
+  const fd=D.filter(r=>{{for(const f in flt)if((r[f]||0)<flt[f])return false;return true;}});
+  const ds=[];
+  ["n","lv","bm","bc","sm","sc"].forEach(cid=>{{
+    const cat=CATS.find(c=>c.id===cid);if(!show[cid])return;
+    const pts=fd.filter(cat.t);if(!pts.length)return;
+    const isO=cid!=="n",isM=cid.endsWith("m"),isL=cid==="lv";
+    ds.push({{
+      label:cat.l,data:pts.map(r=>({{x:r[xf]||0,y:r[yf]||0,r:r}})),
+      backgroundColor:isM?cat.c+"60":cat.c+(isO?"99":"30"),
+      borderColor:isM?(cat.bdr||cat.c):cat.c,borderWidth:isM?2:isO?1:.5,
+      borderDash:isM?[3,3]:[],pointRadius:cat.rad,pointHoverRadius:cat.rad+3,
+      pointStyle:isM?"rectRot":isL?"triangle":"circle",order:isO?1:3,
+    }});
+  }});
+  if(chart)chart.destroy();
+  chart=new Chart(document.getElementById("sc"),{{
+    type:"scatter",data:{{datasets:ds}},
+    options:{{
+      responsive:true,maintainAspectRatio:false,animation:{{duration:0}},
+      plugins:{{legend:{{display:true,position:"top",labels:{{color:"#6b7280",font:{{size:10}},boxWidth:10,padding:12,usePointStyle:true}}}},tooltip:{{enabled:false}}}},
+      scales:{{
+        x:{{title:{{display:true,text:F[xf].l,color:"#6b7280",font:{{size:10}}}},grid:{{color:"#1a1d28"}},ticks:{{color:"#3b3f4a",font:{{size:9}}}}}},
+        y:{{title:{{display:true,text:F[yf].l,color:"#6b7280",font:{{size:10}}}},grid:{{color:"#1a1d28"}},ticks:{{color:"#3b3f4a",font:{{size:9}}}}}}
+      }},
+      onHover:(e,els)=>{{
+        const tip=document.getElementById("tip");
+        if(!els.length){{tip.style.display="none";return;}}
+        const r=els[0].element.$context.raw.r;
+        const ci=CATS.find(c=>c.t(r));const cc=ci?ci.c:"#6b7280";
+        const caught=r.cat==="S"?r.sf:r.cat==="B"?r.bf:null;
+        const ctag=caught===true?'<span class="tag" style="background:#22c55e30;color:#22c55e">CAUGHT</span>':caught===false?'<span class="tag" style="background:#f59e0b30;color:#f59e0b">MISSED</span>':r.cat==="L"?'<span class="tag" style="background:#3b82f630;color:#3b82f6">LIVE</span>':"";
+        tip.innerHTML='<div class="tn" style="color:'+cc+'">'+r.n+" "+ctag+"</div>"+
+          '<div class="ts">'+r.t+" vs "+r.o+" · "+r.d+" · "+r.p+"</div>"+
+          '<div class="tr"><span class="tl">Salary</span><span class="tv">$'+(r.sal||0).toLocaleString()+"</span></div>"+
+          '<div class="tr"><span class="tl">Proj → Act</span><span class="tv">'+r.proj.toFixed(1)+" → "+r.act.toFixed(1)+"</span></div>"+
+          '<div class="tr"><span class="tl">Diff</span><span class="tv" style="color:'+(r.diff>=0?"#22c55e":"#ef4444")+'">'+(r.diff>=0?"+":"")+r.diff.toFixed(1)+"</span></div>"+
+          '<div class="tr"><span class="tl">Edge</span><span class="tv">'+r.es.toFixed(3)+" "+r.el+"</span></div>"+
+          '<div class="tr"><span class="tl">Smash P</span><span class="tv">'+r.sp.toFixed(3)+"</span></div>"+
+          '<div class="tr"><span class="tl">Bust P</span><span class="tv">'+r.bp.toFixed(3)+"</span></div>"+
+          '<div class="tr"><span class="tl">Breakout</span><span class="tv">'+r.br.toFixed(1)+"</span></div>"+
+          '<div class="tr"><span class="tl">Own%</span><span class="tv">'+r.own.toFixed(1)+"%</span></div>"+
+          '<div class="tr"><span class="tl">Leverage</span><span class="tv">'+r.lev.toFixed(1)+"</span></div>"+
+          (r.pt?'<div class="tr"><span class="tl">Pop Tag</span><span class="tv">'+r.pt+"</span></div>":"");
+        const rect=document.getElementById("sc").getBoundingClientRect();
+        let lx=e.native.clientX-rect.left+14,ly=e.native.clientY-rect.top-16;
+        tip.style.display="block";tip.style.left=lx+"px";tip.style.top=ly+"px";
+        const tr2=tip.getBoundingClientRect();
+        if(tr2.right>rect.right)tip.style.left=(lx-tr2.width-20)+"px";
+        if(tr2.bottom>rect.bottom)tip.style.top=(ly-tr2.height+12)+"px";
+      }}
+    }}
+  }});
+  // Header stats
+  const sm=fd.filter(r=>r.cat==="S"),bu=fd.filter(r=>r.cat==="B");
+  const sc2=sm.filter(r=>r.sf).length,bc2=bu.filter(r=>r.bf).length;
+  document.getElementById("hdr").innerHTML=
+    '<div class="cs-item"><div class="csl">Smash Catch</div><div class="csv green">'+(sm.length?Math.round(sc2/sm.length*100):0)+'%</div><div class="css">'+sc2+"/"+sm.length+"</div></div>"+
+    '<div class="cs-item"><div class="csl">Missed</div><div class="csv amber">'+(sm.length-sc2)+'</div></div>'+
+    '<div class="cs-item"><div class="csl">Bust Catch</div><div class="csv red">'+(bu.length?Math.round(bc2/bu.length*100):0)+'%</div><div class="css">'+bc2+"/"+bu.length+"</div></div>"+
+    '<div class="cs-item"><div class="csl">Missed</div><div class="csv amber">'+(bu.length-bc2)+'</div></div>';
+  // Bottom
+  document.getElementById("bot").innerHTML=
+    '<div class="sb"><span class="sbl">Filtered</span><span class="sbv">'+fd.length+"/"+D.length+"</span></div>"+
+    '<div class="sb"><span class="sbl">Smash Rate</span><span class="sbv green">'+(fd.length?(sm.length/fd.length*100).toFixed(1):"0")+"%</span></div>"+
+    '<div class="sb"><span class="sbl">Bust Rate</span><span class="sbv red">'+(fd.length?(bu.length/fd.length*100).toFixed(1):"0")+"%</span></div>"+
+    '<div class="sb"><span class="sbl">Avg Smash</span><span class="sbv green">+'+(sm.length?(sm.reduce((s,r)=>s+r.diff,0)/sm.length).toFixed(1):"0")+"</span></div>"+
+    '<div class="sb"><span class="sbl">Avg Bust</span><span class="sbv red">'+(bu.length?(bu.reduce((s,r)=>s+r.diff,0)/bu.length).toFixed(1):"0")+"</span></div>";
+}}
+rebuild();
+</script>
+</body>
+</html>'''
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -79,51 +383,27 @@ def _load_all_dashboard_data(sport: str) -> Dict[str, Any]:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def render_dashboard_tab(sport: str) -> None:
-    """Render the Dashboard tab."""
-    from app.data_loader import load_calibration_data, load_signal_history, published_dir, load_fresh_meta
+    """Render the Dashboard tab — Smash/Bust Explorer + Maintenance Tools."""
 
-    data = _load_all_dashboard_data(sport)
+    # ── Explorer ──────────────────────────────────────────────────────────
+    data = _load_explorer_data(sport)
 
-    # ── Section 1: System Health ──────────────────────────────────────────
-    try:
-        _render_system_health(data)
-    except Exception as e:
-        st.error(f"System Health error: {e}\n```\n{traceback.format_exc()}\n```")
+    if data:
+        html_str = _build_explorer_html(data)
+        components.html(html_str, height=720, scrolling=False)
 
-    # ── Section 2: Calibration Trend ──────────────────────────────────────
-    st.markdown("---")
-    try:
-        _render_calibration_trend(data)
-    except Exception as e:
-        st.error(f"Calibration Trend error: {e}\n```\n{traceback.format_exc()}\n```")
-
-    # ── Section 3: Breakout Identification ────────────────────────────────
-    st.markdown("---")
-    try:
-        _render_breakout_identification(data, sport)
-    except Exception as e:
-        st.error(f"Breakout Identification error: {e}\n```\n{traceback.format_exc()}\n```")
-
-    # ── Section 4: Contest Band Tracking ──────────────────────────────────
-    st.markdown("---")
-    try:
-        _render_contest_band_tracking(data)
-    except Exception as e:
-        st.error(f"Contest Band Tracking error: {e}\n```\n{traceback.format_exc()}\n```")
-
-    # ── Section 5: Signal Accuracy Trend ──────────────────────────────────
-    st.markdown("---")
-    try:
-        _render_signal_accuracy_trend(data)
-    except Exception as e:
-        st.error(f"Signal Accuracy Trend error: {e}\n```\n{traceback.format_exc()}\n```")
-
-    # ── Section 6: Published Data Status ──────────────────────────────────
-    st.markdown("---")
-    try:
-        _render_published_data_status(sport)
-    except Exception as e:
-        st.error(f"Published Data Status error: {e}\n```\n{traceback.format_exc()}\n```")
+        n_hist = sum(1 for r in data if r["cat"] != "L")
+        n_live = sum(1 for r in data if r["cat"] == "L")
+        slates = len(set(r["d"] for r in data if r["cat"] != "L" and r["d"] != "LIVE"))
+        st.caption(
+            f"{n_hist} historical players across {slates} archived slates"
+            + (f" · {n_live} live players" if n_live else "")
+        )
+    else:
+        st.info(
+            "No archived slate data found.  Run slates and post-slate feedback "
+            "to populate the explorer."
+        )
 
     # ── Maintenance Tools ─────────────────────────────────────────────────
     st.markdown("---")
@@ -138,439 +418,6 @@ def render_dashboard_tab(sport: str) -> None:
         except Exception as e:
             st.error(f"Recalibrate from Archive error: {e}\n```\n{traceback.format_exc()}\n```")
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Section 1: System Health
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _render_system_health(data: Dict[str, Any]) -> None:
-    st.markdown("### System Health")
-
-    slate_errors = data["slate_errors"]
-    signal_weights = data["signal_weights"]
-    recal = data.get("recal_backtest", {})
-    sport = data["sport"]
-
-    sorted_dates = sorted(slate_errors.keys())
-
-    # Projection Accuracy: prefer recalibrated backtest corrected_mae
-    recal_summary = recal.get("summary", {}).get(sport, {})
-    recal_mae = recal_summary.get("corrected_mae")
-    recal_improvement = recal_summary.get("improvement")
-
-    # Fallback to rolling MAE if no recalibrated data
-    recent_mae = recal_mae
-    mae_delta = recal_improvement
-    if recent_mae is None and len(sorted_dates) >= 2:
-        recent_5 = sorted_dates[-5:]
-        prior_5 = sorted_dates[-10:-5] if len(sorted_dates) >= 10 else sorted_dates[:max(1, len(sorted_dates) - 5)]
-        recent_maes = [slate_errors[d].get("overall", {}).get("mae", 0) for d in recent_5 if slate_errors[d].get("overall", {}).get("mae") is not None]
-        prior_maes = [slate_errors[d].get("overall", {}).get("mae", 0) for d in prior_5 if slate_errors[d].get("overall", {}).get("mae") is not None]
-        if recent_maes:
-            recent_mae = sum(recent_maes) / len(recent_maes)
-        prior_mae = sum(prior_maes) / len(prior_maes) if prior_maes else None
-        if recent_mae is not None and prior_mae is not None:
-            mae_delta = recent_mae - prior_mae
-
-    # Signal weighted hit rate
-    sig_stats = signal_weights.get("signal_stats", {})
-    weighted_rates = [s.get("weighted_hit_rate", 0) for s in sig_stats.values() if s.get("weighted_hit_rate")]
-    overall_hit_rate = sum(weighted_rates) / len(weighted_rates) if weighted_rates else None
-
-    # Slates calibrated
-    n_slates = len(sorted_dates)
-    # Delta: slates added in last 7 days
-    cutoff = (date.today() - timedelta(days=7)).isoformat()
-    slates_this_week = sum(1 for d in sorted_dates if d >= cutoff)
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        if recent_mae is not None:
-            if recal_mae is not None:
-                # Show corrected MAE with raw MAE comparison
-                # improvement > 0 means corrections helped (lower MAE = better)
-                raw_mae_val = recal_summary.get("raw_mae")
-                if raw_mae_val is not None and recal_improvement is not None:
-                    if recal_improvement > 0:
-                        delta_str = f"-{abs(recal_improvement):.2f} vs raw ({raw_mae_val:.1f})"
-                    else:
-                        delta_str = f"+{abs(recal_improvement):.2f} vs raw ({raw_mae_val:.1f})"
-                else:
-                    delta_str = None
-                st.metric(
-                    "Model MAE (recalibrated)",
-                    f"{recent_mae:.2f}",
-                    delta=delta_str,
-                    delta_color="inverse",  # negative delta = green (lower MAE is better)
-                )
-            else:
-                st.metric(
-                    "Projection Accuracy (MAE)",
-                    f"{recent_mae:.2f}",
-                    delta=f"{mae_delta:+.2f}" if mae_delta is not None else None,
-                    delta_color="inverse",
-                )
-        else:
-            st.metric("Model MAE (recalibrated)", "N/A")
-    with c2:
-        if overall_hit_rate is not None:
-            st.metric(
-                "Signal Hit Rate",
-                f"{overall_hit_rate:.1%}",
-                delta=f"target: 35%",
-                delta_color="off",
-            )
-        else:
-            st.metric("Signal Hit Rate", "N/A")
-    with c3:
-        st.metric(
-            "Slates Calibrated",
-            n_slates,
-            delta=f"+{slates_this_week} this week" if slates_this_week else None,
-            delta_color="normal",
-        )
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Section 2: Calibration Trend
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _render_calibration_trend(data: Dict[str, Any]) -> None:
-    st.markdown("### Projection Accuracy Over Time")
-
-    slate_errors = data["slate_errors"]
-    sport = data["sport"]
-    recal = data.get("recal_backtest", {})
-    rg_baseline = data.get("rg_baseline", {})
-
-    if not slate_errors and not recal.get("slates"):
-        st.info("No calibration data available.")
-        return
-
-    # Build rows for the YakOS MAE line from slate_errors
-    chart_rows = []
-    for d in sorted(slate_errors.keys()):
-        overall = slate_errors[d].get("overall", {})
-        mae = overall.get("mae")
-        if mae is not None:
-            chart_rows.append({"date": d, "MAE": mae, "Series": "YakOS MAE"})
-
-        # RG MAE from slate_errors (injected during calibration)
-        rg_mae = slate_errors[d].get("rg_mae")
-        if rg_mae is not None:
-            chart_rows.append({"date": d, "MAE": rg_mae, "Series": "RG Baseline MAE"})
-
-    # Also pull from standalone rg_baseline.json for dates not in slate_errors
-    for d, rg_data in sorted(rg_baseline.items()):
-        if d not in slate_errors and rg_data.get("rg_mae") is not None:
-            chart_rows.append({"date": d, "MAE": rg_data["rg_mae"], "Series": "RG Baseline MAE"})
-
-    if not chart_rows:
-        st.info("No MAE data available.")
-        return
-
-    df = pd.DataFrame(chart_rows)
-    df["date"] = pd.to_datetime(df["date"])
-
-    target_mae = 6.0 if sport == "nba" else 25.0
-
-    # Determine which series are present
-    series_present = df["Series"].unique().tolist()
-    domain = []
-    colors = []
-    if "YakOS MAE" in series_present:
-        domain.append("YakOS MAE")
-        colors.append("#4C78A8")
-    if "RG Baseline MAE" in series_present:
-        domain.append("RG Baseline MAE")
-        colors.append("#F5A623")
-
-    color_scale = alt.Scale(domain=domain, range=colors)
-
-    # MAE lines
-    mae_lines = alt.Chart(df).mark_line(point=True).encode(
-        x=alt.X("date:T", title="Date"),
-        y=alt.Y("MAE:Q", title="MAE", scale=alt.Scale(zero=False)),
-        color=alt.Color("Series:N", scale=color_scale),
-        tooltip=["date:T", "Series:N", "MAE:Q"],
-    )
-
-    # Target line
-    target_df = pd.DataFrame([{"target": target_mae}])
-    target_rule = alt.Chart(target_df).mark_rule(
-        color="green", strokeDash=[6, 3], strokeWidth=2
-    ).encode(
-        y="target:Q",
-    )
-
-    target_label = alt.Chart(target_df).mark_text(
-        align="left", dx=5, dy=-8, color="green", fontSize=11
-    ).encode(
-        y="target:Q",
-        text=alt.value(f"Target: {target_mae}"),
-    )
-
-    chart = (mae_lines + target_rule + target_label).properties(
-        height=300,
-    ).interactive()
-
-    st.altair_chart(chart, use_container_width=True)
-
-    # Show footnote
-    st.caption("YakOS MAE = model projections vs actuals. RG Baseline MAE = raw RotoGrinders projections vs actuals.")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Section 3: Breakout Identification
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _render_breakout_identification(data: Dict[str, Any], sport: str = "NBA") -> None:
-    st.markdown("### Breakout Identification")
-
-    left, right = st.columns(2)
-
-    # ── Left: Signal Lift Chart ───────────────────────────────────────────
-    with left:
-        st.markdown("**Signal Lift**")
-        breakout = data["breakout_profile"]
-        signals = breakout.get("signals", {})
-
-        if not signals:
-            st.info("No breakout signal data.")
-        else:
-            lift_rows = []
-            for sig, lift in signals.items():
-                lift_rows.append({
-                    "signal": sig,
-                    "lift": lift,
-                    "works": "Above baseline" if lift > 1.0 else "Below baseline",
-                })
-
-            lift_df = pd.DataFrame(lift_rows)
-
-            bars = alt.Chart(lift_df).mark_bar().encode(
-                x=alt.X("lift:Q", title="Lift (1.0 = baseline)", scale=alt.Scale(domain=[0.5, 1.5])),
-                y=alt.Y("signal:N", sort="-x", title=""),
-                color=alt.Color(
-                    "works:N",
-                    scale=alt.Scale(domain=["Above baseline", "Below baseline"], range=["#2ca02c", "#d62728"]),
-                    legend=None,
-                ),
-                tooltip=["signal:N", "lift:Q"],
-            )
-
-            baseline = alt.Chart(pd.DataFrame([{"x": 1.0}])).mark_rule(
-                color="black", strokeWidth=2
-            ).encode(x="x:Q")
-
-            chart = (bars + baseline).properties(height=250)
-            st.altair_chart(chart, use_container_width=True)
-
-            n_slates = breakout.get("n_slates", 0)
-            n_breakouts = breakout.get("n_breakouts", 0)
-            st.caption(f"{n_breakouts} breakouts across {n_slates} slates")
-
-    # ── Right: Breakout Precision / Recall ────────────────────────────────
-    with right:
-        st.markdown("**Breakout Precision / Recall**")
-        ba_history = data.get("breakout_accuracy", {})
-
-        # Compute rolling precision/recall from all entries for the current sport
-        sport_entries = [
-            v for v in ba_history.values()
-            if isinstance(v, dict) and v.get("sport", "NBA").upper() == sport.upper()
-        ]
-
-        if sport_entries:
-            total_pred = sum(e.get("n_predicted", 0) for e in sport_entries)
-            total_actual = sum(e.get("n_actual", 0) for e in sport_entries)
-            total_correct = sum(e.get("n_correct", 0) for e in sport_entries)
-            precision = total_correct / total_pred if total_pred > 0 else None
-            recall = total_correct / total_actual if total_actual > 0 else None
-
-            if precision is not None:
-                prec_pct = precision * 100
-                prec_delta = prec_pct - 60.0  # target = 60%
-                st.metric(
-                    "Precision",
-                    f"{prec_pct:.1f}%",
-                    delta=f"{prec_delta:+.1f}% vs 60% target",
-                    delta_color="normal",
-                )
-            else:
-                st.metric("Precision", "N/A")
-
-            if recall is not None:
-                rec_pct = recall * 100
-                rec_delta = rec_pct - 50.0  # target = 50%
-                st.metric(
-                    "Recall",
-                    f"{rec_pct:.1f}%",
-                    delta=f"{rec_delta:+.1f}% vs 50% target",
-                    delta_color="normal",
-                )
-            else:
-                st.metric("Recall", "N/A")
-
-            st.caption(f"Across {len(sport_entries)} calibrated slates")
-        else:
-            st.metric("Precision", "N/A")
-            st.metric("Recall", "N/A")
-            st.caption("Run nightly calibration to populate")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Section 4: Contest Band Tracking
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _render_contest_band_tracking(data: Dict[str, Any]) -> None:
-    st.markdown("### Contest Band Tracking")
-
-    contest_history = data["contest_history"]
-    if not contest_history:
-        st.info("No contest results recorded yet.")
-        return
-
-    # Separate GPP and cash contests — they have fundamentally different
-    # score distributions and should not be plotted on the same chart.
-    gpp_rows = []
-    cash_rows = []
-    for key, entry in contest_history.items():
-        d = entry.get("slate_date", key.split("_")[0])
-        cash_line = entry.get("cash_line", 0)
-        winning = entry.get("winning_score", 0)
-        scores = entry.get("scores", {})
-        best = scores.get("best", 0)
-        avg = scores.get("avg", 0)
-        ctype = entry.get("contest_type", "gpp").lower()
-
-        row = {"date": d, "Cash Line": cash_line, "Winning Score": winning}
-        if best and best > 0:
-            row["Best Lineup"] = best
-        if avg and avg > 0:
-            row["Avg Lineup"] = avg
-
-        if ctype in ("cash", "50/50", "double_up"):
-            cash_rows.append(row)
-        else:
-            gpp_rows.append(row)
-
-    color_scale = alt.Scale(
-        domain=["Cash Line", "Winning Score", "Best Lineup", "Avg Lineup"],
-        range=["#2ca02c", "#ff7f0e", "#1f77b4", "#9467bd"],
-    )
-
-    def _band_chart(rows: list, title: str) -> None:
-        if not rows:
-            return
-        df = pd.DataFrame(rows)
-        df["date"] = pd.to_datetime(df["date"])
-        df = df.sort_values("date")
-        value_cols = [c for c in ["Cash Line", "Winning Score", "Best Lineup", "Avg Lineup"] if c in df.columns]
-        melted = df.melt(id_vars=["date"], value_vars=value_cols, var_name="Metric", value_name="Score")
-        melted = melted[melted["Score"] > 0]
-        if melted.empty:
-            return
-        chart = alt.Chart(melted).mark_line(point=True).encode(
-            x=alt.X("date:T", title="Date"),
-            y=alt.Y("Score:Q", title="Score", scale=alt.Scale(zero=False)),
-            color=alt.Color("Metric:N", scale=color_scale),
-            tooltip=["date:T", "Metric:N", "Score:Q"],
-        ).properties(height=250, title=title).interactive()
-        st.altair_chart(chart, use_container_width=True)
-
-    _band_chart(gpp_rows, "GPP Contests")
-    _band_chart(cash_rows, "Cash Contests")
-
-    # Compact contest results table below
-    table_rows = []
-    for key, entry in sorted(contest_history.items(), reverse=True):
-        sc = entry.get("scores", {})
-        table_rows.append({
-            "date": entry.get("slate_date", ""),
-            "type": entry.get("contest_type", ""),
-            "cash_line": entry.get("cash_line", 0),
-            "winning": entry.get("winning_score", 0),
-            "entries": entry.get("num_entries", 0),
-            "best": sc.get("best", 0),
-            "avg": sc.get("avg", 0),
-            "cash_rate": sc.get("cash_rate", ""),
-        })
-    if table_rows:
-        st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True, height=200)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Section 5: Signal Accuracy Trend
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _render_signal_accuracy_trend(data: Dict[str, Any]) -> None:
-    st.markdown("### Signal Hit Rates Over Time")
-
-    signal_history = data["signal_history"]
-    if not signal_history:
-        st.info("No signal history data.")
-        return
-
-    rows = []
-    for d in sorted(signal_history.keys()):
-        entry = signal_history[d]
-        signals = entry.get("signals", {})
-        for sig_name, sig_data in signals.items():
-            hr = sig_data.get("hit_rate")
-            if hr is not None:
-                rows.append({"date": d, "signal": sig_name, "hit_rate": hr})
-
-    if not rows:
-        st.info("No hit rate data available.")
-        return
-
-    df = pd.DataFrame(rows)
-    df["date"] = pd.to_datetime(df["date"])
-
-    chart = alt.Chart(df).mark_line(point=True).encode(
-        x=alt.X("date:T", title="Date"),
-        y=alt.Y("hit_rate:Q", title="Hit Rate", scale=alt.Scale(domain=[0, 1])),
-        color=alt.Color("signal:N", title="Signal"),
-        tooltip=["date:T", "signal:N", "hit_rate:Q"],
-    ).properties(height=300).interactive()
-
-    st.altair_chart(chart, use_container_width=True)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Section 6a: Published Data Status (kept from original)
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _render_published_data_status(sport: str) -> None:
-    from app.data_loader import published_dir, load_fresh_meta
-
-    st.markdown("### Published Data Status")
-
-    for s in ["NBA", "PGA"]:
-        meta = load_fresh_meta(s)
-        if meta:
-            p_dir = published_dir(s)
-            lineup_files = list(p_dir.glob("*_lineups.parquet"))
-            n_lineups = 0
-            for lf in lineup_files:
-                try:
-                    ldf = pd.read_parquet(lf)
-                    if "lineup_index" in ldf.columns:
-                        n_lineups += ldf["lineup_index"].nunique()
-                except Exception:
-                    pass
-
-            st.markdown(f"**{s}:** {meta.get('date', '?')} | {meta.get('pool_size', '?')} players | "
-                        f"Source: {meta.get('proj_source', 'N/A')} | {n_lineups} lineups | "
-                        f"{len(lineup_files)} contest(s)")
-        else:
-            st.caption(f"{s}: No published data")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Section 6b: Post-Slate Feedback (kept from original)
-# ══════════════════════════════════════════════════════════════════════════════
 
 def _render_post_slate_feedback(sport: str) -> None:
     st.markdown("### Post-Slate Feedback")
