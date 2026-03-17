@@ -1,31 +1,30 @@
 {
   "sport": "NBA",
-  "date": "2026-03-16",
+  "date": "2026-03-17",
   "core_names": [
-    "Josh Giddey",
-    "Donovan Clingan",
-    "Luka Doncic",
-    "Jrue Holiday",
-    "Victor Wembanyama"
+    "Nikola Jokic",
+    "Victor Wembanyama",
+    "Shai Gilgeous-Alexander",
+    "Cade Cunningham",
+    "Donovan Mitchell"
   ],
   "leverage_names": [
-    "Gui Santos",
-    "Brandon Williams",
-    "Stephon Castle"
+    "Tristan da Silva",
+    "Tristan Vukcevic"
   ],
   "value_names": [
-    "Gary Payton II",
-    "Malevy Leons",
-    "Nick Richards",
-    "Patrick Williams",
-    "Leonard Miller"
+    "Simone Fontecchio",
+    "Dru Smith",
+    "Jalen Pickett",
+    "Jonas Valanciunas",
+    "Julian Strawther"
   ],
   "fade_names": [
-    "Max Shulga",
-    "Mouhamed Gueye",
-    "Jarred Vanderbilt",
-    "Amari Williams",
-    "AJ Johnson"
+    "Andre Jackson Jr.",
+    "Jordan McLaughlin",
+    "Pacome Dadiet",
+    "Thanasis Antetokounmpo",
+    "Gary Harris"
   ],
   "calibration_slates": 15
 }
