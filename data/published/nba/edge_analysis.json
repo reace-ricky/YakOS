@@ -1,187 +1,215 @@
 {
   "bullets": [
-    "Core anchors: Nikola Jokic, Victor Wembanyama, Shai Gilgeous-Alexander",
-    "Leverage plays: Tristan da Silva, Tristan Vukcevic",
-    "Value targets: Simone Fontecchio, Dru Smith",
-    "Fade candidates: Andre Jackson Jr., Jordan McLaughlin"
+    "Core anchors: Josh Giddey, Donovan Clingan, Luka Doncic",
+    "Leverage plays: Gui Santos, Reed Sheppard",
+    "Value targets: Tyler Burton, Gary Payton II",
+    "Fade candidates: Max Shulga, Mouhamed Gueye"
   ],
-  "recommendation": "5 core plays anchored at $9,800\u2013$12,500. 5 value plays averaging 8.1 pts/$1K. 2 leverage plays at 3\u20133% ownership.",
+  "recommendation": "5 core plays anchored at $7,400\u2013$12,200. 5 value plays averaging 8.0 pts/$1K. 3 leverage plays at 0\u20130% ownership.",
   "core_plays": [
     {
-      "player_name": "Nikola Jokic",
-      "salary": 12500,
-      "proj": 57.019999999999996,
-      "ownership": 6.05,
-      "edge": 0.5654646317481354,
-      "value": 4.561599999999999,
-      "proj_minutes": 33.5,
-      "ceil": 71.54
+      "player_name": "Josh Giddey",
+      "salary": 9000,
+      "proj": 63.8,
+      "ownership": 34.37,
+      "edge": 0.7217596902507003,
+      "value": 7.088888888888889,
+      "proj_minutes": 30.3,
+      "sim90th": 59.489999999999995,
+      "ceil": 74.75
+    },
+    {
+      "player_name": "Donovan Clingan",
+      "salary": 7800,
+      "proj": 54.96,
+      "ownership": 15.26,
+      "edge": 0.6725444090013295,
+      "value": 7.046153846153846,
+      "proj_minutes": 27.3,
+      "sim90th": 50.17,
+      "ceil": 69.64
+    },
+    {
+      "player_name": "Luka Doncic",
+      "salary": 12200,
+      "proj": 55.79,
+      "ownership": 0.0,
+      "edge": 0.5161912391240635,
+      "value": 4.572950819672132,
+      "proj_minutes": 33.3,
+      "sim90th": 70.29,
+      "ceil": 69.42
+    },
+    {
+      "player_name": "Jrue Holiday",
+      "salary": 7400,
+      "proj": 50.73,
+      "ownership": 8.58,
+      "edge": 0.5964836955720514,
+      "value": 6.8554054054054046,
+      "proj_minutes": 27.4,
+      "sim90th": 44.739999999999995,
+      "ceil": 66.88
     },
     {
       "player_name": "Victor Wembanyama",
       "salary": 11000,
-      "proj": 52.739999999999995,
-      "ownership": 6.45,
-      "edge": 0.5496563656944323,
-      "value": 4.794545454545454,
+      "proj": 53.94,
+      "ownership": 0.0,
+      "edge": 0.5346964006784949,
+      "value": 4.903636363636363,
       "proj_minutes": 29.8,
-      "ceil": 63.15
-    },
-    {
-      "player_name": "Shai Gilgeous-Alexander",
-      "salary": 11000,
-      "proj": 51.19,
-      "ownership": 5.62,
-      "edge": 0.5430981763878581,
-      "value": 4.653636363636363,
-      "proj_minutes": 35.1,
-      "ceil": 62.96
-    },
-    {
-      "player_name": "Cade Cunningham",
-      "salary": 11300,
-      "proj": 47.51,
-      "ownership": 4.87,
-      "edge": 0.47190165395831546,
-      "value": 4.204424778761061,
-      "proj_minutes": 32.5,
-      "ceil": 60.82
-    },
-    {
-      "player_name": "Donovan Mitchell",
-      "salary": 9800,
-      "proj": 48.03,
-      "ownership": 5.96,
-      "edge": 0.5507195492641279,
-      "value": 4.901020408163265,
-      "proj_minutes": 33.7,
-      "ceil": 56.58
+      "sim90th": 65.96000000000001,
+      "ceil": 66.41
     }
   ],
   "leverage_plays": [
     {
-      "player_name": "Tristan da Silva",
-      "salary": 5100,
-      "proj": 24.520000000000003,
-      "ownership": 3.4,
-      "edge": 0.45240077954578517,
-      "value": 4.807843137254903,
-      "proj_minutes": 23.5,
-      "ceil": 35.43
+      "player_name": "Gui Santos",
+      "salary": 7300,
+      "proj": 41.63,
+      "ownership": 0.12,
+      "edge": 0.6970655392707312,
+      "value": 5.7027397260273975,
+      "proj_minutes": 29.2,
+      "sim90th": 43.79,
+      "ceil": 52.09
     },
     {
-      "player_name": "Tristan Vukcevic",
-      "salary": 4900,
-      "proj": 21.869999999999997,
-      "ownership": 3.14,
-      "edge": 0.43363172635559183,
-      "value": 4.463265306122448,
-      "proj_minutes": 11.4,
-      "ceil": 34.6
+      "player_name": "Reed Sheppard",
+      "salary": 6500,
+      "proj": 41.04,
+      "ownership": 0.0,
+      "edge": 0.5515398529506238,
+      "value": 6.313846153846153,
+      "proj_minutes": 26.3,
+      "sim90th": 38.32,
+      "ceil": 61.57
+    },
+    {
+      "player_name": "Victor Wembanyama",
+      "salary": 11000,
+      "proj": 53.94,
+      "ownership": 0.0,
+      "edge": 0.5346964006784949,
+      "value": 4.903636363636363,
+      "proj_minutes": 29.8,
+      "sim90th": 65.96000000000001,
+      "ceil": 66.41
     }
   ],
   "value_plays": [
     {
-      "player_name": "Simone Fontecchio",
-      "salary": 3100,
-      "proj": 27.630000000000003,
-      "ownership": 5.72,
-      "edge": 0.5823006487768765,
-      "value": 8.912903225806453,
-      "proj_minutes": 20.2,
-      "ceil": 39.78
-    },
-    {
-      "player_name": "Dru Smith",
-      "salary": 3200,
-      "proj": 27.33,
-      "ownership": 5.8,
-      "edge": 0.5799990756822647,
-      "value": 8.540624999999999,
-      "proj_minutes": 20.9,
-      "ceil": 41.93
-    },
-    {
-      "player_name": "Jalen Pickett",
-      "salary": 3000,
-      "proj": 24.169999999999998,
-      "ownership": 5.17,
-      "edge": 0.5574969207661483,
-      "value": 8.056666666666667,
-      "proj_minutes": 27.1,
-      "ceil": 35.59
-    },
-    {
-      "player_name": "Jonas Valanciunas",
+      "player_name": "Tyler Burton",
       "salary": 3300,
-      "proj": 24.4,
-      "ownership": 5.17,
-      "edge": 0.5357814573016249,
-      "value": 7.393939393939394,
-      "proj_minutes": 14.9,
-      "ceil": 34.69
+      "proj": 29.67,
+      "ownership": 23.45,
+      "edge": 0.559122325370675,
+      "value": 8.990909090909092,
+      "proj_minutes": 25.7,
+      "sim90th": 27.979999999999997,
+      "ceil": 42.12
     },
     {
-      "player_name": "Julian Strawther",
-      "salary": 3200,
-      "proj": 23.65,
-      "ownership": 4.59,
-      "edge": 0.5265634849918968,
-      "value": 7.390624999999999,
-      "proj_minutes": 21.6,
-      "ceil": 35.57
+      "player_name": "Gary Payton II",
+      "salary": 4500,
+      "proj": 39.099999999999994,
+      "ownership": 27.08,
+      "edge": 0.6120232716871254,
+      "value": 8.688888888888888,
+      "proj_minutes": 20.2,
+      "sim90th": 31.95,
+      "ceil": 50.35
+    },
+    {
+      "player_name": "Tre Johnson",
+      "salary": 4200,
+      "proj": 32.2,
+      "ownership": 22.78,
+      "edge": 0.5572628444063643,
+      "value": 7.666666666666667,
+      "proj_minutes": 26.3,
+      "sim90th": 30.439999999999998,
+      "ceil": 46.58
+    },
+    {
+      "player_name": "Josh Minott",
+      "salary": 4300,
+      "proj": 32.16,
+      "ownership": 9.52,
+      "edge": 0.528348980977156,
+      "value": 7.47906976744186,
+      "proj_minutes": 13.4,
+      "sim90th": 30.86,
+      "ceil": 46.3
+    },
+    {
+      "player_name": "Nick Richards",
+      "salary": 4400,
+      "proj": 31.740000000000002,
+      "ownership": 0.45,
+      "edge": 0.5551386984583828,
+      "value": 7.213636363636364,
+      "proj_minutes": 21.0,
+      "sim90th": 26.57,
+      "ceil": 42.3
     }
   ],
   "fade_candidates": [
     {
-      "player_name": "Andre Jackson Jr.",
+      "player_name": "Max Shulga",
       "salary": 3000,
-      "proj": 4.722587914810842,
-      "ownership": 0.02,
-      "edge": 0.1651651250967726,
-      "value": 1.574195971603614,
-      "proj_minutes": 5.3,
-      "ceil": 8.08
-    },
-    {
-      "player_name": "Jordan McLaughlin",
-      "salary": 3000,
-      "proj": 2.8899999999999997,
-      "ownership": 0.01,
-      "edge": 0.16525997025149755,
-      "value": 0.9633333333333333,
-      "proj_minutes": 4.8,
-      "ceil": 8.37
-    },
-    {
-      "player_name": "Pacome Dadiet",
-      "salary": 3000,
-      "proj": 4.4,
-      "ownership": 0.01,
-      "edge": 0.16722448810962942,
-      "value": 1.4666666666666668,
-      "proj_minutes": 3.5,
-      "ceil": 9.01
-    },
-    {
-      "player_name": "Thanasis Antetokounmpo",
-      "salary": 3000,
-      "proj": 3.561981625093785,
-      "ownership": 0.02,
-      "edge": 0.16846470507454125,
-      "value": 1.187327208364595,
-      "proj_minutes": 3.5,
-      "ceil": 8.95
-    },
-    {
-      "player_name": "Gary Harris",
-      "salary": 3200,
-      "proj": 7.753910228211412,
+      "proj": 0.0,
       "ownership": 0.18,
-      "edge": 0.16896925270573443,
-      "value": 2.423096946316066,
-      "proj_minutes": 13.3,
-      "ceil": 12.01
+      "edge": 0.08129310344827587,
+      "value": 0.0,
+      "proj_minutes": 1.8,
+      "sim90th": 0.0,
+      "ceil": 0.52
+    },
+    {
+      "player_name": "Mouhamed Gueye",
+      "salary": 3100,
+      "proj": 0.9699999999999998,
+      "ownership": 0.48,
+      "edge": 0.10842259126795491,
+      "value": 0.3129032258064515,
+      "proj_minutes": 18.5,
+      "sim90th": 3.42,
+      "ceil": 8.21
+    },
+    {
+      "player_name": "Amari Williams",
+      "salary": 3000,
+      "proj": 0.0,
+      "ownership": 0.05,
+      "edge": 0.11577586206896553,
+      "value": 0.0,
+      "proj_minutes": 5.9,
+      "sim90th": 0.0,
+      "ceil": 0.69
+    },
+    {
+      "player_name": "Jarred Vanderbilt",
+      "salary": 3000,
+      "proj": 0.0,
+      "ownership": 0.0,
+      "edge": 0.11750000000000001,
+      "value": 0.0,
+      "proj_minutes": 17.1,
+      "sim90th": 0.0,
+      "ceil": 2.1
+    },
+    {
+      "player_name": "Micah Peavy",
+      "salary": 3000,
+      "proj": 0.0,
+      "ownership": 0.05,
+      "edge": 0.1192241379310345,
+      "value": 0.0,
+      "proj_minutes": 19.0,
+      "sim90th": 0.0,
+      "ceil": 0.85
     }
   ],
   "signals_df_path": "signals.parquet"
