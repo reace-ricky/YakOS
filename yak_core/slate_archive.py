@@ -34,6 +34,7 @@ _ARCHIVE_COLS = [
     "leverage", "edge_score", "edge_category", "edge_label",
     "fp_efficiency", "breakout_score",
     "pop_catalyst_score", "pop_catalyst_tag",
+    "sim_leverage", "ceil_magnitude",
     # Sim outputs
     "smash_prob", "bust_prob", "sim_eligible",
     # Sim percentiles (critical for gpp_score upside/boom calculation)
@@ -273,6 +274,25 @@ def backfill_archives() -> dict:
                 patched = True
             except Exception:
                 pass  # skip if edge module not available
+
+        # ── sim_leverage & ceil_magnitude ──────────────────────────────────
+        if "sim_leverage" not in df.columns and "ceil" in df.columns and "ownership" in df.columns:
+            _ceil = pd.to_numeric(df["ceil"], errors="coerce").fillna(0)
+            _own = pd.to_numeric(df["ownership"], errors="coerce").fillna(0)
+            _proj = pd.to_numeric(df.get("proj", pd.Series(0, index=df.index)), errors="coerce").fillna(0)
+
+            # ceil_magnitude: (ceil - proj) / max(ceil - proj)
+            _ceil_gap = (_ceil - _proj).clip(lower=0)
+            _max_gap = max(_ceil_gap.max(), 1.0)
+            df["ceil_magnitude"] = (_ceil_gap / _max_gap).round(4)
+            columns_added["ceil_magnitude"] = columns_added.get("ceil_magnitude", 0) + 1
+
+            # sim_leverage: ceil percentile rank - ownership percentile rank
+            _ceil_pctile = df["ceil_magnitude"].rank(pct=True) * 100
+            _own_pctile = _own.rank(pct=True) * 100
+            df["sim_leverage"] = (_ceil_pctile - _own_pctile).round(2)
+            columns_added["sim_leverage"] = columns_added.get("sim_leverage", 0) + 1
+            patched = True
 
         # ── FP per minute ────────────────────────────────────────────────
         if "fp_per_min" not in df.columns and "proj" in df.columns and "proj_minutes" in df.columns:

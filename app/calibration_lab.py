@@ -174,6 +174,17 @@ def _enrich_archived_pool(pool: pd.DataFrame) -> pd.DataFrame:
         if col not in pool.columns:
             pool[col] = 0.0
 
+    # 9. SimLeverage (for tier classification in historical replay)
+    if "sim_leverage" not in pool.columns:
+        _ceil_for_lev = pd.to_numeric(pool.get("ceil", pd.Series(0, index=pool.index)), errors="coerce").fillna(0)
+        _proj_for_lev = pd.to_numeric(pool.get("proj", pd.Series(0, index=pool.index)), errors="coerce").fillna(0)
+        _ceil_gap = (_ceil_for_lev - _proj_for_lev).clip(lower=0)
+        _max_gap = max(_ceil_gap.max(), 1.0)
+        pool["ceil_magnitude"] = (_ceil_gap / _max_gap).round(4)
+        _ceil_pctile = pool["ceil_magnitude"].rank(pct=True) * 100
+        _own_pctile = own.rank(pct=True) * 100
+        pool["sim_leverage"] = (_ceil_pctile - _own_pctile).round(2)
+
     return pool
 
 

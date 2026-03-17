@@ -784,6 +784,7 @@ def fetch_player_game_logs(
             "player_name",
             "rolling_fp_5", "rolling_fp_10", "rolling_fp_20",
             "rolling_min_5", "rolling_min_10", "rolling_min_20",
+            "rolling_cv",
         ])
 
     _id_map: Dict[str, str] = player_id_map or {}
@@ -800,6 +801,7 @@ def fetch_player_game_logs(
             "player_name",
             "rolling_fp_5", "rolling_fp_10", "rolling_fp_20",
             "rolling_min_5", "rolling_min_10", "rolling_min_20",
+            "rolling_cv",
         ])
 
     def _fetch_one(name_and_id):
@@ -895,6 +897,16 @@ def fetch_player_game_logs(
             # Most recent game date (latest YYYYMMDD from game IDs)
             last_game_date = max(game_dates) if game_dates else ""
 
+            # CV = std(fps) / mean(fps) for last 10 games
+            recent_fps = fps[-10:] if len(fps) >= 5 else fps
+            if len(recent_fps) >= 3 and sum(recent_fps) > 0:
+                import statistics
+                _mean = statistics.mean(recent_fps)
+                _std = statistics.stdev(recent_fps)
+                rolling_cv = round(_std / max(_mean, 1.0), 3)
+            else:
+                rolling_cv = 0.0
+
             return {
                 "player_name": name,
                 "rolling_fp_5":  _rolling_avg(fps, 5),
@@ -904,6 +916,7 @@ def fetch_player_game_logs(
                 "rolling_min_10": _rolling_avg(mins, 10),
                 "rolling_min_20": _rolling_avg(mins, 20),
                 "last_game_date": last_game_date,
+                "rolling_cv": rolling_cv,
             }
         except Exception as exc:
             print(f"[fetch_player_game_logs] Error for '{name}': {exc}")
@@ -935,6 +948,7 @@ def fetch_player_game_logs(
             "player_name",
             "rolling_fp_5", "rolling_fp_10", "rolling_fp_20",
             "rolling_min_5", "rolling_min_10", "rolling_min_20",
+            "rolling_cv",
         ])
 
     df = pd.DataFrame(rows)

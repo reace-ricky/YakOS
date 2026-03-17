@@ -724,6 +724,14 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
     except Exception as exc:
         print(f"[_load_nba_pool] fetch_player_game_logs failed (non-fatal): {exc}")
 
+    # Compute b2b from last_game_date
+    if "last_game_date" in pool.columns:
+        import datetime as _dt_mod
+        _yesterday = (_dt_mod.date.fromisoformat(slate_date) - _dt_mod.timedelta(days=1)).strftime("%Y%m%d")
+        pool["b2b"] = pool["last_game_date"].fillna("") == _yesterday
+    else:
+        pool["b2b"] = False
+
     pool = apply_projections(pool, cfg)
 
     # ── Compute projected minutes per player using rolling minute averages ──
@@ -909,6 +917,15 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
             pool["game_id"] = pool["team"].map(game_id_map).fillna("")
             _n_with_gid = (pool["game_id"] != "").sum()
             print(f"[_load_nba_pool] Mapped game_id for {_n_with_gid}/{len(pool)} players ({len(game_id_map)//2} games)")
+
+        # Track which teams are home
+        home_teams = set()
+        for g in games_list:
+            _h = str(g.get("home", "")).upper()
+            if _h:
+                home_teams.add(_h)
+        if home_teams and "team" in pool.columns:
+            pool["home"] = pool["team"].isin(home_teams)
     except Exception:
         pass
 
@@ -950,6 +967,16 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
                 spread_map[home] = sp
                 spread_map[away] = sp
             pool["spread"] = pool["team"].map(spread_map).fillna(0.0)
+
+            # Map vegas_total to each player
+            vegas_total_map = {}
+            for _, row in odds_df.iterrows():
+                home = str(row.get("home_team", "")).upper()
+                away = str(row.get("away_team", "")).upper()
+                total = float(row.get("vegas_total", 0))
+                vegas_total_map[home] = total
+                vegas_total_map[away] = total
+            pool["vegas_total"] = pool["team"].map(vegas_total_map).fillna(0.0)
     except Exception as exc:
         print(f"[_load_nba_pool] betting odds / blowout cascade failed (non-fatal): {exc}")
 
@@ -968,6 +995,14 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
         pool = compute_sim_eligible(pool)
     except Exception as exc:
         print(f"[_load_nba_pool] compute_sim_eligible failed (non-fatal): {exc}")
+
+    # Alias opponent -> opp for archive compatibility
+    if "opponent" in pool.columns and "opp" not in pool.columns:
+        pool["opp"] = pool["opponent"]
+
+    # Alias player_id -> dk_player_id for archive compatibility
+    if "player_id" in pool.columns and "dk_player_id" not in pool.columns:
+        pool["dk_player_id"] = pool["player_id"]
 
     meta = {
         "sport": "NBA", "site": "DK", "date": slate_date,
@@ -1243,66 +1278,103 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
     sal_med = float(_sal.median()) if len(_sal) > 0 else 7000.0
     own_med = float(_own.median()) if len(_own) > 0 else 15.0
 
-    # ── Pool-relative percentile thresholds ──
-    # Edge scores are always 0-1 (all components normalised), so absolute
-    # thresholds like "< 0" never fire.  Use percentile cutoffs instead.
-    _edge_p20 = float(np.percentile(_edge.dropna(), 20)) if len(_edge.dropna()) > 2 else 0.0
+    # ── Percentile helpers ──
     _edge_p50 = float(np.percentile(_edge.dropna(), 50)) if len(_edge.dropna()) > 2 else 0.5
+    _edge_p65 = float(np.percentile(_edge.dropna(), 65)) if len(_edge.dropna()) > 2 else 0.6
+    _edge_p40 = float(np.percentile(_edge.dropna(), 40)) if len(_edge.dropna()) > 2 else 0.4
 
-    _pick_cols = ["player_name", "salary", "proj", _own_col, "edge", "value"]
-    # Add proj_minutes, sim90th, ceil if available
-    if "proj_minutes" in df.columns:
-        _pick_cols.append("proj_minutes")
-    if "sim90th" in df.columns:
-        _pick_cols.append("sim90th")
-    if "ceil" in df.columns:
-        _pick_cols.append("ceil")
-
-    # ── Core: high-salary studs with the best ceilings ──
-    sal_p75 = float(np.percentile(_sal.dropna(), 75)) if len(_sal.dropna()) > 2 else 8000.0
     _ceil = _safe_col(df, "ceil")
     if _ceil.sum() == 0 and "sim90th" in df.columns:
         _ceil = _safe_col(df, "sim90th")
     if _ceil.sum() == 0:
         _ceil = _proj * 1.3
-    core = df[_sal >= sal_p75][_pick_cols].copy()
-    core["_ceil"] = _ceil[core.index]
-    core = core.rename(columns={_own_col: "ownership"})
+    _ceil_p70 = float(np.percentile(_ceil.dropna(), 70)) if len(_ceil.dropna()) > 2 else 40.0
 
-    # Track used players so tiers are mutually exclusive
+    _proj_median = float(_proj.median()) if len(_proj) > 0 else 20.0
+
+    _injury_bump = _safe_col(df, "injury_bump_fp")
+    _proj_minutes = _safe_col(df, "proj_minutes")
+    _sim_leverage = _safe_col(df, "sim_leverage")
+
+    # ── Columns to display ──
+    _pick_cols = ["player_name", "salary", "proj", _own_col, "edge", "value"]
+    for _extra in ["proj_minutes", "sim90th", "ceil", "sim_leverage"]:
+        if _extra in df.columns:
+            _pick_cols.append(_extra)
+
+    # ── CORE: high conviction, real upside, not cascade noise ──
+    _cascade_ok_core = (_injury_bump < _proj * 0.40) | (_injury_bump == 0)
+    core_mask = (
+        (_edge >= _edge_p65)
+        & (_ceil >= _ceil_p70)
+        & (_proj >= _proj_median)
+        & _cascade_ok_core
+    )
+    core = df[core_mask][_pick_cols].copy()
+    core = core.rename(columns={_own_col: "ownership"})
+    core = core.sort_values("edge", ascending=False).head(5)
+
     _used = set(core["player_name"].tolist())
 
-    # ── Leverage: above 60th pctl salary, under-owned, high edge, NOT in core ──
-    sal_p60 = float(np.percentile(_sal.dropna(), 60)) if len(_sal.dropna()) > 2 else 6500.0
-    leverage = df[(_sal >= sal_p60) & (_own < own_med) & (_edge >= _edge_p50) & (~df["player_name"].isin(_used))][_pick_cols].rename(columns={_own_col: "ownership"})
+    # ── LEVERAGE: under-owned relative to upside ──
+    _cascade_ok_lev = (_injury_bump < _proj * 0.50) | (_injury_bump == 0)
+    own_threshold = min(15.0, own_med)
+    leverage_mask = (
+        (_edge >= _edge_p50)
+        & (_own < own_threshold)
+        & _cascade_ok_lev
+        & (~df["player_name"].isin(_used))
+    )
+    # If sim_leverage is available, prefer positive sim_leverage
+    if _sim_leverage.abs().sum() > 0:
+        leverage_mask = leverage_mask & (_sim_leverage > 0)
+    leverage = df[leverage_mask][_pick_cols].copy()
+    leverage = leverage.rename(columns={_own_col: "ownership"})
+    # Sort by edge/ownership ratio (highest edge per unit of ownership)
+    _lev_own = _safe_col(leverage, "ownership").clip(lower=0.5)
+    leverage["_sort"] = _safe_col(leverage, "edge") / _lev_own
+    leverage = leverage.sort_values("_sort", ascending=False).drop(columns=["_sort"]).head(5)
+
     _used.update(leverage["player_name"].tolist())
 
-    # ── Value: below median salary, sorted by pts/$1K, NOT already used ──
-    value = df[(_sal < sal_med) & (_value > 0) & (~df["player_name"].isin(_used))][_pick_cols].rename(columns={_own_col: "ownership"})
+    # ── VALUE: salary-efficient with real role certainty ──
+    sal_p60 = float(np.percentile(_sal.dropna(), 60)) if len(_sal.dropna()) > 2 else 6500.0
+    _cascade_ok_val = (_injury_bump < _proj * 0.50) | (_injury_bump == 0)
+    _min_ok = (_proj_minutes >= 20) | (_proj_minutes == 0)  # 0 means missing, don't penalize
+    value_mask = (
+        (_sal < sal_p60)
+        & (_value >= 5.0)
+        & _min_ok
+        & _cascade_ok_val
+        & (~df["player_name"].isin(_used))
+    )
+    value = df[value_mask][_pick_cols].copy()
+    value = value.rename(columns={_own_col: "ownership"})
+    value = value.sort_values("value", ascending=False).head(5)
+
     _used.update(value["player_name"].tolist())
 
-    # ── Fade: bottom 20% edge, OR chalk traps, NOT already used ──
-    fade = df[
-        ((_edge <= _edge_p20) | ((_own >= own_med * 1.5) & (_edge < _edge_p50)))
+    # ── FADE: over-owned relative to edge, or negative sim_leverage ──
+    fade_mask = (
+        ((_own >= own_med * 1.3) & (_edge < _edge_p40))
         & (~df["player_name"].isin(_used))
-    ][_pick_cols].rename(columns={_own_col: "ownership"})
+    )
+    # If sim_leverage available, also fade strongly negative
+    if _sim_leverage.abs().sum() > 0:
+        neg_lev_mask = (_sim_leverage < -15) & (_own > 5) & (~df["player_name"].isin(_used))
+        fade_mask = fade_mask | neg_lev_mask
+    fade = df[fade_mask][_pick_cols].copy()
+    fade = fade.rename(columns={_own_col: "ownership"})
+    fade = fade.sort_values("edge", ascending=True).head(5)
 
     def _to_records(frame, n=5):
-        return frame.sort_values("edge", ascending=False).head(n).to_dict(orient="records")
-    def _to_records_asc(frame, n=5):
-        """Fade candidates: worst edge first."""
-        return frame.sort_values("edge", ascending=True).head(n).to_dict(orient="records")
-    def _to_records_core(frame, n=5):
-        if "_ceil" in frame.columns:
-            return frame.sort_values("_ceil", ascending=False).drop(columns=["_ceil"]).head(n).to_dict(orient="records")
-        return frame.sort_values("edge", ascending=False).head(n).to_dict(orient="records")
-    def _to_records_value(frame, n=5):
-        return frame.sort_values("value", ascending=False).head(n).to_dict(orient="records")
+        return frame.head(n).to_dict(orient="records")
+
     return {
-        "core_plays": _to_records_core(core, 5),
-        "leverage_plays": _to_records(leverage, 3),
-        "value_plays": _to_records_value(value, 5),
-        "fade_candidates": _to_records_asc(fade, 5),
+        "core_plays": _to_records(core, 5),
+        "leverage_plays": _to_records(leverage, 5),
+        "value_plays": _to_records(value, 5),
+        "fade_candidates": _to_records(fade, 5),
     }
 
 

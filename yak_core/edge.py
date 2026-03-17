@@ -848,6 +848,13 @@ def compute_edge_metrics(
         + dvp_norm * 0.10
     )
 
+    # ── SimLeverage: ceiling rank minus ownership rank ──
+    # Positive = player appears in optimal lineups more than the field rosters them.
+    # Negative = field over-values them relative to their ceiling.
+    _ceil_pctile = ceil_magnitude.rank(pct=True) * 100  # 0-100 percentile
+    _own_pctile = own.rank(pct=True) * 100              # 0-100 percentile
+    sim_leverage = (_ceil_pctile - _own_pctile).round(2)
+
     # ── Tournament anchor flag ──
     # Top 8 projected players are GPP anchors — cornerstones for lineups.
     _proj_rank = eff_proj.rank(ascending=False, method="first")
@@ -868,6 +875,7 @@ def compute_edge_metrics(
     out["fp_efficiency"] = eff_norm.values
     out["dvp_matchup_boost"] = _dvp_boost.values
     out["edge_score"] = edge_score.values
+    out["sim_leverage"] = sim_leverage.values
     out["is_anchor"] = is_anchor.values
 
     # Generate human-readable edge labels (pool-relative percentile cutoffs)
