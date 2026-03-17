@@ -1,10 +1,8 @@
 {
   "contest": "GPP Main",
   "sport": "NBA",
-  "num_lineups": 5,
-  "built_at": "2026-03-16T23:39:56.966352+00:00",
+  "num_lineups": 1,
+  "built_at": "2026-03-17T00:30:08.452901+00:00",
   "lock": [],
-  "exclude": [
-    "Taylor Hendricks"
-  ]
+  "exclude": []
 }
