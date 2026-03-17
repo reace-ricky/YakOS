@@ -22,12 +22,16 @@ def _csv_bytes(content: str) -> io.BytesIO:
 
 
 def _sample_csv() -> io.BytesIO:
-    """Minimal valid FP Cheatsheet CSV."""
+    """Minimal valid FP Cheatsheet CSV.
+
+    Uses FantasyPros real format: ONE team-prefixed spread per game.
+    Both LAL and GSW players see ``LAL -3.5``; parser flips sign for GSW.
+    """
     return _csv_bytes(
         "Player,Rest,Opp,DvP,Spread,O/U,Pred Score,Proj Rank,S Rank,Rank Diff,Proj Pts,Salary,CPP\n"
-        "LeBron James (LAL - SF),1,@GSW,22nd,-3.5,228.5,115.0,5,8,-3,48.2,\"$10,200\",4.7\n"
-        "Stephen Curry (GSW - PG),2,LAL,5th,3.5,228.5,113.5,3,2,1,52.1,\"$11,000\",4.7\n"
-        "Jayson Tatum (BOS - SF),0,@MIA,15th,-7.0,215.0,111.0,8,10,-2,42.5,\"$9,400\",4.5\n"
+        "LeBron James (LAL - SF),1,@GSW,22nd,LAL -3.5,228.5,115.0,5,8,-3,48.2,\"$10,200\",4.7\n"
+        "Stephen Curry (GSW - PG),2,LAL,5th,LAL -3.5,228.5,113.5,3,2,1,52.1,\"$11,000\",4.7\n"
+        "Jayson Tatum (BOS - SF),0,@MIA,15th,BOS -7.0,215.0,111.0,8,10,-2,42.5,\"$9,400\",4.5\n"
     )
 
 
@@ -35,7 +39,7 @@ def _sample_csv_alt_columns() -> io.BytesIO:
     """CSV with alternate column names (lowercase, underscored)."""
     return _csv_bytes(
         "player,rest,opp,dvp,spread,ou,pred_score,proj_rank,s_rank,rank_diff,proj_pts,salary,cpp\n"
-        "LeBron James (LAL - SF),1,@GSW,22nd,-3.5,228.5,115.0,5,8,-3,48.2,\"$10,200\",4.7\n"
+        "LeBron James (LAL - SF),1,@GSW,22nd,LAL -3.5,228.5,115.0,5,8,-3,48.2,\"$10,200\",4.7\n"
     )
 
 
@@ -73,7 +77,10 @@ class TestParseFpCheatsheet:
 
     def test_numeric_fields(self):
         df = parse_fp_cheatsheet(_sample_csv())
+        # LAL player sees "LAL -3.5" → spread stays -3.5 (favorite)
         assert df.loc[0, "spread"] == -3.5
+        # GSW player sees "LAL -3.5" → spread flipped to +3.5 (underdog)
+        assert df.loc[1, "spread"] == 3.5
         assert df.loc[0, "over_under"] == 228.5
         assert df.loc[0, "implied_team_total"] == 115.0
         assert df.loc[0, "fp_proj_pts"] == 48.2
@@ -106,6 +113,35 @@ class TestParseFpCheatsheet:
         )
         df = parse_fp_cheatsheet(csv)
         assert len(df) == 1
+
+    def test_spread_team_aware_flip(self):
+        """CLE -10.5 → CLE player gets -10.5, MIL player gets +10.5."""
+        csv = _csv_bytes(
+            "Player,Spread\n"
+            "Donovan Mitchell (CLE - SG),CLE -10.5\n"
+            "Damian Lillard (MIL - PG),CLE -10.5\n"
+        )
+        df = parse_fp_cheatsheet(csv)
+        assert df.loc[0, "spread"] == -10.5  # CLE player = favorite
+        assert df.loc[1, "spread"] == 10.5   # MIL player = underdog
+
+    def test_spread_no_team_prefix(self):
+        """Plain numeric spread (no team prefix) is kept as-is."""
+        csv = _csv_bytes(
+            "Player,Spread\n"
+            "Player A (TM - PG),-5.0\n"
+        )
+        df = parse_fp_cheatsheet(csv)
+        assert df.loc[0, "spread"] == -5.0
+
+    def test_spread_nan_handling(self):
+        """NaN spread values stay NaN."""
+        csv = _csv_bytes(
+            "Player,Spread\n"
+            "Player A (TM - PG),\n"
+        )
+        df = parse_fp_cheatsheet(csv)
+        assert np.isnan(df.loc[0, "spread"])
 
     def test_missing_optional_columns(self):
         csv = _csv_bytes("Player\nLeBron James (LAL - SF)\n")
@@ -150,7 +186,7 @@ class TestComputeCheatsheetSignals:
     def test_blowout_risk_large_favorite(self):
         csv = _csv_bytes(
             "Player,Spread\n"
-            "Player A (TM - PG),-15.0\n"
+            "Player A (TM - PG),TM -15.0\n"
         )
         fp_df = parse_fp_cheatsheet(csv)
         signals = compute_cheatsheet_signals(fp_df)

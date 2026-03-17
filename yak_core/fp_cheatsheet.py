@@ -149,6 +149,20 @@ def _parse_spread(val) -> float:
     return float("nan")
 
 
+def _extract_spread_team(val) -> str:
+    """Extract the team abbreviation prefix from a spread string.
+
+    ``'CLE -10.5'`` → ``'CLE'``, ``'-3.5'`` → ``''``, NaN → ``''``.
+    """
+    if pd.isna(val):
+        return ""
+    s = str(val).strip()
+    m = re.match(r"([A-Z]{2,4})\s", s)
+    if m:
+        return m.group(1)
+    return ""
+
+
 def _extract_player_name(val: str) -> str:
     """Extract player name from 'First Last (TEAM - POS)' format.
 
@@ -214,8 +228,12 @@ def parse_fp_cheatsheet(file_obj) -> pd.DataFrame:
         result["dvp_rank"] = float("nan")
 
     # Parse numeric spread (handles team-prefixed values like 'ATL -3')
+    # Flip sign for players on the OTHER team so spread is from their perspective.
     if "Spread" in df.columns:
-        result["spread"] = df["Spread"].apply(_parse_spread)
+        spread_teams = df["Spread"].apply(_extract_spread_team)
+        spread_values = df["Spread"].apply(_parse_spread)
+        same_team = (result["team"] == spread_teams) | (spread_teams == "")
+        result["spread"] = spread_values.where(same_team, -spread_values)
     else:
         result["spread"] = float("nan")
 
