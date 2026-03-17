@@ -141,7 +141,7 @@ def generate_last_night(recap: Optional[Dict[str, Any]]) -> Optional[str]:
 # 2. TONIGHT'S EDGES -- forward-looking callouts
 # ---------------------------------------------------------------------------
 
-def _find_salary_mismatches(pool: pd.DataFrame) -> List[str]:
+def _find_salary_mismatches(pool: pd.DataFrame, mentioned: set) -> List[str]:
     """Find players where projection implies much more value than salary."""
     required = {"player_name", "salary", "proj"}
     if not required.issubset(pool.columns):
@@ -162,8 +162,9 @@ def _find_salary_mismatches(pool: pd.DataFrame) -> List[str]:
     df["implied_salary"] = (df["proj"] / median_pts_per_1k) * 1000
     df["underpriced_pct"] = (df["implied_salary"] - df["salary"]) / df["salary"]
 
-    # Players underpriced by >15%
-    mispriced = df[df["underpriced_pct"] > 0.15].nlargest(3, "underpriced_pct")
+    # Players underpriced by >15%, skip already-mentioned
+    candidates = df[(df["underpriced_pct"] > 0.15) & (~df["player_name"].isin(mentioned))]
+    mispriced = candidates.nlargest(3, "underpriced_pct")
 
     _MISMATCH_TEMPLATES = [
         "{name} at ${sal} is mispriced. {proj:.0f} projected, {pts_1k:.1f} pts/$1K. The kind of inefficiency that used to pay my bonus. Now it pays lineups.",
@@ -179,10 +180,11 @@ def _find_salary_mismatches(pool: pd.DataFrame) -> List[str]:
         pts_1k = row["pts_per_1k"]
         tmpl = _MISMATCH_TEMPLATES[i % len(_MISMATCH_TEMPLATES)]
         callouts.append(tmpl.format(name=name, sal=sal, proj=proj, pts_1k=pts_1k))
+        mentioned.add(name)
     return callouts
 
 
-def _find_ownership_traps(pool: pd.DataFrame) -> List[str]:
+def _find_ownership_traps(pool: pd.DataFrame, mentioned: set) -> List[str]:
     """Find high-owned players with red flags."""
     own_col = None
     for c in ("ownership", "own_pct", "POWN"):
@@ -196,8 +198,8 @@ def _find_ownership_traps(pool: pd.DataFrame) -> List[str]:
     if df.empty:
         return []
 
-    # Top 5 by ownership
-    top_owned = df.nlargest(5, own_col)
+    # Top 5 by ownership, skip already-mentioned
+    top_owned = df[~df["player_name"].isin(mentioned)].nlargest(5, own_col)
 
     _TRAP_TEMPLATES = [
         "{own:.0f}% of the field is on {name} tonight. Same herd energy. {flags}. The scoreboard doesn't care how popular the pick was.",
@@ -233,11 +235,12 @@ def _find_ownership_traps(pool: pd.DataFrame) -> List[str]:
             flag_str = ", ".join(flags).capitalize()
             tmpl = _TRAP_TEMPLATES[i % len(_TRAP_TEMPLATES)]
             callouts.append(tmpl.format(name=name, own=own, flags=flag_str))
+            mentioned.add(name)
 
     return callouts[:2]  # Max 2 ownership traps
 
 
-def _find_contrarian_windows(pool: pd.DataFrame) -> List[str]:
+def _find_contrarian_windows(pool: pd.DataFrame, mentioned: set) -> List[str]:
     """Find low-owned players with strong situational edges."""
     own_col = None
     for c in ("ownership", "own_pct", "POWN"):
@@ -251,9 +254,9 @@ def _find_contrarian_windows(pool: pd.DataFrame) -> List[str]:
     if df.empty:
         return []
 
-    # Bottom quartile by ownership
+    # Bottom quartile by ownership, skip already-mentioned
     own_25th = df[own_col].quantile(0.25)
-    low_owned = df[df[own_col] <= max(own_25th, 5)].copy()
+    low_owned = df[(df[own_col] <= max(own_25th, 5)) & (~df["player_name"].isin(mentioned))].copy()
 
     if low_owned.empty:
         return []
@@ -299,14 +302,16 @@ def _find_contrarian_windows(pool: pd.DataFrame) -> List[str]:
             reason = " and ".join(reason_parts)
             tmpl = _CONTRARIAN_TEMPLATES[i % len(_CONTRARIAN_TEMPLATES)]
             callouts.append(tmpl.format(name=name, own=own, reason=reason))
+            mentioned.add(name)
         elif row["pts_per_1k"] > 5.0:
             tmpl = _CONTRARIAN_FALLBACK[i % len(_CONTRARIAN_FALLBACK)]
             callouts.append(tmpl.format(name=name, sal=sal, proj=proj, own=own))
+            mentioned.add(name)
 
     return callouts[:2]  # Max 2
 
 
-def _find_game_environment_edges(pool: pd.DataFrame) -> List[str]:
+def _find_game_environment_edges(pool: pd.DataFrame, mentioned: set = None) -> List[str]:
     """Find game environment edges: high totals, pace advantages."""
     if "over_under" not in pool.columns or "player_name" not in pool.columns:
         return []
@@ -334,6 +339,10 @@ def _find_game_environment_edges(pool: pd.DataFrame) -> List[str]:
 def generate_tonights_edges(pool: pd.DataFrame) -> List[str]:
     """Generate 3-5 data-driven callouts about tonight's slate.
 
+    Each callout covers a different player — no name repeats. The sub-generators
+    run in order (mismatches → traps → contrarian → environment) and share a
+    ``mentioned`` set so later generators skip players already called out.
+
     Parameters
     ----------
     pool : pd.DataFrame
@@ -347,11 +356,12 @@ def generate_tonights_edges(pool: pd.DataFrame) -> List[str]:
     if pool.empty:
         return []
 
+    mentioned: set = set()  # player names already used in a callout
     callouts = []
-    callouts.extend(_find_salary_mismatches(pool))
-    callouts.extend(_find_ownership_traps(pool))
-    callouts.extend(_find_contrarian_windows(pool))
-    callouts.extend(_find_game_environment_edges(pool))
+    callouts.extend(_find_salary_mismatches(pool, mentioned))
+    callouts.extend(_find_ownership_traps(pool, mentioned))
+    callouts.extend(_find_contrarian_windows(pool, mentioned))
+    callouts.extend(_find_game_environment_edges(pool, mentioned))
 
     # Cap at 5 callouts, prioritize variety (already ordered by type)
     return callouts[:5]
