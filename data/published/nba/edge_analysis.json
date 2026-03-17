@@ -1,11 +1,11 @@
 {
   "bullets": [
-    "Core anchors: Nikola Jokic, Jalen Duren, Victor Wembanyama",
+    "Core anchors: Nikola Jokic, Victor Wembanyama, Stephon Castle",
     "Leverage plays: Russell Westbrook, Jamal Murray",
-    "Value targets: Bilal Coulibaly, Keldon Johnson",
-    "Fade candidates: Khaman Maluach, Jamal Cain"
+    "Value targets: Bilal Coulibaly, Tre Johnson",
+    "Fade candidates: Larry Nance Jr., Khaman Maluach"
   ],
-  "recommendation": "5 core plays anchored at $7,700\u2013$12,500. 5 value plays averaging 6.9 pts/$1K. 5 leverage plays at 0\u20130% ownership.",
+  "recommendation": "5 core plays anchored at $7,700\u2013$12,500. 5 value plays averaging 6.7 pts/$1K. 5 leverage plays at 0\u20130% ownership.",
   "core_plays": [
     {
       "player_name": "Nikola Jokic",
@@ -14,22 +14,11 @@
       "ownership": 0.0,
       "edge": 0.6288807683545685,
       "value": 5.4392,
+      "risk_score": 33.0,
       "proj_minutes": 33.5,
       "sim90th": 81.27,
       "ceil": 80.32,
       "sim_leverage": 87.64
-    },
-    {
-      "player_name": "Jalen Duren",
-      "salary": 8300,
-      "proj": 44.32,
-      "ownership": 18.19,
-      "edge": 0.5807929690934571,
-      "value": 5.339759036144578,
-      "proj_minutes": 27.7,
-      "sim90th": 52.059999999999995,
-      "ceil": 55.33,
-      "sim_leverage": 6.74
     },
     {
       "player_name": "Victor Wembanyama",
@@ -38,6 +27,7 @@
       "ownership": 0.0,
       "edge": 0.5528628567410266,
       "value": 5.08909090909091,
+      "risk_score": 31.9,
       "proj_minutes": 27.714000000000002,
       "sim90th": 66.66999999999999,
       "ceil": 67.74,
@@ -50,6 +40,7 @@
       "ownership": 0.0,
       "edge": 0.539393853344917,
       "value": 6.151948051948052,
+      "risk_score": 31.1,
       "proj_minutes": 23.994000000000003,
       "sim90th": 48.160000000000004,
       "ceil": 59.48,
@@ -62,10 +53,24 @@
       "ownership": 25.65,
       "edge": 0.534739549807957,
       "value": 5.061627906976745,
+      "risk_score": 44.8,
       "proj_minutes": 29.9,
       "sim90th": 54.25,
       "ceil": 56.21,
       "sim_leverage": -0.56
+    },
+    {
+      "player_name": "Karl-Anthony Towns",
+      "salary": 9000,
+      "proj": 45.11,
+      "ownership": 10.21,
+      "edge": 0.5341028640696602,
+      "value": 5.012222222222222,
+      "risk_score": 59.3,
+      "proj_minutes": 29.8,
+      "sim90th": 56.559999999999995,
+      "ceil": 56.04,
+      "sim_leverage": 8.99
     }
   ],
   "leverage_plays": [
@@ -76,6 +81,7 @@
       "ownership": 0.0,
       "edge": 0.5244451511838165,
       "value": 6.014666666666667,
+      "risk_score": 39.9,
       "proj_minutes": 28.9,
       "sim90th": 44.010000000000005,
       "ceil": 57.61,
@@ -88,6 +94,7 @@
       "ownership": 0.0,
       "edge": 0.5213804706639238,
       "value": 4.952941176470588,
+      "risk_score": 24.1,
       "proj_minutes": 36.0,
       "sim90th": 54.22,
       "ceil": 53.96,
@@ -100,6 +107,7 @@
       "ownership": 0.0,
       "edge": 0.4957288895165853,
       "value": 5.957894736842106,
+      "risk_score": 58.5,
       "proj_minutes": 25.5,
       "sim90th": 49.07,
       "ceil": 56.79,
@@ -112,22 +120,24 @@
       "ownership": 0.17,
       "edge": 0.49528371907020735,
       "value": 7.873333333333334,
+      "risk_score": 54.7,
       "proj_minutes": 12.8,
       "sim90th": 24.55,
       "ceil": 34.1,
       "sim_leverage": 14.04
     },
     {
-      "player_name": "Justin Edwards",
-      "salary": 4500,
-      "proj": 33.4,
+      "player_name": "Keldon Johnson",
+      "salary": 4200,
+      "proj": 29.39,
       "ownership": 0.0,
-      "edge": 0.46237858621225786,
-      "value": 7.422222222222222,
-      "proj_minutes": 12.9,
-      "sim90th": 31.41,
-      "ceil": 45.38,
-      "sim_leverage": 72.47
+      "edge": 0.45399216094779327,
+      "value": 6.997619047619048,
+      "risk_score": 36.3,
+      "proj_minutes": 20.274,
+      "sim90th": 28.26,
+      "ceil": 40.12,
+      "sim_leverage": 59.55
     }
   ],
   "value_plays": [
@@ -138,22 +148,11 @@
       "ownership": 32.73,
       "edge": 0.4901696630754578,
       "value": 7.83,
+      "risk_score": 59.0,
       "proj_minutes": 24.831,
       "sim90th": 36.18,
       "ceil": 51.39,
       "sim_leverage": -14.61
-    },
-    {
-      "player_name": "Keldon Johnson",
-      "salary": 4200,
-      "proj": 29.39,
-      "ownership": 0.0,
-      "edge": 0.45399216094779327,
-      "value": 6.997619047619048,
-      "proj_minutes": 20.274,
-      "sim90th": 28.26,
-      "ceil": 40.12,
-      "sim_leverage": 59.55
     },
     {
       "player_name": "Tre Johnson",
@@ -162,6 +161,7 @@
       "ownership": 6.18,
       "edge": 0.4428941094790113,
       "value": 6.567391304347827,
+      "risk_score": 33.1,
       "proj_minutes": 24.459000000000003,
       "sim90th": 29.830000000000002,
       "ceil": 42.71,
@@ -174,6 +174,7 @@
       "ownership": 0.0,
       "edge": 0.3920176839080264,
       "value": 6.483333333333333,
+      "risk_score": 53.2,
       "proj_minutes": 22.506,
       "sim90th": 24.56,
       "ceil": 33.95,
@@ -186,13 +187,40 @@
       "ownership": 0.0,
       "edge": 0.4341725123993215,
       "value": 6.404166666666668,
+      "risk_score": 46.4,
       "proj_minutes": 22.878000000000004,
       "sim90th": 35.9,
       "ceil": 41.5,
       "sim_leverage": 61.24
+    },
+    {
+      "player_name": "Ajay Mitchell",
+      "salary": 5000,
+      "proj": 30.79,
+      "ownership": 22.2,
+      "edge": 0.4889817546278511,
+      "value": 6.1579999999999995,
+      "risk_score": 32.3,
+      "proj_minutes": 24.5,
+      "sim90th": 33.44,
+      "ceil": 41.82,
+      "sim_leverage": -20.22
     }
   ],
   "fade_candidates": [
+    {
+      "player_name": "Larry Nance Jr.",
+      "salary": 3000,
+      "proj": 0.2599999999999999,
+      "ownership": 0.05,
+      "edge": 0.16063774078177512,
+      "value": 0.08666666666666663,
+      "risk_score": 72.1,
+      "proj_minutes": 12.0,
+      "sim90th": 0.5199999999999999,
+      "ceil": 1.2,
+      "sim_leverage": -30.62
+    },
     {
       "player_name": "Khaman Maluach",
       "salary": 3000,
@@ -200,6 +228,7 @@
       "ownership": 0.46,
       "edge": 0.16242674456044523,
       "value": 3.143333333333333,
+      "risk_score": 38.6,
       "proj_minutes": 4.464,
       "sim90th": 12.709999999999999,
       "ceil": 15.7,
@@ -212,6 +241,7 @@
       "ownership": 0.54,
       "edge": 0.20056492519996055,
       "value": 1.9060606060606062,
+      "risk_score": 24.1,
       "proj_minutes": 8.277000000000001,
       "sim90th": 9.01,
       "ceil": 12.52,
@@ -224,34 +254,24 @@
       "ownership": 0.51,
       "edge": 0.24359326501703077,
       "value": 2.96875,
+      "risk_score": 24.1,
       "proj_minutes": 15.8,
       "sim90th": 12.49,
       "ceil": 16.73,
       "sim_leverage": -43.26
     },
     {
-      "player_name": "Mohamed Diawara",
-      "salary": 3100,
-      "proj": 14.93,
-      "ownership": 4.29,
-      "edge": 0.3128228212163616,
-      "value": 4.816129032258064,
-      "proj_minutes": 13.9,
-      "sim90th": 20.61,
-      "ceil": 23.71,
-      "sim_leverage": -48.88
-    },
-    {
-      "player_name": "Davion Mitchell",
-      "salary": 4900,
-      "proj": 21.729999999999997,
-      "ownership": 0.74,
-      "edge": 0.32559778156134267,
-      "value": 4.43469387755102,
-      "proj_minutes": 23.9,
-      "sim90th": 27.119999999999997,
-      "ceil": 30.97,
-      "sim_leverage": -26.97
+      "player_name": "Marcus Sasser",
+      "salary": 3400,
+      "proj": 11.030000000000001,
+      "ownership": 0.05,
+      "edge": 0.2844696658013438,
+      "value": 3.244117647058824,
+      "risk_score": 75.1,
+      "proj_minutes": 8.8,
+      "sim90th": 15.829999999999998,
+      "ceil": 18.99,
+      "sim_leverage": -11.52
     }
   ],
   "signals_df_path": "signals.parquet"

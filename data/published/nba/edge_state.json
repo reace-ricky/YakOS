@@ -3,31 +3,31 @@
   "date": "2026-03-17",
   "core_names": [
     "Nikola Jokic",
-    "Jalen Duren",
     "Victor Wembanyama",
     "Stephon Castle",
-    "LaMelo Ball"
+    "LaMelo Ball",
+    "Karl-Anthony Towns"
   ],
   "leverage_names": [
     "Russell Westbrook",
     "Jamal Murray",
     "Quentin Grimes",
     "Tyler Kolek",
-    "Justin Edwards"
+    "Keldon Johnson"
   ],
   "value_names": [
     "Bilal Coulibaly",
-    "Keldon Johnson",
     "Tre Johnson",
     "Harrison Barnes",
-    "Julian Champagnie"
+    "Julian Champagnie",
+    "Ajay Mitchell"
   ],
   "fade_names": [
+    "Larry Nance Jr.",
     "Khaman Maluach",
     "Jamal Cain",
     "Josh Green",
-    "Mohamed Diawara",
-    "Davion Mitchell"
+    "Marcus Sasser"
   ],
   "calibration_slates": 15
 }
