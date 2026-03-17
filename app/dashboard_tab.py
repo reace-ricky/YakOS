@@ -543,12 +543,11 @@ def render_dashboard_tab(sport: str) -> None:
             + (f" · {n_live} live players" if n_live else "")
         )
 
-    # ── Scatter Explorer (inline — Normal excluded to reduce payload) ────
-    if data:
-        scatter_data = [r for r in data if r["cat"] != "N"]
-        if scatter_data:
-            ex_html = _build_explorer_html(scatter_data)
-            components.html(ex_html, height=620, scrolling=False)
+    # ── Scatter Explorer (hosted standalone) ───────────────────────
+    st.markdown(
+        "[Open Smash / Bust Explorer ↗](https://www.perplexity.ai/computer/a/yakos-smash-bust-explorer-Ir3N20l9RcCPKV0fnhxhhA)",
+        help="Interactive scatter plot — click categories to isolate, shift+click to toggle, use filters to drill in.",
+    )
 
     # ── Maintenance Tools ─────────────────────────────────────────────────
     st.markdown("---")
