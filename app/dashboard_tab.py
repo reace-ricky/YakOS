@@ -382,7 +382,6 @@ const CATS=[
   {{id:"bc",l:"Bust Caught",c:"#ef4444",t:r=>r.cat==="B"&&r.bf,rad:6}},
   {{id:"bm",l:"Bust Missed",c:"#fca5a5",t:r=>r.cat==="B"&&!r.bf,rad:6,bdr:"#ef4444"}},
   {{id:"lv",l:"Live",c:"#3b82f6",t:r=>r.cat==="L",rad:5}},
-  {{id:"n",l:"Normal",c:"#6b7280",t:r=>r.cat==="N",rad:2}},
 ];
 let show={{}};CATS.forEach(c=>show[c.id]=true);
 const F={{
@@ -416,7 +415,7 @@ CATS.forEach(c=>{{
   const e=document.createElement("div");e.className="ct on";e.dataset.id=c.id;
   const sty=c.bdr?"border:2px dashed "+c.bdr+";background:transparent":"background:"+c.c;
   e.innerHTML='<div class="dot" style="'+sty+'"></div><span class="ctl">'+c.l+'</span><span class="ctc">'+n+'</span>';
-  e.onclick=()=>{{show[c.id]=!show[c.id];e.classList.toggle("on");rebuild();}};
+  e.onclick=(ev)=>{{if(ev.shiftKey){{show[c.id]=!show[c.id];e.classList.toggle("on");}}else{{const solo=Object.values(show).filter(v=>v).length===1&&show[c.id];CATS.forEach(x=>{{show[x.id]=solo;document.querySelector('[data-id="'+x.id+'"]').classList.toggle("on",solo);}});if(!solo){{show[c.id]=true;e.classList.add("on");}}}}rebuild();}};
   cd.appendChild(e);
 }});
 // Axes
@@ -441,7 +440,7 @@ function rebuild(){{
   const xf=document.getElementById("xA").value,yf=document.getElementById("yA").value;
   const fd=D.filter(r=>{{for(const f in flt)if((r[f]||0)<flt[f])return false;return true;}});
   const ds=[];
-  ["n","lv","bm","bc","sm","sc"].forEach(cid=>{{
+  ["lv","bm","bc","sm","sc"].forEach(cid=>{{
     const cat=CATS.find(c=>c.id===cid);if(!show[cid])return;
     const pts=fd.filter(cat.t);if(!pts.length)return;
     const isO=cid!=="n",isM=cid.endsWith("m"),isL=cid==="lv";
@@ -544,11 +543,12 @@ def render_dashboard_tab(sport: str) -> None:
             + (f" · {n_live} live players" if n_live else "")
         )
 
-    # ── Scatter Explorer (external link — too large for iframe) ───────────
-    st.markdown(
-        "[Open Smash / Bust Scatter Explorer ↗](https://www.perplexity.ai/computer/a/smash-bust-explorer-03tOw2tLTEmiPPP1a14SVA)",
-        help="Interactive scatter plot with all player signals — opens in a new tab.",
-    )
+    # ── Scatter Explorer (inline — Normal excluded to reduce payload) ────
+    if data:
+        scatter_data = [r for r in data if r["cat"] != "N"]
+        if scatter_data:
+            ex_html = _build_explorer_html(scatter_data)
+            components.html(ex_html, height=620, scrolling=False)
 
     # ── Maintenance Tools ─────────────────────────────────────────────────
     st.markdown("---")
