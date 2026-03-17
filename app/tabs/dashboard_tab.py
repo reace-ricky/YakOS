@@ -58,6 +58,9 @@ def _load_all_dashboard_data(sport: str) -> Dict[str, Any]:
     # Recalibrated backtest (all slates re-projected through current corrections)
     recal_backtest = _load_json(REPO_ROOT / "data" / "calibration_feedback" / "recalibrated_backtest.json")
 
+    # RG baseline MAE data (standalone file + inline in slate_errors)
+    rg_baseline = _load_json(REPO_ROOT / "data" / "calibration_feedback" / "rg_baseline.json")
+
     return {
         "slate_errors": slate_errors,
         "signal_history": signal_history,
@@ -66,6 +69,7 @@ def _load_all_dashboard_data(sport: str) -> Dict[str, Any]:
         "breakout_profile": breakout_profile,
         "breakout_accuracy": breakout_accuracy,
         "recal_backtest": recal_backtest,
+        "rg_baseline": rg_baseline,
         "sport": sport_lower,
     }
 
@@ -120,13 +124,6 @@ def render_dashboard_tab(sport: str) -> None:
         _render_published_data_status(sport)
     except Exception as e:
         st.error(f"Published Data Status error: {e}\n```\n{traceback.format_exc()}\n```")
-
-    # ── Contest Results (entry form) ──────────────────────────────────────
-    st.markdown("---")
-    try:
-        _render_contest_results(sport)
-    except Exception as e:
-        st.error(f"Contest Results error: {e}\n```\n{traceback.format_exc()}\n```")
 
     # ── Maintenance Tools ─────────────────────────────────────────────────
     st.markdown("---")
@@ -244,24 +241,29 @@ def _render_calibration_trend(data: Dict[str, Any]) -> None:
     slate_errors = data["slate_errors"]
     sport = data["sport"]
     recal = data.get("recal_backtest", {})
+    rg_baseline = data.get("rg_baseline", {})
 
     if not slate_errors and not recal.get("slates"):
         st.info("No calibration data available.")
         return
 
-    # Build rows for the as-run MAE line from slate_errors
+    # Build rows for the YakOS MAE line from slate_errors
     chart_rows = []
     for d in sorted(slate_errors.keys()):
         overall = slate_errors[d].get("overall", {})
         mae = overall.get("mae")
         if mae is not None:
-            chart_rows.append({"date": d, "MAE": mae, "Series": "As-Run MAE"})
+            chart_rows.append({"date": d, "MAE": mae, "Series": "YakOS MAE"})
 
-    # Build rows for the recalibrated MAE line from recal_backtest slates
-    recal_slates = recal.get("slates", [])
-    for s in recal_slates:
-        if s.get("sport", "").lower() == sport and s.get("corrected_mae") is not None:
-            chart_rows.append({"date": s["date"], "MAE": s["corrected_mae"], "Series": "Recalibrated MAE"})
+        # RG MAE from slate_errors (injected during calibration)
+        rg_mae = slate_errors[d].get("rg_mae")
+        if rg_mae is not None:
+            chart_rows.append({"date": d, "MAE": rg_mae, "Series": "RG Baseline MAE"})
+
+    # Also pull from standalone rg_baseline.json for dates not in slate_errors
+    for d, rg_data in sorted(rg_baseline.items()):
+        if d not in slate_errors and rg_data.get("rg_mae") is not None:
+            chart_rows.append({"date": d, "MAE": rg_data["rg_mae"], "Series": "RG Baseline MAE"})
 
     if not chart_rows:
         st.info("No MAE data available.")
@@ -272,12 +274,20 @@ def _render_calibration_trend(data: Dict[str, Any]) -> None:
 
     target_mae = 6.0 if sport == "nba" else 25.0
 
-    color_scale = alt.Scale(
-        domain=["As-Run MAE", "Recalibrated MAE"],
-        range=["#4C78A8", "#E45756"],
-    )
+    # Determine which series are present
+    series_present = df["Series"].unique().tolist()
+    domain = []
+    colors = []
+    if "YakOS MAE" in series_present:
+        domain.append("YakOS MAE")
+        colors.append("#4C78A8")
+    if "RG Baseline MAE" in series_present:
+        domain.append("RG Baseline MAE")
+        colors.append("#F5A623")
 
-    # Dual MAE lines
+    color_scale = alt.Scale(domain=domain, range=colors)
+
+    # MAE lines
     mae_lines = alt.Chart(df).mark_line(point=True).encode(
         x=alt.X("date:T", title="Date"),
         y=alt.Y("MAE:Q", title="MAE", scale=alt.Scale(zero=False)),
@@ -305,7 +315,9 @@ def _render_calibration_trend(data: Dict[str, Any]) -> None:
     ).interactive()
 
     st.altair_chart(chart, use_container_width=True)
-    st.caption("As-Run = accuracy at time of slate. Recalibrated = accuracy with current model corrections applied retroactively.")
+
+    # Show footnote
+    st.caption("YakOS MAE = model projections vs actuals. RG Baseline MAE = raw RotoGrinders projections vs actuals.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -480,6 +492,8 @@ def _render_contest_band_tracking(data: Dict[str, Any]) -> None:
             "cash_line": entry.get("cash_line", 0),
             "winning": entry.get("winning_score", 0),
             "entries": entry.get("num_entries", 0),
+            "best": sc.get("best", 0),
+            "avg": sc.get("avg", 0),
             "cash_rate": sc.get("cash_rate", ""),
         })
     if table_rows:
@@ -561,88 +575,30 @@ def _render_published_data_status(sport: str) -> None:
 def _render_post_slate_feedback(sport: str) -> None:
     st.markdown("### Post-Slate Feedback")
 
-    feedback_date = st.text_input("Slate date", value=date.today().isoformat(), key=f"dash_fb_date_{sport}")
+    feedback_date = st.date_input(
+        "Slate date", value=date.today(), key=f"dash_fb_date_{sport}"
+    )
 
     if st.button("Run Post-Slate", key=f"dash_postslate_{sport}"):
         with st.spinner("Running post-slate analysis..."):
             try:
-                result = _run_post_slate(sport, feedback_date)
+                result = _run_post_slate(sport, str(feedback_date))
                 if result.get("status") == "ok":
                     st.success(f"Post-slate complete: {result.get('message', '')}")
                     if result.get("calibration_update"):
                         st.json(result["calibration_update"])
+                    # Display minutes calibration stats if available
+                    mins_overall = result.get("minutes_stats", {})
+                    if mins_overall.get("min_mae") is not None:
+                        st.markdown(
+                            f"**Minutes Accuracy:** MAE={mins_overall['min_mae']}, "
+                            f"Corr={mins_overall.get('min_correlation', 'N/A')}, "
+                            f"Bias={mins_overall.get('min_mean_error', 0):+.1f}"
+                        )
                 else:
                     st.warning(result.get("message", "No actuals available for this date."))
             except Exception as e:
                 st.error(f"Post-slate error: {e}")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Contest Results Section (PRESERVED — has user-active forms)
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _render_contest_results(sport: str) -> None:
-    """Contest band entry form and history table."""
-    st.markdown("### Contest Results")
-
-    c1, c2 = st.columns(2)
-    with c1:
-        cr_date = st.date_input("Contest date", value=date.today(), key=f"cr_date_{sport}")
-    with c2:
-        cr_type = st.selectbox("Contest type", ["GPP", "Cash", "Showdown"], key=f"cr_type_{sport}")
-
-    c3, c4 = st.columns(2)
-    with c3:
-        cash_line = st.number_input("Cash Line", min_value=0.0, step=0.5, key=f"cr_cash_{sport}")
-        top_10 = st.number_input("Top 10% Score", min_value=0.0, step=0.5, key=f"cr_top10_{sport}")
-    with c4:
-        winning = st.number_input("Winning Score", min_value=0.0, step=0.5, key=f"cr_win_{sport}")
-        entries = st.number_input("Entry Count", min_value=0, step=1, key=f"cr_entries_{sport}")
-
-    notes = st.text_input("Notes", key=f"cr_notes_{sport}")
-
-    if st.button("Save Contest Result", key=f"cr_save_{sport}"):
-        if cash_line <= 0:
-            st.warning("Cash line must be > 0")
-            return
-
-        from yak_core.contest_calibration import (
-            ContestResult, save_contest_result, score_vs_bands,
-        )
-        from app.data_loader import published_dir
-
-        cr = ContestResult(
-            slate_date=str(cr_date),
-            contest_type=cr_type.lower(),
-            cash_line=cash_line,
-            top_15_score=top_10,
-            top_1_score=0,
-            winning_score=winning,
-            num_entries=entries,
-            notes=notes,
-        )
-
-        # Check for published lineups to auto-score
-        scores = None
-        p_dir = published_dir(sport)
-        lineup_files = list(p_dir.glob("*_lineups.parquet")) if p_dir.exists() else []
-        if lineup_files:
-            try:
-                all_actuals = []
-                for lf in lineup_files:
-                    ldf = pd.read_parquet(lf)
-                    if "actual_fp" in ldf.columns and "lineup_index" in ldf.columns:
-                        lu_totals = ldf.groupby("lineup_index")["actual_fp"].sum()
-                        all_actuals.extend(lu_totals.dropna().tolist())
-                if all_actuals:
-                    scores = score_vs_bands(all_actuals, cr)
-            except Exception:
-                pass
-
-        save_contest_result(cr, scores=scores)
-        st.success(f"Saved contest result for {cr_date} ({cr_type})")
-        if scores and scores.get("n_lineups", 0) > 0:
-            st.json(scores)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -778,6 +734,74 @@ def _render_pga_backfill() -> None:
 
 # ── Recalibrate from Archive ────────────────────────────────────────────────
 
+def _inject_rg_mae(slate_date: str, pool_df: pd.DataFrame, sport: str = "NBA") -> None:
+    """Compute RG baseline MAE and store it in slate_errors + rg_baseline.json.
+
+    Looks for an RG archive file matching the slate date. If found, merges
+    RG projections with actuals from pool_df and stores the MAE.
+    """
+    if sport.lower() != "nba":
+        return  # Only NBA for now
+
+    rg_dir = REPO_ROOT / "data" / "rg_archive" / "nba"
+    rg_path = rg_dir / f"rg_{slate_date}.csv"
+    if not rg_path.exists():
+        return
+
+    if "actual_fp" not in pool_df.columns:
+        return
+
+    try:
+        rg = pd.read_csv(rg_path)
+        rg.columns = [c.strip().upper() for c in rg.columns]
+        if "FPTS" not in rg.columns or "PLAYER" not in rg.columns:
+            return
+
+        rg_clean = pd.DataFrame()
+        rg_clean["player_name"] = rg["PLAYER"].astype(str).str.strip().str.replace('"', '')
+        rg_clean["rg_proj"] = pd.to_numeric(rg["FPTS"], errors="coerce")
+        rg_clean["_key"] = rg_clean["player_name"].str.strip().str.lower()
+
+        actuals = pool_df[["player_name", "actual_fp"]].dropna(subset=["actual_fp"]).copy()
+        actuals["_key"] = actuals["player_name"].astype(str).str.strip().str.lower()
+
+        merged = rg_clean.merge(actuals[["_key", "actual_fp"]], on="_key", how="inner")
+        if len(merged) < 10:
+            return
+
+        rg_mae = float((merged["rg_proj"] - merged["actual_fp"]).abs().mean())
+
+        # Inject into slate_errors.json
+        errors_path = REPO_ROOT / "data" / "calibration_feedback" / "nba" / "slate_errors.json"
+        if errors_path.exists():
+            import json as _json
+            with open(errors_path) as f:
+                errors = _json.load(f)
+            if slate_date in errors:
+                errors[slate_date]["rg_mae"] = round(rg_mae, 2)
+                with open(errors_path, "w") as f:
+                    _json.dump(errors, f, indent=2)
+
+        # Also update standalone rg_baseline.json
+        baseline_path = REPO_ROOT / "data" / "calibration_feedback" / "rg_baseline.json"
+        baseline = {}
+        if baseline_path.exists():
+            import json as _json
+            with open(baseline_path) as f:
+                baseline = _json.load(f)
+        baseline[slate_date] = {
+            "rg_mae": round(rg_mae, 2),
+            "rg_bias": round(float((merged["rg_proj"] - merged["actual_fp"]).mean()), 2),
+            "n_matched": len(merged),
+        }
+        with open(baseline_path, "w") as f:
+            import json as _json
+            _json.dump(baseline, f, indent=2)
+
+    except Exception:
+        pass  # Non-critical — don't break calibration flow
+
+
 def _recalibrate_from_archive(archive_files: list, sport: str = "NBA") -> None:
     """Clear existing calibration and rebuild from archived slate parquets.
 
@@ -841,6 +865,9 @@ def _recalibrate_from_archive(archive_files: list, sport: str = "NBA") -> None:
 
             # Record errors — this appends to history and recomputes corrections
             cal_result = record_slate_errors(slate_date, valid, sport=sport.upper())
+
+            # Inject RG baseline MAE if we have an RG archive for this date
+            _inject_rg_mae(slate_date, valid, sport=sport)
 
             if "error" in cal_result:
                 results.append({
@@ -943,8 +970,15 @@ def _run_post_slate(sport: str, slate_date: str) -> Dict[str, Any]:
             # create actual_fp_x / actual_fp_y suffix columns.
             if "actual_fp" in pool.columns:
                 pool = pool.drop(columns=["actual_fp"])
+            if "mp_actual" in pool.columns:
+                pool = pool.drop(columns=["mp_actual"])
+
+            # Merge both actual_fp and mp_actual from actuals
+            merge_cols = ["player_name", "actual_fp"]
+            if "mp_actual" in actuals.columns:
+                merge_cols.append("mp_actual")
             pool_with_actuals = pool.merge(
-                actuals[["player_name", "actual_fp"]],
+                actuals[merge_cols],
                 on="player_name",
                 how="left",
             )
@@ -961,13 +995,25 @@ def _run_post_slate(sport: str, slate_date: str) -> Dict[str, Any]:
         if has_actual == 0:
             return {"status": "error", "message": "No actuals matched to pool players"}
 
-        record_slate_errors(slate_date, pool_with_actuals, sport=sport.upper())
+        slate_record = record_slate_errors(slate_date, pool_with_actuals, sport=sport.upper())
+
+        # Inject RG baseline MAE if we have an RG file for this date
+        _inject_rg_mae(slate_date, pool_with_actuals, sport=sport)
 
         summary = get_calibration_summary(sport=sport.upper())
-        return {
+        result = {
             "status": "ok",
             "message": f"Recorded errors for {has_actual} players",
             "calibration_update": summary,
         }
+        # Pass through minutes stats from the slate record if available
+        mins_overall = slate_record.get("overall", {})
+        if "min_mae" in mins_overall:
+            result["minutes_stats"] = {
+                k: mins_overall[k]
+                for k in ("min_mae", "min_rmse", "min_correlation", "min_mean_error", "min_n_players")
+                if k in mins_overall
+            }
+        return result
     except Exception as e:
         return {"status": "error", "message": f"Calibration update failed: {e}"}

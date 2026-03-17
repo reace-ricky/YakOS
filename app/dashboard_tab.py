@@ -58,6 +58,9 @@ def _load_all_dashboard_data(sport: str) -> Dict[str, Any]:
     # Recalibrated backtest (all slates re-projected through current corrections)
     recal_backtest = _load_json(REPO_ROOT / "data" / "calibration_feedback" / "recalibrated_backtest.json")
 
+    # RG baseline MAE data (standalone file + inline in slate_errors)
+    rg_baseline = _load_json(REPO_ROOT / "data" / "calibration_feedback" / "rg_baseline.json")
+
     return {
         "slate_errors": slate_errors,
         "signal_history": signal_history,
@@ -66,6 +69,7 @@ def _load_all_dashboard_data(sport: str) -> Dict[str, Any]:
         "breakout_profile": breakout_profile,
         "breakout_accuracy": breakout_accuracy,
         "recal_backtest": recal_backtest,
+        "rg_baseline": rg_baseline,
         "sport": sport_lower,
     }
 
@@ -237,24 +241,29 @@ def _render_calibration_trend(data: Dict[str, Any]) -> None:
     slate_errors = data["slate_errors"]
     sport = data["sport"]
     recal = data.get("recal_backtest", {})
+    rg_baseline = data.get("rg_baseline", {})
 
     if not slate_errors and not recal.get("slates"):
         st.info("No calibration data available.")
         return
 
-    # Build rows for the as-run MAE line from slate_errors
+    # Build rows for the YakOS MAE line from slate_errors
     chart_rows = []
     for d in sorted(slate_errors.keys()):
         overall = slate_errors[d].get("overall", {})
         mae = overall.get("mae")
         if mae is not None:
-            chart_rows.append({"date": d, "MAE": mae, "Series": "As-Run MAE"})
+            chart_rows.append({"date": d, "MAE": mae, "Series": "YakOS MAE"})
 
-    # Build rows for the recalibrated MAE line from recal_backtest slates
-    recal_slates = recal.get("slates", [])
-    for s in recal_slates:
-        if s.get("sport", "").lower() == sport and s.get("corrected_mae") is not None:
-            chart_rows.append({"date": s["date"], "MAE": s["corrected_mae"], "Series": "Recalibrated MAE"})
+        # RG MAE from slate_errors (injected during calibration)
+        rg_mae = slate_errors[d].get("rg_mae")
+        if rg_mae is not None:
+            chart_rows.append({"date": d, "MAE": rg_mae, "Series": "RG Baseline MAE"})
+
+    # Also pull from standalone rg_baseline.json for dates not in slate_errors
+    for d, rg_data in sorted(rg_baseline.items()):
+        if d not in slate_errors and rg_data.get("rg_mae") is not None:
+            chart_rows.append({"date": d, "MAE": rg_data["rg_mae"], "Series": "RG Baseline MAE"})
 
     if not chart_rows:
         st.info("No MAE data available.")
@@ -265,12 +274,20 @@ def _render_calibration_trend(data: Dict[str, Any]) -> None:
 
     target_mae = 6.0 if sport == "nba" else 25.0
 
-    color_scale = alt.Scale(
-        domain=["As-Run MAE", "Recalibrated MAE"],
-        range=["#4C78A8", "#E45756"],
-    )
+    # Determine which series are present
+    series_present = df["Series"].unique().tolist()
+    domain = []
+    colors = []
+    if "YakOS MAE" in series_present:
+        domain.append("YakOS MAE")
+        colors.append("#4C78A8")
+    if "RG Baseline MAE" in series_present:
+        domain.append("RG Baseline MAE")
+        colors.append("#F5A623")
 
-    # Dual MAE lines
+    color_scale = alt.Scale(domain=domain, range=colors)
+
+    # MAE lines
     mae_lines = alt.Chart(df).mark_line(point=True).encode(
         x=alt.X("date:T", title="Date"),
         y=alt.Y("MAE:Q", title="MAE", scale=alt.Scale(zero=False)),
@@ -298,7 +315,9 @@ def _render_calibration_trend(data: Dict[str, Any]) -> None:
     ).interactive()
 
     st.altair_chart(chart, use_container_width=True)
-    st.caption("As-Run = accuracy at time of slate. Recalibrated = accuracy with current model corrections applied retroactively.")
+
+    # Show footnote
+    st.caption("YakOS MAE = model projections vs actuals. RG Baseline MAE = raw RotoGrinders projections vs actuals.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -715,6 +734,74 @@ def _render_pga_backfill() -> None:
 
 # ── Recalibrate from Archive ────────────────────────────────────────────────
 
+def _inject_rg_mae(slate_date: str, pool_df: pd.DataFrame, sport: str = "NBA") -> None:
+    """Compute RG baseline MAE and store it in slate_errors + rg_baseline.json.
+
+    Looks for an RG archive file matching the slate date. If found, merges
+    RG projections with actuals from pool_df and stores the MAE.
+    """
+    if sport.lower() != "nba":
+        return  # Only NBA for now
+
+    rg_dir = REPO_ROOT / "data" / "rg_archive" / "nba"
+    rg_path = rg_dir / f"rg_{slate_date}.csv"
+    if not rg_path.exists():
+        return
+
+    if "actual_fp" not in pool_df.columns:
+        return
+
+    try:
+        rg = pd.read_csv(rg_path)
+        rg.columns = [c.strip().upper() for c in rg.columns]
+        if "FPTS" not in rg.columns or "PLAYER" not in rg.columns:
+            return
+
+        rg_clean = pd.DataFrame()
+        rg_clean["player_name"] = rg["PLAYER"].astype(str).str.strip().str.replace('"', '')
+        rg_clean["rg_proj"] = pd.to_numeric(rg["FPTS"], errors="coerce")
+        rg_clean["_key"] = rg_clean["player_name"].str.strip().str.lower()
+
+        actuals = pool_df[["player_name", "actual_fp"]].dropna(subset=["actual_fp"]).copy()
+        actuals["_key"] = actuals["player_name"].astype(str).str.strip().str.lower()
+
+        merged = rg_clean.merge(actuals[["_key", "actual_fp"]], on="_key", how="inner")
+        if len(merged) < 10:
+            return
+
+        rg_mae = float((merged["rg_proj"] - merged["actual_fp"]).abs().mean())
+
+        # Inject into slate_errors.json
+        errors_path = REPO_ROOT / "data" / "calibration_feedback" / "nba" / "slate_errors.json"
+        if errors_path.exists():
+            import json as _json
+            with open(errors_path) as f:
+                errors = _json.load(f)
+            if slate_date in errors:
+                errors[slate_date]["rg_mae"] = round(rg_mae, 2)
+                with open(errors_path, "w") as f:
+                    _json.dump(errors, f, indent=2)
+
+        # Also update standalone rg_baseline.json
+        baseline_path = REPO_ROOT / "data" / "calibration_feedback" / "rg_baseline.json"
+        baseline = {}
+        if baseline_path.exists():
+            import json as _json
+            with open(baseline_path) as f:
+                baseline = _json.load(f)
+        baseline[slate_date] = {
+            "rg_mae": round(rg_mae, 2),
+            "rg_bias": round(float((merged["rg_proj"] - merged["actual_fp"]).mean()), 2),
+            "n_matched": len(merged),
+        }
+        with open(baseline_path, "w") as f:
+            import json as _json
+            _json.dump(baseline, f, indent=2)
+
+    except Exception:
+        pass  # Non-critical — don't break calibration flow
+
+
 def _recalibrate_from_archive(archive_files: list, sport: str = "NBA") -> None:
     """Clear existing calibration and rebuild from archived slate parquets.
 
@@ -778,6 +865,9 @@ def _recalibrate_from_archive(archive_files: list, sport: str = "NBA") -> None:
 
             # Record errors — this appends to history and recomputes corrections
             cal_result = record_slate_errors(slate_date, valid, sport=sport.upper())
+
+            # Inject RG baseline MAE if we have an RG archive for this date
+            _inject_rg_mae(slate_date, valid, sport=sport)
 
             if "error" in cal_result:
                 results.append({
@@ -906,6 +996,9 @@ def _run_post_slate(sport: str, slate_date: str) -> Dict[str, Any]:
             return {"status": "error", "message": "No actuals matched to pool players"}
 
         slate_record = record_slate_errors(slate_date, pool_with_actuals, sport=sport.upper())
+
+        # Inject RG baseline MAE if we have an RG file for this date
+        _inject_rg_mae(slate_date, pool_with_actuals, sport=sport)
 
         summary = get_calibration_summary(sport=sport.upper())
         result = {
