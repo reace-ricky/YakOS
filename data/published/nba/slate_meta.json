@@ -1,7 +1,7 @@
 {
   "sport": "NBA",
   "site": "DK",
-  "date": "2026-03-16",
+  "date": "2026-03-17",
   "salary_cap": 50000,
   "roster_slots": [
     "PG",
@@ -14,56 +14,56 @@
     "UTIL"
   ],
   "lineup_size": 8,
-  "pool_size": 279,
+  "pool_size": 284,
   "proj_source": "rotogrinders+tank01",
   "matchups": [
     {
+      "away": "OKC",
+      "home": "ORL",
+      "game_id": "20260317_OKC@ORL",
+      "label": "OKC @ ORL"
+    },
+    {
+      "away": "PHI",
+      "home": "DEN",
+      "game_id": "20260317_PHI@DEN",
+      "label": "PHI @ DEN"
+    },
+    {
+      "away": "DET",
+      "home": "WAS",
+      "game_id": "20260317_DET@WAS",
+      "label": "DET @ WAS"
+    },
+    {
       "away": "SA",
-      "home": "LAC",
-      "game_id": "20260316_SA@LAC",
-      "label": "SA @ LAC"
+      "home": "SAC",
+      "game_id": "20260317_SA@SAC",
+      "label": "SA @ SAC"
+    },
+    {
+      "away": "MIA",
+      "home": "CHA",
+      "game_id": "20260317_MIA@CHA",
+      "label": "MIA @ CHA"
     },
     {
       "away": "PHO",
-      "home": "BOS",
-      "game_id": "20260316_PHO@BOS",
-      "label": "PHO @ BOS"
+      "home": "MIN",
+      "game_id": "20260317_PHO@MIN",
+      "label": "PHO @ MIN"
     },
     {
-      "away": "ORL",
-      "home": "ATL",
-      "game_id": "20260316_ORL@ATL",
-      "label": "ORL @ ATL"
+      "away": "IND",
+      "home": "NY",
+      "game_id": "20260317_IND@NY",
+      "label": "IND @ NY"
     },
     {
-      "away": "LAL",
-      "home": "HOU",
-      "game_id": "20260316_LAL@HOU",
-      "label": "LAL @ HOU"
-    },
-    {
-      "away": "POR",
-      "home": "BKN",
-      "game_id": "20260316_POR@BKN",
-      "label": "POR @ BKN"
-    },
-    {
-      "away": "DAL",
-      "home": "NO",
-      "game_id": "20260316_DAL@NO",
-      "label": "DAL @ NO"
-    },
-    {
-      "away": "GS",
-      "home": "WAS",
-      "game_id": "20260316_GS@WAS",
-      "label": "GS @ WAS"
-    },
-    {
-      "away": "MEM",
-      "home": "CHI",
-      "game_id": "20260316_MEM@CHI",
-      "label": "MEM @ CHI"
+      "away": "CLE",
+      "home": "MIL",
+      "game_id": "20260317_CLE@MIL",
+      "label": "CLE @ MIL"
     }
   ]
 }
