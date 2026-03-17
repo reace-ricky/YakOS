@@ -1,11 +1,11 @@
 {
   "bullets": [
-    "Core anchors: Nikola Jokic, Jalen Duren, LaMelo Ball",
+    "Core anchors: Nikola Jokic, Jalen Duren, Victor Wembanyama",
     "Leverage plays: Russell Westbrook, Jamal Murray",
-    "Value targets: Bilal Coulibaly, Tre Johnson",
+    "Value targets: Bilal Coulibaly, Keldon Johnson",
     "Fade candidates: Khaman Maluach, Jamal Cain"
   ],
-  "recommendation": "5 core plays anchored at $8,300\u2013$12,500. 5 value plays averaging 6.4 pts/$1K. 5 leverage plays at 0\u20130% ownership.",
+  "recommendation": "5 core plays anchored at $7,700\u2013$12,500. 5 value plays averaging 6.9 pts/$1K. 5 leverage plays at 0\u20130% ownership.",
   "core_plays": [
     {
       "player_name": "Nikola Jokic",
@@ -32,6 +32,30 @@
       "sim_leverage": 6.74
     },
     {
+      "player_name": "Victor Wembanyama",
+      "salary": 11000,
+      "proj": 55.980000000000004,
+      "ownership": 0.0,
+      "edge": 0.5528628567410266,
+      "value": 5.08909090909091,
+      "proj_minutes": 27.714000000000002,
+      "sim90th": 66.66999999999999,
+      "ceil": 67.74,
+      "sim_leverage": 86.52
+    },
+    {
+      "player_name": "Stephon Castle",
+      "salary": 7700,
+      "proj": 47.370000000000005,
+      "ownership": 0.0,
+      "edge": 0.539393853344917,
+      "value": 6.151948051948052,
+      "proj_minutes": 23.994000000000003,
+      "sim90th": 48.160000000000004,
+      "ceil": 59.48,
+      "sim_leverage": 82.02
+    },
+    {
       "player_name": "LaMelo Ball",
       "salary": 8600,
       "proj": 43.53,
@@ -42,30 +66,6 @@
       "sim90th": 54.25,
       "ceil": 56.21,
       "sim_leverage": -0.56
-    },
-    {
-      "player_name": "Victor Wembanyama",
-      "salary": 11000,
-      "proj": 54.980000000000004,
-      "ownership": 0.0,
-      "edge": 0.5343006939918277,
-      "value": 4.998181818181819,
-      "proj_minutes": 27.714000000000002,
-      "sim90th": 66.66999999999999,
-      "ceil": 66.54,
-      "sim_leverage": 86.52
-    },
-    {
-      "player_name": "Karl-Anthony Towns",
-      "salary": 9000,
-      "proj": 45.11,
-      "ownership": 10.21,
-      "edge": 0.5341028640696602,
-      "value": 5.012222222222222,
-      "proj_minutes": 29.8,
-      "sim90th": 56.559999999999995,
-      "ceil": 56.04,
-      "sim_leverage": 8.99
     }
   ],
   "leverage_plays": [
@@ -79,7 +79,7 @@
       "proj_minutes": 28.9,
       "sim90th": 44.010000000000005,
       "ceil": 57.61,
-      "sim_leverage": 80.34
+      "sim_leverage": 79.78
     },
     {
       "player_name": "Jamal Murray",
@@ -91,7 +91,7 @@
       "proj_minutes": 36.0,
       "sim90th": 54.22,
       "ceil": 53.96,
-      "sim_leverage": 75.28
+      "sim_leverage": 74.72
     },
     {
       "player_name": "Quentin Grimes",
@@ -103,7 +103,7 @@
       "proj_minutes": 25.5,
       "sim90th": 49.07,
       "ceil": 56.79,
-      "sim_leverage": 79.78
+      "sim_leverage": 79.21
     },
     {
       "player_name": "Tyler Kolek",
@@ -115,7 +115,7 @@
       "proj_minutes": 12.8,
       "sim90th": 24.55,
       "ceil": 34.1,
-      "sim_leverage": 15.17
+      "sim_leverage": 14.04
     },
     {
       "player_name": "Justin Edwards",
@@ -127,7 +127,7 @@
       "proj_minutes": 12.9,
       "sim90th": 31.41,
       "ceil": 45.38,
-      "sim_leverage": 73.03
+      "sim_leverage": 72.47
     }
   ],
   "value_plays": [
@@ -144,6 +144,18 @@
       "sim_leverage": -14.61
     },
     {
+      "player_name": "Keldon Johnson",
+      "salary": 4200,
+      "proj": 29.39,
+      "ownership": 0.0,
+      "edge": 0.45399216094779327,
+      "value": 6.997619047619048,
+      "proj_minutes": 20.274,
+      "sim90th": 28.26,
+      "ceil": 40.12,
+      "sim_leverage": 59.55
+    },
+    {
       "player_name": "Tre Johnson",
       "salary": 4600,
       "proj": 30.21,
@@ -153,43 +165,31 @@
       "proj_minutes": 24.459000000000003,
       "sim90th": 29.830000000000002,
       "ceil": 42.71,
-      "sim_leverage": -14.04
+      "sim_leverage": -15.73
     },
     {
-      "player_name": "Ajay Mitchell",
-      "salary": 5000,
-      "proj": 30.79,
-      "ownership": 22.2,
-      "edge": 0.4889817546278511,
-      "value": 6.1579999999999995,
-      "proj_minutes": 24.5,
-      "sim90th": 33.44,
-      "ceil": 41.82,
-      "sim_leverage": -20.22
+      "player_name": "Harrison Barnes",
+      "salary": 3600,
+      "proj": 23.34,
+      "ownership": 0.0,
+      "edge": 0.3920176839080264,
+      "value": 6.483333333333333,
+      "proj_minutes": 22.506,
+      "sim90th": 24.56,
+      "ceil": 33.95,
+      "sim_leverage": 42.7
     },
     {
-      "player_name": "Ayo Dosunmu",
-      "salary": 4700,
-      "proj": 27.75,
-      "ownership": 52.38,
-      "edge": 0.3841405386072474,
-      "value": 5.904255319148936,
-      "proj_minutes": 28.8,
-      "sim90th": 36.66,
-      "ceil": 37.89,
-      "sim_leverage": -50.56
-    },
-    {
-      "player_name": "Ben Sheppard",
-      "salary": 3500,
-      "proj": 20.16,
-      "ownership": 0.47,
-      "edge": 0.38233616667619685,
-      "value": 5.76,
-      "proj_minutes": 23.7,
-      "sim90th": 19.270000000000003,
-      "ceil": 27.79,
-      "sim_leverage": -25.84
+      "player_name": "Julian Champagnie",
+      "salary": 4800,
+      "proj": 30.740000000000002,
+      "ownership": 0.0,
+      "edge": 0.4341725123993215,
+      "value": 6.404166666666668,
+      "proj_minutes": 22.878000000000004,
+      "sim90th": 35.9,
+      "ceil": 41.5,
+      "sim_leverage": 61.24
     }
   ],
   "fade_candidates": [
@@ -203,7 +203,7 @@
       "proj_minutes": 4.464,
       "sim90th": 12.709999999999999,
       "ceil": 15.7,
-      "sim_leverage": -42.7
+      "sim_leverage": -43.26
     },
     {
       "player_name": "Jamal Cain",
