@@ -1269,16 +1269,22 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
     core["_ceil"] = _ceil[core.index]
     core = core.rename(columns={_own_col: "ownership"})
 
-    # ── Leverage: above 60th pctl salary, under-owned, high edge ──
+    # Track used players so tiers are mutually exclusive
+    _used = set(core["player_name"].tolist())
+
+    # ── Leverage: above 60th pctl salary, under-owned, high edge, NOT in core ──
     sal_p60 = float(np.percentile(_sal.dropna(), 60)) if len(_sal.dropna()) > 2 else 6500.0
-    leverage = df[(_sal >= sal_p60) & (_own < own_med) & (_edge >= _edge_p50)][_pick_cols].rename(columns={_own_col: "ownership"})
+    leverage = df[(_sal >= sal_p60) & (_own < own_med) & (_edge >= _edge_p50) & (~df["player_name"].isin(_used))][_pick_cols].rename(columns={_own_col: "ownership"})
+    _used.update(leverage["player_name"].tolist())
 
-    # ── Value: below median salary, sorted by pts/$1K ──
-    value = df[(_sal < sal_med) & (_value > 0)][_pick_cols].rename(columns={_own_col: "ownership"})
+    # ── Value: below median salary, sorted by pts/$1K, NOT already used ──
+    value = df[(_sal < sal_med) & (_value > 0) & (~df["player_name"].isin(_used))][_pick_cols].rename(columns={_own_col: "ownership"})
+    _used.update(value["player_name"].tolist())
 
-    # ── Fade: bottom 20% edge, OR chalk traps ──
+    # ── Fade: bottom 20% edge, OR chalk traps, NOT already used ──
     fade = df[
-        (_edge <= _edge_p20) | ((_own >= own_med * 1.5) & (_edge < _edge_p50))
+        ((_edge <= _edge_p20) | ((_own >= own_med * 1.5) & (_edge < _edge_p50)))
+        & (~df["player_name"].isin(_used))
     ][_pick_cols].rename(columns={_own_col: "ownership"})
 
     def _to_records(frame, n=5):
