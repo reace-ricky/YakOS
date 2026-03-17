@@ -1072,6 +1072,13 @@ def _merge_rg_csv(pool, rg_file):
             pool.at[idx, "rg_proj"] = rg_proj
             pool.at[idx, "proj_source"] = "rotogrinders"
             n_merged += 1
+        # Salary — RG file is source of truth (especially for Showdown
+        # slates where salaries differ from the main classic contest).
+        rg_sal = r.get("SALARY")
+        if rg_sal is not None and not pd.isna(rg_sal):
+            rg_sal = float(rg_sal)
+            if rg_sal > 0:
+                pool.at[idx, "salary"] = int(rg_sal)
         rg_floor = float(r.get("FLOOR", 0) or 0)
         rg_ceil = float(r.get("CEIL", 0) or 0)
         if rg_floor > 0:
@@ -1520,37 +1527,8 @@ def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, o
     })
     if showdown_teams:
         pool = pool[pool["team"].isin(showdown_teams)].reset_index(drop=True)
-
-        # ── Fetch Showdown-specific salaries from DraftKings ──
-        # DK Showdown contests use different salaries than the main slate.
-        # Tank01 only returns main-slate salaries, so we override with the
-        # real Showdown salary from the DK draftables API.
-        if sport.upper() == "NBA":
-            sd_salary_map = _fetch_dk_showdown_salaries(showdown_teams[0], showdown_teams[1])
-            if sd_salary_map:
-                _updated = 0
-                for idx, row in pool.iterrows():
-                    pname = str(row.get("player_name", "")).strip()
-                    pteam = str(row.get("team", "")).upper()
-                    # Try exact name first, then normalised, then last-name+team
-                    sd_sal = sd_salary_map.get(pname)
-                    if sd_sal is None:
-                        norm = _re.sub(r"[.'`\-]", "", pname.lower()).strip()
-                        norm = _re.sub(r"\s+(jr|sr|ii|iii|iv|v)$", "", norm)
-                        norm = _re.sub(r"\s+", " ", norm).strip()
-                        sd_sal = sd_salary_map.get(norm)
-                    if sd_sal is None and pteam:
-                        # Last-name + team fallback (handles Dom/Dominick mismatches)
-                        norm = _re.sub(r"[.'`\-]", "", pname.lower()).strip()
-                        norm = _re.sub(r"\s+(jr|sr|ii|iii|iv|v)$", "", norm)
-                        norm = _re.sub(r"\s+", " ", norm).strip()
-                        parts = norm.split()
-                        if len(parts) >= 2:
-                            sd_sal = sd_salary_map.get(f"_LN_{parts[-1]}_{pteam}")
-                    if sd_sal is not None:
-                        pool.at[idx, "salary"] = int(sd_sal)
-                        _updated += 1
-                print(f"[_build_lineups] Showdown salary override: {_updated}/{len(pool)} players updated")
+        # Showdown salaries come from the RG file (merged during _load_nba_pool).
+        # No DK API fetch needed — the RG CSV is the source of truth.
 
     _excl_path = out_dir / "excluded_players.json"
     if _excl_path.exists():
