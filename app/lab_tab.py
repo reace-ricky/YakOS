@@ -1869,7 +1869,14 @@ def _render_historical_replay(sport: str) -> None:
     if actuals_path.exists() and _slate_date_from_meta:
         try:
             _existing_actuals = pd.read_parquet(actuals_path)
-            if "date" in _existing_actuals.columns:
+            if "date" not in _existing_actuals.columns:
+                # No date column → can't verify, treat as stale
+                actuals_path.unlink(missing_ok=True)
+                st.info(
+                    "Cleared actuals file (missing date stamp). "
+                    "Re-fetch to get correct data."
+                )
+            else:
                 _actuals_date = str(_existing_actuals["date"].iloc[0])
                 if _actuals_date != _slate_date_from_meta:
                     actuals_path.unlink(missing_ok=True)
