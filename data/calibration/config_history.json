@@ -4763,5 +4763,87 @@
       "edge_bust_penalty": 0.1,
       "edge_efficiency_weight": 0.05
     }
+  },
+  {
+    "timestamp": "2026-03-17T00:07:09",
+    "contest_type": "gpp",
+    "slate_date": "2026-01-29",
+    "action": "batch_train",
+    "changes": {
+      "proj_weight": {
+        "from": 0.35,
+        "to": 0.4
+      },
+      "boom_weight": {
+        "from": 0.5,
+        "to": 0.55
+      },
+      "own_penalty_strength": {
+        "from": 1.0,
+        "to": 0.9
+      }
+    },
+    "values": {
+      "proj_weight": 0.4,
+      "upside_weight": 0.35,
+      "boom_weight": 0.55,
+      "own_penalty_strength": 0.9,
+      "low_own_boost": 0.5,
+      "own_neutral_pct": 15,
+      "max_punt_players": 1,
+      "min_mid_players": 4,
+      "game_diversity_pct": 65,
+      "stud_exposure": 50,
+      "mid_exposure": 35,
+      "value_exposure": 25,
+      "edge_smash_weight": 0.15,
+      "edge_leverage_weight": 0.1,
+      "edge_form_weight": 0.1,
+      "edge_dvp_weight": 0.05,
+      "edge_catalyst_weight": 0.05,
+      "edge_bust_penalty": 0.1,
+      "edge_efficiency_weight": 0.05
+    }
+  },
+  {
+    "timestamp": "2026-03-17T00:07:11",
+    "contest_type": "gpp",
+    "slate_date": "2026-02-01",
+    "action": "batch_train",
+    "changes": {
+      "proj_weight": {
+        "from": 0.4,
+        "to": 0.45
+      },
+      "own_penalty_strength": {
+        "from": 0.9,
+        "to": 0.8
+      },
+      "stud_exposure": {
+        "from": 50,
+        "to": 55
+      }
+    },
+    "values": {
+      "proj_weight": 0.45,
+      "upside_weight": 0.35,
+      "boom_weight": 0.55,
+      "own_penalty_strength": 0.8,
+      "low_own_boost": 0.5,
+      "own_neutral_pct": 15,
+      "max_punt_players": 1,
+      "min_mid_players": 4,
+      "game_diversity_pct": 65,
+      "stud_exposure": 55,
+      "mid_exposure": 35,
+      "value_exposure": 25,
+      "edge_smash_weight": 0.15,
+      "edge_leverage_weight": 0.1,
+      "edge_form_weight": 0.1,
+      "edge_dvp_weight": 0.05,
+      "edge_catalyst_weight": 0.05,
+      "edge_bust_penalty": 0.1,
+      "edge_efficiency_weight": 0.05
+    }
   }
 ]
