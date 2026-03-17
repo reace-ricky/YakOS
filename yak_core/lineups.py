@@ -1126,6 +1126,13 @@ def build_multiple_lineups_with_exposure(
 
     # Convert pool to list-of-dicts for the solver
     players = player_pool.to_dict("records")
+    n = len(players)
+
+    # Determine scoring column based on GPP objective
+    if gpp_objective == "ceiling" and "gpp_ceil_score" in player_pool.columns:
+        score_col = "gpp_ceil_score"
+    else:
+        score_col = "gpp_score"
 
     # Build name-to-index maps
     name_to_idx = {p["player_name"]: i for i, p in enumerate(players)}
