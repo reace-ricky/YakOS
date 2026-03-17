@@ -1244,8 +1244,42 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
     _orig_proj = _safe_col(df, "original_proj")
     _base_proj = _orig_proj.where(_orig_proj > 0, _proj)  # fall back to proj if original_proj missing
 
+    # ── Risk score: same signals as bust scorer (generate_bust_call) ──
+    _rolling_fp_5 = _safe_col(df, "rolling_fp_5")
+    _spread = _safe_col(df, "spread")
+    _blowout_risk = _safe_col(df, "blowout_risk")
+    _dvp_rank = _safe_col(df, "dvp_rank")
+
+    _risk_score = pd.Series(0.0, index=df.index)
+
+    # Factor 1: Bad recent form (proj significantly above rolling avg = overpriced)
+    _form_gap = _proj - _rolling_fp_5.where(_rolling_fp_5 > 0, _proj)
+    _form_gap_norm = (_form_gap / _proj.clip(lower=1)).clip(lower=0)
+    _risk_score += _form_gap_norm * 30
+
+    # Factor 2: Tough defensive matchup
+    _dvp_filled = _dvp_rank.where(_dvp_rank > 0, 15)
+    _risk_score += (_dvp_filled / 30) * 25
+
+    # Factor 3: Wrong side of spread (blowout risk)
+    _spread_risk = _spread.clip(lower=0) / 10
+    _risk_score += _spread_risk * 15
+
+    # Factor 4: Blowout risk flag
+    _risk_score += _blowout_risk * 10
+
+    # Normalize to 0-100 scale
+    _risk_max = _risk_score.max()
+    if _risk_max > 0:
+        _risk_score = (_risk_score / _risk_max) * 100
+
+    df["risk_score"] = _risk_score.round(1)
+
+    _risk_p80 = float(np.percentile(_risk_score.dropna(), 80)) if len(_risk_score.dropna()) > 2 else 80
+    _low_risk = _risk_score < _risk_p80
+
     # ── Columns to display ──
-    _pick_cols = ["player_name", "salary", "proj", _own_col, "edge", "value"]
+    _pick_cols = ["player_name", "salary", "proj", _own_col, "edge", "value", "risk_score"]
     for _extra in ["proj_minutes", "sim90th", "ceil", "sim_leverage"]:
         if _extra in df.columns:
             _pick_cols.append(_extra)
@@ -1261,6 +1295,7 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
         & (_proj >= _proj_median)
         & _cascade_ok_core
         & _min_ok_core
+        & _low_risk
     )
     core = df[core_mask][_pick_cols].copy()
     core = core.rename(columns={_own_col: "ownership"})
@@ -1275,6 +1310,7 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
         (_edge >= _edge_p50)
         & (_own < own_threshold)
         & _cascade_ok_lev
+        & _low_risk
         & (~df["player_name"].isin(_used))
     )
     # If sim_leverage is available, prefer positive sim_leverage
@@ -1298,6 +1334,7 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
         & (_value >= 5.0)
         & _min_ok
         & _cascade_ok_val
+        & _low_risk
         & (~df["player_name"].isin(_used))
     )
     value = df[value_mask][_pick_cols].copy()
@@ -1315,6 +1352,10 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
     if _sim_leverage.abs().sum() > 0:
         neg_lev_mask = (_sim_leverage < -15) & (_own > 5) & (~df["player_name"].isin(_used))
         fade_mask = fade_mask | neg_lev_mask
+    # Also fade high-risk players regardless of ownership
+    _risk_p85 = float(np.percentile(_risk_score.dropna(), 85)) if len(_risk_score.dropna()) > 2 else 85
+    high_risk_mask = (_risk_score >= _risk_p85) & (~df["player_name"].isin(_used))
+    fade_mask = fade_mask | high_risk_mask
     fade = df[fade_mask][_pick_cols].copy()
     fade = fade.rename(columns={_own_col: "ownership"})
     fade = fade.sort_values("edge", ascending=True).head(5)

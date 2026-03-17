@@ -376,6 +376,7 @@ _BUST_FALLBACK = [
 def generate_bust_call(
     pool: pd.DataFrame,
     fade_candidates: Optional[List[Dict[str, Any]]] = None,
+    positive_tier_names: Optional[set] = None,
 ) -> Optional[Dict[str, Any]]:
     """Pick the one player most likely to massively underperform.
 
@@ -392,6 +393,9 @@ def generate_bust_call(
         Current slate pool.
     fade_candidates : list of dict, optional
         Pre-classified fade candidates from edge_analysis.
+    positive_tier_names : set of str, optional
+        Player names classified as core/leverage/value. Excluded from bust
+        candidacy to prevent contradictions with tier classification.
 
     Returns
     -------
@@ -443,6 +447,18 @@ def generate_bust_call(
 
     if "blowout_risk" in df.columns:
         df["bust_score"] += df["blowout_risk"].fillna(0) * 10
+
+    # Align bust call with tier classifier: boost fades, penalize non-fades
+    if fade_candidates:
+        fade_names = {fc.get("player_name", "") for fc in fade_candidates}
+        df.loc[df["player_name"].isin(fade_names), "bust_score"] += 15
+        df.loc[~df["player_name"].isin(fade_names), "bust_score"] -= 10
+
+    # Exclude positive-tier players from bust candidacy
+    if positive_tier_names:
+        df = df[~df["player_name"].isin(positive_tier_names)]
+        if df.empty:
+            return _bust_from_fades(fade_candidates)
 
     # Pick the top bust candidate
     bust = df.nlargest(1, "bust_score").iloc[0]

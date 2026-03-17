@@ -10,7 +10,7 @@
         "Authorization: Bearer ${AUTH_TOKEN}"
       ],
       "env": {
-        "AUTH_TOKEN": "agp_019cfa39-b38a-7383-8cee-e6f6c818ec12"
+        "AUTH_TOKEN": "agp_019cfc8b-9c68-78c3-b6c1-001d06d8c66d"
       }
     }
   }

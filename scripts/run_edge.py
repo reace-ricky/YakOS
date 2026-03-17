@@ -62,6 +62,35 @@ def _classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
     df["_edge"] = _edge
     df["_val"] = _val
 
+    # ── Risk score: same signals as bust scorer (generate_bust_call) ──
+    _rolling_fp_5 = _safe_col(df, "rolling_fp_5")
+    _spread = _safe_col(df, "spread")
+    _blowout_risk = _safe_col(df, "blowout_risk")
+    _dvp_rank = _safe_col(df, "dvp_rank")
+
+    _risk_score = pd.Series(0.0, index=df.index)
+
+    _form_gap = _proj - _rolling_fp_5.where(_rolling_fp_5 > 0, _proj)
+    _form_gap_norm = (_form_gap / _proj.clip(lower=1)).clip(lower=0)
+    _risk_score += _form_gap_norm * 30
+
+    _dvp_filled = _dvp_rank.where(_dvp_rank > 0, 15)
+    _risk_score += (_dvp_filled / 30) * 25
+
+    _spread_risk = _spread.clip(lower=0) / 10
+    _risk_score += _spread_risk * 15
+
+    _risk_score += _blowout_risk * 10
+
+    _risk_max = _risk_score.max()
+    if _risk_max > 0:
+        _risk_score = (_risk_score / _risk_max) * 100
+
+    df["risk_score"] = _risk_score.round(1)
+
+    _risk_p80 = float(np.percentile(_risk_score.dropna(), 80)) if len(_risk_score.dropna()) > 2 else 80
+    _low_risk = _risk_score < _risk_p80
+
     is_pga = sport.upper() == "PGA"
 
     def _to_list(frame, tag: str = ""):
@@ -77,6 +106,7 @@ def _classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
                 "value": round(float(row.get("_val", 0)), 2),
                 "proj_minutes": round(float(row.get("proj_minutes", 0)), 1),
                 "sim90th": round(float(row.get("sim90th", 0)), 1),
+                "risk_score": round(float(row.get("risk_score", 0)), 1),
             }
             # PGA wave data
             if is_pga:
@@ -87,24 +117,29 @@ def _classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
             out.append(entry)
         return out
 
-    # Core (Chalk): top projected players, $7K+ salary
-    core = df[df["_sal"] >= 7000].nlargest(5, "_proj")
+    # Core (Chalk): top projected players, $7K+ salary, low risk
+    core = df[(df["_sal"] >= 7000) & _low_risk].nlargest(5, "_proj")
     _used = set(core["player_name"].tolist())
 
-    # Leverage (GPP Gold): best edge, low ownership (<15%), not in core
-    _lev_pool = df[(df["_own"] < 15) & (~df["player_name"].isin(_used))]
+    # Leverage (GPP Gold): best edge, low ownership (<15%), not in core, low risk
+    _lev_pool = df[(df["_own"] < 15) & _low_risk & (~df["player_name"].isin(_used))]
     leverage = _lev_pool.nlargest(5, "_edge")
     _used.update(leverage["player_name"].tolist())
 
-    # Value (Salary Savers): best pts/$1K, under $6.5K, not already used
-    _val_pool = df[(df["_sal"] < 6500) & (df["_sal"] > 0) & (~df["player_name"].isin(_used))]
+    # Value (Salary Savers): best pts/$1K, under $6.5K, not already used, low risk
+    _val_pool = df[(df["_sal"] < 6500) & (df["_sal"] > 0) & _low_risk & (~df["player_name"].isin(_used))]
     value = _val_pool.nlargest(5, "_val")
     _used.update(value["player_name"].tolist())
 
-    # Fades: high ownership with weakest edge
+    # Fades: high ownership with weakest edge, plus high-risk players
+    _risk_p85 = float(np.percentile(_risk_score.dropna(), 85)) if len(_risk_score.dropna()) > 2 else 85
     _fade_pool = df[~df["player_name"].isin(_used)].copy()
     _fade_high_own = _fade_pool[_fade_pool["_own"] >= 10]
-    if len(_fade_high_own) >= 3:
+    _fade_high_risk = _fade_pool[_fade_pool["risk_score"] >= _risk_p85]
+    _fade_combined = pd.concat([_fade_high_own, _fade_high_risk]).drop_duplicates(subset=["player_name"])
+    if len(_fade_combined) >= 3:
+        fades = _fade_combined.nsmallest(5, "_edge")
+    elif len(_fade_high_own) >= 3:
         fades = _fade_high_own.nsmallest(5, "_edge")
     else:
         _fade_sal = _fade_pool[_fade_pool["_sal"] >= 5000]

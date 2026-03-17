@@ -189,7 +189,13 @@ def _render_rickys_take(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str,
 
     last_night = generate_last_night(recap)
     edges = generate_tonights_edges(pool)
-    bust = generate_bust_call(pool, edge_analysis.get("fade_candidates"))
+    # Collect positive-tier player names to exclude from bust candidacy
+    _pos_names = set()
+    for _tier in ("core_plays", "leverage_plays", "value_plays"):
+        for _p in edge_analysis.get(_tier, []):
+            _pos_names.add(_p.get("player_name", ""))
+    _pos_names.discard("")
+    bust = generate_bust_call(pool, edge_analysis.get("fade_candidates"), positive_tier_names=_pos_names or None)
 
     # Don't render the section at all if there's nothing to show
     if not last_night and not edges and not bust:
