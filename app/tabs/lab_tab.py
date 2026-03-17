@@ -482,6 +482,15 @@ def render_lab_tab(sport: str) -> None:
         else:
             st.warning("No matchup data found. Re-run Load Pool to fetch the schedule.")
 
+    # ── DK Showdown salary CSV upload ────────────────────────────────────
+    dk_sd_file = None
+    if is_nba_showdown and showdown_teams:
+        dk_sd_file = st.file_uploader(
+            "DK Showdown Salaries CSV (from lobby)",
+            type=["csv"],
+            key=f"lab_dk_sd_{sport}",
+        )
+
     _pool_names_sorted: list[str] = []
     if pool_path.exists():
         try:
@@ -552,6 +561,7 @@ def render_lab_tab(sport: str) -> None:
                     lineups_df = _build_lineups(
                         sport, contest_label, num_lineups, lock_list, exclude_list, out_dir,
                         showdown_teams=showdown_teams if showdown_teams else None,
+                        dk_sd_file=dk_sd_file,
                         optimizer_preset=optimizer_preset_name,
                     )
                     n_built = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else 0
@@ -1498,7 +1508,54 @@ def _fetch_dk_showdown_salaries(away: str, home: str) -> dict:
     return salary_map
 
 
-def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None, optimizer_preset="Custom"):
+def _apply_dk_showdown_salaries(pool: pd.DataFrame, dk_sd_file) -> None:
+    """Override pool salaries with UTIL salaries from a DK Showdown CSV.
+
+    The DKSalaries.csv from the DK Showdown lobby has two rows per player:
+    one with Roster Position = 'CPT' (salary = 1.5×) and one with
+    Roster Position = 'UTIL' (base salary).  We use the UTIL salary since
+    the optimizer applies the 1.5× CPT multiplier internally.
+
+    Modifies *pool* in place.
+    """
+    import re as _re
+
+    dk = pd.read_csv(dk_sd_file)
+    util_rows = dk[dk["Roster Position"] == "UTIL"].copy()
+    if util_rows.empty:
+        print("[_apply_dk_showdown_salaries] No UTIL rows found in CSV")
+        return
+
+    sal_map: dict[str, int] = {}
+    for _, row in util_rows.iterrows():
+        name = str(row.get("Name", "")).strip()
+        sal = int(row.get("Salary", 0))
+        if not name or sal <= 0:
+            continue
+        sal_map[name] = sal
+        norm = _re.sub(r"[.'`\-]", "", name.lower()).strip()
+        norm = _re.sub(r"\s+(jr|sr|ii|iii|iv|v)$", "", norm)
+        norm = _re.sub(r"\s+", " ", norm).strip()
+        sal_map[norm] = sal
+
+    _updated = 0
+    for idx, row in pool.iterrows():
+        pname = str(row.get("player_name", "")).strip()
+        sd_sal = sal_map.get(pname)
+        if sd_sal is None:
+            norm = _re.sub(r"[.'`\-]", "", pname.lower()).strip()
+            norm = _re.sub(r"\s+(jr|sr|ii|iii|iv|v)$", "", norm)
+            norm = _re.sub(r"\s+", " ", norm).strip()
+            sd_sal = sal_map.get(norm)
+        if sd_sal is not None:
+            pool.at[idx, "salary"] = sd_sal
+            _updated += 1
+
+    print(f"[_apply_dk_showdown_salaries] Updated {_updated}/{len(pool)} player salaries from DK CSV")
+    st.info(f"Showdown salaries applied: {_updated}/{len(pool)} players matched from DK CSV")
+
+
+def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None, dk_sd_file=None, optimizer_preset="Custom"):
     from yak_core.config import CONTEST_PRESETS, merge_config
     from yak_core.lineups import build_multiple_lineups_with_exposure, build_player_pool, build_showdown_lineups
     from yak_core.presets import get_preset
@@ -1527,7 +1584,13 @@ def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, o
     })
     if showdown_teams:
         pool = pool[pool["team"].isin(showdown_teams)].reset_index(drop=True)
-        # Showdown salaries come from the RG file (merged during _load_nba_pool).
+
+        # Apply DK Showdown salaries from uploaded CSV
+        if dk_sd_file is not None:
+            try:
+                _apply_dk_showdown_salaries(pool, dk_sd_file)
+            except Exception as _sd_err:
+                print(f"[_build_lineups] DK Showdown salary apply failed: {_sd_err}")
         # No DK API fetch needed — the RG CSV is the source of truth.
 
     _excl_path = out_dir / "excluded_players.json"
