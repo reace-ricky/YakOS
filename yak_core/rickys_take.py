@@ -390,15 +390,26 @@ def generate_tonights_edges(pool: pd.DataFrame) -> List[str]:
 # 3. BUST CALL -- one player, named, bold prediction
 # ---------------------------------------------------------------------------
 
-_BUST_EXPLANATIONS = [
+_BUST_EXPLANATIONS_HIGH_OWN = [
     "{own:.0f}% of the field is about to learn a lesson. {reasons}. I've watched this exact setup blow up a hundred portfolios.",
     "{own:.0f}% of the field lined up for this. {reasons}. The consensus was wrong in the boardroom and it's wrong here.",
     "{own:.0f}% owned. {reasons}. Everyone agreed on this pick — and that's exactly the problem.",
 ]
 
-_BUST_FALLBACK = [
+_BUST_EXPLANATIONS_LOW_OWN = [
+    "{own:.0f}% owned, but the price tag is a trap. {reasons}. The salary says star, the situation says sit.",
+    "{own:.0f}% owned — doesn't matter. {reasons}. Projections don't match reality here and the scoreboard won't either.",
+    "Only {own:.0f}% of the field is on this, but the ones who are will regret it. {reasons}. Bad spot, bad price.",
+]
+
+_BUST_FALLBACK_HIGH_OWN = [
     "{own:.0f}% owned and the numbers don't support it. Popularity isn't an edge. Never was.",
     "The field loves {name} tonight at {own:.0f}%. The data doesn't. I'll take the data.",
+]
+
+_BUST_FALLBACK_LOW_OWN = [
+    "{own:.0f}% owned — low exposure, but still a bad bet. The salary is doing the selling, not the data.",
+    "Only {own:.0f}% of the field bit on {name}, but the price tag still doesn't add up. Pass.",
 ]
 
 
@@ -510,14 +521,17 @@ def generate_bust_call(
     if "blowout_risk" in df.columns and bust.get("blowout_risk", 0) > 0.4:
         reasons.append("blowout game script risk")
 
-    # Pick a template
+    # Pick a template — tier by ownership so language matches reality
     seed = sal + int(own * 10)
+    high_own = own > 15
     if reasons:
         reason_str = ", ".join(reasons).capitalize()
-        tmpl = _pick_template(_BUST_EXPLANATIONS, seed)
+        templates = _BUST_EXPLANATIONS_HIGH_OWN if high_own else _BUST_EXPLANATIONS_LOW_OWN
+        tmpl = _pick_template(templates, seed)
         explanation = tmpl.format(name=name, own=own, reasons=reason_str)
     else:
-        tmpl = _pick_template(_BUST_FALLBACK, seed)
+        templates = _BUST_FALLBACK_HIGH_OWN if high_own else _BUST_FALLBACK_LOW_OWN
+        tmpl = _pick_template(templates, seed)
         explanation = tmpl.format(name=name, own=own)
 
     return {"name": name, "salary": sal, "explanation": explanation}
