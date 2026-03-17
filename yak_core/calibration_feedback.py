@@ -223,6 +223,19 @@ def record_slate_errors(
         return {"error": "No valid proj/actual pairs after filtering"}
 
     df["error"] = df["actual_fp"] - df["proj"]
+
+    # Minutes error tracking
+    has_minutes = (
+        "mp_actual" in df.columns
+        and "proj_minutes" in df.columns
+        and df["mp_actual"].notna().any()
+        and df["proj_minutes"].notna().any()
+    )
+    if has_minutes:
+        df["mp_actual"] = pd.to_numeric(df["mp_actual"], errors="coerce")
+        df["proj_minutes"] = pd.to_numeric(df["proj_minutes"], errors="coerce")
+        df["min_error"] = df["mp_actual"] - df["proj_minutes"]
+
     df["primary_pos"] = df["pos"].astype(str).str.split("/").str[0].str.strip()
     df["salary_tier"] = pd.cut(
         df["salary"], bins=salary_bins, labels=salary_labels, right=True
@@ -238,6 +251,11 @@ def record_slate_errors(
                 "n": int(len(grp)),
                 "mae": round(float(grp["error"].abs().mean()), 2),
             }
+            if has_minutes:
+                min_grp = grp[grp["min_error"].notna()]
+                if len(min_grp) >= 2:
+                    pos_errors[pos]["min_mae"] = round(float(min_grp["min_error"].abs().mean()), 2)
+                    pos_errors[pos]["min_mean_error"] = round(float(min_grp["min_error"].mean()), 2)
 
     # Salary tier errors
     tier_errors = {}
@@ -249,6 +267,11 @@ def record_slate_errors(
                 "n": int(len(grp)),
                 "mae": round(float(grp["error"].abs().mean()), 2),
             }
+            if has_minutes:
+                min_grp = grp[grp["min_error"].notna()]
+                if len(min_grp) >= 2:
+                    tier_errors[str(tier)]["min_mae"] = round(float(min_grp["min_error"].abs().mean()), 2)
+                    tier_errors[str(tier)]["min_mean_error"] = round(float(min_grp["min_error"].mean()), 2)
 
     # Overall stats
     overall = {
@@ -258,6 +281,15 @@ def record_slate_errors(
         "correlation": round(float(df["proj"].corr(df["actual_fp"])), 4),
         "n_players": int(len(df)),
     }
+
+    if has_minutes:
+        min_valid = df[df["min_error"].notna()]
+        if len(min_valid) >= 2:
+            overall["min_mae"] = round(float(min_valid["min_error"].abs().mean()), 2)
+            overall["min_rmse"] = round(float(np.sqrt((min_valid["min_error"] ** 2).mean())), 2)
+            overall["min_correlation"] = round(float(min_valid["proj_minutes"].corr(min_valid["mp_actual"])), 4)
+            overall["min_mean_error"] = round(float(min_valid["min_error"].mean()), 2)
+            overall["min_n_players"] = int(len(min_valid))
 
     slate_record = {
         "slate_date": slate_date,

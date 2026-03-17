@@ -568,6 +568,14 @@ def _render_post_slate_feedback(sport: str) -> None:
                     st.success(f"Post-slate complete: {result.get('message', '')}")
                     if result.get("calibration_update"):
                         st.json(result["calibration_update"])
+                    # Display minutes calibration stats if available
+                    mins_overall = result.get("minutes_stats", {})
+                    if mins_overall.get("min_mae") is not None:
+                        st.markdown(
+                            f"**Minutes Accuracy:** MAE={mins_overall['min_mae']}, "
+                            f"Corr={mins_overall.get('min_correlation', 'N/A')}, "
+                            f"Bias={mins_overall.get('min_mean_error', 0):+.1f}"
+                        )
                 else:
                     st.warning(result.get("message", "No actuals available for this date."))
             except Exception as e:
@@ -872,8 +880,15 @@ def _run_post_slate(sport: str, slate_date: str) -> Dict[str, Any]:
             # create actual_fp_x / actual_fp_y suffix columns.
             if "actual_fp" in pool.columns:
                 pool = pool.drop(columns=["actual_fp"])
+            if "mp_actual" in pool.columns:
+                pool = pool.drop(columns=["mp_actual"])
+
+            # Merge both actual_fp and mp_actual from actuals
+            merge_cols = ["player_name", "actual_fp"]
+            if "mp_actual" in actuals.columns:
+                merge_cols.append("mp_actual")
             pool_with_actuals = pool.merge(
-                actuals[["player_name", "actual_fp"]],
+                actuals[merge_cols],
                 on="player_name",
                 how="left",
             )
@@ -890,13 +905,22 @@ def _run_post_slate(sport: str, slate_date: str) -> Dict[str, Any]:
         if has_actual == 0:
             return {"status": "error", "message": "No actuals matched to pool players"}
 
-        record_slate_errors(slate_date, pool_with_actuals, sport=sport.upper())
+        slate_record = record_slate_errors(slate_date, pool_with_actuals, sport=sport.upper())
 
         summary = get_calibration_summary(sport=sport.upper())
-        return {
+        result = {
             "status": "ok",
             "message": f"Recorded errors for {has_actual} players",
             "calibration_update": summary,
         }
+        # Pass through minutes stats from the slate record if available
+        mins_overall = slate_record.get("overall", {})
+        if "min_mae" in mins_overall:
+            result["minutes_stats"] = {
+                k: mins_overall[k]
+                for k in ("min_mae", "min_rmse", "min_correlation", "min_mean_error", "min_n_players")
+                if k in mins_overall
+            }
+        return result
     except Exception as e:
         return {"status": "error", "message": f"Calibration update failed: {e}"}

@@ -447,7 +447,8 @@ def fetch_actuals_from_api(date_key: str, cfg: dict) -> pd.DataFrame:
     Returns
     -------
     pd.DataFrame
-        Columns: ``player_name``, ``actual_fp``.  One row per player.  Players
+        Columns: ``player_name``, ``actual_fp``, and ``mp_actual`` (actual
+        minutes played, when available).  One row per player.  Players
         with no recorded score (``actual_fp == 0``) are **included** so the
         caller can decide how to handle zero-point performances.
 
