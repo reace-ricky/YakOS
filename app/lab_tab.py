@@ -13,6 +13,10 @@ import json
 import os
 import tempfile
 from datetime import date, datetime, timezone
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any, Dict
 
@@ -1559,7 +1563,7 @@ def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, o
     exposure_df.to_parquet(str(exposure_out), index=False)
     with open(meta_out, "w") as f:
         meta_data = {"contest": contest_label, "sport": sport.upper(), "num_lineups": num_lineups,
-                     "built_at": datetime.now(timezone.utc).isoformat(), "lock": lock_list, "exclude": exclude_list}
+                     "built_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %I:%M %p ET"), "lock": lock_list, "exclude": exclude_list}
         if showdown_teams:
             meta_data["matchup"] = " vs ".join(showdown_teams)
         json.dump(meta_data, f, indent=2)

@@ -552,6 +552,22 @@ def apply_injury_cascade(
     # Make proj = adjusted_proj so all downstream consumers pick up the change
     df["proj"] = df["adjusted_proj"]
 
+    # Scale ceil and floor proportionally so proj never exceeds ceil.
+    # If original proj was 20 and ceil was 35, that's a 1.75× ratio.
+    # After a +10 cascade bump (proj→30), ceil should be 30 × 1.75 = 52.5.
+    _orig = pd.to_numeric(df["original_proj"], errors="coerce").fillna(0)
+    _adj = pd.to_numeric(df["adjusted_proj"], errors="coerce").fillna(0)
+    _bumped = _adj > _orig  # only touch rows that actually got bumped
+    if _bumped.any() and "ceil" in df.columns:
+        _ceil = pd.to_numeric(df["ceil"], errors="coerce").fillna(0)
+        # Ratio of ceil-to-proj (before cascade); clamp to >= 1.0
+        _ratio = (_ceil / _orig.clip(lower=0.1)).clip(lower=1.0)
+        df.loc[_bumped, "ceil"] = (_adj[_bumped] * _ratio[_bumped]).round(2)
+    if _bumped.any() and "floor" in df.columns:
+        _floor = pd.to_numeric(df["floor"], errors="coerce").fillna(0)
+        _floor_ratio = (_floor / _orig.clip(lower=0.1)).clip(lower=0.0, upper=1.0)
+        df.loc[_bumped, "floor"] = (_adj[_bumped] * _floor_ratio[_bumped]).round(2)
+
     return df, cascade_report
 
 
