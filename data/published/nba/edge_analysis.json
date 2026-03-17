@@ -1,11 +1,11 @@
 {
   "bullets": [
     "Core anchors: Josh Giddey, Donovan Clingan, Luka Doncic",
-    "Leverage plays: Gui Santos, Reed Sheppard",
+    "Leverage plays: Brandon Williams",
     "Value targets: Tyler Burton, Gary Payton II",
-    "Fade candidates: Max Shulga, Mouhamed Gueye"
+    "Fade candidates: Max Shulga, Amari Williams"
   ],
-  "recommendation": "5 core plays anchored at $7,400\u2013$12,200. 5 value plays averaging 8.0 pts/$1K. 3 leverage plays at 0\u20130% ownership.",
+  "recommendation": "5 core plays anchored at $7,400\u2013$12,200. 5 value plays averaging 8.0 pts/$1K. 1 leverage plays at 0\u20130% ownership.",
   "core_plays": [
     {
       "player_name": "Josh Giddey",
@@ -65,37 +65,15 @@
   ],
   "leverage_plays": [
     {
-      "player_name": "Gui Santos",
-      "salary": 7300,
-      "proj": 41.63,
-      "ownership": 0.12,
-      "edge": 0.6970655392707312,
-      "value": 5.7027397260273975,
-      "proj_minutes": 29.2,
-      "sim90th": 43.79,
-      "ceil": 52.09
-    },
-    {
-      "player_name": "Reed Sheppard",
-      "salary": 6500,
-      "proj": 41.04,
-      "ownership": 0.0,
-      "edge": 0.5515398529506238,
-      "value": 6.313846153846153,
-      "proj_minutes": 26.3,
-      "sim90th": 38.32,
-      "ceil": 61.57
-    },
-    {
-      "player_name": "Victor Wembanyama",
-      "salary": 11000,
-      "proj": 53.94,
-      "ownership": 0.0,
-      "edge": 0.5346964006784949,
-      "value": 4.903636363636363,
-      "proj_minutes": 29.8,
-      "sim90th": 65.96000000000001,
-      "ceil": 66.41
+      "player_name": "Brandon Williams",
+      "salary": 5200,
+      "proj": 29.85,
+      "ownership": 0.05,
+      "edge": 0.47120929739077566,
+      "value": 5.740384615384616,
+      "proj_minutes": 20.6,
+      "sim90th": 27.36,
+      "ceil": 43.22
     }
   ],
   "value_plays": [
@@ -168,17 +146,6 @@
       "ceil": 0.52
     },
     {
-      "player_name": "Mouhamed Gueye",
-      "salary": 3100,
-      "proj": 0.9699999999999998,
-      "ownership": 0.48,
-      "edge": 0.10842259126795491,
-      "value": 0.3129032258064515,
-      "proj_minutes": 18.5,
-      "sim90th": 3.42,
-      "ceil": 8.21
-    },
-    {
       "player_name": "Amari Williams",
       "salary": 3000,
       "proj": 0.0,
@@ -210,6 +177,17 @@
       "proj_minutes": 19.0,
       "sim90th": 0.0,
       "ceil": 0.85
+    },
+    {
+      "player_name": "AJ Johnson",
+      "salary": 3000,
+      "proj": 0.0,
+      "ownership": 0.05,
+      "edge": 0.12267241379310345,
+      "value": 0.0,
+      "proj_minutes": 9.8,
+      "sim90th": 0.0,
+      "ceil": 0.7
     }
   ],
   "signals_df_path": "signals.parquet"
