@@ -529,5 +529,26 @@
         "avg_proj": 26.47
       }
     }
+  },
+  "2026-03-16": {
+    "slate_date": "2026-03-16",
+    "contest_type": "GPP Main",
+    "n_players": 147,
+    "signals": {
+      "high_leverage": {
+        "n_flagged": 73,
+        "n_hit": 13,
+        "hit_rate": 0.178,
+        "avg_actual": 26.18,
+        "avg_proj": 37.66
+      },
+      "salary_value": {
+        "n_flagged": 85,
+        "n_hit": 5,
+        "hit_rate": 0.059,
+        "avg_actual": 23.36,
+        "avg_proj": 40.05
+      }
+    }
   }
 }

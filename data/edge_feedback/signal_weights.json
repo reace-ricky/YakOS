@@ -1,24 +1,24 @@
 {
-  "computed_at": "2026-03-16T10:15:26.567806+00:00",
-  "n_slates": 24,
+  "computed_at": "2026-03-17T09:13:35.995146+00:00",
+  "n_slates": 25,
   "signal_stats": {
     "high_leverage": {
-      "total_flagged": 1872,
-      "total_hit": 609,
-      "raw_hit_rate": 0.325,
-      "weighted_hit_rate": 0.337,
-      "n_slates_active": 21
+      "total_flagged": 1945,
+      "total_hit": 622,
+      "raw_hit_rate": 0.32,
+      "weighted_hit_rate": 0.317,
+      "n_slates_active": 22
     },
     "salary_value": {
-      "total_flagged": 122,
-      "total_hit": 41,
-      "raw_hit_rate": 0.336,
-      "weighted_hit_rate": 0.324,
-      "n_slates_active": 22
+      "total_flagged": 207,
+      "total_hit": 46,
+      "raw_hit_rate": 0.222,
+      "weighted_hit_rate": 0.292,
+      "n_slates_active": 23
     }
   },
   "weights": {
-    "high_leverage": 0.51,
-    "salary_value": 0.49
+    "high_leverage": 0.521,
+    "salary_value": 0.479
   }
 }
