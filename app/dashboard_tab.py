@@ -156,6 +156,141 @@ def _load_explorer_data(sport: str) -> list:
     return records
 
 
+# ── Catch Rate Line Chart Builder ────────────────────────────────────────────
+
+
+def _compute_catch_rates(data: list) -> list:
+    """Compute per-slate original and current-config catch rates.
+
+    Returns a list of dicts with per-date stats for the line chart.
+    Uses the same *data* list that feeds the scatter explorer.
+    """
+    from collections import defaultdict
+
+    by_date: dict = defaultdict(list)
+    for r in data:
+        if r["cat"] == "L" or r["d"] == "LIVE":
+            continue
+        by_date[r["d"]].append(r)
+
+    results = []
+    for dt in sorted(by_date):
+        players = by_date[dt]
+        n = len(players)
+
+        smashes = [r for r in players if r["diff"] >= 12]
+        busts = [r for r in players if r["diff"] <= -12]
+        n_s = len(smashes)
+        n_b = len(busts)
+        if n_s == 0 and n_b == 0:
+            continue
+
+        # ── Original catch logic (dashboard scatter categories) ──
+        def _orig_smash(r: dict) -> bool:
+            return r["sf"]
+
+        def _orig_bust(r: dict) -> bool:
+            return r["bf"]
+
+        # ── Current / fixed catch logic ──
+        # Lower smash threshold to 0.15, include Value label
+        def _curr_smash(r: dict) -> bool:
+            if r["sf"]:
+                return True
+            return r["sp"] > 0.15 or "Value" in r["el"]
+
+        # Lower bust threshold to 0.15
+        def _curr_bust(r: dict) -> bool:
+            if r["bf"]:
+                return True
+            return r["bp"] > 0.15
+
+        os = sum(1 for r in smashes if _orig_smash(r))
+        ob = sum(1 for r in busts if _orig_bust(r))
+        fs = sum(1 for r in smashes if _curr_smash(r))
+        fb = sum(1 for r in busts if _curr_bust(r))
+
+        # Short date label for chart (MM/DD)
+        parts = dt.split("-")
+        short = f"{parts[1]}/{parts[2]}" if len(parts) == 3 else dt
+
+        results.append({
+            "d": short,
+            "ns": n_s,
+            "nb": n_b,
+            "os": round(os / n_s * 100, 1) if n_s else 0,
+            "ob": round(ob / n_b * 100, 1) if n_b else 0,
+            "fs": round(fs / n_s * 100, 1) if n_s else 0,
+            "fb": round(fb / n_b * 100, 1) if n_b else 0,
+        })
+
+    return results
+
+
+def _build_catch_rate_html(rates: list) -> str:
+    """Return self-contained HTML/JS for the catch-rate line chart."""
+    if not rates:
+        return ""
+
+    data_json = json.dumps(rates, separators=(",", ":"))
+
+    return f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:#0f1117;color:#c8ccd4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;padding:16px 20px}}
+.hdr{{display:flex;align-items:center;gap:16px;margin-bottom:12px;flex-wrap:wrap}}
+.hdr h2{{font-size:14px;color:#e2e5ec;font-weight:600}}
+.stats{{display:flex;gap:16px;margin-left:auto;flex-wrap:wrap}}
+.st{{text-align:center;background:#161921;border:1px solid #2a2d38;border-radius:6px;padding:6px 12px;min-width:100px}}
+.st .sl{{font-size:8px;color:#6b7280;text-transform:uppercase;letter-spacing:.4px}}
+.st .sv{{font-size:16px;font-weight:700}}
+.st .sd{{font-size:9px;color:#4b5060}}
+.green{{color:#22c55e}}.red{{color:#ef4444}}.amber{{color:#f59e0b}}.blue{{color:#3b82f6}}
+.charts{{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:8px}}
+.cw{{position:relative;height:260px}}
+.cw h3{{font-size:11px;color:#6b7280;margin-bottom:4px}}
+.note{{font-size:9px;color:#3b3f4a;line-height:1.5}}
+</style>
+</head>
+<body>
+<div class="hdr">
+  <h2>Catch Rate Trend</h2>
+  <div class="stats" id="hdr"></div>
+</div>
+<div class="charts">
+  <div><h3>Smash Catch Rate by Slate</h3><div class="cw"><canvas id="sc"></canvas></div></div>
+  <div><h3>Bust Catch Rate by Slate</h3><div class="cw"><canvas id="bc"></canvas></div></div>
+</div>
+<div class="note">
+  Original: sp&gt;0.25 | breakout&gt;30 | Anchor/Core &middot; bp&gt;0.25 | Fade &nbsp;&nbsp;|&nbsp;&nbsp;
+  Current: sp&gt;0.15 | Value label added &middot; bp&gt;0.15
+</div>
+<script>
+const R=''' + data_json + ''';
+const L=R.map(r=>r.d);
+const tS=R.reduce((s,r)=>s+r.ns,0),tB=R.reduce((s,r)=>s+r.nb,0);
+const tOS=R.reduce((s,r)=>s+Math.round(r.ns*r.os/100),0);
+const tFS=R.reduce((s,r)=>s+Math.round(r.ns*r.fs/100),0);
+const tOB=R.reduce((s,r)=>s+Math.round(r.nb*r.ob/100),0);
+const tFB=R.reduce((s,r)=>s+Math.round(r.nb*r.fb/100),0);
+document.getElementById("hdr").innerHTML=
+  '<div class="st"><div class="sl">Orig Smash</div><div class="sv green">'+Math.round(tOS/tS*100)+'%</div><div class="sd">'+tOS+'/'+tS+'</div></div>'+
+  '<div class="st"><div class="sl">Curr Smash</div><div class="sv blue">'+Math.round(tFS/tS*100)+'%</div><div class="sd">'+tFS+'/'+tS+' &middot; +'+Math.round((tFS-tOS)/tS*100)+'pp</div></div>'+
+  '<div class="st"><div class="sl">Orig Bust</div><div class="sv red">'+Math.round(tOB/tB*100)+'%</div><div class="sd">'+tOB+'/'+tB+'</div></div>'+
+  '<div class="st"><div class="sl">Curr Bust</div><div class="sv amber">'+Math.round(tFB/tB*100)+'%</div><div class="sd">'+tFB+'/'+tB+' &middot; +'+Math.round((tFB-tOB)/tB*100)+'pp</div></div>';
+const G='#1a1d28',T='#3b3f4a';
+function mkOpts(isS){return{responsive:true,maintainAspectRatio:false,animation:{duration:300},interaction:{mode:'index',intersect:false},plugins:{legend:{position:'top',labels:{color:'#6b7280',font:{size:9},boxWidth:10,padding:10,usePointStyle:true}},tooltip:{backgroundColor:'#1a1d28ee',borderColor:'#2a2d38',borderWidth:1,titleColor:'#e2e5ec',bodyColor:'#c8ccd4',titleFont:{size:10},bodyFont:{size:9},callbacks:{afterTitle:ctx=>{const d=R[ctx[0].dataIndex];return isS?d.ns+' smashes':d.nb+' busts'},label:ctx=>' '+ctx.dataset.label+': '+ctx.parsed.y.toFixed(1)+'%'}}},scales:{x:{grid:{color:G},ticks:{color:T,font:{size:8},maxRotation:45}},y:{min:0,max:100,grid:{color:G},ticks:{color:T,font:{size:8},callback:v=>v+'%'}}}}}
+new Chart(document.getElementById('sc'),{type:'line',data:{labels:L,datasets:[{label:'Original',data:R.map(r=>r.os),borderColor:'#22c55e',borderWidth:1.5,pointRadius:2.5,tension:.3,borderDash:[5,3]},{label:'Current',data:R.map(r=>r.fs),borderColor:'#3b82f6',borderWidth:2,pointRadius:3,tension:.3}]},options:mkOpts(true)});
+new Chart(document.getElementById('bc'),{type:'line',data:{labels:L,datasets:[{label:'Original',data:R.map(r=>r.ob),borderColor:'#ef4444',borderWidth:1.5,pointRadius:2.5,tension:.3,borderDash:[5,3]},{label:'Current',data:R.map(r=>r.fb),borderColor:'#f59e0b',borderWidth:2,pointRadius:3,tension:.3}]},options:mkOpts(false)});
+</script>
+</body>
+</html>'''
+
+
 # ── Explorer HTML Builder ────────────────────────────────────────────────────
 
 def _build_explorer_html(data: list) -> str:
@@ -404,6 +539,13 @@ def render_dashboard_tab(sport: str) -> None:
             "No archived slate data found.  Run slates and post-slate feedback "
             "to populate the explorer."
         )
+
+    # ── Catch Rate Line Chart ─────────────────────────────────────────────
+    if data:
+        rates = _compute_catch_rates(data)
+        if rates:
+            cr_html = _build_catch_rate_html(rates)
+            components.html(cr_html, height=380, scrolling=False)
 
     # ── Maintenance Tools ─────────────────────────────────────────────────
     st.markdown("---")
