@@ -6,6 +6,17 @@ Generates three sections for the Edge Analysis tab:
   3. Bust Call -- one bold prediction for the biggest underperformer
 
 All text is template-based with data slots. No LLM calls.
+
+RICKY'S VOICE:
+  Ex-hedge-fund guy who walked away from the suit. Too independent, too fast,
+  too willing to cut through bullshit instead of following process. The C-suite
+  hated his vibe because he didn't suck up. Now he's at the coffee shop in a
+  hoodie, building lineups against a scoreboard that can't be spun.
+
+  He doesn't respect consensus. When 30% of the field is on someone, he sees
+  herd behavior — the same groupthink that filled conference rooms with
+  nodding heads. He trusts the work, not the narrative. The scoreboard is the
+  only honest meeting he's ever attended.
 """
 from __future__ import annotations
 
@@ -21,26 +32,29 @@ import pandas as pd
 
 # Hit templates: player outperformed projection
 _HIT_TEMPLATES = [
-    "{name} went off for {actual:.0f} against a supposedly tough matchup — the model had that one at {proj:.0f}, close enough.",
-    "{name} dropped {actual:.0f} on a {proj:.0f} projection. Model liked it, reality loved it.",
-    "{name} smashed at {actual:.0f}. Projected {proj:.0f}. The kind of night that pays for the whole week.",
-    "{name} crushed with {actual:.0f} actual on a {proj:.0f} line. Easy money for anyone who was paying attention.",
+    "{name} went off for {actual:.0f} on a {proj:.0f} projection. The model did the work. The scoreboard agreed.",
+    "{name} dropped {actual:.0f} against a {proj:.0f} line. That's what happens when you trust the data instead of the narrative.",
+    "{name} crushed with {actual:.0f} actual on {proj:.0f} projected. No committee needed to see that one coming.",
+    "{name} smashed at {actual:.0f}. Projected {proj:.0f}. The kind of edge that doesn't survive a group chat — which is exactly why it hit.",
 ]
 
 # Miss templates: player underperformed projection
 _MISS_TEMPLATES = [
-    "{name} owners got cooked. {actual:.0f} actual on a {proj:.0f} projection. Ugly.",
-    "{name} bricked hard — {actual:.0f} on a {proj:.0f} line. The field learned that one the expensive way.",
-    "{name} at {actual:.0f} actual vs {proj:.0f} projected. Sometimes the chalk just crumbles.",
-    "{name} laid an egg. {actual:.0f} fantasy points on a {proj:.0f} projection. Pain.",
+    "{name} owners got cooked. {actual:.0f} actual on a {proj:.0f} line. The field followed each other right off a cliff.",
+    "{name} bricked at {actual:.0f} on a {proj:.0f} projection. Consensus pick, consensus loss. Seen this movie before.",
+    "{name} laid an egg — {actual:.0f} on a {proj:.0f} line. Half the field was on it because the other half was on it. That's not analysis, that's a herd.",
+    "{name} at {actual:.0f} vs {proj:.0f} projected. Popular pick. Popular outcome. The scoreboard doesn't grade on a curve.",
 ]
 
-# Pattern templates (optional third sentence)
-_PATTERN_TEMPLATES = [
-    "Road favorites went {record} on the night. Worth tracking.",
-    "Minutes killed. The back end of the rotation got nothing across the board.",
-    "High-salary plays went {hit_rate} on the night. Chalk held.",
-    "Chalk crumbled across the board. Only {hit_count} of the top-{total} salaries cleared projection.",
+# Pattern templates (optional third sentence about the slate)
+_PATTERN_TEMPLATES_CHALK_HELD = [
+    "High-salary chalk went {hit_count}-of-{total}. Sometimes the obvious play is the right play — just don't confuse that with doing the work.",
+    "Top salaries went {hit_count}-of-{total}. Chalk held, but that's not the norm. Don't get comfortable.",
+]
+
+_PATTERN_TEMPLATES_CHALK_CRUMBLED = [
+    "Only {hit_count} of the top-{total} salaries cleared projection. The field loves paying up for names. The scoreboard doesn't care about names.",
+    "Chalk crumbled — {hit_count}-of-{total} top salaries hit. Everyone nodded along on the same picks. Same result as every bad meeting.",
 ]
 
 
@@ -112,13 +126,13 @@ def generate_last_night(recap: Optional[Dict[str, Any]]) -> Optional[str]:
             top_hits = sum(1 for p in top_players if p["delta"] >= 0)
             total = len(top_players)
             if top_hits >= total * 0.7:
-                sentences.append(
-                    f"High-salary plays went {top_hits}-of-{total} on the night. Chalk held."
-                )
+                seed = top_hits + total
+                tmpl = _pick_template(_PATTERN_TEMPLATES_CHALK_HELD, seed)
+                sentences.append(tmpl.format(hit_count=top_hits, total=total))
             elif top_hits <= total * 0.3:
-                sentences.append(
-                    f"Chalk crumbled across the board. Only {top_hits} of the top-{total} salaries cleared projection."
-                )
+                seed = top_hits + total
+                tmpl = _pick_template(_PATTERN_TEMPLATES_CHALK_CRUMBLED, seed)
+                sentences.append(tmpl.format(hit_count=top_hits, total=total))
 
     return " ".join(sentences) if sentences else None
 
@@ -151,35 +165,50 @@ def _find_salary_mismatches(pool: pd.DataFrame) -> List[str]:
     # Players underpriced by >15%
     mispriced = df[df["underpriced_pct"] > 0.15].nlargest(3, "underpriced_pct")
 
+    _MISMATCH_TEMPLATES = [
+        "{name} at ${sal} is mispriced. {proj:.0f} projected, {pts_1k:.1f} pts/$1K. The kind of inefficiency that used to pay my bonus. Now it pays lineups.",
+        "{name} at ${sal} with {proj:.0f} projected. {pts_1k:.1f} pts/$1K. The market is wrong on this one and the market doesn't self-correct before lock.",
+        "{name} at ${sal} projects to {proj:.0f}. That's {pts_1k:.1f} pts/$1K — a pricing gap the field won't notice until the scoreboard posts.",
+    ]
+
     callouts = []
-    for _, row in mispriced.iterrows():
+    for i, (_, row) in enumerate(mispriced.iterrows()):
         name = row["player_name"]
-        sal = int(row["salary"])
+        sal = f"{int(row['salary']):,}"
         proj = row["proj"]
         pts_1k = row["pts_per_1k"]
-        callouts.append(
-            f"{name} at ${sal:,} is the kind of mispricing you see maybe once a week. {proj:.0f} projected at {pts_1k:.1f} pts/$1K. That's free money."
-        )
+        tmpl = _MISMATCH_TEMPLATES[i % len(_MISMATCH_TEMPLATES)]
+        callouts.append(tmpl.format(name=name, sal=sal, proj=proj, pts_1k=pts_1k))
     return callouts
 
 
 def _find_ownership_traps(pool: pd.DataFrame) -> List[str]:
     """Find high-owned players with red flags."""
-    required = {"player_name", "salary", "proj", "ownership"}
-    if not required.issubset(pool.columns):
+    own_col = None
+    for c in ("ownership", "own_pct", "POWN"):
+        if c in pool.columns:
+            own_col = c
+            break
+    if own_col is None or "player_name" not in pool.columns or "salary" not in pool.columns:
         return []
 
-    df = pool[pool["ownership"] > 0].copy()
+    df = pool[pool[own_col] > 0].copy()
     if df.empty:
         return []
 
     # Top 5 by ownership
-    top_owned = df.nlargest(5, "ownership")
+    top_owned = df.nlargest(5, own_col)
+
+    _TRAP_TEMPLATES = [
+        "{own:.0f}% of the field is on {name} tonight. Same herd energy. {flags}. The scoreboard doesn't care how popular the pick was.",
+        "{own:.0f}% of the field lined up behind {name}. {flags}. That's not conviction, that's a crowded trade. I've watched those unwind.",
+        "{name} at {own:.0f}% owned. {flags}. Everyone's nodding along on this one. I've sat in enough rooms to know what that means.",
+    ]
 
     callouts = []
-    for _, row in top_owned.iterrows():
+    for i, (_, row) in enumerate(top_owned.iterrows()):
         name = row["player_name"]
-        own = row["ownership"]
+        own = row[own_col]
         sal = int(row["salary"])
         flags = []
 
@@ -187,8 +216,8 @@ def _find_ownership_traps(pool: pd.DataFrame) -> List[str]:
         if "dvp_rank" in df.columns and pd.notna(row.get("dvp_rank")):
             dvp = row["dvp_rank"]
             if dvp >= 25:
-                rank_label = 31 - int(dvp)  # rank 30 → "top-1", rank 25 → "top-6"
-                flags.append(f"faces a top-{rank_label} defense at the position")
+                rank_label = 31 - int(dvp)
+                flags.append(f"top-{rank_label} defense at the position")
 
         # Blowout risk
         if "blowout_risk" in df.columns and row.get("blowout_risk", 0) > 0.5:
@@ -198,30 +227,33 @@ def _find_ownership_traps(pool: pd.DataFrame) -> List[str]:
         if "spread" in df.columns and pd.notna(row.get("spread")):
             spread = row["spread"]
             if spread > 5:
-                flags.append(f"+{spread:.1f} spread means garbage time risk")
+                flags.append(f"+{spread:.1f} spread, garbage time incoming")
 
         if flags:
-            flag_str = " and ".join(flags)
-            callouts.append(
-                f"{own:.0f}% of the field is on {name} tonight. {flag_str.capitalize()}. Trap."
-            )
+            flag_str = ", ".join(flags).capitalize()
+            tmpl = _TRAP_TEMPLATES[i % len(_TRAP_TEMPLATES)]
+            callouts.append(tmpl.format(name=name, own=own, flags=flag_str))
 
     return callouts[:2]  # Max 2 ownership traps
 
 
 def _find_contrarian_windows(pool: pd.DataFrame) -> List[str]:
     """Find low-owned players with strong situational edges."""
-    required = {"player_name", "salary", "proj", "ownership"}
-    if not required.issubset(pool.columns):
+    own_col = None
+    for c in ("ownership", "own_pct", "POWN"):
+        if c in pool.columns:
+            own_col = c
+            break
+    if own_col is None or "player_name" not in pool.columns:
         return []
 
-    df = pool[(pool["ownership"] > 0) & (pool["proj"] > 10)].copy()
+    df = pool[(pool[own_col] > 0) & (pool["proj"] > 10)].copy()
     if df.empty:
         return []
 
     # Bottom quartile by ownership
-    own_25th = df["ownership"].quantile(0.25)
-    low_owned = df[df["ownership"] <= max(own_25th, 5)].copy()
+    own_25th = df[own_col].quantile(0.25)
+    low_owned = df[df[own_col] <= max(own_25th, 5)].copy()
 
     if low_owned.empty:
         return []
@@ -229,11 +261,22 @@ def _find_contrarian_windows(pool: pd.DataFrame) -> List[str]:
     # Score contrarian value: good DvP + high projection relative to salary
     low_owned["pts_per_1k"] = low_owned["proj"] / (low_owned["salary"] / 1000)
 
+    _CONTRARIAN_TEMPLATES = [
+        "{name} at {own:.0f}% owned. The field didn't do the work — {reason}. This is the kind of edge that doesn't survive a committee.",
+        "{name} sitting at {own:.0f}% owned. {reason}. Nobody in the room bothered to look. That's the whole edge.",
+        "{name}, {own:.0f}% owned. {reason}. The field is too busy copying each other's homework to notice.",
+    ]
+
+    _CONTRARIAN_FALLBACK = [
+        "{name} at ${sal} with {proj:.0f} projected and only {own:.0f}% owned. The field is asleep. I've made a career on the other side of that trade.",
+        "{name} at ${sal}, {proj:.0f} projected, {own:.0f}% owned. When nobody's looking, that's when you look harder.",
+    ]
+
     callouts = []
-    for _, row in low_owned.nlargest(5, "pts_per_1k").iterrows():
+    for i, (_, row) in enumerate(low_owned.nlargest(5, "pts_per_1k").iterrows()):
         name = row["player_name"]
-        own = row["ownership"]
-        sal = int(row["salary"])
+        own = row[own_col]
+        sal = f"{int(row['salary']):,}"
         proj = row["proj"]
 
         reason_parts = []
@@ -254,13 +297,11 @@ def _find_contrarian_windows(pool: pd.DataFrame) -> List[str]:
 
         if reason_parts:
             reason = " and ".join(reason_parts)
-            callouts.append(
-                f"Nobody's looking at {name} at {own:.0f}% owned but {reason}. Sneaky."
-            )
+            tmpl = _CONTRARIAN_TEMPLATES[i % len(_CONTRARIAN_TEMPLATES)]
+            callouts.append(tmpl.format(name=name, own=own, reason=reason))
         elif row["pts_per_1k"] > 5.0:
-            callouts.append(
-                f"{name} at ${sal:,} with {proj:.0f} projected and only {own:.0f}% owned. The field is sleeping."
-            )
+            tmpl = _CONTRARIAN_FALLBACK[i % len(_CONTRARIAN_FALLBACK)]
+            callouts.append(tmpl.format(name=name, sal=sal, proj=proj, own=own))
 
     return callouts[:2]  # Max 2
 
@@ -285,7 +326,7 @@ def _find_game_environment_edges(pool: pd.DataFrame) -> List[str]:
                 teams = game_players["team"].unique() if "team" in game_players.columns else []
                 if len(teams) >= 2:
                     return [
-                        f"{teams[0]}-{teams[1]} has a {ou:.0f} total. Pace and points. Stack territory."
+                        f"{teams[0]}-{teams[1]} has a {ou:.0f} total. Pace and points. This is where the math lives tonight."
                     ]
     return []
 
@@ -320,6 +361,18 @@ def generate_tonights_edges(pool: pd.DataFrame) -> List[str]:
 # 3. BUST CALL -- one player, named, bold prediction
 # ---------------------------------------------------------------------------
 
+_BUST_EXPLANATIONS = [
+    "{own:.0f}% of the field is about to learn a lesson. {reasons}. I've watched this exact setup blow up a hundred portfolios.",
+    "{own:.0f}% of the field lined up for this. {reasons}. The consensus was wrong in the boardroom and it's wrong here.",
+    "{own:.0f}% owned. {reasons}. Everyone agreed on this pick — and that's exactly the problem.",
+]
+
+_BUST_FALLBACK = [
+    "{own:.0f}% owned and the numbers don't support it. Popularity isn't an edge. Never was.",
+    "The field loves {name} tonight at {own:.0f}%. The data doesn't. I'll take the data.",
+]
+
+
 def generate_bust_call(
     pool: pd.DataFrame,
     fade_candidates: Optional[List[Dict[str, Any]]] = None,
@@ -348,23 +401,28 @@ def generate_bust_call(
     if pool.empty:
         return None
 
+    own_col = None
+    for c in ("ownership", "own_pct", "POWN"):
+        if c in pool.columns:
+            own_col = c
+            break
+
     # Work from the pool to score bust risk — need at least salary + proj + ownership
-    required = {"player_name", "salary", "proj", "ownership"}
-    if not required.issubset(pool.columns):
-        return None
+    required = {"player_name", "salary", "proj"}
+    if not required.issubset(pool.columns) or own_col is None:
+        return _bust_from_fades(fade_candidates)
 
     # Only consider relevant players (meaningful salary and ownership)
-    df = pool[(pool["salary"] >= 5000) & (pool["ownership"] > 3) & (pool["proj"] > 10)].copy()
+    df = pool[(pool["salary"] >= 5000) & (pool[own_col] > 3) & (pool["proj"] > 10)].copy()
     if df.empty:
-        # Fallback: try fade_candidates
         return _bust_from_fades(fade_candidates)
 
     df["bust_score"] = 0.0
 
     # Factor 1: Ownership (higher = worse GPP outcome if bust)
-    own_max = df["ownership"].max()
+    own_max = df[own_col].max()
     if own_max > 0:
-        df["bust_score"] += (df["ownership"] / own_max) * 30
+        df["bust_score"] += (df[own_col] / own_max) * 30
 
     # Factor 2: Bad DvP matchup (high rank = tough defense)
     if "dvp_rank" in df.columns:
@@ -374,8 +432,6 @@ def generate_bust_call(
     # Factor 3: Salary overpriced vs recent form
     if "rolling_fp_5" in df.columns:
         recent = df["rolling_fp_5"].fillna(df["proj"])
-        salary_implied = df["salary"] / 1000 * df["proj"].median() / (df["salary"].median() / 1000)
-        # If recent avg is well below projection, higher bust risk
         form_gap = df["proj"] - recent
         form_gap_norm = form_gap / df["proj"].clip(lower=1)
         df["bust_score"] += form_gap_norm.clip(lower=0) * 20
@@ -383,7 +439,6 @@ def generate_bust_call(
     # Factor 4: Blowout risk (wrong side of spread)
     if "spread" in df.columns:
         spread = df["spread"].fillna(0)
-        # Positive spread = underdog = garbage time risk
         df["bust_score"] += (spread.clip(lower=0) / 10) * 15
 
     if "blowout_risk" in df.columns:
@@ -393,16 +448,16 @@ def generate_bust_call(
     bust = df.nlargest(1, "bust_score").iloc[0]
     name = bust["player_name"]
     sal = int(bust["salary"])
-    own = bust["ownership"]
+    own = bust[own_col]
     proj = bust["proj"]
 
     # Build explanation
     reasons = []
     if "dvp_rank" in df.columns and pd.notna(bust.get("dvp_rank")) and bust["dvp_rank"] >= 20:
-        rank_label = 31 - int(bust["dvp_rank"])  # rank 30 → "top-1", rank 25 → "top-6"
+        rank_label = 31 - int(bust["dvp_rank"])
         reasons.append(f"top-{rank_label} defense at the position")
     if "spread" in df.columns and pd.notna(bust.get("spread")) and bust["spread"] > 4:
-        reasons.append(f"+{bust['spread']:.1f} underdog spread")
+        reasons.append(f"+{bust['spread']:.1f} spread")
     if "rolling_fp_5" in df.columns and pd.notna(bust.get("rolling_fp_5")):
         recent = bust["rolling_fp_5"]
         if recent < proj * 0.85:
@@ -410,11 +465,15 @@ def generate_bust_call(
     if "blowout_risk" in df.columns and bust.get("blowout_risk", 0) > 0.4:
         reasons.append("blowout game script risk")
 
+    # Pick a template
+    seed = sal + int(own * 10)
     if reasons:
-        reason_str = ", ".join(reasons)
-        explanation = f"{own:.0f}% of the field is about to find out. {reason_str.capitalize()}."
+        reason_str = ", ".join(reasons).capitalize()
+        tmpl = _pick_template(_BUST_EXPLANATIONS, seed)
+        explanation = tmpl.format(name=name, own=own, reasons=reason_str)
     else:
-        explanation = f"{own:.0f}% of the field is about to find out. The price is wrong."
+        tmpl = _pick_template(_BUST_FALLBACK, seed)
+        explanation = tmpl.format(name=name, own=own)
 
     return {"name": name, "salary": sal, "explanation": explanation}
 
@@ -434,12 +493,12 @@ def _bust_from_fades(
     bust = max(relevant, key=lambda f: f.get("salary", 0))
     name = bust.get("player_name", "Unknown")
     sal = int(bust.get("salary", 0))
-    own = bust.get("ownership", 0)
+    own = bust.get("ownership", bust.get("own_pct", 0))
 
     return {
         "name": name,
         "salary": sal,
-        "explanation": f"{own:.0f}% owned and the model hates it. Don't be a hero.",
+        "explanation": f"The model doesn't like it at {own:.0f}% owned. The field followed each other into this one. Don't follow them.",
     }
 
 
