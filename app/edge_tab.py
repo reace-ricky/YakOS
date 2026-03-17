@@ -2,7 +2,8 @@
 
 Displays the pre-computed edge analysis from data/published/{sport}/:
   - Analysis bullets + recommendation up top
-  - 4-box dashboard: Core, Leverage, Value, Fades (boxed cards)
+  - Ricky's Take: Last Night recap, Tonight's Edges, Bust Call
+  - 3-box dashboard: Core, Leverage, Value (boxed cards)
   - PGA wave split summary
   - Published lineups by contest type
 """
@@ -69,6 +70,38 @@ _CARD_CSS = """
     margin-bottom: 4px;
     font-size: 0.92rem;
 }
+.rickys-take {
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin-bottom: 16px;
+    background: rgba(255,255,255,0.02);
+}
+.rickys-take h3 {
+    margin: 0 0 14px 0;
+}
+.rickys-last-night {
+    color: rgba(240,240,240,0.65);
+    font-size: 0.9rem;
+    line-height: 1.5;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.rickys-edge-callout {
+    font-size: 0.92rem;
+    line-height: 1.5;
+    margin-bottom: 8px;
+}
+.rickys-bust-call {
+    border: 1px solid rgba(244,67,54,0.3);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-top: 14px;
+    background: rgba(244,67,54,0.06);
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
 </style>
 """
 
@@ -77,7 +110,6 @@ _BOX_CONFIG = {
     "core_plays": {"title": "Core Plays", "emoji": "🎯", "color": "#2196F3"},
     "leverage_plays": {"title": "Leverage Plays", "emoji": "💎", "color": "#FF9800"},
     "value_plays": {"title": "Value Plays", "emoji": "💰", "color": "#4CAF50"},
-    "fade_candidates": {"title": "Fades", "emoji": "👋", "color": "#f44336"},
 }
 
 
@@ -122,7 +154,7 @@ def _render_player_card_html(player: Dict[str, Any], is_pga: bool) -> str:
 
 
 def _render_edge_box(key: str, players: List[Dict], is_pga: bool) -> None:
-    """Render one of the 4 edge classification boxes."""
+    """Render one of the edge classification boxes."""
     cfg = _BOX_CONFIG[key]
     title = cfg["title"]
     emoji = cfg["emoji"]
@@ -144,76 +176,68 @@ def _render_edge_box(key: str, players: List[Dict], is_pga: bool) -> None:
     st.markdown(box_html, unsafe_allow_html=True)
 
 
-def _render_slate_recap(sport: str) -> None:
-    """Render the Previous Slate Recap section.
+def _render_rickys_take(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, Any]) -> None:
+    """Render the Ricky's Take section.
 
-    Shows how yesterday's projections performed vs actuals, with
-    hit/miss indicators.  Replaces the old emoji name lists.
+    Three parts:
+      1. Last Night -- recap of previous slate in Ricky's voice
+      2. Tonight's Edges -- data-driven callouts about current slate
+      3. Bust Call -- one bold prediction
     """
+    from yak_core.rickys_take import generate_bust_call, generate_last_night, generate_tonights_edges
+
+    # -- Get previous slate recap data --
+    recap = None
     try:
         from yak_core.slate_recap import get_previous_slate_recap
         recap = get_previous_slate_recap(sport)
     except Exception as exc:
         print(f"[edge_tab] Slate recap error: {exc}")
-        recap = None
 
-    if recap is None:
-        st.caption("No previous slate data available.")
+    last_night = generate_last_night(recap)
+    edges = generate_tonights_edges(pool)
+    bust = generate_bust_call(pool, edge_analysis.get("fade_candidates"))
+
+    # Don't render the section at all if there's nothing to show
+    if not last_night and not edges and not bust:
         return
 
-    summary = recap["summary"]
-    players = recap["players"]
-    slate_date = recap["slate_date"]
+    # -- Build HTML --
+    parts = []
 
-    # Header with summary stats
-    st.markdown(
-        f'<div style="margin-bottom:8px;">'
-        f'<strong>Previous Slate Recap</strong> '
-        f'<span style="color:rgba(240,240,240,0.5);font-size:0.85rem;">({slate_date})</span>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
-    # Summary metrics row
-    mc1, mc2, mc3, mc4, mc5 = st.columns(5)
-    mc1.metric("Total", summary["total"])
-    mc2.metric("Big Hits", f"{summary['big_hits']}", delta=None)
-    mc3.metric("Hits", f"{summary['hits']}", delta=None)
-    mc4.metric("Misses", f"{summary['misses']}", delta=None)
-    mc5.metric("Busts", f"{summary['busts']}", delta=None)
-
-    # Show top players in a compact table — limit to top 20 by salary
-    display_players = players[:20]
-    if display_players:
-        rows_html = []
-        for p in display_players:
-            delta_color = "#4CAF50" if p["delta"] >= 0 else "#f44336"
-            delta_str = f"+{p['delta']:.1f}" if p["delta"] >= 0 else f"{p['delta']:.1f}"
-            rows_html.append(
-                f'<tr>'
-                f'<td style="padding:3px 8px;">{p["emoji"]}</td>'
-                f'<td style="padding:3px 8px;font-weight:500;">{p["player_name"]}</td>'
-                f'<td style="padding:3px 8px;text-align:right;">{p["projected"]:.1f}</td>'
-                f'<td style="padding:3px 8px;text-align:right;">{p["actual"]:.1f}</td>'
-                f'<td style="padding:3px 8px;text-align:right;color:{delta_color};">{delta_str}</td>'
-                f'</tr>'
-            )
-        table_html = (
-            '<table style="width:100%;border-collapse:collapse;font-size:0.88rem;margin-bottom:12px;">'
-            '<thead><tr style="border-bottom:1px solid rgba(255,255,255,0.1);">'
-            '<th style="padding:3px 8px;text-align:left;"></th>'
-            '<th style="padding:3px 8px;text-align:left;">Player</th>'
-            '<th style="padding:3px 8px;text-align:right;">Proj</th>'
-            '<th style="padding:3px 8px;text-align:right;">Actual</th>'
-            '<th style="padding:3px 8px;text-align:right;">Delta</th>'
-            '</tr></thead><tbody>'
-            + "".join(rows_html)
-            + '</tbody></table>'
+    # Last Night (muted, secondary)
+    if last_night:
+        slate_date = recap.get("slate_date", "") if recap else ""
+        date_label = f' <span style="color:rgba(240,240,240,0.4);font-size:0.8rem;">({slate_date})</span>' if slate_date else ""
+        parts.append(
+            f'<div style="margin-bottom:4px;font-weight:600;font-size:0.88rem;color:rgba(240,240,240,0.5);">Last Night{date_label}</div>'
+            f'<div class="rickys-last-night">{last_night}</div>'
         )
-        st.markdown(table_html, unsafe_allow_html=True)
 
-        if len(players) > 20:
-            st.caption(f"Showing top 20 of {len(players)} players (by salary).")
+    # Tonight's Edges (primary content)
+    if edges:
+        parts.append(
+            '<div style="margin-bottom:4px;font-weight:600;font-size:0.88rem;">Tonight\'s Edges</div>'
+        )
+        for callout in edges:
+            parts.append(f'<div class="rickys-edge-callout">{callout}</div>')
+
+    # Bust Call (distinct callout)
+    if bust:
+        parts.append(
+            f'<div class="rickys-bust-call">'
+            f'<strong>💀 Tonight\'s bust: {bust["name"]} (${bust["salary"]:,}).</strong> '
+            f'{bust["explanation"]}'
+            f'</div>'
+        )
+
+    html = (
+        f'<div class="rickys-take">'
+        f'<h3>☕ Ricky\'s Take</h3>'
+        + "".join(parts)
+        + '</div>'
+    )
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def render_edge_tab(sport: str) -> None:
@@ -248,19 +272,16 @@ def render_edge_tab(sport: str) -> None:
 
     # ── Analysis + Recommendation up top ──
     rec = edge_analysis.get("recommendation", "")
-    bullets = edge_analysis.get("bullets", [])
 
     if rec:
         st.markdown(f'<div class="rec-box">{rec}</div>', unsafe_allow_html=True)
 
-    # ── Previous Slate Recap ──────────────────────────────────────────────
-    # Replaces the old emoji-tagged name lists (Core/Leverage/Value/Fade)
-    # with a comparison of yesterday's projections vs actual results.
-    _render_slate_recap(sport)
+    # ── Ricky's Take ─────────────────────────────────────────────────────
+    _render_rickys_take(sport, pool, edge_analysis)
 
     st.markdown("")  # spacer
 
-    # ── PGA wave split (above the 4-box if present) ──
+    # ── PGA wave split (above the 3-box if present) ──
     if is_pga:
         wave_split = edge_state.get("wave_split")
         if wave_split:
@@ -285,14 +306,14 @@ def render_edge_tab(sport: str) -> None:
                     st.caption(f"Top: {', '.join(late_top[:5])}")
             st.markdown("")
 
-    # ── 4-box dashboard ──
-    col1, col2 = st.columns(2)
+    # ── 3-box dashboard ──
+    col1, col2, col3 = st.columns(3)
     with col1:
         _render_edge_box("core_plays", edge_analysis.get("core_plays", []), is_pga)
-        _render_edge_box("value_plays", edge_analysis.get("value_plays", []), is_pga)
     with col2:
         _render_edge_box("leverage_plays", edge_analysis.get("leverage_plays", []), is_pga)
-        _render_edge_box("fade_candidates", edge_analysis.get("fade_candidates", []), is_pga)
+    with col3:
+        _render_edge_box("value_plays", edge_analysis.get("value_plays", []), is_pga)
 
     # ── Published lineups ──
     if lineups:
