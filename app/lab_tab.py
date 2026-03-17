@@ -1184,6 +1184,9 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
     _injury_bump = _safe_col(df, "injury_bump_fp")
     _proj_minutes = _safe_col(df, "proj_minutes")
     _sim_leverage = _safe_col(df, "sim_leverage")
+    # Use original_proj (pre-cascade) for cascade % check so inflated proj doesn't dilute the ratio
+    _orig_proj = _safe_col(df, "original_proj")
+    _base_proj = _orig_proj.where(_orig_proj > 0, _proj)  # fall back to proj if original_proj missing
 
     # ── Columns to display ──
     _pick_cols = ["player_name", "salary", "proj", _own_col, "edge", "value"]
@@ -1192,12 +1195,16 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
             _pick_cols.append(_extra)
 
     # ── CORE: high conviction, real upside, not cascade noise ──
-    _cascade_ok_core = (_injury_bump < _proj * 0.40) | (_injury_bump == 0)
+    # Cascade filter: bump must be < 40% of ORIGINAL proj (not inflated proj)
+    _cascade_ok_core = (_injury_bump < _base_proj * 0.40) | (_injury_bump == 0)
+    # Minutes floor: must be a real rotation player (>= 15 min), skip if data missing
+    _min_ok_core = (_proj_minutes >= 15) | (_proj_minutes == 0)
     core_mask = (
         (_edge >= _edge_p65)
         & (_ceil >= _ceil_p70)
         & (_proj >= _proj_median)
         & _cascade_ok_core
+        & _min_ok_core
     )
     core = df[core_mask][_pick_cols].copy()
     core = core.rename(columns={_own_col: "ownership"})
@@ -1206,7 +1213,7 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
     _used = set(core["player_name"].tolist())
 
     # ── LEVERAGE: under-owned relative to upside ──
-    _cascade_ok_lev = (_injury_bump < _proj * 0.50) | (_injury_bump == 0)
+    _cascade_ok_lev = (_injury_bump < _base_proj * 0.50) | (_injury_bump == 0)
     own_threshold = min(15.0, own_med)
     leverage_mask = (
         (_edge >= _edge_p50)
@@ -1228,7 +1235,7 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
 
     # ── VALUE: salary-efficient with real role certainty ──
     sal_p60 = float(np.percentile(_sal.dropna(), 60)) if len(_sal.dropna()) > 2 else 6500.0
-    _cascade_ok_val = (_injury_bump < _proj * 0.50) | (_injury_bump == 0)
+    _cascade_ok_val = (_injury_bump < _base_proj * 0.50) | (_injury_bump == 0)
     _min_ok = (_proj_minutes >= 20) | (_proj_minutes == 0)  # 0 means missing, don't penalize
     value_mask = (
         (_sal < sal_p60)
