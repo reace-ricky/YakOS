@@ -520,24 +520,13 @@ rebuild();
 def render_dashboard_tab(sport: str) -> None:
     """Render the Dashboard tab — Smash/Bust Explorer + Maintenance Tools."""
 
-    # ── Explorer ──────────────────────────────────────────────────────────
+    # ── Load archive data ─────────────────────────────────────────────────
     data = _load_explorer_data(sport)
 
-    if data:
-        html_str = _build_explorer_html(data)
-        components.html(html_str, height=720, scrolling=False)
-
-        n_hist = sum(1 for r in data if r["cat"] != "L")
-        n_live = sum(1 for r in data if r["cat"] == "L")
-        slates = len(set(r["d"] for r in data if r["cat"] != "L" and r["d"] != "LIVE"))
-        st.caption(
-            f"{n_hist} historical players across {slates} archived slates"
-            + (f" · {n_live} live players" if n_live else "")
-        )
-    else:
+    if not data:
         st.info(
             "No archived slate data found.  Run slates and post-slate feedback "
-            "to populate the explorer."
+            "to populate the dashboard."
         )
 
     # ── Catch Rate Line Chart ─────────────────────────────────────────────
@@ -546,6 +535,20 @@ def render_dashboard_tab(sport: str) -> None:
         if rates:
             cr_html = _build_catch_rate_html(rates)
             components.html(cr_html, height=380, scrolling=False)
+
+        n_hist = sum(1 for r in data if r["cat"] != "L")
+        n_live = sum(1 for r in data if r["cat"] == "L")
+        slates = len(set(r["d"] for r in data if r["cat"] != "L" and r["d"] != "LIVE"))
+        st.caption(
+            f"{n_hist} historical players across {slates} archived slates"
+            + (f" · {n_live} live players" if n_live else "")
+        )
+
+    # ── Scatter Explorer (external link — too large for iframe) ───────────
+    st.markdown(
+        "[Open Smash / Bust Scatter Explorer ↗](https://www.perplexity.ai/computer/a/smash-bust-explorer-03tOw2tLTEmiPPP1a14SVA)",
+        help="Interactive scatter plot with all player signals — opens in a new tab.",
+    )
 
     # ── Maintenance Tools ─────────────────────────────────────────────────
     st.markdown("---")
