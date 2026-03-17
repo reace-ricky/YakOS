@@ -79,6 +79,8 @@ def render_lab_tab(sport: str) -> None:
             try:
                 if is_pga:
                     pool, meta = _load_pga_pool(api_key, slate_date, pga_slate)
+                    if pool.empty:
+                        st.warning(f"No PGA pool data available for {slate_date}. Check if an archive exists.")
                 else:
                     # RG merge now happens INSIDE _load_nba_pool() before
                     # the injury cascade, so cascade bumps are not overwritten.
@@ -419,6 +421,8 @@ def render_lab_tab(sport: str) -> None:
                         if is_pga:
                             _pga_slate = preset.get("projection_slate", "showdown")
                             pool_fresh, meta_fresh = _load_pga_pool(api_key, slate_date, _pga_slate)
+                            if pool_fresh.empty:
+                                st.warning(f"No PGA pool data available for {slate_date}. Check if an archive exists.")
                         else:
                             pool_fresh, meta_fresh = _load_nba_pool(api_key, slate_date)
                         try:
@@ -860,6 +864,37 @@ def _load_pga_pool(api_key: str, slate_date: str, slate: str) -> tuple:
     dg = DataGolfClient(api_key)
     pool = build_pga_pool(dg, site="draftkings", slate=slate)
 
+    # If API returned empty (historical date or no current event),
+    # try loading from slate archive
+    if pool.empty:
+        _archive_path = os.path.join(
+            str(Path(__file__).resolve().parent.parent),
+            "data", "slate_archive", f"{slate_date}_pga_gpp.parquet"
+        )
+        if os.path.isfile(_archive_path):
+            pool = pd.read_parquet(_archive_path)
+            print(f"[_load_pga_pool] Loaded {len(pool)} players from archive: {_archive_path}")
+        else:
+            # Also try showdown archive
+            _sd_path = os.path.join(
+                str(Path(__file__).resolve().parent.parent),
+                "data", "slate_archive", f"{slate_date}_pga_showdown.parquet"
+            )
+            if os.path.isfile(_sd_path):
+                pool = pd.read_parquet(_sd_path)
+                print(f"[_load_pga_pool] Loaded {len(pool)} players from showdown archive: {_sd_path}")
+
+    # Guard: if pool is still empty after all fallbacks, return early
+    if pool.empty:
+        meta = {
+            "sport": "PGA", "site": "DK", "date": slate_date, "slate": slate,
+            "salary_cap": DK_PGA_SALARY_CAP, "roster_slots": DK_PGA_POS_SLOTS,
+            "lineup_size": DK_PGA_LINEUP_SIZE, "pool_size": 0,
+            "proj_source": "none (no data available)",
+        }
+        return pool, meta
+
+    # Only apply corrections if pool has data
     corrections = get_correction_factors(sport="PGA")
     if corrections.get("n_slates", 0) > 0:
         pool = apply_corrections(pool, corrections, sport="PGA")
@@ -919,6 +954,13 @@ def _merge_rg_csv(pool, rg_file):
             pool.at[idx, "rg_proj"] = rg_proj
             pool.at[idx, "proj_source"] = "rotogrinders"
             n_merged += 1
+        # Salary — RG file is source of truth (especially for Showdown
+        # slates where salaries differ from the main classic contest).
+        rg_sal = r.get("SALARY")
+        if rg_sal is not None and not pd.isna(rg_sal):
+            rg_sal = float(rg_sal)
+            if rg_sal > 0:
+                pool.at[idx, "salary"] = int(rg_sal)
         rg_floor = float(r.get("FLOOR", 0) or 0)
         rg_ceil = float(r.get("CEIL", 0) or 0)
         if rg_floor > 0:
@@ -1364,37 +1406,8 @@ def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, o
     })
     if showdown_teams:
         pool = pool[pool["team"].isin(showdown_teams)].reset_index(drop=True)
-
-        # ── Fetch Showdown-specific salaries from DraftKings ──
-        # DK Showdown contests use different salaries than the main slate.
-        # Tank01 only returns main-slate salaries, so we override with the
-        # real Showdown salary from the DK draftables API.
-        if sport.upper() == "NBA":
-            sd_salary_map = _fetch_dk_showdown_salaries(showdown_teams[0], showdown_teams[1])
-            if sd_salary_map:
-                _updated = 0
-                for idx, row in pool.iterrows():
-                    pname = str(row.get("player_name", "")).strip()
-                    pteam = str(row.get("team", "")).upper()
-                    # Try exact name first, then normalised, then last-name+team
-                    sd_sal = sd_salary_map.get(pname)
-                    if sd_sal is None:
-                        norm = _re.sub(r"[.'`\-]", "", pname.lower()).strip()
-                        norm = _re.sub(r"\s+(jr|sr|ii|iii|iv|v)$", "", norm)
-                        norm = _re.sub(r"\s+", " ", norm).strip()
-                        sd_sal = sd_salary_map.get(norm)
-                    if sd_sal is None and pteam:
-                        # Last-name + team fallback (handles Dom/Dominick mismatches)
-                        norm = _re.sub(r"[.'`\-]", "", pname.lower()).strip()
-                        norm = _re.sub(r"\s+(jr|sr|ii|iii|iv|v)$", "", norm)
-                        norm = _re.sub(r"\s+", " ", norm).strip()
-                        parts = norm.split()
-                        if len(parts) >= 2:
-                            sd_sal = sd_salary_map.get(f"_LN_{parts[-1]}_{pteam}")
-                    if sd_sal is not None:
-                        pool.at[idx, "salary"] = int(sd_sal)
-                        _updated += 1
-                print(f"[_build_lineups] Showdown salary override: {_updated}/{len(pool)} players updated")
+        # Showdown salaries come from the RG file (merged during _load_nba_pool).
+        # No DK API fetch needed — the RG CSV is the source of truth.
 
     _excl_path = out_dir / "excluded_players.json"
     if _excl_path.exists():

@@ -138,6 +138,12 @@ def run_nba_calibration(slate_date: str) -> dict:
     actuals["_norm_name"] = actuals["player_name"].apply(normalize_player_name)
     act_map = actuals.set_index("_norm_name")["actual_fp"].to_dict()
     pool["actual_fp"] = pool["_norm_name"].map(act_map)
+
+    # Also merge actual minutes if available
+    if "mp_actual" in actuals.columns:
+        min_map = actuals.set_index("_norm_name")["mp_actual"].to_dict()
+        pool["mp_actual"] = pool["_norm_name"].map(min_map)
+
     pool.drop(columns=["_norm_name"], inplace=True)
     matched = pool["actual_fp"].notna().sum()
     log.info("Matched actuals for %d / %d players (normalized names)", matched, len(pool))
