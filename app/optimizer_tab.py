@@ -105,11 +105,8 @@ def render_optimizer_tab(sport: str) -> None:
 
     # ── Showdown: add CPT ownership column to pool display ──
     # Computed from salary tier multiplier × overall ownership
-    _show_cpt_own = (
-        not is_pga
-        and "salary" in pool.columns
-        and any("showdown" in c.lower() for c in contest_options)
-    )
+    # Show for NBA pools (useful context even outside showdown builds)
+    _show_cpt_own = not is_pga and "salary" in pool.columns
     if _show_cpt_own:
         from yak_core.lineups import add_cpt_own_pct
         _pool_with_cpt = add_cpt_own_pct(pool.copy())
