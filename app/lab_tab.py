@@ -79,6 +79,8 @@ def render_lab_tab(sport: str) -> None:
             try:
                 if is_pga:
                     pool, meta = _load_pga_pool(api_key, slate_date, pga_slate)
+                    if pool.empty:
+                        st.warning(f"No PGA pool data available for {slate_date}. Check if an archive exists.")
                 else:
                     # RG merge now happens INSIDE _load_nba_pool() before
                     # the injury cascade, so cascade bumps are not overwritten.
@@ -419,6 +421,8 @@ def render_lab_tab(sport: str) -> None:
                         if is_pga:
                             _pga_slate = preset.get("projection_slate", "showdown")
                             pool_fresh, meta_fresh = _load_pga_pool(api_key, slate_date, _pga_slate)
+                            if pool_fresh.empty:
+                                st.warning(f"No PGA pool data available for {slate_date}. Check if an archive exists.")
                         else:
                             pool_fresh, meta_fresh = _load_nba_pool(api_key, slate_date)
                         try:
@@ -860,6 +864,37 @@ def _load_pga_pool(api_key: str, slate_date: str, slate: str) -> tuple:
     dg = DataGolfClient(api_key)
     pool = build_pga_pool(dg, site="draftkings", slate=slate)
 
+    # If API returned empty (historical date or no current event),
+    # try loading from slate archive
+    if pool.empty:
+        _archive_path = os.path.join(
+            str(Path(__file__).resolve().parent.parent),
+            "data", "slate_archive", f"{slate_date}_pga_gpp.parquet"
+        )
+        if os.path.isfile(_archive_path):
+            pool = pd.read_parquet(_archive_path)
+            print(f"[_load_pga_pool] Loaded {len(pool)} players from archive: {_archive_path}")
+        else:
+            # Also try showdown archive
+            _sd_path = os.path.join(
+                str(Path(__file__).resolve().parent.parent),
+                "data", "slate_archive", f"{slate_date}_pga_showdown.parquet"
+            )
+            if os.path.isfile(_sd_path):
+                pool = pd.read_parquet(_sd_path)
+                print(f"[_load_pga_pool] Loaded {len(pool)} players from showdown archive: {_sd_path}")
+
+    # Guard: if pool is still empty after all fallbacks, return early
+    if pool.empty:
+        meta = {
+            "sport": "PGA", "site": "DK", "date": slate_date, "slate": slate,
+            "salary_cap": DK_PGA_SALARY_CAP, "roster_slots": DK_PGA_POS_SLOTS,
+            "lineup_size": DK_PGA_LINEUP_SIZE, "pool_size": 0,
+            "proj_source": "none (no data available)",
+        }
+        return pool, meta
+
+    # Only apply corrections if pool has data
     corrections = get_correction_factors(sport="PGA")
     if corrections.get("n_slates", 0) > 0:
         pool = apply_corrections(pool, corrections, sport="PGA")
