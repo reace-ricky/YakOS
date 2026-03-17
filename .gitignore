@@ -1,7 +1,13 @@
 *.parquet
 *.csv
-# Allow the manually-managed injury override file to be committed
+# ── CSV whitelist ── survive Streamlit Cloud reboots ──────────────
 !config/manual_injuries.csv
+!data/imports/*.csv
+!data/rg_uploads/*.csv
+!data/rg_archive/**/*.csv
+!data/fp_uploads/*.csv
+!data/historical_lineups.csv
+
 *.ipynb_checkpoints/
 __pycache__/
 .DS_Store
