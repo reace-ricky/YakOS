@@ -23,6 +23,10 @@ from typing import Any, Dict
 import pandas as pd
 import streamlit as st
 
+# DK ↔ Pool team abbreviation mapping
+_POOL_TO_DK_TEAM = {"SA": "SAS", "GS": "GSW", "PHO": "PHX", "NO": "NOP"}
+_DK_TO_POOL_TEAM = {v: k for k, v in _POOL_TO_DK_TEAM.items()}
+
 
 def render_lab_tab(sport: str) -> None:
     from app.data_loader import published_dir
@@ -1338,6 +1342,41 @@ def _fetch_dk_showdown_salaries(away: str, home: str) -> dict:
                 continue
 
     if matched_dg is None:
+        # Fallback: scan recent DG IDs via the draftables API.
+        # Locked contests disappear from the lobby but their draftables
+        # endpoint stays live.  Scan backwards from the lowest lobby DG.
+        _min_lobby_dg = min(sd_dg_ids) if sd_dg_ids else min(
+            (c.get("dg", 0) for c in contests), default=0
+        )
+        if _min_lobby_dg > 0:
+            _scan_start = _min_lobby_dg - 1
+            _scan_end = max(_min_lobby_dg - 40, 0)
+            _target_teams = {away.upper(), home.upper()}
+            for _dg_try in range(_scan_start, _scan_end, -1):
+                try:
+                    _r = _req.get(
+                        f"https://api.draftkings.com/draftgroups/v1/draftgroups/{_dg_try}/draftables",
+                        headers={"User-Agent": "YakOS/1.0"},
+                        timeout=8,
+                    )
+                    if _r.status_code != 200:
+                        continue
+                    _draftables = _r.json().get("draftables", [])
+                    if not _draftables:
+                        continue
+                    # Check if this DG is a showdown (exactly 2 teams) matching our matchup
+                    _teams_in = {str(d.get("teamAbbreviation", "")).upper() for d in _draftables}
+                    if _teams_in == _target_teams:
+                        # Verify it's showdown format (has both CPT/FLEX slot IDs)
+                        _slot_ids = {d.get("rosterSlotId") for d in _draftables}
+                        if len(_slot_ids) >= 2:  # CPT + FLEX
+                            matched_dg = _dg_try
+                            print(f"[_fetch_dk_showdown_salaries] found locked DG {_dg_try} via scan")
+                            break
+                except Exception:
+                    continue
+
+    if matched_dg is None:
         print(f"[_fetch_dk_showdown_salaries] no DG found for {away} @ {home}")
         return {}
 
@@ -1474,15 +1513,46 @@ def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, o
     if showdown_teams:
         pool = pool[pool["team"].isin(showdown_teams)].reset_index(drop=True)
 
-        # ── Apply DK Showdown salaries from uploaded CSV ──
+        # ── Apply DK Showdown salaries ──
         # DK Showdown uses completely different salaries than the main slate.
-        # The CSV has two rows per player: CPT (1.5x) and UTIL (base).
-        # We take the UTIL salary as the base; the optimizer applies 1.5x for CPT.
+        # Priority: uploaded CSV > DK API auto-fetch.
         if dk_sd_file is not None:
             try:
                 _apply_dk_showdown_salaries(pool, dk_sd_file)
             except Exception as _sd_err:
                 print(f"[_build_lineups] DK Showdown salary apply failed: {_sd_err}")
+        else:
+            # Auto-fetch from DK API
+            try:
+                import re as _re
+                _dk_teams = [_POOL_TO_DK_TEAM.get(t, t) for t in showdown_teams]
+                _away, _home = _dk_teams[0], _dk_teams[1]
+                sd_salary_map = _fetch_dk_showdown_salaries(_away, _home)
+                if sd_salary_map:
+                    _updated = 0
+                    for idx, row in pool.iterrows():
+                        pname = str(row.get("player_name", "")).strip()
+                        sd_sal = sd_salary_map.get(pname)
+                        if sd_sal is None:
+                            norm = _re.sub(r"[.'`\-]", "", pname.lower()).strip()
+                            norm = _re.sub(r"\s+(jr|sr|ii|iii|iv|v)$", "", norm)
+                            norm = _re.sub(r"\s+", " ", norm).strip()
+                            sd_sal = sd_salary_map.get(norm)
+                        if sd_sal is None:
+                            parts = _re.sub(r"[.'`\-]", "", pname.lower()).strip().split()
+                            team_dk = _POOL_TO_DK_TEAM.get(str(row.get("team", "")), str(row.get("team", "")))
+                            if len(parts) >= 2:
+                                sd_sal = sd_salary_map.get(f"_LN_{parts[-1]}_{team_dk}")
+                        if sd_sal is not None:
+                            pool.at[idx, "salary"] = sd_sal
+                            _updated += 1
+                    print(f"[_build_lineups] DK Showdown API salaries applied: {_updated}/{len(pool)}")
+                    st.success(f"Showdown salaries auto-fetched from DK: {_updated}/{len(pool)} players matched")
+                else:
+                    st.warning("Could not fetch Showdown salaries from DK API — using main slate salaries")
+            except Exception as _api_err:
+                print(f"[_build_lineups] DK Showdown API fetch failed: {_api_err}")
+                st.warning(f"DK Showdown salary fetch failed: {_api_err}")
 
     _excl_path = out_dir / "excluded_players.json"
     if _excl_path.exists():
