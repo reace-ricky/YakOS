@@ -1124,11 +1124,6 @@ def build_multiple_lineups_with_exposure(
         if removed > 0:
             print(f"[Proj floor] Removed {removed} players with proj < {min_proj_floor:.0f}")
 
-        player_pool["gpp_ceil_score"] = ceil_base
-        score_col = "gpp_ceil_score"
-        # Rebuild players list since we added a column
-        players = player_pool.to_dict("records")
-
     # Build name-to-index maps
     name_to_idx = {p["player_name"]: i for i, p in enumerate(players)}
     lock_indices = [name_to_idx[nm] for nm in lock_names if nm in name_to_idx]

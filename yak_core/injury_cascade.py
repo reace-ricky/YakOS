@@ -54,8 +54,9 @@ KEY_INJURY_MIN_MINUTES: float = 15.0
 MAX_PLAYER_MINUTES: float = 40.0
 
 # Max bump multiplier: cascade bump cannot exceed this × original projection.
-# A player projected for 6 FP can get at most +18 FP (3×6), totaling 24 FP.
-_MAX_BUMP_MULTIPLIER: float = 3.0
+# A player projected for 20 FP can get at most +10 FP (0.5×20), totaling 30 FP.
+_MAX_BUMP_MULTIPLIER: float = 0.50  # Max injury bump = 50% of base projection
+_MAX_TOTAL_BUMP_MULTIPLIER: float = 0.65  # Max total bump (injury + minutes gap combined)
 
 # ---------------------------------------------------------------------------
 # Position matching
@@ -681,6 +682,18 @@ def apply_minutes_gap_redistribution(pool_df: pd.DataFrame) -> pd.DataFrame:
             else:
                 fp_per_min = 1.0
             bump_fp = round(extra_min * fp_per_min, 2)
+
+            # Cap: total bumps (injury + minutes gap) cannot exceed
+            # _MAX_TOTAL_BUMP_MULTIPLIER × original projection.
+            orig_proj = float(df.at[idx, "original_proj"]) if "original_proj" in df.columns else current_proj
+            existing_injury_bump = float(df.at[idx, "injury_bump_fp"]) if "injury_bump_fp" in df.columns else 0.0
+            total_bump_so_far = existing_injury_bump
+            max_total_bump = orig_proj * _MAX_TOTAL_BUMP_MULTIPLIER
+            room = max(max_total_bump - total_bump_so_far, 0.0)
+            bump_fp = min(bump_fp, round(room, 2))
+
+            if bump_fp <= 0:
+                continue
 
             df.at[idx, "proj_minutes"] = round(current_min + extra_min, 1)
             df.at[idx, "proj"] = round(current_proj + bump_fp, 2)
