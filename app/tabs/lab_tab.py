@@ -992,6 +992,12 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
     # All projection-modifying steps are done (cascade, blowout, B2B).
     # Recompute ceil/floor/sims so they reflect the FINAL proj, not the
     # stale pre-cascade RG values.  See audit 2026-03-17 Fix 4.
+    #
+    # The cascade's ratio-scaling breaks when RG floor ≈ orig_proj
+    # (floor_ratio ~1.0 → floor = proj after scaling).  Instead, rebuild
+    # floor/ceil from the final proj using the salary-tier spread model,
+    # blended with rolling variance when available — same formula used by
+    # the fallback block above, ensuring every player gets real spread.
     try:
         import numpy as np
         from yak_core.edge import compute_empirical_std
@@ -999,13 +1005,24 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
         _final_proj = pd.to_numeric(pool.get("proj", 0), errors="coerce").fillna(0).clip(lower=0)
         _final_sal = pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0)
 
-        # 1) Clamp ceil >= proj and floor <= proj
-        if "ceil" in pool.columns:
-            _ceil = pd.to_numeric(pool["ceil"], errors="coerce").fillna(0)
-            pool["ceil"] = np.maximum(_ceil, _final_proj).round(2)
-        if "floor" in pool.columns:
-            _floor = pd.to_numeric(pool["floor"], errors="coerce").fillna(0)
-            pool["floor"] = np.minimum(_floor, _final_proj).round(2)
+        # 1) Recompute floor/ceil from final proj using salary-tier spread
+        _sal_k = (_final_sal / 1000.0).clip(lower=3.0)
+        _spread_mult = (0.65 - _sal_k * 0.03).clip(lower=0.25, upper=0.55)
+        # Blend with rolling variance when available
+        if "rolling_fp_5" in pool.columns and "rolling_fp_10" in pool.columns:
+            _fp5 = pd.to_numeric(pool["rolling_fp_5"], errors="coerce")
+            _fp10 = pd.to_numeric(pool["rolling_fp_10"], errors="coerce")
+            _rmean = ((_fp5.fillna(0) + _fp10.fillna(0)) / 2.0).replace(0, 1)
+            _rdiff = (_fp5.fillna(0) - _fp10.fillna(0)).abs()
+            _rcv = (_rdiff / _rmean).clip(lower=0.05, upper=0.60)
+            _has_rv = _fp5.notna() & _fp10.notna()
+            _spread_mult[_has_rv] = (
+                _rcv[_has_rv] * 0.60 + _spread_mult[_has_rv] * 0.40
+            ).clip(lower=0.25, upper=0.55)
+        _new_floor = (_final_proj * (1.0 - _spread_mult)).round(2)
+        _new_ceil = (_final_proj * (1.0 + _spread_mult)).round(2)
+        pool["floor"] = _new_floor
+        pool["ceil"] = _new_ceil
 
         # 2) Recompute sim percentiles from final proj + salary-bracket variance
         _std = compute_empirical_std(_final_proj.values, _final_sal.values, variance_mult=1.0)
