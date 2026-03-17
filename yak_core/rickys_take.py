@@ -275,7 +275,16 @@ def _find_contrarian_windows(pool: pd.DataFrame, mentioned: set) -> List[str]:
         "{name} at ${sal}, {proj:.0f} projected, {own:.0f}% owned. When nobody's looking, that's when you look harder.",
     ]
 
-    callouts = []
+    _LOTTO_TEMPLATES = [
+        "GPP lotto tickets: {names}. Low owned, high environment, mispriced. These are the kind of names that show up in winning lineups and nobody saw it coming.",
+        "GPP lotto shelf: {names}. The field walked right past them. One of these hits and your lineup looks like genius.",
+        "Lotto plays: {names}. Cheap, ignored, and sitting in the right game environment. That's the whole formula.",
+    ]
+
+    # Collect qualified contrarian picks
+    lead_callout = None  # First strong pick gets its own bullet
+    lotto_names = []     # Extras get bundled into a lotto bullet
+
     for i, (_, row) in enumerate(low_owned.nlargest(5, "pts_per_1k").iterrows()):
         name = row["player_name"]
         own = row[own_col]
@@ -298,17 +307,34 @@ def _find_contrarian_windows(pool: pd.DataFrame, mentioned: set) -> List[str]:
             if ou >= 230:
                 reason_parts.append(f"{ou:.0f} O/U game environment")
 
-        if reason_parts:
-            reason = " and ".join(reason_parts)
-            tmpl = _CONTRARIAN_TEMPLATES[i % len(_CONTRARIAN_TEMPLATES)]
-            callouts.append(tmpl.format(name=name, own=own, reason=reason))
+        qualified = bool(reason_parts) or row["pts_per_1k"] > 5.0
+        if not qualified:
+            continue
+
+        # First pick gets a full callout; the rest become lotto picks
+        if lead_callout is None:
+            if reason_parts:
+                reason = " and ".join(reason_parts)
+                tmpl = _CONTRARIAN_TEMPLATES[i % len(_CONTRARIAN_TEMPLATES)]
+                lead_callout = tmpl.format(name=name, own=own, reason=reason)
+            else:
+                tmpl = _CONTRARIAN_FALLBACK[i % len(_CONTRARIAN_FALLBACK)]
+                lead_callout = tmpl.format(name=name, sal=sal, proj=proj, own=own)
             mentioned.add(name)
-        elif row["pts_per_1k"] > 5.0:
-            tmpl = _CONTRARIAN_FALLBACK[i % len(_CONTRARIAN_FALLBACK)]
-            callouts.append(tmpl.format(name=name, sal=sal, proj=proj, own=own))
+        else:
+            lotto_names.append(f"{name} ({own:.0f}%)")
             mentioned.add(name)
 
-    return callouts[:2]  # Max 2
+    callouts = []
+    if lead_callout:
+        callouts.append(lead_callout)
+    if lotto_names:
+        import hashlib as _hl
+        _seed = int(_hl.md5(",".join(lotto_names).encode()).hexdigest()[:8], 16)
+        tmpl = _LOTTO_TEMPLATES[_seed % len(_LOTTO_TEMPLATES)]
+        callouts.append(tmpl.format(names=", ".join(lotto_names)))
+
+    return callouts[:2]  # Max 2 (1 lead + 1 lotto bundle)
 
 
 def _find_game_environment_edges(pool: pd.DataFrame, mentioned: set = None) -> List[str]:
