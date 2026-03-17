@@ -682,6 +682,36 @@ def prepare_pool(
     # ---- Ownership proxy ----
     df = _add_ownership(df, cfg)
 
+    # ---- Deflate cascade-inflated projections before scoring ----
+    # Players whose injury_bump_fp >= 40% of their original (pre-cascade)
+    # projection have numbers driven by cascade math, not real expectation.
+    # Dampen their proj toward original + 50% of the bump so the optimizer
+    # doesn't over-rank them (especially as Showdown captains).
+    if "injury_bump_fp" in df.columns and "original_proj" in df.columns:
+        _bump = pd.to_numeric(df["injury_bump_fp"], errors="coerce").fillna(0)
+        _orig = pd.to_numeric(df["original_proj"], errors="coerce").fillna(0)
+        _base = _orig.where(_orig > 0, df["proj"])
+        _cascade_ratio = _bump / _base.clip(lower=1)
+        _inflated = (_cascade_ratio >= 0.40) & (_bump > 0)
+        if _inflated.any():
+            # Keep 50% of the cascade bump — acknowledges the opportunity
+            # without letting the full inflated number drive scoring
+            _dampened = _orig + _bump * 0.50
+            # Scale factor: ratio of dampened to CURRENT (inflated) proj
+            # Must compute before overwriting proj
+            _cur_proj = pd.to_numeric(df["proj"], errors="coerce").clip(lower=1)
+            _scale = _dampened / _cur_proj
+            df.loc[_inflated, "proj"] = _dampened[_inflated]
+            # Proportionally dampen ceil & sim percentiles so upside/boom
+            # don't still reflect the inflated number
+            for _sim_col in ["ceil", "floor", "sim15th", "sim33rd", "sim50th",
+                             "sim66th", "sim85th", "sim90th", "sim99th"]:
+                if _sim_col in df.columns:
+                    _vals = pd.to_numeric(df[_sim_col], errors="coerce")
+                    df.loc[_inflated, _sim_col] = (_vals * _scale)[_inflated]
+            n_deflated = _inflated.sum()
+            print(f"[prepare_pool] Dampened {n_deflated} cascade-inflated projection(s) (kept 50% of bump)")
+
     # ---- Derived scores ----
     df = _add_scores(df, cfg)
 
