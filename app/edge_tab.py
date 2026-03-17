@@ -144,6 +144,78 @@ def _render_edge_box(key: str, players: List[Dict], is_pga: bool) -> None:
     st.markdown(box_html, unsafe_allow_html=True)
 
 
+def _render_slate_recap(sport: str) -> None:
+    """Render the Previous Slate Recap section.
+
+    Shows how yesterday's projections performed vs actuals, with
+    hit/miss indicators.  Replaces the old emoji name lists.
+    """
+    try:
+        from yak_core.slate_recap import get_previous_slate_recap
+        recap = get_previous_slate_recap(sport)
+    except Exception as exc:
+        print(f"[edge_tab] Slate recap error: {exc}")
+        recap = None
+
+    if recap is None:
+        st.caption("No previous slate data available.")
+        return
+
+    summary = recap["summary"]
+    players = recap["players"]
+    slate_date = recap["slate_date"]
+
+    # Header with summary stats
+    st.markdown(
+        f'<div style="margin-bottom:8px;">'
+        f'<strong>Previous Slate Recap</strong> '
+        f'<span style="color:rgba(240,240,240,0.5);font-size:0.85rem;">({slate_date})</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Summary metrics row
+    mc1, mc2, mc3, mc4, mc5 = st.columns(5)
+    mc1.metric("Total", summary["total"])
+    mc2.metric("Big Hits", f"{summary['big_hits']}", delta=None)
+    mc3.metric("Hits", f"{summary['hits']}", delta=None)
+    mc4.metric("Misses", f"{summary['misses']}", delta=None)
+    mc5.metric("Busts", f"{summary['busts']}", delta=None)
+
+    # Show top players in a compact table — limit to top 20 by salary
+    display_players = players[:20]
+    if display_players:
+        rows_html = []
+        for p in display_players:
+            delta_color = "#4CAF50" if p["delta"] >= 0 else "#f44336"
+            delta_str = f"+{p['delta']:.1f}" if p["delta"] >= 0 else f"{p['delta']:.1f}"
+            rows_html.append(
+                f'<tr>'
+                f'<td style="padding:3px 8px;">{p["emoji"]}</td>'
+                f'<td style="padding:3px 8px;font-weight:500;">{p["player_name"]}</td>'
+                f'<td style="padding:3px 8px;text-align:right;">{p["projected"]:.1f}</td>'
+                f'<td style="padding:3px 8px;text-align:right;">{p["actual"]:.1f}</td>'
+                f'<td style="padding:3px 8px;text-align:right;color:{delta_color};">{delta_str}</td>'
+                f'</tr>'
+            )
+        table_html = (
+            '<table style="width:100%;border-collapse:collapse;font-size:0.88rem;margin-bottom:12px;">'
+            '<thead><tr style="border-bottom:1px solid rgba(255,255,255,0.1);">'
+            '<th style="padding:3px 8px;text-align:left;"></th>'
+            '<th style="padding:3px 8px;text-align:left;">Player</th>'
+            '<th style="padding:3px 8px;text-align:right;">Proj</th>'
+            '<th style="padding:3px 8px;text-align:right;">Actual</th>'
+            '<th style="padding:3px 8px;text-align:right;">Delta</th>'
+            '</tr></thead><tbody>'
+            + "".join(rows_html)
+            + '</tbody></table>'
+        )
+        st.markdown(table_html, unsafe_allow_html=True)
+
+        if len(players) > 20:
+            st.caption(f"Showing top 20 of {len(players)} players (by salary).")
+
+
 def render_edge_tab(sport: str) -> None:
     """Render Ricky's Edge Analysis tab."""
     from app.data_loader import invalidate_published_cache, load_published_data
@@ -181,29 +253,10 @@ def render_edge_tab(sport: str) -> None:
     if rec:
         st.markdown(f'<div class="rec-box">{rec}</div>', unsafe_allow_html=True)
 
-    # Emoji-tagged category lines (not generic bullets)
-    _TAG_EMOJI = {"core": "🎯", "leverage": "💎", "value": "💰", "fade": "👋"}
-    _TAG_LABEL = {"core": "Core", "leverage": "Leverage", "value": "Value", "fade": "Fade"}
-
-    tag_lines = []
-    for key in ["core_plays", "leverage_plays", "value_plays", "fade_candidates"]:
-        plays = edge_analysis.get(key, [])
-        if not plays:
-            continue
-        tag = plays[0].get("tag", key.split("_")[0])
-        emoji = _TAG_EMOJI.get(tag, "")
-        label = _TAG_LABEL.get(tag, tag.title())
-        names = ", ".join(p["player_name"] for p in plays)
-        tag_lines.append(f"{emoji} <strong>{label}</strong>: {names}")
-
-    # Wave bullets (PGA)
-    for b in bullets:
-        if "Wave" in b or "wave" in b:
-            tag_lines.append(f"⛳ {b}")
-
-    if tag_lines:
-        lines_html = "<br>".join(tag_lines)
-        st.markdown(f'<div style="margin-bottom:16px;line-height:1.8;">{lines_html}</div>', unsafe_allow_html=True)
+    # ── Previous Slate Recap ──────────────────────────────────────────────
+    # Replaces the old emoji-tagged name lists (Core/Leverage/Value/Fade)
+    # with a comparison of yesterday's projections vs actual results.
+    _render_slate_recap(sport)
 
     st.markdown("")  # spacer
 

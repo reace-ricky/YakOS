@@ -1741,6 +1741,65 @@ def _build_one_lineup_pass2(
 
 
 # =============================================================================
+# CPT OWNERSHIP TIER MULTIPLIER (Showdown)
+# =============================================================================
+
+# Tier-based multiplier: CPT salary range → fraction of overall ownership
+# that becomes captain-specific ownership.  Higher-salary captains are
+# picked more often by the field, lower-salary captains rarely.
+_CPT_OWN_TIERS = [
+    (15_000, 0.52),   # $15K+ CPT salary
+    (9_000,  0.16),   # $9K–$14,999
+    (6_000,  0.12),   # $6K–$8,999
+    (4_000,  0.14),   # $4K–$5,999
+    (0,      0.03),   # < $4K
+]
+
+
+def _cpt_salary_multiplier(cpt_salary: float) -> float:
+    """Return the CPT ownership multiplier for a given CPT salary."""
+    for threshold, mult in _CPT_OWN_TIERS:
+        if cpt_salary >= threshold:
+            return mult
+    return 0.03
+
+
+def add_cpt_own_pct(pool: pd.DataFrame) -> pd.DataFrame:
+    """Add ``cpt_own_pct`` column to a showdown player pool.
+
+    Uses projection-rank-based ownership (appropriate for single-game
+    showdown context where ownership is concentrated on top players)
+    multiplied by the CPT salary tier multiplier.
+
+    Projection-rank ownership: rank 1 → 85%, rank 2 → 70%, rank 3 → 55%,
+    tapering down.  This reflects showdown-game-level ownership, not
+    main-slate ownership which is diluted across many games.
+
+    CPT salary = FLEX salary × 1.5, then looked up in the tier table.
+    """
+    df = pool.copy()
+
+    # For showdown, always use projection-rank-based ownership estimate.
+    # Main-slate POWN (own_pct/proj_own) is for the entire slate and is
+    # far too low for showdown context (e.g. Tatum 15% main → 70%+ in
+    # a single-game showdown).
+    rank = df["proj"].rank(ascending=False, method="first")
+    n = len(df)
+    # Rank 1 → 0.85, rank 2 → 0.70, rank 3 → 0.55, then taper
+    sd_own = (0.85 - 0.15 * (rank - 1)).clip(lower=0.02, upper=0.85)
+
+    # Compute CPT salary (FLEX salary × 1.5)
+    flex_salary = pd.to_numeric(df["salary"], errors="coerce").fillna(0)
+    cpt_salary = flex_salary * DK_SHOWDOWN_CAPTAIN_MULTIPLIER
+
+    # Apply tier multiplier: sd_own × multiplier(cpt_salary)
+    multipliers = cpt_salary.apply(_cpt_salary_multiplier)
+    df["cpt_own_pct"] = sd_own * multipliers
+
+    return df
+
+
+# =============================================================================
 # PuLP OPTIMISER — SHOWDOWN (Captain Mode)
 # =============================================================================
 
@@ -1786,6 +1845,9 @@ def build_showdown_lineups(
     max_pair_appearances = int(cfg.get("MAX_PAIR_APPEARANCES", 0))
 
     noise_std = float(cfg.get("SD_NOISE_STD", DEFAULT_CONFIG.get("SD_NOISE_STD", 0.10)))
+
+    # ── Add CPT ownership tier multiplier ────────────────────────────────────
+    player_pool = add_cpt_own_pct(player_pool)
 
     base_players = player_pool.to_dict("records")
     m = len(base_players)
@@ -1837,10 +1899,11 @@ def build_showdown_lineups(
         else:
             boom = 0.0
 
-        # Ownership adjustment (same log-based as v8, NOT scaled by 1.5x)
-        own = max(0.001, float(p.get("own_pct", 0)))
-        own_adj = -own_penalty_k * np.log(own / 0.15)
-        own_adj += own_low_boost * max(0.0, 0.08 - own) * 10
+        # Ownership adjustment — use cpt_own_pct for captain-specific leverage
+        # High CPT ownership → penalty, low CPT ownership → bonus (GPP leverage)
+        cpt_own = max(0.001, float(p.get("cpt_own_pct", p.get("own_pct", 0.05))))
+        own_adj = -own_penalty_k * np.log(cpt_own / 0.15)
+        own_adj += own_low_boost * max(0.0, 0.08 - cpt_own) * 10
 
         return proj * gpp_proj_w + upside * gpp_upside_w + boom * gpp_boom_w + own_adj
 
@@ -1994,6 +2057,7 @@ def build_showdown_lineups(
                     "salary": p["salary"],  # already 1.5x
                     "proj": p.get("proj", 0) * cpt_mult,
                     "own_pct": p.get("own_pct", 0),
+                    "cpt_own_pct": p.get("cpt_own_pct", 0),
                     "gpp_score": p.get("gpp_score", 0),
                     "cash_score": p.get("cash_score", 0),
                 })
@@ -2014,6 +2078,7 @@ def build_showdown_lineups(
                     "salary": p["salary"],
                     "proj": p.get("proj", 0),
                     "own_pct": p.get("own_pct", 0),
+                    "cpt_own_pct": p.get("cpt_own_pct", 0),
                     "gpp_score": p.get("gpp_score", 0),
                     "cash_score": p.get("cash_score", 0),
                 })
@@ -2056,6 +2121,7 @@ def build_showdown_lineups(
                 "salary": p["salary"],
                 "proj": p.get("proj", 0),
                 "own_pct": p.get("own_pct", 0),
+                "cpt_own_pct": p.get("cpt_own_pct", 0),
                 "lineups": times,
                 "exposure": times / max(n_built, 1),
             })

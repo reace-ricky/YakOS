@@ -103,6 +103,23 @@ def render_optimizer_tab(sport: str) -> None:
     display_df = pool[avail_cols].copy()
     display_df = display_df.sort_values("salary", ascending=False).reset_index(drop=True)
 
+    # ── Showdown: add CPT ownership column to pool display ──
+    # Computed from salary tier multiplier × overall ownership
+    _show_cpt_own = (
+        not is_pga
+        and "salary" in pool.columns
+        and any("showdown" in c.lower() for c in contest_options)
+    )
+    if _show_cpt_own:
+        from yak_core.lineups import add_cpt_own_pct
+        _pool_with_cpt = add_cpt_own_pct(pool.copy())
+        if "cpt_own_pct" in _pool_with_cpt.columns:
+            display_df["cpt_own%"] = (
+                _pool_with_cpt.sort_values("salary", ascending=False)
+                .reset_index(drop=True)["cpt_own_pct"]
+                .apply(lambda x: f"{x * 100:.1f}%")
+            )
+
     # ── Emoji tag column from edge analysis ──
     _TAG_EMOJI = {"core": "🎯", "leverage": "💎", "value": "💰", "fade": "👋"}
     player_tag_map: dict[str, str] = {}
@@ -287,8 +304,17 @@ def render_optimizer_tab(sport: str) -> None:
                 show_cols = ["player_name", "pos", "salary", "proj", "ceil"]
                 if "slot" in lu.columns:
                     show_cols = ["slot"] + show_cols
+                # Add CPT ownership column for showdown lineups
+                if "cpt_own_pct" in lu.columns:
+                    show_cols.append("cpt_own_pct")
                 avail = [c for c in show_cols if c in lu.columns]
-                st.dataframe(lu[avail].reset_index(drop=True), use_container_width=True, hide_index=True)
+                _lu_display = lu[avail].reset_index(drop=True)
+                if "cpt_own_pct" in _lu_display.columns:
+                    _lu_display["cpt_own_pct"] = _lu_display["cpt_own_pct"].apply(
+                        lambda x: f"{float(x) * 100:.1f}%" if pd.notna(x) else ""
+                    )
+                    _lu_display = _lu_display.rename(columns={"cpt_own_pct": "cpt_own%"})
+                st.dataframe(_lu_display, use_container_width=True, hide_index=True)
         else:
             st.dataframe(lineups_df, use_container_width=True)
 
