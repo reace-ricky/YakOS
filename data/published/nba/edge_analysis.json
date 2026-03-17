@@ -1,215 +1,215 @@
 {
   "bullets": [
-    "Core anchors: Luka Doncic, Victor Wembanyama, Jalen Johnson",
-    "Leverage plays: Pat Spencer, Brandon Williams",
-    "Value targets: Malevy Leons, Gary Payton II",
+    "Core anchors: Josh Giddey, Donovan Clingan, Luka Doncic",
+    "Leverage plays: Gui Santos, Brandon Williams",
+    "Value targets: Gary Payton II, Malevy Leons",
     "Fade candidates: Max Shulga, Mouhamed Gueye"
   ],
-  "recommendation": "5 core plays anchored at $9,000\u2013$12,200. 5 value plays averaging 19.9 pts/$1K. 3 leverage plays at 0\u20130% ownership.",
+  "recommendation": "5 core plays anchored at $7,400\u2013$12,200. 5 value plays averaging 18.0 pts/$1K. 3 leverage plays at 0\u20130% ownership.",
   "core_plays": [
+    {
+      "player_name": "Josh Giddey",
+      "salary": 9000,
+      "proj": 66.41,
+      "ownership": 34.37,
+      "edge": 0.596517616315472,
+      "value": 7.378888888888889,
+      "proj_minutes": 30.3,
+      "sim90th": 62.099999999999994,
+      "ceil": 74.75
+    },
+    {
+      "player_name": "Donovan Clingan",
+      "salary": 7800,
+      "proj": 56.72,
+      "ownership": 15.26,
+      "edge": 0.5485940670794947,
+      "value": 7.271794871794872,
+      "proj_minutes": 27.3,
+      "sim90th": 51.93,
+      "ceil": 69.64
+    },
     {
       "player_name": "Luka Doncic",
       "salary": 12200,
-      "proj": 56.910000000000004,
+      "proj": 56.94,
       "ownership": 0.0,
-      "edge": 0.44639421618693675,
-      "value": 4.664754098360656,
-      "proj_minutes": 34.3,
-      "sim90th": 71.92999999999999,
-      "ceil": 69.45
+      "edge": 0.42204448443812687,
+      "value": 4.667213114754098,
+      "proj_minutes": 33.3,
+      "sim90th": 71.44,
+      "ceil": 69.42
+    },
+    {
+      "player_name": "Jrue Holiday",
+      "salary": 7400,
+      "proj": 54.01,
+      "ownership": 8.58,
+      "edge": 0.49732992178123386,
+      "value": 7.298648648648648,
+      "proj_minutes": 27.4,
+      "sim90th": 46.629999999999995,
+      "ceil": 68.65
     },
     {
       "player_name": "Victor Wembanyama",
       "salary": 11000,
-      "proj": 55.17,
+      "proj": 55.96,
       "ownership": 0.0,
-      "edge": 0.47701575273759406,
-      "value": 5.015454545454546,
-      "proj_minutes": 29.7,
-      "sim90th": 66.47,
-      "ceil": 64.14
-    },
-    {
-      "player_name": "Jalen Johnson",
-      "salary": 10900,
-      "proj": 51.29,
-      "ownership": 13.55,
-      "edge": 0.3798786471762461,
-      "value": 4.705504587155963,
-      "proj_minutes": 36.2,
-      "sim90th": 64.98,
-      "ceil": 61.52
-    },
-    {
-      "player_name": "Josh Giddey",
-      "salary": 9000,
-      "proj": 68.13,
-      "ownership": 44.18,
-      "edge": 0.5999046297620705,
-      "value": 7.569999999999999,
-      "proj_minutes": 30.5,
-      "sim90th": 62.76,
-      "ceil": 60.18
-    },
-    {
-      "player_name": "Kevin Durant",
-      "salary": 9000,
-      "proj": 47.88,
-      "ownership": 0.0,
-      "edge": 0.4582260775144269,
-      "value": 5.32,
-      "proj_minutes": 35.5,
-      "sim90th": 59.150000000000006,
-      "ceil": 56.62
+      "edge": 0.46080295246165787,
+      "value": 5.087272727272727,
+      "proj_minutes": 29.8,
+      "sim90th": 66.98,
+      "ceil": 67.61
     }
   ],
   "leverage_plays": [
     {
-      "player_name": "Pat Spencer",
-      "salary": 5000,
-      "proj": 58.190000000000005,
-      "ownership": 0.05,
-      "edge": 0.5810077229071962,
-      "value": 11.638000000000002,
-      "proj_minutes": 25.8,
-      "sim90th": 31.13,
-      "ceil": 30.0
+      "player_name": "Gui Santos",
+      "salary": 7300,
+      "proj": 43.120000000000005,
+      "ownership": 0.12,
+      "edge": 0.6066549241430035,
+      "value": 5.906849315068494,
+      "proj_minutes": 29.2,
+      "sim90th": 45.28,
+      "ceil": 52.09
     },
     {
       "player_name": "Brandon Williams",
       "salary": 5200,
-      "proj": 51.15,
+      "proj": 50.32,
       "ownership": 0.05,
-      "edge": 0.5337361440351958,
-      "value": 9.836538461538462,
+      "edge": 0.5266313187984735,
+      "value": 9.676923076923076,
       "proj_minutes": 20.6,
-      "sim90th": 31.25,
-      "ceil": 29.82
+      "sim90th": 29.79,
+      "ceil": 66.93
     },
     {
-      "player_name": "Amen Thompson",
-      "salary": 8000,
-      "proj": 45.82,
+      "player_name": "Stephon Castle",
+      "salary": 7700,
+      "proj": 49.22,
       "ownership": 0.0,
-      "edge": 0.5157385727835048,
-      "value": 5.7275,
-      "proj_minutes": 36.3,
-      "sim90th": 57.27,
-      "ceil": 53.23
+      "edge": 0.5090470458900929,
+      "value": 6.392207792207792,
+      "proj_minutes": 25.8,
+      "sim90th": 49.91,
+      "ceil": 60.73
     }
   ],
   "value_plays": [
     {
-      "player_name": "Malevy Leons",
-      "salary": 3400,
-      "proj": 82.09,
-      "ownership": 0.44,
-      "edge": 0.7564837195461308,
-      "value": 24.144117647058824,
-      "proj_minutes": 3.8,
-      "sim90th": 16.61,
-      "ceil": 15.82
-    },
-    {
       "player_name": "Gary Payton II",
       "salary": 4500,
-      "proj": 90.88,
-      "ownership": 20.5,
-      "edge": 0.7123002613731102,
-      "value": 20.195555555555554,
+      "proj": 94.72,
+      "ownership": 27.08,
+      "edge": 0.7112497777292435,
+      "value": 21.04888888888889,
       "proj_minutes": 20.2,
-      "sim90th": 34.040000000000006,
-      "ceil": 32.4
+      "sim90th": 34.92,
+      "ceil": 85.9
+    },
+    {
+      "player_name": "Malevy Leons",
+      "salary": 3400,
+      "proj": 70.03,
+      "ownership": 0.45,
+      "edge": 0.6844741093904186,
+      "value": 20.597058823529412,
+      "proj_minutes": 3.8,
+      "sim90th": 14.6,
+      "ceil": 55.06
     },
     {
       "player_name": "Nick Richards",
       "salary": 4400,
-      "proj": 88.67,
-      "ownership": 0.29,
-      "edge": 0.7902541930174712,
-      "value": 20.152272727272727,
-      "proj_minutes": 21.8,
-      "sim90th": 29.57,
-      "ceil": 28.04
-    },
-    {
-      "player_name": "Leonard Miller",
-      "salary": 4300,
-      "proj": 80.93,
-      "ownership": 17.7,
-      "edge": 0.6576903288030924,
-      "value": 18.82093023255814,
-      "proj_minutes": 13.2,
-      "sim90th": 33.93,
-      "ceil": 31.3
+      "proj": 83.83,
+      "ownership": 0.45,
+      "edge": 0.7063829996332893,
+      "value": 19.052272727272726,
+      "proj_minutes": 21.0,
+      "sim90th": 29.41,
+      "ceil": 70.49
     },
     {
       "player_name": "Patrick Williams",
       "salary": 3500,
-      "proj": 57.27,
-      "ownership": 0.05,
-      "edge": 0.5702912296248929,
-      "value": 16.362857142857145,
-      "proj_minutes": 24.7,
-      "sim90th": 23.240000000000002,
-      "ceil": 21.89
+      "proj": 53.79,
+      "ownership": 0.63,
+      "edge": 0.5775321743811452,
+      "value": 15.368571428571428,
+      "proj_minutes": 24.1,
+      "sim90th": 22.159999999999997,
+      "ceil": 55.71
+    },
+    {
+      "player_name": "Leonard Miller",
+      "salary": 4300,
+      "proj": 60.83,
+      "ownership": 0.33,
+      "edge": 0.6398015028982147,
+      "value": 14.146511627906976,
+      "proj_minutes": 12.8,
+      "sim90th": 28.08,
+      "ceil": 49.22
     }
   ],
   "fade_candidates": [
     {
       "player_name": "Max Shulga",
       "salary": 3000,
-      "proj": 0.020000000000000018,
-      "ownership": 0.05,
-      "edge": 0.08183267515362176,
-      "value": 0.006666666666666672,
+      "proj": 0.050000000000000044,
+      "ownership": 0.18,
+      "edge": 0.08263683187420107,
+      "value": 0.01666666666666668,
       "proj_minutes": 1.8,
       "sim90th": 0.0,
-      "ceil": 0.35
+      "ceil": 1.1
     },
     {
       "player_name": "Mouhamed Gueye",
       "salary": 3100,
-      "proj": 3.63,
-      "ownership": 0.22,
-      "edge": 0.1388237029708216,
-      "value": 1.1709677419354838,
+      "proj": 3.6100000000000003,
+      "ownership": 0.48,
+      "edge": 0.12375148400975075,
+      "value": 1.164516129032258,
       "proj_minutes": 18.5,
-      "sim90th": 5.42,
-      "ceil": 5.43
+      "sim90th": 5.75,
+      "ceil": 8.87
     },
     {
       "player_name": "Jarred Vanderbilt",
       "salary": 3000,
-      "proj": 0.8299999999999998,
+      "proj": 0.48,
       "ownership": 0.0,
-      "edge": 0.14108588866274846,
-      "value": 0.2766666666666666,
+      "edge": 0.12629371249094884,
+      "value": 0.16,
       "proj_minutes": 17.1,
-      "sim90th": 3.37,
-      "ceil": 2.79
+      "sim90th": 1.3499999999999999,
+      "ceil": 2.1
     },
     {
       "player_name": "Amari Williams",
       "salary": 3000,
       "proj": 0.97,
-      "ownership": 0.17,
-      "edge": 0.1413353728135267,
+      "ownership": 0.05,
+      "edge": 0.1412249401328549,
       "value": 0.3233333333333333,
       "proj_minutes": 5.9,
       "sim90th": 0.0,
-      "ceil": 0.46
+      "ceil": 1.84
     },
     {
-      "player_name": "Jordan McLaughlin",
+      "player_name": "AJ Johnson",
       "salary": 3000,
-      "proj": 2.45,
-      "ownership": 0.0,
-      "edge": 0.15720796712400592,
-      "value": 0.8166666666666668,
-      "proj_minutes": 3.9,
-      "sim90th": 0.6599999999999999,
-      "ceil": 0.94
+      "proj": 0.8299999999999998,
+      "ownership": 0.05,
+      "edge": 0.14467568240759882,
+      "value": 0.2766666666666666,
+      "proj_minutes": 9.8,
+      "sim90th": 0.0,
+      "ceil": 1.88
     }
   ],
   "signals_df_path": "signals.parquet"
