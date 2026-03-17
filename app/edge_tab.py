@@ -55,13 +55,6 @@ _CARD_CSS = """
 }
 .wave-early { background: #1565C0; color: #fff; }
 .wave-late { background: #E65100; color: #fff; }
-.rec-box {
-    border: 1px solid #1E90FF;
-    border-radius: 8px;
-    padding: 14px 18px;
-    background: rgba(30,144,255,0.08);
-    margin-bottom: 16px;
-}
 .bullet-list {
     margin: 0;
     padding-left: 20px;
@@ -269,12 +262,6 @@ def render_edge_tab(sport: str) -> None:
     # ── Header ──
     st.markdown(f"## 📐 Right Angle Ricky — {sport}")
     st.caption(f"{slate_date} · {pool_size} players · DraftKings")
-
-    # ── Analysis + Recommendation up top ──
-    rec = edge_analysis.get("recommendation", "")
-
-    if rec:
-        st.markdown(f'<div class="rec-box">{rec}</div>', unsafe_allow_html=True)
 
     # ── Ricky's Take ─────────────────────────────────────────────────────
     _render_rickys_take(sport, pool, edge_analysis)
