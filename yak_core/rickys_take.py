@@ -343,6 +343,10 @@ def generate_tonights_edges(pool: pd.DataFrame) -> List[str]:
     run in order (mismatches → traps → contrarian → environment) and share a
     ``mentioned`` set so later generators skip players already called out.
 
+    Players whose projection is heavily cascade-inflated (injury_bump_fp >= 40%
+    of original_proj) are excluded — we don't hype a number the model doesn't
+    actually believe.
+
     Parameters
     ----------
     pool : pd.DataFrame
@@ -356,12 +360,27 @@ def generate_tonights_edges(pool: pd.DataFrame) -> List[str]:
     if pool.empty:
         return []
 
+    # ── Strip cascade-inflated players before generating callouts ──
+    # If the injury bump is >= 40% of the original (pre-cascade) projection,
+    # the number is mostly cascade math, not a real expectation.
+    _pool = pool.copy()
+    if "injury_bump_fp" in _pool.columns and "original_proj" in _pool.columns:
+        _bump = pd.to_numeric(_pool["injury_bump_fp"], errors="coerce").fillna(0)
+        _orig = pd.to_numeric(_pool["original_proj"], errors="coerce").fillna(0)
+        _base = _orig.where(_orig > 0, _pool["proj"] if "proj" in _pool.columns else 1)
+        _cascade_ratio = _bump / _base.clip(lower=1)
+        _inflated = (_cascade_ratio >= 0.40) & (_bump > 0)
+        n_removed = _inflated.sum()
+        if n_removed > 0:
+            _pool = _pool[~_inflated].reset_index(drop=True)
+            print(f"[generate_tonights_edges] Excluded {n_removed} cascade-inflated player(s) from callouts")
+
     mentioned: set = set()  # player names already used in a callout
     callouts = []
-    callouts.extend(_find_salary_mismatches(pool, mentioned))
-    callouts.extend(_find_ownership_traps(pool, mentioned))
-    callouts.extend(_find_contrarian_windows(pool, mentioned))
-    callouts.extend(_find_game_environment_edges(pool, mentioned))
+    callouts.extend(_find_salary_mismatches(_pool, mentioned))
+    callouts.extend(_find_ownership_traps(_pool, mentioned))
+    callouts.extend(_find_contrarian_windows(_pool, mentioned))
+    callouts.extend(_find_game_environment_edges(_pool, mentioned))
 
     # Cap at 5 callouts, prioritize variety (already ordered by type)
     return callouts[:5]
