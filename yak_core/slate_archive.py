@@ -53,6 +53,7 @@ _ARCHIVE_COLS = [
     "fp_per_min",
     # Cascade / projection source columns
     "original_proj", "adjusted_proj", "injury_bump_fp",
+    "minutes_gap_bump_fp",
     "tank01_proj", "proj_source",
 ]
 

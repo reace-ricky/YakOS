@@ -55,8 +55,8 @@ MAX_PLAYER_MINUTES: float = 40.0
 
 # Max bump multiplier: cascade bump cannot exceed this × original projection.
 # A player projected for 20 FP can get at most +10 FP (0.5×20), totaling 30 FP.
-_MAX_BUMP_MULTIPLIER: float = 0.50  # Max injury bump = 50% of base projection
-_MAX_TOTAL_BUMP_MULTIPLIER: float = 0.65  # Max total bump (injury + minutes gap combined)
+_MAX_BUMP_MULTIPLIER: float = 0.35  # Max injury bump = 35% of base projection
+_MAX_TOTAL_BUMP_MULTIPLIER: float = 0.40  # Max total bump (injury + minutes gap combined)
 
 # ---------------------------------------------------------------------------
 # Position matching
@@ -421,6 +421,28 @@ def apply_injury_cascade(
 
         # Identify primary backup index for the single-injury cap (reuses helper)
         primary_backup_idx: Optional[int] = _find_primary_backup_idx(weights, eligible, out_pos)
+
+        # ── Concentrate bumps on top beneficiaries ──────────────────────
+        # In reality, 1-2 players absorb 70%+ of a missing player's role.
+        # Spreading evenly across 8-10 teammates dilutes the signal and
+        # inflates bench players who won't actually see more run.
+        # Give 80% of the total weight to the top 3, 20% to the next 2.
+        # Everyone else gets zero.
+        _TOP_N = 3
+        _SEC_N = 2
+        _TOP_SHARE = 0.80
+        if len(weights) > _TOP_N + _SEC_N:
+            sorted_idxs = sorted(weights, key=lambda i: weights[i], reverse=True)
+            top_idxs = sorted_idxs[:_TOP_N]
+            sec_idxs = sorted_idxs[_TOP_N:_TOP_N + _SEC_N]
+            top_total = sum(weights[i] for i in top_idxs)
+            sec_total = sum(weights[i] for i in sec_idxs)
+            new_weights: Dict[int, float] = {}
+            for i in top_idxs:
+                new_weights[i] = (weights[i] / max(top_total, 0.01)) * _TOP_SHARE
+            for i in sec_idxs:
+                new_weights[i] = (weights[i] / max(sec_total, 0.01)) * (1.0 - _TOP_SHARE)
+            weights = new_weights
 
         total_weight = sum(weights.values())
         if total_weight <= 0:

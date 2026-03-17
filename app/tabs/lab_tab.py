@@ -820,14 +820,13 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
     except Exception as exc:
         print(f"[_load_nba_pool] apply_injury_cascade failed (non-fatal): {exc}")
 
-    # ── Minutes gap redistribution: catch teams missing off-slate players ──
-    try:
-        pool = apply_minutes_gap_redistribution(pool)
-        _n_gap = int((pool.get("minutes_gap_bump_min", pd.Series(0, index=pool.index)) > 0).sum())
-        if _n_gap:
-            print(f"[_load_nba_pool] Minutes gap redistribution boosted {_n_gap} player(s)")
-    except Exception as exc:
-        print(f"[_load_nba_pool] apply_minutes_gap_redistribution failed (non-fatal): {exc}")
+    # ── Minutes gap redistribution: DISABLED ──────────────────────────────
+    # Removed: apply_minutes_gap_redistribution() was silently adding a second
+    # round of uncapped projection bumps on top of injury_cascade.  It used the
+    # cascade-inflated fp_per_min rate, producing 50x over-distribution
+    # (e.g. Quinten Post OUT at 4.5 fp → 225.7 fp distributed to teammates).
+    # The injury cascade already handles known OUT players; off-slate absences
+    # are priced into DK salaries.  See audit 2026-03-17.
 
     # ── Pop Catalyst: score situational upside signals ──
     try:
@@ -988,6 +987,46 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
                 pd.to_numeric(pool.loc[b2b_mask, "proj_minutes"], errors="coerce").fillna(0) * 0.93
             )
             print(f"[_load_nba_pool] B2B dampened minutes for {b2b_mask.sum()} player(s)")
+
+    # ── Post-cascade recompute: ceil/floor/sims from final proj ──────────
+    # All projection-modifying steps are done (cascade, blowout, B2B).
+    # Recompute ceil/floor/sims so they reflect the FINAL proj, not the
+    # stale pre-cascade RG values.  See audit 2026-03-17 Fix 4.
+    try:
+        import numpy as np
+        from yak_core.edge import compute_empirical_std
+
+        _final_proj = pd.to_numeric(pool.get("proj", 0), errors="coerce").fillna(0).clip(lower=0)
+        _final_sal = pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0)
+
+        # 1) Clamp ceil >= proj and floor <= proj
+        if "ceil" in pool.columns:
+            _ceil = pd.to_numeric(pool["ceil"], errors="coerce").fillna(0)
+            pool["ceil"] = np.maximum(_ceil, _final_proj).round(2)
+        if "floor" in pool.columns:
+            _floor = pd.to_numeric(pool["floor"], errors="coerce").fillna(0)
+            pool["floor"] = np.minimum(_floor, _final_proj).round(2)
+
+        # 2) Recompute sim percentiles from final proj + salary-bracket variance
+        _std = compute_empirical_std(_final_proj.values, _final_sal.values, variance_mult=1.0)
+        _n_sims = 5000
+        _rng = np.random.default_rng(42)  # deterministic seed for reproducibility
+        _sim_matrix = _rng.normal(
+            loc=_final_proj.values[None, :],
+            scale=_std[None, :],
+            size=(_n_sims, len(_final_proj)),
+        )
+        _sim_matrix = np.maximum(_sim_matrix, 0.0)
+        for _pct, _col in [
+            (15, "sim15th"), (33, "sim33rd"), (50, "sim50th"),
+            (66, "sim66th"), (85, "sim85th"), (90, "sim90th"), (99, "sim99th"),
+        ]:
+            pool[_col] = np.percentile(_sim_matrix, _pct, axis=0).round(2)
+
+        _n_recomp = int((_final_proj > 0).sum())
+        print(f"[_load_nba_pool] Post-cascade recompute: ceil/floor/sims refreshed for {_n_recomp} player(s)")
+    except Exception as exc:
+        print(f"[_load_nba_pool] post-cascade recompute failed (non-fatal): {exc}")
 
     # ── Sim eligibility ──
     try:
@@ -1295,6 +1334,9 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
     _injury_bump = _safe_col(df, "injury_bump_fp")
     _proj_minutes = _safe_col(df, "proj_minutes")
     _sim_leverage = _safe_col(df, "sim_leverage")
+    # Use original_proj (pre-cascade) for cascade % check so inflated proj doesn't dilute the ratio
+    _orig_proj = _safe_col(df, "original_proj")
+    _base_proj = _orig_proj.where(_orig_proj > 0, _proj)  # fall back to proj if original_proj missing
 
     # ── Columns to display ──
     _pick_cols = ["player_name", "salary", "proj", _own_col, "edge", "value"]
@@ -1303,12 +1345,16 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
             _pick_cols.append(_extra)
 
     # ── CORE: high conviction, real upside, not cascade noise ──
-    _cascade_ok_core = (_injury_bump < _proj * 0.40) | (_injury_bump == 0)
+    # Cascade filter: bump must be < 40% of ORIGINAL proj (not inflated proj)
+    _cascade_ok_core = (_injury_bump < _base_proj * 0.40) | (_injury_bump == 0)
+    # Minutes floor: must be a real rotation player (>= 15 min), skip if data missing
+    _min_ok_core = (_proj_minutes >= 15) | (_proj_minutes == 0)
     core_mask = (
         (_edge >= _edge_p65)
         & (_ceil >= _ceil_p70)
         & (_proj >= _proj_median)
         & _cascade_ok_core
+        & _min_ok_core
     )
     core = df[core_mask][_pick_cols].copy()
     core = core.rename(columns={_own_col: "ownership"})
@@ -1317,7 +1363,7 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
     _used = set(core["player_name"].tolist())
 
     # ── LEVERAGE: under-owned relative to upside ──
-    _cascade_ok_lev = (_injury_bump < _proj * 0.50) | (_injury_bump == 0)
+    _cascade_ok_lev = (_injury_bump < _base_proj * 0.50) | (_injury_bump == 0)
     own_threshold = min(15.0, own_med)
     leverage_mask = (
         (_edge >= _edge_p50)
@@ -1339,7 +1385,7 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
 
     # ── VALUE: salary-efficient with real role certainty ──
     sal_p60 = float(np.percentile(_sal.dropna(), 60)) if len(_sal.dropna()) > 2 else 6500.0
-    _cascade_ok_val = (_injury_bump < _proj * 0.50) | (_injury_bump == 0)
+    _cascade_ok_val = (_injury_bump < _base_proj * 0.50) | (_injury_bump == 0)
     _min_ok = (_proj_minutes >= 20) | (_proj_minutes == 0)  # 0 means missing, don't penalize
     value_mask = (
         (_sal < sal_p60)

@@ -718,14 +718,13 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
     except Exception as exc:
         print(f"[_load_nba_pool] apply_injury_cascade failed (non-fatal): {exc}")
 
-    # ── Minutes gap redistribution: catch teams missing off-slate players ──
-    try:
-        pool = apply_minutes_gap_redistribution(pool)
-        _n_gap = int((pool.get("minutes_gap_bump_min", pd.Series(0, index=pool.index)) > 0).sum())
-        if _n_gap:
-            print(f"[_load_nba_pool] Minutes gap redistribution boosted {_n_gap} player(s)")
-    except Exception as exc:
-        print(f"[_load_nba_pool] apply_minutes_gap_redistribution failed (non-fatal): {exc}")
+    # ── Minutes gap redistribution: DISABLED ──────────────────────────────
+    # Removed: apply_minutes_gap_redistribution() was silently adding a second
+    # round of uncapped projection bumps on top of injury_cascade.  It used the
+    # cascade-inflated fp_per_min rate, producing 50x over-distribution
+    # (e.g. Quinten Post OUT at 4.5 fp → 225.7 fp distributed to teammates).
+    # The injury cascade already handles known OUT players; off-slate absences
+    # are priced into DK salaries.  See audit 2026-03-17.
 
     # ── Pop Catalyst: score situational upside signals ──
     try:
@@ -886,6 +885,46 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
                 pd.to_numeric(pool.loc[b2b_mask, "proj_minutes"], errors="coerce").fillna(0) * 0.93
             )
             print(f"[_load_nba_pool] B2B dampened minutes for {b2b_mask.sum()} player(s)")
+
+    # ── Post-cascade recompute: ceil/floor/sims from final proj ──────────
+    # All projection-modifying steps are done (cascade, blowout, B2B).
+    # Recompute ceil/floor/sims so they reflect the FINAL proj, not the
+    # stale pre-cascade RG values.  See audit 2026-03-17 Fix 4.
+    try:
+        import numpy as np
+        from yak_core.edge import compute_empirical_std
+
+        _final_proj = pd.to_numeric(pool.get("proj", 0), errors="coerce").fillna(0).clip(lower=0)
+        _final_sal = pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0)
+
+        # 1) Clamp ceil >= proj and floor <= proj
+        if "ceil" in pool.columns:
+            _ceil = pd.to_numeric(pool["ceil"], errors="coerce").fillna(0)
+            pool["ceil"] = np.maximum(_ceil, _final_proj).round(2)
+        if "floor" in pool.columns:
+            _floor = pd.to_numeric(pool["floor"], errors="coerce").fillna(0)
+            pool["floor"] = np.minimum(_floor, _final_proj).round(2)
+
+        # 2) Recompute sim percentiles from final proj + salary-bracket variance
+        _std = compute_empirical_std(_final_proj.values, _final_sal.values, variance_mult=1.0)
+        _n_sims = 5000
+        _rng = np.random.default_rng(42)  # deterministic seed for reproducibility
+        _sim_matrix = _rng.normal(
+            loc=_final_proj.values[None, :],
+            scale=_std[None, :],
+            size=(_n_sims, len(_final_proj)),
+        )
+        _sim_matrix = np.maximum(_sim_matrix, 0.0)
+        for _pct, _col in [
+            (15, "sim15th"), (33, "sim33rd"), (50, "sim50th"),
+            (66, "sim66th"), (85, "sim85th"), (90, "sim90th"), (99, "sim99th"),
+        ]:
+            pool[_col] = np.percentile(_sim_matrix, _pct, axis=0).round(2)
+
+        _n_recomp = int((_final_proj > 0).sum())
+        print(f"[_load_nba_pool] Post-cascade recompute: ceil/floor/sims refreshed for {_n_recomp} player(s)")
+    except Exception as exc:
+        print(f"[_load_nba_pool] post-cascade recompute failed (non-fatal): {exc}")
 
     # ── Sim eligibility ──
     try:
