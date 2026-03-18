@@ -114,7 +114,7 @@ def render_lab_tab(sport: str) -> None:
                 if not api_key:
                     st.error("Missing RAPIDAPI_KEY. Set it in Streamlit secrets or environment.")
                     return
-        pga_slate = "showdown"
+        pga_slate = "main"
         with st.spinner("Loading pool..."):
             try:
                 if is_pga:
@@ -481,7 +481,7 @@ def render_lab_tab(sport: str) -> None:
                     if _cur_meta.get("date") != slate_date:
                         _needs_load = True
                     if is_pga:
-                        _needed_slate = preset.get("projection_slate", "showdown")
+                        _needed_slate = preset.get("projection_slate", "main")
                         if _cur_meta.get("slate") != _needed_slate:
                             _needs_load = True
 
@@ -489,7 +489,7 @@ def render_lab_tab(sport: str) -> None:
                 with st.spinner("Loading pool..."):
                     try:
                         if is_pga:
-                            _pga_slate = preset.get("projection_slate", "showdown")
+                            _pga_slate = preset.get("projection_slate", "main")
                             pool_fresh, meta_fresh = _load_pga_pool(api_key, slate_date, _pga_slate)
                             if pool_fresh.empty:
                                 st.warning(
