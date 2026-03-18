@@ -161,7 +161,12 @@ def _score_own_proj_mismatch(df: pd.DataFrame) -> pd.Series:
 
 
 def _score_salary_value(df: pd.DataFrame) -> pd.Series:
-    """FP per $1K relative to slate median -- salary hasn't caught up."""
+    """FP per $1K relative to slate median -- salary hasn't caught up.
+
+    Qualifiers (Fix 3): Only flag when rolling_min_5 >= 24 AND floor >= 0.65 * proj.
+    This filters out players who are cheap because they're in bad situations
+    (low minutes, low floor) rather than genuine salary value.
+    """
     proj = _safe_numeric(df.get("proj", pd.Series(0.0, index=df.index)))
     sal = _safe_numeric(df.get("salary", pd.Series(5000.0, index=df.index)))
     sal_k = (sal / 1000.0).clip(lower=1.0)
@@ -174,6 +179,26 @@ def _score_salary_value(df: pd.DataFrame) -> pd.Series:
     # How far above median value this player sits, normalised
     # 2x median value → score of 1.0
     score = ((val - median_val) / median_val).clip(0, 1)
+
+    # Apply floor/minutes qualifiers to suppress false positives.
+    # Only zero out players who FAIL the qualifiers — if the columns
+    # don't exist, skip the filter gracefully (don't penalize).
+    has_rolling_min = "rolling_min_5" in df.columns
+    has_floor = "floor" in df.columns
+
+    if has_rolling_min or has_floor:
+        disqualify = pd.Series(False, index=df.index)
+        if has_rolling_min:
+            rolling_min = _safe_numeric(df["rolling_min_5"])
+            # Only disqualify players with actual rolling data that's below threshold
+            has_data = rolling_min > 0
+            disqualify = disqualify | (has_data & (rolling_min < 24))
+        if has_floor:
+            floor_vals = _safe_numeric(df["floor"])
+            has_data = floor_vals > 0
+            disqualify = disqualify | (has_data & (floor_vals < 0.65 * proj))
+        score = score.where(~disqualify, 0.0)
+
     return score
 
 
@@ -296,7 +321,7 @@ def compute_ricky_signals(
         + df["sig_sticky"] * w.get("salary_stickiness", 0.10)
     )
 
-    # Active signals (threshold: 0.3 out of 1.0)
+    # Active signals (threshold: 0.3 out of 1.0, except leverage which is 0.50)
     _sig_map = {
         "sig_injury": "injury_cascade",
         "sig_own_mismatch": "own_proj_mismatch",
@@ -305,9 +330,23 @@ def compute_ricky_signals(
         "sig_sticky": "salary_stickiness",
     }
     _threshold = 0.3
+    _leverage_threshold = 0.50
+
+    # Leverage percentile cutoff: only flag top 25% of leverage scores on the slate
+    _leverage_p75 = float(df["sig_leverage"].quantile(0.75)) if len(df) > 0 else 0.0
 
     def _active(row):
-        return [_sig_map[col] for col, key in _sig_map.items() if row.get(col, 0) >= _threshold]
+        active = []
+        for col, key in _sig_map.items():
+            val = row.get(col, 0)
+            if key == "leverage":
+                # Tighter threshold (0.50) + must be in top 25% of slate
+                if val >= _leverage_threshold and val >= _leverage_p75:
+                    active.append(key)
+            else:
+                if val >= _threshold:
+                    active.append(key)
+        return active
 
     df["active_signals"] = df.apply(_active, axis=1)
     df["signal_badges"] = df["active_signals"].apply(

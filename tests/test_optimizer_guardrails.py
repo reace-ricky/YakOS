@@ -496,10 +496,11 @@ class TestGPPv8SimScoring:
         """Custom weights should override defaults."""
         from yak_core.lineups import _add_scores
         df = self._make_pool()
-        # Pure projection mode (zero upside/boom weights)
+        # Pure projection mode (zero upside/boom/edge weights)
         cfg = {**DEFAULT_CONFIG, "GPP_PROJ_WEIGHT": 1.0,
                "GPP_UPSIDE_WEIGHT": 0.0, "GPP_BOOM_WEIGHT": 0.0,
-               "GPP_OWN_PENALTY_STRENGTH": 0.0, "GPP_OWN_LOW_BOOST": 0.0}
+               "GPP_OWN_PENALTY_STRENGTH": 0.0, "GPP_OWN_LOW_BOOST": 0.0,
+               "GPP_RICKY_EDGE_WEIGHT": 0.0}
         result = _add_scores(df, cfg)
         # With zero ownership penalty and pure projection, gpp_score = proj * 1.0
         for i in range(len(df)):

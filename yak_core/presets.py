@@ -48,7 +48,7 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "GPP_VALUE_WEIGHT": 0.05,
             "GPP_REST_WEIGHT": 0.03,
             # Optimizer constraints
-            "GPP_MIN_STUD_PLAYERS": 3,
+            "GPP_MIN_STUD_PLAYERS": 1,   # reduced from 3 — RG winners avg 1.5 studs
             "GPP_STUD_SALARY_THRESHOLD": 8000,
             "GPP_OBJECTIVE": "ceiling",
             "GPP_OWN_CAP": 2.4,
@@ -195,11 +195,11 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "description": "Unique CPT choice, leverage in a tiny player pool, correlate with game script",
             "SPORT": "NBA",
             "CONTEST_TYPE": "showdown",
-            # GPP scoring weights — ceiling-heavy, captain multiplier drives upside
-            "GPP_PROJ_WEIGHT": 0.20,         # moderate proj — still need a baseline
+            # Showdown-specific GPP scoring weights (calibrated separately from classic GPP)
+            "GPP_PROJ_WEIGHT": 0.30,         # moderate proj — baseline projection matters in small pools
             "GPP_UPSIDE_WEIGHT": 0.40,       # high upside — captain ceiling drives wins
-            "GPP_BOOM_WEIGHT": 0.40,         # high boom — every spot needs explosion potential
-            "GPP_OWN_PENALTY_STRENGTH": 1.8, # very high — concentrated pools need differentiation
+            "GPP_BOOM_WEIGHT": 0.30,         # boom — every spot needs explosion potential
+            "GPP_OWN_PENALTY_STRENGTH": 1.5, # strong — concentrated pools need differentiation
             "GPP_OWN_LOW_BOOST": 0.6,        # boost low-owned picks — leverage is paramount
             # Edge signal weights — smash-heavy, leverage-dominant
             "GPP_SMASH_WEIGHT": 0.9,         # very high — 6 spots means every pick must smash
