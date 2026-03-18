@@ -487,36 +487,43 @@ def _run_pipeline(
 # ---------------------------------------------------------------------------
 
 def _slider_default(preset_name: str, key: str, fallback: Any) -> Any:
-    """Look up the default value for a config key from preset, then DEFAULT_CONFIG, then fallback."""
+    """Look up the default value for a config key.
+
+    Uses merge_config(preset) as the source of truth so that alias
+    mappings (e.g. preset ``low_own_threshold`` → ``GPP_LOW_OWN_THRESHOLD``)
+    are resolved the same way the optimizer would resolve them.
+    """
     preset = CONTEST_PRESETS[preset_name]
-    val = preset.get(key)
-    if val is not None:
-        return val
-    val = DEFAULT_CONFIG.get(key)
+    merged = merge_config(preset)
+    val = merged.get(key)
     if val is not None:
         return val
     return fallback
 
 
 def _render_config_panel(preset_name: str) -> Dict[str, Any]:
-    """Render the 4-group config panel. Returns current overrides dict."""
+    """Render the 4-group config panel. Returns ONLY keys the user changed."""
     sk = _sandbox_config_key(preset_name)
     if sk not in st.session_state:
         st.session_state[sk] = {}
     overrides: Dict[str, Any] = st.session_state[sk]
 
     def _sl(label: str, key: str, mn: float, mx: float, step: float, fallback: Any, fmt: str = "%.2f") -> Any:
-        """Helper to render a slider and store the value."""
-        default = overrides.get(key, _slider_default(preset_name, key, fallback))
-        # Clamp default to valid range
-        if isinstance(default, (int, float)):
-            default = max(mn, min(mx, default))
-        # For integer sliders
+        """Render a slider. Only store in overrides if user changed from preset default."""
+        preset_default = _slider_default(preset_name, key, fallback)
+        current = overrides.get(key, preset_default)
+        if isinstance(current, (int, float)):
+            current = max(mn, min(mx, current))
         if isinstance(mn, int) and isinstance(mx, int) and isinstance(step, int):
-            val = st.slider(label, min_value=mn, max_value=mx, value=int(default), step=step, key=f"sl_{preset_name}_{key}")
+            val = st.slider(label, min_value=mn, max_value=mx, value=int(current), step=step, key=f"sl_{preset_name}_{key}")
         else:
-            val = st.slider(label, min_value=float(mn), max_value=float(mx), value=float(default), step=float(step), format=fmt, key=f"sl_{preset_name}_{key}")
-        overrides[key] = val
+            val = st.slider(label, min_value=float(mn), max_value=float(mx), value=float(current), step=float(step), format=fmt, key=f"sl_{preset_name}_{key}")
+        # Only store override if user moved slider away from preset default
+        clamped_default = max(mn, min(mx, preset_default)) if isinstance(preset_default, (int, float)) else preset_default
+        if val != clamped_default:
+            overrides[key] = val
+        elif key in overrides:
+            del overrides[key]
         return val
 
     # Group 1: Smash/Bust (expanded by default)
