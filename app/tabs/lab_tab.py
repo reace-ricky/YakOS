@@ -146,11 +146,16 @@ def render_lab_tab(sport: str) -> None:
                                 f"({len(pool)} remaining)"
                             )
 
-                    # Apply calibration AFTER RG merge so corrections aren't overwritten
-                    from yak_core.calibration_feedback import get_correction_factors, apply_corrections
-                    corrections = get_correction_factors(sport="NBA")
-                    if corrections.get("n_slates", 0) > 0:
-                        pool = apply_corrections(pool, corrections, sport="NBA")
+                    # ── Self-learning corrections DISABLED (2026-03-17) ──────────
+                    # apply_corrections was inflating stud projections via a
+                    # feedback loop trained on 23 samples.  Scoring (record_slate_errors)
+                    # still runs — only the correction application is bypassed.
+                    # See clean_baseline analysis for justification.
+                    #
+                    # from yak_core.calibration_feedback import get_correction_factors, apply_corrections
+                    # corrections = get_correction_factors(sport="NBA")
+                    # if corrections.get("n_slates", 0) > 0:
+                    #     pool = apply_corrections(pool, corrections, sport="NBA")
 
                     # Process FantasyPros Cheatsheet if uploaded (or auto-reload saved file)
                     _fp_auto_path = os.path.join(
