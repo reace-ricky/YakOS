@@ -28,20 +28,20 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "description": "Ceiling-chasing, leverage-aware, one best lineup for the slate",
             "SPORT": "NBA",
             "CONTEST_TYPE": "gpp",
-            # GPP scoring weights (v10)
+            # GPP scoring weights (v10 — recalibrated for smash/ceiling)
             "GPP_PROJ_WEIGHT": 0.25,
             "GPP_UPSIDE_WEIGHT": 0.35,
             "GPP_BOOM_WEIGHT": 0.40,
-            "GPP_OWN_PENALTY_STRENGTH": 1.2,
-            "GPP_OWN_LOW_BOOST": 0.5,
-            # Edge signal weights
-            "GPP_SMASH_WEIGHT": 0.8,
-            "GPP_LEVERAGE_WEIGHT": 0.5,
-            "GPP_CATALYST_WEIGHT": 0.3,
-            "GPP_EFFICIENCY_WEIGHT": 0.3,
-            "GPP_BUST_PENALTY": 0.4,
-            "GPP_FORM_WEIGHT": 0.2,
-            "GPP_DVP_WEIGHT": 0.2,
+            "GPP_OWN_PENALTY_STRENGTH": 1.20,
+            "GPP_OWN_LOW_BOOST": 0.50,
+            # Edge signal weights (aggressive ceiling-chasing)
+            "GPP_SMASH_WEIGHT": 0.80,
+            "GPP_LEVERAGE_WEIGHT": 0.55,
+            "GPP_CATALYST_WEIGHT": 0.30,
+            "GPP_EFFICIENCY_WEIGHT": 0.30,
+            "GPP_BUST_PENALTY": 0.35,
+            "GPP_FORM_WEIGHT": 0.20,
+            "GPP_DVP_WEIGHT": 0.20,
             # FP Cheatsheet signal weights (GPP: higher pace/dvp for ceiling)
             "GPP_SPREAD_PENALTY_WEIGHT": 0.05,
             "GPP_PACE_ENV_WEIGHT": 0.10,
@@ -81,20 +81,20 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "description": "Multiple lineups around 2-3 game stories, uniqueness between lineups",
             "SPORT": "NBA",
             "CONTEST_TYPE": "gpp",
-            # GPP scoring weights (same as single-entry)
+            # GPP scoring weights (balanced multi-entry — lower own penalty)
             "GPP_PROJ_WEIGHT": 0.25,
             "GPP_UPSIDE_WEIGHT": 0.35,
             "GPP_BOOM_WEIGHT": 0.40,
-            "GPP_OWN_PENALTY_STRENGTH": 1.0,
-            "GPP_OWN_LOW_BOOST": 0.5,
-            # Edge signal weights
-            "GPP_SMASH_WEIGHT": 0.8,
-            "GPP_LEVERAGE_WEIGHT": 0.6,
-            "GPP_CATALYST_WEIGHT": 0.3,
-            "GPP_EFFICIENCY_WEIGHT": 0.3,
-            "GPP_BUST_PENALTY": 0.3,
-            "GPP_FORM_WEIGHT": 0.2,
-            "GPP_DVP_WEIGHT": 0.2,
+            "GPP_OWN_PENALTY_STRENGTH": 1.00,
+            "GPP_OWN_LOW_BOOST": 0.50,
+            # Edge signal weights (aggressive ceiling-chasing)
+            "GPP_SMASH_WEIGHT": 0.80,
+            "GPP_LEVERAGE_WEIGHT": 0.50,
+            "GPP_CATALYST_WEIGHT": 0.30,
+            "GPP_EFFICIENCY_WEIGHT": 0.30,
+            "GPP_BUST_PENALTY": 0.30,
+            "GPP_FORM_WEIGHT": 0.20,
+            "GPP_DVP_WEIGHT": 0.20,
             # FP Cheatsheet signal weights (GPP: higher pace/dvp for ceiling)
             "GPP_SPREAD_PENALTY_WEIGHT": 0.05,
             "GPP_PACE_ENV_WEIGHT": 0.10,
@@ -326,19 +326,19 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "description": "6/6 still critical, 1-2 leverage angles via ownership/wave/course-fit pivots",
             "SPORT": "PGA",
             "CONTEST_TYPE": "gpp_single",
-            # Scoring weights
-            "PROJ_WEIGHT": 0.30,
-            "CUT_EQUITY_WEIGHT": 0.20,
-            "BALL_STRIKING_WEIGHT": 0.10,
-            "UPSIDE_WEIGHT": 0.25,
-            "BOOM_WEIGHT": 0.15,
-            "COURSE_FIT_WEIGHT": 0.15,
-            "WAVE_ADVANTAGE_WEIGHT": 0.10,
-            # Ownership / leverage
-            "OWN_PENALTY_STRENGTH": 0.8,
-            "LEVERAGE_WEIGHT": 0.5,
+            # Scoring weights (recalibrated — lower proj, higher ceiling/smash signals)
+            "PROJ_WEIGHT": 0.20,
+            "CUT_EQUITY_WEIGHT": 0.15,
+            "BALL_STRIKING_WEIGHT": 0.25,
+            "UPSIDE_WEIGHT": 0.30,
+            "BOOM_WEIGHT": 0.25,
+            "COURSE_FIT_WEIGHT": 0.25,
+            "WAVE_ADVANTAGE_WEIGHT": 0.15,
+            # Ownership / leverage (strong for single-entry GPP)
+            "OWN_PENALTY_STRENGTH": 1.10,
+            "LEVERAGE_WEIGHT": 0.60,
             # PGA-specific thresholds
-            "BUST_PENALTY": 0.5,
+            "BUST_PENALTY": 0.40,
             "MIN_CUT_PROBABILITY": 0.55,
             "RECENT_FORM_LOOKBACK": 12,
             # Lineup controls
@@ -353,19 +353,19 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "description": "Core 4-6 golfers at high exposure, rotate secondary plays and leverage angles",
             "SPORT": "PGA",
             "CONTEST_TYPE": "gpp_20max",
-            # Scoring weights
-            "PROJ_WEIGHT": 0.25,
-            "CUT_EQUITY_WEIGHT": 0.15,
-            "BALL_STRIKING_WEIGHT": 0.10,
-            "UPSIDE_WEIGHT": 0.25,
-            "BOOM_WEIGHT": 0.25,
-            "COURSE_FIT_WEIGHT": 0.15,
-            "WAVE_ADVANTAGE_WEIGHT": 0.15,
-            # Ownership / leverage
-            "OWN_PENALTY_STRENGTH": 1.0,
-            "LEVERAGE_WEIGHT": 0.7,
+            # Scoring weights (recalibrated — aggressive ceiling/smash for multi-entry)
+            "PROJ_WEIGHT": 0.20,
+            "CUT_EQUITY_WEIGHT": 0.10,
+            "BALL_STRIKING_WEIGHT": 0.25,
+            "UPSIDE_WEIGHT": 0.30,
+            "BOOM_WEIGHT": 0.30,
+            "COURSE_FIT_WEIGHT": 0.25,
+            "WAVE_ADVANTAGE_WEIGHT": 0.20,
+            # Ownership / leverage (strongest for 20-max — need diverse leverage angles)
+            "OWN_PENALTY_STRENGTH": 1.20,
+            "LEVERAGE_WEIGHT": 0.75,
             # PGA-specific thresholds
-            "BUST_PENALTY": 0.3,
+            "BUST_PENALTY": 0.25,
             "MIN_CUT_PROBABILITY": 0.45,
             "RECENT_FORM_LOOKBACK": 16,
             # Lineup controls
