@@ -1,7 +1,8 @@
-"""Sim Lab — contest replay sandbox.
+"""Sim Lab v2 — Config Tuning + Batch Replay.
 
-Fetch pool → build lineups → score against actuals → display results.
-Single file, no wizards, no persistence.  Session-state only.
+Pick a contest preset, adjust knobs across 4 tuning groups,
+batch-run all available RG archive dates, and compare configs
+via trend chart + summary table.  Session-state only, no persistence.
 """
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ import json
 import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from statistics import mean
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -17,7 +19,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-from yak_core.config import CONTEST_PRESETS, merge_config
+from yak_core.config import CONTEST_PRESETS, DEFAULT_CONFIG, merge_config
 from yak_core.edge import compute_edge_metrics
 from yak_core.lineups import (
     build_multiple_lineups_with_exposure,
@@ -32,6 +34,8 @@ from yak_core.live import fetch_actuals_from_api, fetch_live_dfs
 
 _NBA_PRESETS = ["GPP Main", "GPP Early", "GPP Late", "Showdown", "Cash Main", "Cash Game"]
 _PGA_PRESETS = ["PGA GPP", "PGA Cash", "PGA Showdown"]
+
+_BATCH_COLORS = ["#4dabf7", "#00ff87", "#ffa726", "#ef5350", "#ab47bc", "#26c6da", "#d4e157", "#ff7043"]
 
 
 def _get_secret(key: str) -> str:
@@ -60,6 +64,12 @@ def _sandbox_config_key(preset: str) -> str:
 
 def _get_sandbox_overrides(preset: str) -> Dict[str, Any]:
     return dict(st.session_state.get(_sandbox_config_key(preset), {}))
+
+
+def _config_hash(overrides: Dict[str, Any]) -> str:
+    return hashlib.md5(
+        json.dumps(overrides, sort_keys=True, default=str).encode()
+    ).hexdigest()[:8]
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +188,6 @@ def _fetch_pga_pool(api_key: str) -> pd.DataFrame:
     pool = dg.get_dfs_projections(site="draftkings", slate="main")
     if pool.empty:
         raise ValueError("DataGolf returned an empty projection pool.")
-    # Normalise columns the optimizer expects
     if "proj_own" in pool.columns and "ownership" not in pool.columns:
         pool["ownership"] = pool["proj_own"]
     if "player_name" not in pool.columns and "dg_id" in pool.columns:
@@ -195,9 +204,8 @@ def _fetch_pga_actuals(api_key: str, slate_date: str = "") -> pd.DataFrame:
     if events.empty:
         raise ValueError("No PGA events found in DataGolf event list.")
 
-    # Find event closest to (and <=) the selected date
     target = slate_date.replace("-", "") if slate_date else ""
-    chosen = events.iloc[0]  # default: most recent
+    chosen = events.iloc[0]
     if target:
         for _, ev in events.iterrows():
             ev_date = str(ev.get("date", "")).replace("-", "")[:8]
@@ -217,7 +225,7 @@ def _fetch_pga_actuals(api_key: str, slate_date: str = "") -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Scatter Plot (Chart.js)
+# Scatter Plot (Chart.js) — kept for potential future use
 # ---------------------------------------------------------------------------
 
 _EDGE_COLORS = {
@@ -330,7 +338,7 @@ new Chart(ctx,{{
 
 
 # ---------------------------------------------------------------------------
-# Pipeline
+# Pipeline (unchanged from v1)
 # ---------------------------------------------------------------------------
 
 def _run_pipeline(
@@ -339,18 +347,17 @@ def _run_pipeline(
     preset_name: str,
     sandbox_overrides: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Execute the full fetch → build → score pipeline. Returns a run dict."""
+    """Execute the full fetch -> build -> score pipeline. Returns a run dict."""
     date_key = selected_date.strftime("%Y%m%d")
     date_dash = selected_date.strftime("%Y-%m-%d")
     preset = CONTEST_PRESETS[preset_name]
     cfg = merge_config(preset)
     cfg.update(sandbox_overrides)
 
-    # Ensure NUM_LINEUPS is set from sandbox or preset default
     if "NUM_LINEUPS" not in cfg or cfg["NUM_LINEUPS"] <= 0:
         cfg["NUM_LINEUPS"] = preset.get("default_lineups", 10)
 
-    # ── Step 1: Fetch pool ────────────────────────────────────────────
+    # Step 1: Fetch pool
     if sport == "NBA":
         api_key = _get_nba_api_key()
         if not api_key:
@@ -366,7 +373,7 @@ def _run_pipeline(
     if pool_df is None or pool_df.empty:
         raise ValueError(f"No DFS pool found for {date_dash}.")
 
-    # ── Step 2: Merge RG projections (NBA only) ──────────────────────
+    # Step 2: Merge RG projections (NBA only)
     if sport == "NBA":
         rg_path = _RG_ARCHIVE_DIR / f"rg_{date_dash}.csv"
         if rg_path.is_file():
@@ -374,7 +381,7 @@ def _run_pipeline(
         else:
             st.warning(f"No RG archive file for {date_dash}. Using Tank01 projections.")
 
-    # ── Step 3: Auto-run Monte Carlo sims (if sim columns missing) ───
+    # Step 3: Auto-run Monte Carlo sims (if sim columns missing)
     if sport == "NBA" and "sim90th" not in pool_df.columns and "SIM90TH" not in pool_df.columns:
         try:
             from yak_core.edge import compute_empirical_std
@@ -396,16 +403,16 @@ def _run_pipeline(
         except Exception as _sim_err:
             st.warning(f"Auto-sim failed ({_sim_err}), continuing with fallback estimates")
 
-    # ── Step 4: Compute edge ──────────────────────────────────────────
+    # Step 4: Compute edge
     edge_df = compute_edge_metrics(pool_df, calibration_state=None, sport=sport)
 
-    # ── Step 5: Fetch actuals ─────────────────────────────────────────
+    # Step 5: Fetch actuals
     if sport == "NBA":
         actuals_df = fetch_actuals_from_api(date_key, cfg)
     else:
         actuals_df = _fetch_pga_actuals(api_key, date_dash)
 
-    # ── Step 6: Build lineups ─────────────────────────────────────────
+    # Step 6: Build lineups
     prepped = prepare_pool(edge_df, cfg)
 
     is_showdown = "showdown" in preset_name.lower()
@@ -417,10 +424,8 @@ def _run_pipeline(
     if lineups_df is None or lineups_df.empty:
         raise ValueError("Optimizer returned no lineups. Try adjusting config.")
 
-    # ── Step 7: Score lineups ─────────────────────────────────────────
-    # Normalise name columns for merge
+    # Step 7: Score lineups
     if "player_name" not in actuals_df.columns:
-        # PGA actuals may use different column name
         for c in ("name", "dg_name", "player"):
             if c in actuals_df.columns:
                 actuals_df = actuals_df.rename(columns={c: "player_name"})
@@ -432,20 +437,17 @@ def _run_pipeline(
         how="left",
         suffixes=("", "_actual"),
     )
-    # Use _actual column if merge created one, else use actual_fp
     if "actual_fp_actual" in scored.columns:
         scored["actual_fp"] = scored["actual_fp_actual"].fillna(scored.get("actual_fp", 0.0))
         scored.drop(columns=["actual_fp_actual"], inplace=True)
     scored["actual_fp"] = pd.to_numeric(scored["actual_fp"], errors="coerce").fillna(0.0)
 
-    # Ensure lineup_index exists
     if "lineup_index" not in scored.columns:
         if "lineup_id" in scored.columns:
             scored["lineup_index"] = scored["lineup_id"]
         else:
             scored["lineup_index"] = 0
 
-    # Per-lineup summary
     summary = (
         scored.groupby("lineup_index")
         .agg(
@@ -458,14 +460,11 @@ def _run_pipeline(
     summary["diff"] = summary["total_actual"] - summary["total_proj"]
     summary = summary.sort_values("total_actual", ascending=False).reset_index(drop=True)
 
-    # ── Build run record ────────────────────────────────────────────
     beat_proj_pct = 0.0
     if len(summary) > 0:
         beat_proj_pct = float((summary["total_actual"] >= summary["total_proj"]).mean() * 100)
 
-    config_hash = hashlib.md5(
-        json.dumps(sandbox_overrides, sort_keys=True, default=str).encode()
-    ).hexdigest()[:8]
+    chash = _config_hash(sandbox_overrides)
 
     return {
         "timestamp": datetime.now().isoformat(),
@@ -477,126 +476,302 @@ def _run_pipeline(
         "avg_proj": round(float(summary["total_proj"].mean()), 2) if len(summary) else 0,
         "best": round(float(summary["total_actual"].max()), 2) if len(summary) else 0,
         "beat_proj_pct": round(beat_proj_pct, 1),
-        "config_hash": config_hash,
+        "config_hash": chash,
         "summary_df": summary,
         "player_df": scored,
     }
 
 
 # ---------------------------------------------------------------------------
-# Config expander
+# Config Panel (v2 — grouped knobs)
 # ---------------------------------------------------------------------------
 
-def _render_config_expander(preset_name: str) -> Dict[str, Any]:
-    """Render sandbox config sliders. Returns the current overrides dict."""
+def _slider_default(preset_name: str, key: str, fallback: Any) -> Any:
+    """Look up the default value for a config key from preset, then DEFAULT_CONFIG, then fallback."""
     preset = CONTEST_PRESETS[preset_name]
-    sk = _sandbox_config_key(preset_name)
+    val = preset.get(key)
+    if val is not None:
+        return val
+    val = DEFAULT_CONFIG.get(key)
+    if val is not None:
+        return val
+    return fallback
 
+
+def _render_config_panel(preset_name: str) -> Dict[str, Any]:
+    """Render the 4-group config panel. Returns current overrides dict."""
+    sk = _sandbox_config_key(preset_name)
     if sk not in st.session_state:
         st.session_state[sk] = {}
     overrides: Dict[str, Any] = st.session_state[sk]
 
-    with st.expander("Config \u2699\ufe0f", expanded=False):
+    def _sl(label: str, key: str, mn: float, mx: float, step: float, fallback: Any, fmt: str = "%.2f") -> Any:
+        """Helper to render a slider and store the value."""
+        default = overrides.get(key, _slider_default(preset_name, key, fallback))
+        # Clamp default to valid range
+        if isinstance(default, (int, float)):
+            default = max(mn, min(mx, default))
+        # For integer sliders
+        if isinstance(mn, int) and isinstance(mx, int) and isinstance(step, int):
+            val = st.slider(label, min_value=mn, max_value=mx, value=int(default), step=step, key=f"sl_{preset_name}_{key}")
+        else:
+            val = st.slider(label, min_value=float(mn), max_value=float(mx), value=float(default), step=float(step), format=fmt, key=f"sl_{preset_name}_{key}")
+        overrides[key] = val
+        return val
+
+    # Group 1: Smash/Bust (expanded by default)
+    with st.expander("Smash / Bust", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
-            nl = st.slider(
-                "Lineups",
-                min_value=1,
-                max_value=20,
-                value=overrides.get("NUM_LINEUPS", preset.get("default_lineups", 10)),
-                key=f"sim_nl_{preset_name}",
-            )
-            overrides["NUM_LINEUPS"] = nl
-
-            me = st.slider(
-                "Max Exposure",
-                min_value=0.1,
-                max_value=1.0,
-                value=overrides.get("MAX_EXPOSURE", preset.get("default_max_exposure", 0.6)),
-                step=0.05,
-                key=f"sim_me_{preset_name}",
-            )
-            overrides["MAX_EXPOSURE"] = me
-
+            _sl("Smash Weight", "GPP_SMASH_WEIGHT", 0.0, 0.50, 0.05, 0.15)
+            _sl("Upside Weight", "GPP_UPSIDE_WEIGHT", 0.0, 0.60, 0.05, 0.35)
         with c2:
-            ms = st.slider(
-                "Min Salary",
-                min_value=0,
-                max_value=50000,
-                value=overrides.get("MIN_SALARY_USED", preset.get("min_salary", 49000)),
-                step=500,
-                key=f"sim_ms_{preset_name}",
-            )
-            overrides["MIN_SALARY_USED"] = ms
+            _sl("Bust Penalty", "GPP_BUST_PENALTY", 0.0, 0.50, 0.05, 0.10)
+            _sl("Boom Weight", "GPP_BOOM_WEIGHT", 0.0, 0.60, 0.05, 0.20)
 
-            un = st.slider(
-                "Min Uniques",
-                min_value=0,
-                max_value=5,
-                value=overrides.get("MIN_UNIQUES", 0),
-                key=f"sim_un_{preset_name}",
-            )
-            overrides["MIN_UNIQUES"] = un
+    # Group 2: Mins/Injury
+    with st.expander("Mins / Injury"):
+        c1, c2 = st.columns(2)
+        with c1:
+            _sl("Catalyst Weight", "GPP_CATALYST_WEIGHT", 0.0, 0.30, 0.05, 0.05)
+            _sl("Form Weight", "GPP_FORM_WEIGHT", 0.0, 0.30, 0.05, 0.10)
+        with c2:
+            _sl("Efficiency Weight", "GPP_EFFICIENCY_WEIGHT", 0.0, 0.30, 0.05, 0.05)
+            _sl("Min Player Minutes", "MIN_PLAYER_MINUTES", 0, 20, 1, 0)
+
+    # Group 3: Ownership Edge
+    with st.expander("Ownership Edge"):
+        c1, c2 = st.columns(2)
+        with c1:
+            _sl("Own Weight", "OWN_WEIGHT", 0.0, 1.0, 0.05, 0.0)
+            _sl("Leverage Weight", "GPP_LEVERAGE_WEIGHT", 0.0, 0.50, 0.05, 0.10)
+            _sl("Min Low Own Players", "GPP_MIN_LOW_OWN_PLAYERS", 0, 4, 1, 1)
+        with c2:
+            _sl("Own Penalty Strength", "GPP_OWN_PENALTY_STRENGTH", 0.0, 3.0, 0.1, 1.2, fmt="%.1f")
+            _sl("Low Own Threshold", "GPP_LOW_OWN_THRESHOLD", 0.0, 0.50, 0.05, 0.10)
+
+    # Group 4: Structure (collapsed)
+    with st.expander("Structure"):
+        c1, c2 = st.columns(2)
+        with c1:
+            _sl("Num Lineups", "NUM_LINEUPS", 1, 20, 1, 10)
+            _sl("Min Salary Used", "MIN_SALARY_USED", 45000, 50000, 500, 49000)
+        with c2:
+            _sl("Max Exposure", "MAX_EXPOSURE", 0.1, 1.0, 0.05, 0.6)
+            _sl("Min Uniques", "MIN_UNIQUES", 0, 5, 1, 0)
 
     st.session_state[sk] = overrides
     return overrides
 
 
 # ---------------------------------------------------------------------------
-# Results display
+# Batch Run
 # ---------------------------------------------------------------------------
 
-def _render_results(run: Dict[str, Any]) -> None:
-    """Display KPIs, lineup table, and scatter plot for a completed run."""
-    summary = run["summary_df"]
-    player_df = run["player_df"]
+def _run_batch(
+    sport: str,
+    preset_name: str,
+    sandbox_overrides: Dict[str, Any],
+    dates: List[date],
+) -> Dict[str, Any]:
+    """Run the pipeline for every date. Returns a batch record."""
+    runs: List[Dict[str, Any]] = []
+    errors: List[Dict[str, str]] = []
+    progress = st.progress(0, text="Starting batch run...")
 
-    # ── KPIs ──────────────────────────────────────────────────────────
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Avg Actual FP", f"{run['avg_actual']:.1f}")
-    k2.metric("Avg Proj FP", f"{run['avg_proj']:.1f}")
-    k3.metric("Best Lineup", f"{run['best']:.1f}")
-    k4.metric("Beat Proj %", f"{run['beat_proj_pct']:.0f}%")
-
-    # ── Two-column layout: table + scatter ────────────────────────────
-    col_left, col_right = st.columns([6, 4])
-
-    with col_left:
-        st.subheader("Lineup Scores")
-        display = summary.copy()
-        display.index = display.index + 1
-        display.index.name = "#"
-        display = display[["total_actual", "total_proj", "diff", "total_salary"]]
-        display.columns = ["Total Actual", "Total Proj", "Diff", "Salary"]
-        st.dataframe(
-            display.style.format(
-                {"Total Actual": "{:.1f}", "Total Proj": "{:.1f}", "Diff": "{:+.1f}", "Salary": "${:,.0f}"}
-            ),
-            use_container_width=True,
+    for i, d in enumerate(dates):
+        progress.progress(
+            (i + 1) / len(dates),
+            text=f"Running {d.strftime('%Y-%m-%d')} ({i + 1}/{len(dates)})",
         )
+        try:
+            run = _run_pipeline(sport, d, preset_name, sandbox_overrides)
+            runs.append(run)
+            # Also store in the flat run log
+            if "sim_lab_runs" not in st.session_state:
+                st.session_state["sim_lab_runs"] = []
+            st.session_state["sim_lab_runs"].append(run)
+        except Exception as exc:
+            errors.append({"date": str(d), "error": str(exc)})
 
-    with col_right:
-        st.subheader("Proj vs Actual")
-        # De-dup players for scatter (one dot per player)
-        scatter_df = (
-            player_df.drop_duplicates(subset="player_name")
-            .dropna(subset=["proj", "actual_fp"])
-        )
-        html = _build_scatter_html(scatter_df)
-        components.html(html, height=500, scrolling=False)
+    progress.empty()
+
+    chash = _config_hash(sandbox_overrides)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Determine batch number
+    batches = st.session_state.get("sim_lab_batches", [])
+    batch_number = len(batches) + 1
+
+    avg_actual = round(mean(r["avg_actual"] for r in runs), 2) if runs else 0
+    avg_proj = round(mean(r["avg_proj"] for r in runs), 2) if runs else 0
+    beat_proj_pct = round(mean(r["beat_proj_pct"] for r in runs), 1) if runs else 0
+
+    return {
+        "batch_id": f"{chash}_{timestamp}",
+        "preset": preset_name,
+        "config_hash": chash,
+        "config_label": f"Run {batch_number}",
+        "overrides": sandbox_overrides.copy(),
+        "runs": runs,
+        "errors": errors,
+        "avg_actual": avg_actual,
+        "avg_proj": avg_proj,
+        "beat_proj_pct": beat_proj_pct,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Trend Chart (Chart.js — dark mode)
+# ---------------------------------------------------------------------------
+
+def _render_trend_chart() -> None:
+    """Render a Chart.js line chart: X = date, Y = avg actual FP, one line per batch."""
+    batches: List[Dict[str, Any]] = st.session_state.get("sim_lab_batches", [])
+    if not batches:
+        return
+
+    st.subheader("Config Comparison — Avg Actual FP by Date")
+
+    # Build datasets for Chart.js
+    datasets_js = []
+    for i, batch in enumerate(batches):
+        color = _BATCH_COLORS[i % len(_BATCH_COLORS)]
+        # Sort runs by date
+        sorted_runs = sorted(batch["runs"], key=lambda r: r["date"])
+        data_points = []
+        for run in sorted_runs:
+            data_points.append({"x": run["date"], "y": run["avg_actual"]})
+
+        label = f"{batch['config_label']} ({batch['config_hash']})"
+        datasets_js.append({
+            "label": label,
+            "data": data_points,
+            "borderColor": color,
+            "backgroundColor": color,
+            "tension": 0.2,
+            "pointRadius": 4,
+            "pointHoverRadius": 6,
+            "fill": False,
+        })
+
+    datasets_json = json.dumps(datasets_js, separators=(",", ":"))
+    chart_html = f"""
+<div style="width:100%;height:400px;background:#0f1117;border-radius:8px;padding:12px;">
+<canvas id="trendChart"></canvas>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7"></script>
+<script>
+(function(){{
+const ds={datasets_json};
+const ctx=document.getElementById('trendChart').getContext('2d');
+new Chart(ctx,{{
+  type:'line',
+  data:{{datasets:ds}},
+  options:{{
+    responsive:true,
+    maintainAspectRatio:false,
+    plugins:{{
+      legend:{{
+        display:true,
+        labels:{{color:'#ccc',font:{{size:12}}}}
+      }},
+      tooltip:{{
+        mode:'index',
+        intersect:false,
+        callbacks:{{
+          label:function(ctx){{
+            return ctx.dataset.label+': '+ctx.parsed.y.toFixed(1)+' FP';
+          }}
+        }}
+      }}
+    }},
+    scales:{{
+      x:{{
+        type:'category',
+        labels:[...new Set(ds.flatMap(d=>d.data.map(p=>p.x)))].sort(),
+        title:{{display:true,text:'Date',color:'#ccc'}},
+        grid:{{color:'rgba(255,255,255,0.06)'}},
+        ticks:{{color:'#aaa',maxRotation:45}}
+      }},
+      y:{{
+        title:{{display:true,text:'Avg Actual FP',color:'#ccc'}},
+        grid:{{color:'rgba(255,255,255,0.06)'}},
+        ticks:{{color:'#aaa'}}
+      }}
+    }},
+    interaction:{{
+      mode:'nearest',
+      axis:'x',
+      intersect:false,
+    }}
+  }}
+}});
+}})();
+</script>
+"""
+    components.html(chart_html, height=440, scrolling=False)
+
+
+# ---------------------------------------------------------------------------
+# Comparison Table
+# ---------------------------------------------------------------------------
+
+def _render_comparison_table() -> None:
+    """Render a summary table comparing all batch runs."""
+    batches: List[Dict[str, Any]] = st.session_state.get("sim_lab_batches", [])
+    if not batches:
+        return
+
+    st.subheader("Batch Comparison")
+    rows = []
+    for batch in batches:
+        successful_runs = batch["runs"]
+        best_slate = ""
+        worst_slate = ""
+        if successful_runs:
+            best_run = max(successful_runs, key=lambda r: r["avg_actual"])
+            worst_run = min(successful_runs, key=lambda r: r["avg_actual"])
+            best_slate = f"{best_run['date']} ({best_run['avg_actual']:.1f})"
+            worst_slate = f"{worst_run['date']} ({worst_run['avg_actual']:.1f})"
+
+        rows.append({
+            "Run": batch["config_label"],
+            "Config Hash": batch["config_hash"],
+            "Avg Actual": batch["avg_actual"],
+            "Avg Proj": batch["avg_proj"],
+            "Best Slate": best_slate,
+            "Worst Slate": worst_slate,
+            "Beat Proj %": f"{batch['beat_proj_pct']:.0f}%",
+            "Errors": len(batch["errors"]),
+        })
+
+    df = pd.DataFrame(rows)
+    st.dataframe(
+        df.style.format({"Avg Actual": "{:.1f}", "Avg Proj": "{:.1f}"}),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
 # ---------------------------------------------------------------------------
 # Run Log
 # ---------------------------------------------------------------------------
 
-def _render_run_log() -> Optional[int]:
-    """Render the run log expander. Returns index of selected run or None."""
+def _render_run_log() -> None:
+    """Render the run log expander with per-run detail."""
     runs: List[Dict[str, Any]] = st.session_state.get("sim_lab_runs", [])
     if not runs:
-        return None
+        return
 
     with st.expander("Run Log", expanded=False):
+        c1, c2 = st.columns([8, 2])
+        with c2:
+            if st.button("Clear Runs", key="sim_lab_clear_runs"):
+                st.session_state["sim_lab_runs"] = []
+                st.session_state["sim_lab_batches"] = []
+                st.rerun()
+
         log_rows = []
         for i, r in enumerate(runs):
             log_rows.append({
@@ -611,17 +786,6 @@ def _render_run_log() -> Optional[int]:
             })
         st.dataframe(pd.DataFrame(log_rows), use_container_width=True, hide_index=True)
 
-        # Allow re-display of a past run
-        if len(runs) > 1:
-            sel = st.selectbox(
-                "Re-display run",
-                options=list(range(len(runs))),
-                format_func=lambda i: f"Run {i+1}: {runs[i]['date']} / {runs[i]['preset']} ({runs[i]['config_hash']})",
-                key="sim_lab_run_select",
-            )
-            return sel
-    return None
-
 
 # ---------------------------------------------------------------------------
 # Main entry point
@@ -631,83 +795,100 @@ def render_sim_lab(sport: str) -> None:
     """Render the Sim Lab tab."""
     st.header("\U0001f52c Sim Lab")
 
-    # ── Controls row ──────────────────────────────────────────────────
+    # Contest preset selector
     presets = _NBA_PRESETS if sport == "NBA" else _PGA_PRESETS
+    preset_name = st.selectbox(
+        "Contest Preset",
+        options=presets,
+        key="sim_lab_preset",
+    )
 
-    c_date, c_preset, c_btn = st.columns([2, 3, 2])
+    # Config panel (4 groups)
+    sandbox_overrides = _render_config_panel(preset_name)
 
-    with c_date:
-        if sport == "NBA":
-            rg_dates = _scan_rg_dates()
-            if rg_dates:
-                selected_date = st.selectbox(
-                    "Date (RG Archive)",
-                    options=rg_dates,
-                    format_func=lambda d: d.strftime("%Y-%m-%d"),
-                    key="sim_lab_date_nba",
-                )
-            else:
-                st.warning("No RG archive files found in data/rg_archive/nba/")
-                selected_date = st.date_input(
-                    "Date",
-                    value=date.today() - timedelta(days=1),
-                    key="sim_lab_date",
-                )
+    if sport == "NBA":
+        # --- NBA: Batch run across all RG dates ---
+        rg_dates = _scan_rg_dates()
+
+        if rg_dates:
+            st.caption(f"{len(rg_dates)} RG archive dates available")
+
+            if st.button("\U0001f504 Run All Dates", use_container_width=True, key="sim_lab_batch_run"):
+                with st.spinner("Running batch..."):
+                    batch = _run_batch(sport, preset_name, sandbox_overrides, rg_dates)
+
+                    if "sim_lab_batches" not in st.session_state:
+                        st.session_state["sim_lab_batches"] = []
+                    st.session_state["sim_lab_batches"].append(batch)
+
+                    n_ok = len(batch["runs"])
+                    n_err = len(batch["errors"])
+                    st.success(
+                        f"Batch complete: {n_ok} slates processed, "
+                        f"{n_err} errors | Avg Actual: {batch['avg_actual']:.1f} FP"
+                    )
+                    if batch["errors"]:
+                        with st.expander("Batch Errors"):
+                            for err in batch["errors"]:
+                                st.warning(f"{err['date']}: {err['error']}")
         else:
-            selected_date = st.date_input(
-                "Date",
-                value=date.today() - timedelta(days=1),
-                key="sim_lab_date",
-            )
+            st.warning("No RG archive files found in data/rg_archive/nba/")
 
-    with c_preset:
-        preset_name = st.selectbox(
-            "Contest Preset",
-            options=presets,
-            key="sim_lab_preset",
+        # Trend chart (if batches exist)
+        _render_trend_chart()
+
+        # Comparison table
+        _render_comparison_table()
+
+    else:
+        # --- PGA: single date flow (no RG archive) ---
+        selected_date = st.date_input(
+            "Date",
+            value=date.today() - timedelta(days=1),
+            key="sim_lab_date_pga",
         )
 
-    sandbox_overrides = _render_config_expander(preset_name)
+        if st.button("\U0001f504 Fetch & Build", use_container_width=True, key="sim_lab_pga_run"):
+            with st.spinner("Fetching pool, building lineups, scoring..."):
+                try:
+                    run = _run_pipeline(sport, selected_date, preset_name, sandbox_overrides)
+                    if "sim_lab_runs" not in st.session_state:
+                        st.session_state["sim_lab_runs"] = []
+                    st.session_state["sim_lab_runs"].append(run)
+                    st.session_state["sim_lab_latest_pga_run"] = run
+                except ValueError as exc:
+                    st.warning(str(exc))
+                except RuntimeError as exc:
+                    st.error(f"API error: {exc}")
+                except Exception as exc:
+                    msg = str(exc)
+                    if "in progress" in msg.lower() or "not final" in msg.lower():
+                        st.warning("Games may still be in progress. Actuals may be incomplete.")
+                    else:
+                        st.error(f"Pipeline error: {msg}")
 
-    with c_btn:
-        st.markdown("<br>", unsafe_allow_html=True)
-        run_clicked = st.button("\U0001f504 Fetch & Build", use_container_width=True, key="sim_lab_run")
+        # Display latest PGA run results
+        latest_pga = st.session_state.get("sim_lab_latest_pga_run")
+        if latest_pga:
+            summary = latest_pga["summary_df"]
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Avg Actual FP", f"{latest_pga['avg_actual']:.1f}")
+            k2.metric("Avg Proj FP", f"{latest_pga['avg_proj']:.1f}")
+            k3.metric("Best Lineup", f"{latest_pga['best']:.1f}")
+            k4.metric("Beat Proj %", f"{latest_pga['beat_proj_pct']:.0f}%")
 
-    # ── Execute pipeline ──────────────────────────────────────────────
-    if run_clicked:
-        with st.spinner("Fetching pool, building lineups, scoring\u2026"):
-            try:
-                run = _run_pipeline(sport, selected_date, preset_name, sandbox_overrides)
+            st.subheader("Lineup Scores")
+            display = summary.copy()
+            display.index = display.index + 1
+            display.index.name = "#"
+            display = display[["total_actual", "total_proj", "diff", "total_salary"]]
+            display.columns = ["Total Actual", "Total Proj", "Diff", "Salary"]
+            st.dataframe(
+                display.style.format(
+                    {"Total Actual": "{:.1f}", "Total Proj": "{:.1f}", "Diff": "{:+.1f}", "Salary": "${:,.0f}"}
+                ),
+                use_container_width=True,
+            )
 
-                # Store in run log
-                if "sim_lab_runs" not in st.session_state:
-                    st.session_state["sim_lab_runs"] = []
-                st.session_state["sim_lab_runs"].append(run)
-                st.session_state["sim_lab_latest_run"] = run
-
-            except ValueError as exc:
-                st.warning(str(exc))
-                return
-            except RuntimeError as exc:
-                st.error(f"API error: {exc}")
-                return
-            except Exception as exc:
-                msg = str(exc)
-                if "in progress" in msg.lower() or "not final" in msg.lower():
-                    st.warning("Games may still be in progress. Actuals may be incomplete.")
-                else:
-                    st.error(f"Pipeline error: {msg}")
-                return
-
-    # ── Display results ───────────────────────────────────────────────
-    latest = st.session_state.get("sim_lab_latest_run")
-    if latest:
-        _render_results(latest)
-
-    # ── Run log ───────────────────────────────────────────────────────
-    selected_idx = _render_run_log()
-    runs = st.session_state.get("sim_lab_runs", [])
-    if selected_idx is not None and 0 <= selected_idx < len(runs):
-        st.divider()
-        st.caption(f"Showing Run {selected_idx + 1}")
-        _render_results(runs[selected_idx])
+    # Run log (always visible at bottom)
+    _render_run_log()
