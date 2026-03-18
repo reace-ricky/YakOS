@@ -1144,8 +1144,10 @@ def _run_edge(sport: str, slate_date: str, out_dir: Path) -> tuple:
             )
             if api_key:
                 pool = auto_flag_injuries(pool, api_key=api_key, slate_date=slate_date)
+            else:
+                st.warning("⚠️ No API key found — injury re-check skipped")
         except Exception as exc:
-            print(f"[_run_edge] Late swap injury re-check failed (non-fatal): {exc}")
+            st.warning(f"⚠️ Injury re-check failed: {exc}")
 
         # Load published lineups for lineup membership check
         _pub_lineups: dict = {}

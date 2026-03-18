@@ -579,6 +579,7 @@ def fetch_espn_nba_injuries() -> list:
         " will sit", " won't play", " has been ruled out",
         " will miss", " not available", " remains out",
         " sidelined", " will be sidelined", " maintenance day",
+        " held out",
     )
     try:
         resp = requests.get(_ESPN_NBA_INJURIES_URL, timeout=15)

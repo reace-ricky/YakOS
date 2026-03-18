@@ -89,7 +89,7 @@ def main():
     sys.path.insert(0, os.path.join(_proj_root, "app"))
     sys.path.insert(0, _proj_root)
 
-    from app.tabs.lab_tab import _classify_plays
+    from app.lab_tab import _classify_plays
 
     print("\n" + "=" * 60)
     print("Running _classify_plays()...")
