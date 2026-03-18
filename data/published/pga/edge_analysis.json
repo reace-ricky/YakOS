@@ -1,71 +1,165 @@
 {
   "bullets": [
-    "Fade candidates: Joe Highsmith, Adam Schenk"
+    "Core anchors: Matt Fitzpatrick, Aaron Rai, Christiaan Bezuidenhout",
+    "Leverage plays: Davis Chatfield, Dylan Wu",
+    "Fade candidates: Davis Riley, Michael Brennan"
   ],
-  "recommendation": "0 core plays anchored at .",
-  "core_plays": [],
-  "leverage_plays": [],
+  "recommendation": "5 core plays anchored at $7,500\u2013$9,800. 5 leverage plays at 0\u20130% ownership.",
+  "core_plays": [
+    {
+      "player_name": "Matt Fitzpatrick",
+      "salary": 9800,
+      "proj": 76.41,
+      "ownership": 21.79,
+      "edge": 0.7414473034840705,
+      "value": 1.0,
+      "risk_score": 0.0,
+      "ceil": 98.81
+    },
+    {
+      "player_name": "Aaron Rai",
+      "salary": 7900,
+      "proj": 62.49,
+      "ownership": 9.36,
+      "edge": 0.729959601613775,
+      "value": 0.55,
+      "risk_score": 0.0,
+      "ceil": 81.92
+    },
+    {
+      "player_name": "Christiaan Bezuidenhout",
+      "salary": 7700,
+      "proj": 61.74,
+      "ownership": 6.08,
+      "edge": 0.7096004342369078,
+      "value": 0.59,
+      "risk_score": 0.0,
+      "ceil": 80.84
+    },
+    {
+      "player_name": "Max McGreevy",
+      "salary": 7500,
+      "proj": 62.0,
+      "ownership": 7.4,
+      "edge": 0.6943835308752573,
+      "value": 0.74,
+      "risk_score": 0.0,
+      "ceil": 81.76
+    },
+    {
+      "player_name": "J.J. Spaun",
+      "salary": 8700,
+      "proj": 67.68,
+      "ownership": 13.43,
+      "edge": 0.6923250451779546,
+      "value": 0.63,
+      "risk_score": 0.0,
+      "ceil": 88.04
+    }
+  ],
+  "leverage_plays": [
+    {
+      "player_name": "Davis Chatfield",
+      "salary": 6100,
+      "proj": 45.7,
+      "ownership": 0.07,
+      "edge": 0.6650570884960574,
+      "value": -0.09,
+      "risk_score": 0.0,
+      "ceil": 60.91
+    },
+    {
+      "player_name": "Dylan Wu",
+      "salary": 6500,
+      "proj": 49.63,
+      "ownership": 0.19,
+      "edge": 0.6458075595908068,
+      "value": 0.02,
+      "risk_score": 0.0,
+      "ceil": 66.08
+    },
+    {
+      "player_name": "Kensei Hirata",
+      "salary": 6100,
+      "proj": 44.04,
+      "ownership": 0.0,
+      "edge": 0.6254501592105028,
+      "value": -0.19,
+      "risk_score": 0.0,
+      "ceil": 58.72
+    },
+    {
+      "player_name": "Brandt Snedeker",
+      "salary": 6200,
+      "proj": 46.87,
+      "ownership": 0.07,
+      "edge": 0.6117166687543153,
+      "value": -0.05,
+      "risk_score": 0.0,
+      "ceil": 62.52
+    },
+    {
+      "player_name": "Adrien Saddier",
+      "salary": 6500,
+      "proj": 50.47,
+      "ownership": 0.0,
+      "edge": 0.6066335654933911,
+      "value": 0.11,
+      "risk_score": 0.0,
+      "ceil": 67.9
+    }
+  ],
   "value_plays": [],
   "fade_candidates": [
     {
-      "player_name": "Joe Highsmith",
-      "salary": 6300,
-      "proj": 32.0,
-      "ownership": 0.0,
-      "edge": 0.2766820965965127,
-      "value": 5.079365079365079,
-      "risk_score": 100.0,
-      "sim90th": 45.77,
-      "ceil": 52.63,
-      "sim_leverage": -2.05
+      "player_name": "Davis Riley",
+      "salary": 6500,
+      "proj": 43.68,
+      "ownership": 4.3,
+      "edge": 0.4528194183618591,
+      "value": -0.34,
+      "risk_score": 0.0,
+      "ceil": 58.82
     },
     {
-      "player_name": "Adam Schenk",
-      "salary": 6200,
-      "proj": 32.4,
-      "ownership": 0.0,
-      "edge": 0.2829090613576783,
-      "value": 5.225806451612903,
-      "risk_score": 100.0,
-      "sim90th": 46.96,
-      "ceil": 52.89,
-      "sim_leverage": -3.69
+      "player_name": "Michael Brennan",
+      "salary": 6700,
+      "proj": 55.29,
+      "ownership": 4.77,
+      "edge": 0.5536964155130416,
+      "value": 0.5,
+      "risk_score": 0.0,
+      "ceil": 74.52
     },
     {
-      "player_name": "Danny Walker",
-      "salary": 6000,
-      "proj": 31.85,
-      "ownership": 0.92,
-      "edge": 0.29486035402163485,
-      "value": 5.308333333333334,
-      "risk_score": 100.0,
-      "sim90th": 45.6,
-      "ceil": 52.39,
-      "sim_leverage": -27.87
+      "player_name": "Billy Horschel",
+      "salary": 7200,
+      "proj": 49.55,
+      "ownership": 7.28,
+      "edge": 0.5543489103499808,
+      "value": -0.22,
+      "risk_score": 0.0,
+      "ceil": 66.49
     },
     {
-      "player_name": "Cam Davis",
-      "salary": 6100,
-      "proj": 31.08,
-      "ownership": 0.32,
-      "edge": 0.30174286094511077,
-      "value": 5.0950819672131145,
-      "risk_score": 100.0,
-      "sim90th": 44.76,
-      "ceil": 51.29,
-      "sim_leverage": -16.39
+      "player_name": "Marco Penge",
+      "salary": 7300,
+      "proj": 56.42,
+      "ownership": 3.66,
+      "edge": 0.5553112779404944,
+      "value": 0.26,
+      "risk_score": 0.0,
+      "ceil": 75.72
     },
     {
-      "player_name": "Erik Van Rooyen",
-      "salary": 6200,
-      "proj": 35.37,
-      "ownership": 0.0,
-      "edge": 0.3018441539238508,
-      "value": 5.704838709677419,
-      "risk_score": 100.0,
-      "sim90th": 50.94,
-      "ceil": 57.63,
-      "sim_leverage": 0.41
+      "player_name": "Matti Schmid",
+      "salary": 7100,
+      "proj": 53.73,
+      "ownership": 5.03,
+      "edge": 0.5555442207574964,
+      "value": 0.1,
+      "risk_score": 0.0,
+      "ceil": 72.11
     }
   ],
   "signals_df_path": "signals.parquet"

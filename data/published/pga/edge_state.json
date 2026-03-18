@@ -1,15 +1,47 @@
 {
   "sport": "PGA",
-  "date": "2026-03-12",
-  "core_names": [],
-  "leverage_names": [],
+  "date": "2026-03-19",
+  "core_names": [
+    "Matt Fitzpatrick",
+    "Aaron Rai",
+    "Christiaan Bezuidenhout",
+    "Max McGreevy",
+    "J.J. Spaun"
+  ],
+  "leverage_names": [
+    "Davis Chatfield",
+    "Dylan Wu",
+    "Kensei Hirata",
+    "Brandt Snedeker",
+    "Adrien Saddier"
+  ],
   "value_names": [],
   "fade_names": [
-    "Joe Highsmith",
-    "Adam Schenk",
-    "Danny Walker",
-    "Cam Davis",
-    "Erik Van Rooyen"
+    "Davis Riley",
+    "Michael Brennan",
+    "Billy Horschel",
+    "Marco Penge",
+    "Matti Schmid"
   ],
-  "calibration_slates": 15
+  "calibration_slates": 15,
+  "wave_split": {
+    "early_count": 66,
+    "late_count": 65,
+    "early_avg_proj": 52.3,
+    "late_avg_proj": 53.2,
+    "early_players": [
+      "Matt Fitzpatrick",
+      "Jacob Bridgeman",
+      "Justin Thomas",
+      "Ryo Hisatsune",
+      "Jordan Spieth"
+    ],
+    "late_players": [
+      "Xander Schauffele",
+      "Patrick Cantlay",
+      "Viktor Hovland",
+      "J.J. Spaun",
+      "Corey Conners"
+    ]
+  }
 }
