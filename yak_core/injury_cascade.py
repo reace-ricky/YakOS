@@ -54,8 +54,8 @@ KEY_INJURY_MIN_MINUTES: float = 15.0
 MAX_PLAYER_MINUTES: float = 40.0
 
 # Max bump multiplier: cascade bump cannot exceed this × original projection.
-# A player projected for 20 FP can get at most +10 FP (0.5×20), totaling 30 FP.
-_MAX_BUMP_MULTIPLIER: float = 0.35  # Max injury bump = 35% of base projection
+# A player projected for 20 FP can get at most +3 FP (0.15×20), totaling 23 FP.
+_MAX_BUMP_MULTIPLIER: float = 0.15  # 35% was over-inflating — bench players don't maintain FP/min at higher minute loads
 _MAX_TOTAL_BUMP_MULTIPLIER: float = 0.40  # Max total bump (injury + minutes gap combined)
 
 # ---------------------------------------------------------------------------
@@ -76,6 +76,9 @@ _TIER_STARTER: float = 0.4       # 28+ min    ← near ceiling, limited upside
 # replacement (same position, 12–28 min projected, highest minute count).
 _PRIMARY_BACKUP_BOOST_MULT: float = 2.0   # weight multiplier for primary backup
 _PRIMARY_BACKUP_MAX_EXTRA_MINS: float = 12.0  # hard cap on extra mins per injury
+
+# Efficiency decay: players don't maintain FP/min when absorbing extra minutes
+_CASCADE_EFFICIENCY_DECAY: float = 0.65
 
 # ---------------------------------------------------------------------------
 # Position-based FP/min floor rates (NBA) — DEPRECATED
@@ -527,7 +530,7 @@ def apply_injury_cascade(
             )
             player_pos = str(df.at[idx2, "pos"])
             fp_per_min = _player_fp_per_min(df.loc[idx2], orig_proj, orig_mins)
-            bump_fp = round(extra * fp_per_min, 2)
+            bump_fp = round(extra * fp_per_min * _CASCADE_EFFICIENCY_DECAY, 2)
 
             # Cap per-injury bump by remaining bump room (_MAX_BUMP_MULTIPLIER)
             already_bumped = float(df.at[idx2, "injury_bump_fp"])
@@ -583,7 +586,7 @@ def apply_injury_cascade(
             pd.to_numeric(df.at[idx, "proj_minutes"], errors="coerce") or 0
         )
         fp_per_min = _player_fp_per_min(df.loc[idx], orig_proj, orig_mins)
-        total_bump = round(total_extra * fp_per_min, 2)
+        total_bump = round(total_extra * fp_per_min * _CASCADE_EFFICIENCY_DECAY, 2)
 
         # Safety net: cap bump at _MAX_BUMP_MULTIPLIER × original projection
         max_bump = orig_proj * _MAX_BUMP_MULTIPLIER

@@ -912,6 +912,14 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
         _final_proj = pd.to_numeric(pool.get("proj", 0), errors="coerce").fillna(0).clip(lower=0)
         _final_sal = pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0)
 
+        # Use pre-cascade (original) projections as the sim base so cascade
+        # bumps don't triple-inflate through gpp_score's upside/boom components.
+        # The cascade bump is still in `proj` for optimizer/selection purposes.
+        if "original_proj" in pool.columns:
+            _sim_base_proj = pd.to_numeric(pool["original_proj"], errors="coerce").fillna(0).clip(lower=0)
+        else:
+            _sim_base_proj = _final_proj
+
         # 1) Recompute floor/ceil from final proj using salary-tier spread
         _sal_k = (_final_sal / 1000.0).clip(lower=3.0)
         _spread_mult = (0.65 - _sal_k * 0.03).clip(lower=0.25, upper=0.55)
@@ -926,19 +934,21 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
             _spread_mult[_has_rv] = (
                 _rcv[_has_rv] * 0.60 + _spread_mult[_has_rv] * 0.40
             ).clip(lower=0.25, upper=0.55)
-        _new_floor = (_final_proj * (1.0 - _spread_mult)).round(2)
-        _new_ceil = (_final_proj * (1.0 + _spread_mult)).round(2)
+        _new_floor = (_sim_base_proj * (1.0 - _spread_mult)).round(2)
+        _new_ceil = (_sim_base_proj * (1.0 + _spread_mult)).round(2)
         pool["floor"] = _new_floor
         pool["ceil"] = _new_ceil
 
-        # 2) Recompute sim percentiles from final proj + salary-bracket variance
-        _std = compute_empirical_std(_final_proj.values, _final_sal.values, variance_mult=1.0)
+        # 2) Recompute sim percentiles from ORIGINAL (pre-cascade) proj + salary-bracket variance
+        #    Cascade bumps inflate proj for optimizer use, but sims should reflect
+        #    realistic distributions anchored to the RG projection.
+        _std = compute_empirical_std(_sim_base_proj.values, _final_sal.values, variance_mult=1.0)
         _n_sims = 5000
         _rng = np.random.default_rng(42)  # deterministic seed for reproducibility
         _sim_matrix = _rng.normal(
-            loc=_final_proj.values[None, :],
+            loc=_sim_base_proj.values[None, :],
             scale=_std[None, :],
-            size=(_n_sims, len(_final_proj)),
+            size=(_n_sims, len(_sim_base_proj)),
         )
         _sim_matrix = np.maximum(_sim_matrix, 0.0)
         for _pct, _col in [
