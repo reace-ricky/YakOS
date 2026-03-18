@@ -195,6 +195,19 @@ def _get_sim_col(df: pd.DataFrame, pctile: str) -> pd.Series:
     return pd.Series(0.0, index=df.index)
 
 
+def _safe_col(df: pd.DataFrame, col: str, default: float = 0.0) -> pd.Series:
+    """Return a numeric Series for *col*, falling back to a constant Series.
+
+    ``df.get(col, scalar)`` returns a plain scalar when *col* is missing,
+    and calling ``.fillna()`` on that scalar raises
+    ``AttributeError: 'int' object has no attribute 'fillna'``.
+    This helper guarantees the return value is always a Series.
+    """
+    if col in df.columns:
+        return pd.to_numeric(df[col], errors="coerce").fillna(default)
+    return pd.Series(default, index=df.index)
+
+
 def _add_pga_scores(
     df: pd.DataFrame,
     cfg: Dict[str, Any],
@@ -229,19 +242,19 @@ def _add_pga_scores(
     proj = pd.to_numeric(df["proj"], errors="coerce").fillna(0)
 
     # -- Cut equity signal (0-1)
-    cut_equity = pd.to_numeric(df.get("cut_equity", 0), errors="coerce").fillna(0.5)
+    cut_equity = _safe_col(df, "cut_equity", 0.5)
 
     # -- Ball-striking (z-scored, normalise to 0-1 for scoring)
-    ball_striking = _norm01(pd.to_numeric(df.get("ball_striking", 0), errors="coerce").fillna(0))
+    ball_striking = _norm01(_safe_col(df, "ball_striking", 0.0))
 
     # -- Course fit (z-scored, normalise to 0-1)
-    course_fit = _norm01(pd.to_numeric(df.get("course_fit_z", 0), errors="coerce").fillna(0))
+    course_fit = _norm01(_safe_col(df, "course_fit_z", 0.0))
 
     # -- Wave advantage
-    wave_adv = _norm01(pd.to_numeric(df.get("wave_advantage", 0), errors="coerce").fillna(0))
+    wave_adv = _norm01(_safe_col(df, "wave_advantage", 0.0))
 
     # -- Upside: ceiling_proxy (win%*3 + top5%*2 + top10%), normalised
-    ceiling_proxy = _norm01(pd.to_numeric(df.get("ceiling_proxy", 0), errors="coerce").fillna(0))
+    ceiling_proxy = _norm01(_safe_col(df, "ceiling_proxy", 0.0))
 
     # -- Boom: use ceil - proj spread, normalised
     if "ceil" in df.columns:
@@ -251,7 +264,9 @@ def _add_pga_scores(
     boom = _norm01(boom_raw)
 
     # -- Ownership penalty (log-based, same principle as NBA)
-    own = pd.to_numeric(df.get("own_pct", df.get("ownership", 0)), errors="coerce").fillna(0).clip(lower=0.001)
+    own_pct = _safe_col(df, "own_pct", 0.0)
+    own_fallback = _safe_col(df, "ownership", 0.0)
+    own = own_pct.where(own_pct > 0, own_fallback).clip(lower=0.001)
     # Scale to fraction if percentages
     if own.max() > 1:
         own = own / 100.0
