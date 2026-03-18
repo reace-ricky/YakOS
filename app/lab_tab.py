@@ -1327,14 +1327,22 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
     _risk_score += _blowout_risk * 10
 
     # Normalize to 0-100 scale
+    # Guard: when all players have identical risk (e.g. PGA pools lacking
+    # NBA-specific columns), the max-normalization would map everyone to
+    # 100 and block all classifications.  Treat zero variance as "no risk
+    # signal available" → set all to 0.
     _risk_max = _risk_score.max()
-    if _risk_max > 0:
+    _risk_min = _risk_score.min()
+    if _risk_max > 0 and (_risk_max - _risk_min) > 0.01:
         _risk_score = (_risk_score / _risk_max) * 100
+    else:
+        _risk_score = pd.Series(0.0, index=df.index)
 
     df["risk_score"] = _risk_score.round(1)
 
     _risk_p80 = float(np.percentile(_risk_score.dropna(), 80)) if len(_risk_score.dropna()) > 2 else 80
-    _low_risk = _risk_score < _risk_p80
+    # When no risk signal exists (all zeros), treat everyone as low-risk
+    _low_risk = _risk_score <= _risk_p80 if _risk_p80 == 0 else _risk_score < _risk_p80
 
     # ── Columns to display ──
     _pick_cols = ["player_name", "salary", "proj", _own_col, "edge", "value", "risk_score"]
@@ -1411,9 +1419,11 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
         neg_lev_mask = (_sim_leverage < -15) & (_own > 5) & (~df["player_name"].isin(_used))
         fade_mask = fade_mask | neg_lev_mask
     # Also fade high-risk players regardless of ownership
+    # Skip when no risk signal exists (all zeros — e.g. PGA pools)
     _risk_p85 = float(np.percentile(_risk_score.dropna(), 85)) if len(_risk_score.dropna()) > 2 else 85
-    high_risk_mask = (_risk_score >= _risk_p85) & (~df["player_name"].isin(_used))
-    fade_mask = fade_mask | high_risk_mask
+    if _risk_p85 > 0:
+        high_risk_mask = (_risk_score >= _risk_p85) & (~df["player_name"].isin(_used))
+        fade_mask = fade_mask | high_risk_mask
     fade = df[fade_mask][_pick_cols].copy()
     fade = fade.rename(columns={_own_col: "ownership"})
     fade = fade.sort_values("edge", ascending=True).head(5)
@@ -2245,23 +2255,23 @@ def _fetch_nba_actuals(api_key: str, game_date: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _fetch_pga_actuals(api_key: str) -> pd.DataFrame:
-    """Fetch actual DK fantasy points for the current/most recent PGA event via DataGolf.
+def _fetch_pga_actuals(api_key: str, slate_date: str = "") -> pd.DataFrame:
+    """Fetch actual DK fantasy points for a PGA event via DataGolf.
 
-    Uses the historical-dfs-data/points endpoint which returns DK fantasy
-    points directly.  Requires DataGolf premium; returns empty on 403.
+    Uses ``pga_calibration.get_pga_event_list`` for robust event lookup
+    (filters to PGA tour + DK salaries, sorted by date).  When *slate_date*
+    is provided, selects the event closest to that date; otherwise falls
+    back to the most recent event.
 
-    Falls back to the event list to auto-detect the most recent event.
-
-    Returns a DataFrame with columns: player_name, actual_fp
+    Returns a DataFrame with columns: player_name, actual_fp, event_name
     """
     from yak_core.datagolf import DataGolfClient
+    from yak_core.pga_calibration import get_pga_event_list, fetch_pga_actuals as _cal_fetch
 
     dg = DataGolfClient(api_key)
 
-    # Find the most recent event
     try:
-        events = dg.get_dfs_event_list()
+        events = get_pga_event_list(dg)
     except Exception as exc:
         print(f"[_fetch_pga_actuals] Event list fetch failed: {exc}")
         return pd.DataFrame(columns=["player_name", "actual_fp"])
@@ -2269,57 +2279,36 @@ def _fetch_pga_actuals(api_key: str) -> pd.DataFrame:
     if events.empty:
         return pd.DataFrame(columns=["player_name", "actual_fp"])
 
-    # Events are sorted newest-first by DataGolf; pick the latest one
-    # that has a year matching current or most recent
-    from datetime import date as _date
-    current_year = _date.today().year
-
-    # Filter to current year events, take the last one (most recent)
-    if "year" in events.columns:
-        year_events = events[events["year"] == current_year]
-        if year_events.empty:
-            year_events = events
+    # Match event to slate_date when available
+    latest = None
+    if slate_date and "date" in events.columns:
+        # events are sorted date descending; find the event whose date
+        # is closest to (and <= ) the slate date
+        events["_date_str"] = events["date"].astype(str)
+        candidates = events[events["_date_str"] <= slate_date]
+        if not candidates.empty:
+            latest = candidates.iloc[0]  # most recent event on or before slate_date
+        else:
+            latest = events.iloc[0]  # fallback: most recent overall
     else:
-        year_events = events
+        latest = events.iloc[0]  # sorted date desc, so first = most recent
 
-    # Take the last row (most recent event)
-    latest = year_events.iloc[-1] if len(year_events) > 0 else None
-    if latest is None:
-        return pd.DataFrame(columns=["player_name", "actual_fp"])
-
-    event_id = int(latest.get("event_id", latest.get("id", 0)))
-    year = int(latest.get("year", latest.get("calendar_year", current_year)))
-    event_name = latest.get("event_name", latest.get("name", f"Event {event_id}"))
+    event_id = int(latest.get("event_id", 0))
+    year = int(latest.get("calendar_year", date.today().year))
+    event_name = str(latest.get("event_name", f"Event {event_id}"))
     print(f"[_fetch_pga_actuals] Fetching actuals for: {event_name} ({year}, ID={event_id})")
 
     try:
-        df = dg.get_historical_dfs_points(event_id=event_id, year=year, tour="pga", site="draftkings")
+        df = _cal_fetch(dg, event_id=event_id, year=year)
     except Exception as exc:
         print(f"[_fetch_pga_actuals] DFS points fetch failed: {exc}")
         return pd.DataFrame(columns=["player_name", "actual_fp"])
 
-    if df.empty:
+    if df.empty or "actual_fp" not in df.columns:
         return pd.DataFrame(columns=["player_name", "actual_fp"])
 
-    # Normalize column names — DataGolf may return 'dk_points', 'total_points', etc.
-    fp_col = None
-    for candidate in ["dk_points", "total_points", "fantasy_points", "total", "points", "dk_salary"]:
-        if candidate in df.columns:
-            fp_col = candidate
-            break
-    # If no obvious FP column, check for numeric columns that look like FP
-    if fp_col is None:
-        for c in df.columns:
-            if "point" in c.lower() or "fp" in c.lower() or "score" in c.lower():
-                fp_col = c
-                break
-
-    if fp_col is None or "player_name" not in df.columns:
-        print(f"[_fetch_pga_actuals] Unexpected columns: {list(df.columns)}")
-        return pd.DataFrame(columns=["player_name", "actual_fp"])
-
-    result = df[["player_name"]].copy()
-    result["actual_fp"] = pd.to_numeric(df[fp_col], errors="coerce").fillna(0.0).round(2)
+    result = df[["player_name", "actual_fp"]].copy()
+    result["actual_fp"] = pd.to_numeric(result["actual_fp"], errors="coerce").fillna(0.0).round(2)
     result["event_name"] = event_name
     return result
 
@@ -2392,7 +2381,7 @@ def _render_historical_replay(sport: str) -> None:
                     st.error("Missing DATAGOLF_API_KEY.")
                 else:
                     with st.spinner("Fetching DK fantasy points from DataGolf..."):
-                        actuals_df = _fetch_pga_actuals(api_key)
+                        actuals_df = _fetch_pga_actuals(api_key, slate_date=_slate_date_from_meta)
                     if actuals_df.empty:
                         st.warning("No actuals found. The event may still be in progress, or your DataGolf plan may not include historical DFS data.")
                     else:
