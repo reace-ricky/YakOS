@@ -138,11 +138,17 @@ def _find_previous_slate(sport: str, today: date) -> Optional[pd.DataFrame]:
         check_date = today - timedelta(days=days_back)
         date_str = check_date.strftime("%Y-%m-%d")
 
-        # Look for gpp_main first (most comprehensive), then any slate
-        patterns = [
-            f"{date_str}_gpp_main.parquet",
-            f"{date_str}_cash_main.parquet",
-        ]
+        # Sport-aware archive patterns
+        if sport.upper() == "PGA":
+            patterns = [
+                f"{date_str}_pga_gpp.parquet",
+                f"{date_str}_pga_showdown.parquet",
+            ]
+        else:
+            patterns = [
+                f"{date_str}_gpp_main.parquet",
+                f"{date_str}_cash_main.parquet",
+            ]
         for pattern in patterns:
             path = _ARCHIVE_DIR / pattern
             if path.exists():
@@ -231,15 +237,14 @@ def get_previous_slate_recap(
     )
 
     if has_actuals:
-        # Use actuals from archive
+        # Use actuals from archive (works for both NBA and PGA)
         df = prev_slate[
             prev_slate["actual_fp"].notna()
             & (prev_slate["proj"] > 0)
         ][["player_name", "proj", "actual_fp", "salary"]].copy()
         df = df.rename(columns={"actual_fp": "actual"})
-    else:
-        # Fall back to Tank01 API
-        # Convert slate_date to YYYYMMDD format for API
+    elif sport.upper() != "PGA":
+        # NBA: Fall back to Tank01 API
         try:
             api_date = slate_date.replace("-", "")
         except Exception:
@@ -254,6 +259,9 @@ def get_previous_slate_recap(
         ].copy()
         df["actual"] = df["player_name"].map(actuals_map)
         df = df[df["actual"].notna()].copy()
+    else:
+        # PGA: no Tank01 fallback — actuals come from DataGolf via calibration
+        return None
 
     if df.empty:
         return None
