@@ -317,6 +317,8 @@ def render_lab_tab(sport: str) -> None:
                 try:
                     edge_df, edge_analysis, edge_state = _run_edge(sport, slate_date, out_dir)
                     st.success(f"Edge analysis complete \u2014 {len(edge_df)} players scored")
+                    from app.data_loader import invalidate_published_cache
+                    invalidate_published_cache()
 
                     for key, label in [
                         ("core_plays", "Core"), ("leverage_plays", "Leverage"),
