@@ -152,7 +152,7 @@
       "proj_minutes": 24.5,
       "sim90th": 47.9,
       "ceil": 36.63,
-      "sim_leverage": 0.0
+      "sim_leverage": 0.56
     },
     {
       "player_name": "Keldon Johnson",
@@ -165,7 +165,7 @@
       "proj_minutes": 21.9,
       "sim90th": 43.64,
       "ceil": 36.5,
-      "sim_leverage": 58.99
+      "sim_leverage": 59.55
     },
     {
       "player_name": "Ayo Dosunmu",
@@ -178,7 +178,7 @@
       "proj_minutes": 29.3,
       "sim90th": 46.349999999999994,
       "ceil": 36.59,
-      "sim_leverage": -43.26
+      "sim_leverage": -43.82
     },
     {
       "player_name": "Julian Champagnie",
@@ -191,7 +191,7 @@
       "proj_minutes": 23.2,
       "sim90th": 46.440000000000005,
       "ceil": 40.09,
-      "sim_leverage": 65.73
+      "sim_leverage": 66.29
     },
     {
       "player_name": "Tre Johnson",
@@ -204,7 +204,7 @@
       "proj_minutes": 24.8,
       "sim90th": 43.79,
       "ceil": 36.13,
-      "sim_leverage": -21.35
+      "sim_leverage": -21.91
     }
   ],
   "fade_candidates": [
