@@ -1,7 +1,7 @@
 {
   "sport": "NBA",
   "site": "DK",
-  "date": "2026-03-17",
+  "date": "2026-03-18",
   "salary_cap": 50000,
   "roster_slots": [
     "PG",
@@ -14,56 +14,62 @@
     "UTIL"
   ],
   "lineup_size": 8,
-  "pool_size": 284,
+  "pool_size": 314,
   "proj_source": "rotogrinders+tank01",
   "matchups": [
     {
-      "away": "OKC",
-      "home": "ORL",
-      "game_id": "20260317_OKC@ORL",
-      "label": "OKC @ ORL"
+      "away": "ATL",
+      "home": "DAL",
+      "game_id": "20260318_ATL@DAL",
+      "label": "ATL @ DAL"
     },
     {
-      "away": "PHI",
-      "home": "DEN",
-      "game_id": "20260317_PHI@DEN",
-      "label": "PHI @ DEN"
+      "away": "POR",
+      "home": "IND",
+      "game_id": "20260318_POR@IND",
+      "label": "POR @ IND"
     },
     {
-      "away": "DET",
-      "home": "WAS",
-      "game_id": "20260317_DET@WAS",
-      "label": "DET @ WAS"
+      "away": "GS",
+      "home": "BOS",
+      "game_id": "20260318_GS@BOS",
+      "label": "GS @ BOS"
     },
     {
-      "away": "SA",
-      "home": "SAC",
-      "game_id": "20260317_SA@SAC",
-      "label": "SA @ SAC"
+      "away": "LAC",
+      "home": "NO",
+      "game_id": "20260318_LAC@NO",
+      "label": "LAC @ NO"
     },
     {
-      "away": "MIA",
-      "home": "CHA",
-      "game_id": "20260317_MIA@CHA",
-      "label": "MIA @ CHA"
+      "away": "DEN",
+      "home": "MEM",
+      "game_id": "20260318_DEN@MEM",
+      "label": "DEN @ MEM"
     },
     {
-      "away": "PHO",
+      "away": "UTA",
       "home": "MIN",
-      "game_id": "20260317_PHO@MIN",
-      "label": "PHO @ MIN"
+      "game_id": "20260318_UTA@MIN",
+      "label": "UTA @ MIN"
     },
     {
-      "away": "IND",
-      "home": "NY",
-      "game_id": "20260317_IND@NY",
-      "label": "IND @ NY"
+      "away": "OKC",
+      "home": "BKN",
+      "game_id": "20260318_OKC@BKN",
+      "label": "OKC @ BKN"
     },
     {
-      "away": "CLE",
-      "home": "MIL",
-      "game_id": "20260317_CLE@MIL",
-      "label": "CLE @ MIL"
+      "away": "LAL",
+      "home": "HOU",
+      "game_id": "20260318_LAL@HOU",
+      "label": "LAL @ HOU"
+    },
+    {
+      "away": "TOR",
+      "home": "CHI",
+      "game_id": "20260318_TOR@CHI",
+      "label": "TOR @ CHI"
     }
   ]
 }

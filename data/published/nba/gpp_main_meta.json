@@ -2,7 +2,9 @@
   "contest": "GPP Main",
   "sport": "NBA",
   "num_lineups": 5,
-  "built_at": "2026-03-18 01:53 AM ET",
+  "built_at": "2026-03-18 09:56 AM ET",
   "lock": [],
-  "exclude": []
+  "exclude": [
+    "Andrew Nembhard"
+  ]
 }

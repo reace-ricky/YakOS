@@ -1,0 +1,10 @@
+{
+  "contest": "Cash Main",
+  "sport": "NBA",
+  "num_lineups": 10,
+  "built_at": "2026-03-18 04:29 AM ET",
+  "lock": [],
+  "exclude": [
+    "Andrew Nembhard"
+  ]
+}
