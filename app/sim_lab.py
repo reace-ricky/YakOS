@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -58,6 +60,112 @@ def _sandbox_config_key(preset: str) -> str:
 
 def _get_sandbox_overrides(preset: str) -> Dict[str, Any]:
     return dict(st.session_state.get(_sandbox_config_key(preset), {}))
+
+
+# ---------------------------------------------------------------------------
+# RG archive helpers (NBA)
+# ---------------------------------------------------------------------------
+
+_RG_ARCHIVE_DIR = Path(__file__).resolve().parent.parent / "data" / "rg_archive" / "nba"
+_RG_DATE_RE = re.compile(r"^rg_(\d{4}-\d{2}-\d{2})\.csv$")
+
+
+def _scan_rg_dates() -> List[date]:
+    """Return dates with RG archive files, sorted most-recent-first."""
+    if not _RG_ARCHIVE_DIR.is_dir():
+        return []
+    dates: List[date] = []
+    for f in _RG_ARCHIVE_DIR.iterdir():
+        m = _RG_DATE_RE.match(f.name)
+        if m:
+            try:
+                dates.append(date.fromisoformat(m.group(1)))
+            except ValueError:
+                continue
+    dates.sort(reverse=True)
+    return dates
+
+
+def _merge_rg_csv(pool: pd.DataFrame, rg_file: Path) -> pd.DataFrame:
+    """Merge RotoGrinders CSV projections into the player pool."""
+    try:
+        rg = pd.read_csv(rg_file, encoding="utf-8-sig")
+    except Exception:
+        try:
+            rg = pd.read_csv(rg_file, encoding="latin-1")
+        except Exception:
+            rg = pd.read_csv(rg_file, sep=None, engine="python")
+
+    rg.columns = [c.strip().upper() for c in rg.columns]
+
+    if "PLAYER" not in rg.columns:
+        st.error(
+            f"RG CSV missing PLAYER column. "
+            f"Found columns: {', '.join(rg.columns[:10])}"
+        )
+        return pool
+
+    rg["_join_name"] = rg["PLAYER"].astype(str).str.strip().str.lower()
+    pool["_join_name"] = pool["player_name"].astype(str).str.strip().str.lower()
+    pool["rg_proj"] = float("nan")
+    rg_lookup = rg.set_index("_join_name")
+
+    n_merged = 0
+    n_missing = 0
+    for idx, row in pool.iterrows():
+        jn = row["_join_name"]
+        if jn not in rg_lookup.index:
+            n_missing += 1
+            continue
+        r = rg_lookup.loc[jn]
+        if isinstance(r, pd.DataFrame):
+            r = r.iloc[0]
+        rg_proj = float(r.get("FPTS", 0) or 0)
+        if rg_proj > 0:
+            pool.at[idx, "proj"] = rg_proj
+            pool.at[idx, "rg_proj"] = rg_proj
+            pool.at[idx, "proj_source"] = "rotogrinders"
+            n_merged += 1
+        rg_sal = r.get("SALARY")
+        if rg_sal is not None and not pd.isna(rg_sal):
+            rg_sal = float(rg_sal)
+            if rg_sal > 0:
+                pool.at[idx, "salary"] = int(rg_sal)
+        rg_floor = float(r.get("FLOOR", 0) or 0)
+        rg_ceil = float(r.get("CEIL", 0) or 0)
+        if rg_floor > 0:
+            pool.at[idx, "floor"] = rg_floor
+        if rg_ceil > 0:
+            pool.at[idx, "ceil"] = rg_ceil
+        pown_str = str(r.get("POWN", "0%")).replace("%", "").strip()
+        try:
+            pown_val = float(pown_str)
+        except (ValueError, TypeError):
+            pown_val = 0.0
+        if pown_val > 0:
+            pool.at[idx, "ownership"] = pown_val
+            pool.at[idx, "own_proj"] = pown_val
+        for sim_col in ["SIM15TH", "SIM33RD", "SIM50TH", "SIM66TH", "SIM85TH", "SIM90TH", "SIM99TH"]:
+            val = r.get(sim_col)
+            if val is not None and not pd.isna(val):
+                pool.at[idx, sim_col.lower()] = float(val)
+        smash_val = r.get("SMASH")
+        if smash_val is not None and not pd.isna(smash_val):
+            pool.at[idx, "smash_prob"] = float(smash_val)
+    pool.drop(columns=["_join_name"], inplace=True)
+
+    rg_fpts_range = f"{rg['FPTS'].min():.0f}-{rg['FPTS'].max():.0f}" if "FPTS" in rg.columns else "N/A"
+    st.info(
+        f"RG merge: {n_merged}/{len(pool)} players matched "
+        f"({n_missing} unmatched) | {len(rg)} rows in CSV | "
+        f"FPTS range {rg_fpts_range}"
+    )
+    if n_merged == 0:
+        st.warning(
+            "No players matched from RG file. Projections will use "
+            "YakOS model values instead of RotoGrinders."
+        )
+    return pool
 
 
 # ---------------------------------------------------------------------------
@@ -258,16 +366,46 @@ def _run_pipeline(
     if pool_df is None or pool_df.empty:
         raise ValueError(f"No DFS pool found for {date_dash}.")
 
-    # ── Step 2: Fetch actuals ─────────────────────────────────────────
+    # ── Step 2: Merge RG projections (NBA only) ──────────────────────
+    if sport == "NBA":
+        rg_path = _RG_ARCHIVE_DIR / f"rg_{date_dash}.csv"
+        if rg_path.is_file():
+            pool_df = _merge_rg_csv(pool_df, rg_path)
+        else:
+            st.warning(f"No RG archive file for {date_dash}. Using Tank01 projections.")
+
+    # ── Step 3: Auto-run Monte Carlo sims (if sim columns missing) ───
+    if sport == "NBA" and "sim90th" not in pool_df.columns and "SIM90TH" not in pool_df.columns:
+        try:
+            from yak_core.edge import compute_empirical_std
+            _proj = pd.to_numeric(pool_df["proj"], errors="coerce").fillna(0)
+            _sal = pd.to_numeric(pool_df["salary"], errors="coerce").fillna(0)
+            _std = compute_empirical_std(_proj.values, _sal.values, variance_mult=1.0)
+            _n_sims = 5000
+            _rng = np.random.default_rng(42)
+            _sim_matrix = _rng.normal(
+                loc=_proj.values[None, :],
+                scale=_std[None, :],
+                size=(_n_sims, len(_proj)),
+            )
+            _sim_matrix = np.maximum(_sim_matrix, 0.0)
+            for _pct, _col in [(15, "sim15th"), (33, "sim33rd"), (50, "sim50th"),
+                                (66, "sim66th"), (85, "sim85th"), (90, "sim90th"), (99, "sim99th")]:
+                pool_df[_col] = np.percentile(_sim_matrix, _pct, axis=0).round(2)
+            st.info(f"Auto-ran {_n_sims} player sims — sim columns populated")
+        except Exception as _sim_err:
+            st.warning(f"Auto-sim failed ({_sim_err}), continuing with fallback estimates")
+
+    # ── Step 4: Compute edge ──────────────────────────────────────────
+    edge_df = compute_edge_metrics(pool_df, calibration_state=None, sport=sport)
+
+    # ── Step 5: Fetch actuals ─────────────────────────────────────────
     if sport == "NBA":
         actuals_df = fetch_actuals_from_api(date_key, cfg)
     else:
         actuals_df = _fetch_pga_actuals(api_key, date_dash)
 
-    # ── Step 3: Compute edge ──────────────────────────────────────────
-    edge_df = compute_edge_metrics(pool_df, calibration_state=None, sport=sport)
-
-    # ── Step 4: Build lineups ─────────────────────────────────────────
+    # ── Step 6: Build lineups ─────────────────────────────────────────
     prepped = prepare_pool(edge_df, cfg)
 
     is_showdown = "showdown" in preset_name.lower()
@@ -279,7 +417,7 @@ def _run_pipeline(
     if lineups_df is None or lineups_df.empty:
         raise ValueError("Optimizer returned no lineups. Try adjusting config.")
 
-    # ── Step 5: Score lineups ─────────────────────────────────────────
+    # ── Step 7: Score lineups ─────────────────────────────────────────
     # Normalise name columns for merge
     if "player_name" not in actuals_df.columns:
         # PGA actuals may use different column name
@@ -320,7 +458,7 @@ def _run_pipeline(
     summary["diff"] = summary["total_actual"] - summary["total_proj"]
     summary = summary.sort_values("total_actual", ascending=False).reset_index(drop=True)
 
-    # ── Step 6: Build run record ──────────────────────────────────────
+    # ── Build run record ────────────────────────────────────────────
     beat_proj_pct = 0.0
     if len(summary) > 0:
         beat_proj_pct = float((summary["total_actual"] >= summary["total_proj"]).mean() * 100)
@@ -499,11 +637,28 @@ def render_sim_lab(sport: str) -> None:
     c_date, c_preset, c_btn = st.columns([2, 3, 2])
 
     with c_date:
-        selected_date = st.date_input(
-            "Date",
-            value=date.today() - timedelta(days=1),
-            key="sim_lab_date",
-        )
+        if sport == "NBA":
+            rg_dates = _scan_rg_dates()
+            if rg_dates:
+                selected_date = st.selectbox(
+                    "Date (RG Archive)",
+                    options=rg_dates,
+                    format_func=lambda d: d.strftime("%Y-%m-%d"),
+                    key="sim_lab_date_nba",
+                )
+            else:
+                st.warning("No RG archive files found in data/rg_archive/nba/")
+                selected_date = st.date_input(
+                    "Date",
+                    value=date.today() - timedelta(days=1),
+                    key="sim_lab_date",
+                )
+        else:
+            selected_date = st.date_input(
+                "Date",
+                value=date.today() - timedelta(days=1),
+                key="sim_lab_date",
+            )
 
     with c_preset:
         preset_name = st.selectbox(
