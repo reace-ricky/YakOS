@@ -742,15 +742,15 @@ def _render_comparison_table() -> None:
             best_slate = f"{best_run['date']} ({best_run['avg_actual']:.1f})"
             worst_slate = f"{worst_run['date']} ({worst_run['avg_actual']:.1f})"
 
+        lu_count = successful_runs[0]["num_lineups"] if successful_runs else "?"
         rows.append({
             "Run": batch["config_label"],
-            "Config Hash": batch["config_hash"],
+            "Lineups": lu_count,
             "Avg Actual": batch["avg_actual"],
             "Avg Proj": batch["avg_proj"],
             "Best Slate": best_slate,
             "Worst Slate": worst_slate,
             "Beat Proj %": f"{batch['beat_proj_pct']:.0f}%",
-            "Errors": len(batch["errors"]),
         })
 
     df = pd.DataFrame(rows)
@@ -818,7 +818,9 @@ def render_sim_lab(sport: str) -> None:
         rg_dates = _scan_rg_dates()
 
         if rg_dates:
-            st.caption(f"{len(rg_dates)} RG archive dates available")
+            # Show what's about to run
+            _num_lu = sandbox_overrides.get("NUM_LINEUPS", merge_config(CONTEST_PRESETS[preset_name]).get("NUM_LINEUPS", 20))
+            st.caption(f"{len(rg_dates)} dates · {_num_lu} lineups per slate · {preset_name}")
 
             if st.button("\U0001f504 Run All Dates", use_container_width=True, key="sim_lab_batch_run"):
                 with st.spinner("Running batch..."):
@@ -830,9 +832,10 @@ def render_sim_lab(sport: str) -> None:
 
                     n_ok = len(batch["runs"])
                     n_err = len(batch["errors"])
+                    _lu_per = batch["runs"][0]["num_lineups"] if batch["runs"] else "?"
                     st.success(
-                        f"Batch complete: {n_ok} slates processed, "
-                        f"{n_err} errors | Avg Actual: {batch['avg_actual']:.1f} FP"
+                        f"Batch complete: {n_ok} slates · {_lu_per} lineups each · "
+                        f"Avg Actual: {batch['avg_actual']:.1f} FP"
                     )
                     if batch["errors"]:
                         with st.expander("Batch Errors"):
