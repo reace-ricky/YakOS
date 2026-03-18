@@ -294,50 +294,51 @@ def _compute_smash_bust(
 # actuals with zero calibration corrections.
 #
 # Performance vs old CDF model:
-#   Smash AUC:  0.679  (was 0.320 clean / 0.453 YakOS)
-#   Bust AUC:   0.664  (was 0.627 floor / 0.530 salary)
-#   Smash label hit rate: 56.9%  (was 10-19%)
-#   Overall signal hit rate: 77.4%  (was 27-41%)
+#   Smash AUC:  0.587  (was 0.320 clean / 0.453 YakOS — both inverted)
+#   Bust AUC:   0.647  (was 0.530 salary-based)
+#   Smash label hit rate (top 15%): 53%  (was 10-19%)
+#   Quartiles: monotonically increasing (29% → 40% → 43% → 47%)
 #
-# v1 — 2026-03-17 — trained on 555 players / 10 slates
+# v1.1 — 2026-03-17 — retrained on 510 clean rows / 10 slates
+# (v1.0 had inverted coefficient signs — caught during live validation)
 # Retrain when 20+ clean slates accumulate in the archive.
 # ─────────────────────────────────────────────────────────────────────────
 
-# Scaler parameters (StandardScaler fit on training data)
+# Scaler parameters (StandardScaler fit on 510 clean training rows)
 _V2_MEANS = {
-    "salary_k":      4.962162,
-    "own_pct":       4.693914,
-    "proj_min":     24.577477,
-    "fp_per_min":    0.944554,
-    "rolling_ratio": 1.034385,
+    "salary_k":      5.400000,
+    "own_pct":       3.979572,
+    "proj_min":     20.720675,
+    "fp_per_min":    1.159681,
+    "rolling_ratio": 1.047709,
 }
 _V2_STDS = {
-    "salary_k":      2.323715,
-    "own_pct":       9.563013,
-    "proj_min":      7.406677,
-    "fp_per_min":    0.200534,
-    "rolling_ratio": 0.446307,
+    "salary_k":      1.873970,
+    "own_pct":       9.469020,
+    "proj_min":      7.198361,
+    "fp_per_min":    0.373724,
+    "rolling_ratio": 0.454763,
 }
 
 # Smash logistic coefficients
 _V2_SMASH_COEF = {
-    "salary_k":       0.355614,   # higher salary → more smash
-    "own_pct":       -0.273852,   # lower ownership → more smash
-    "proj_min":      -0.464636,   # fewer minutes → more smash
-    "fp_per_min":    -0.390111,   # lower efficiency → more smash (upside not priced in)
-    "rolling_ratio":  0.137422,   # hot recent form → more smash
+    "salary_k":      -0.138125,   # lower salary → easier to hit 5x value → more smash
+    "own_pct":        0.127658,   # higher ownership → popular value plays smash
+    "proj_min":       0.259927,   # more minutes → more opportunity → more smash
+    "fp_per_min":     0.254218,   # higher efficiency → more smash
+    "rolling_ratio":  0.043520,   # hot recent form → slightly more smash
 }
-_V2_SMASH_INTERCEPT = -1.131903
+_V2_SMASH_INTERCEPT = -0.420610
 
 # Bust logistic coefficients
 _V2_BUST_COEF = {
-    "salary_k":      -0.333912,   # lower salary → more bust
-    "own_pct":        0.202290,   # higher ownership → more bust (chalk traps)
-    "proj_min":      -0.166555,   # fewer minutes → more bust
-    "fp_per_min":    -0.285929,   # lower efficiency → more bust
-    "rolling_ratio": -0.202349,   # cold recent form → more bust
+    "salary_k":      -0.777630,   # lower salary → more bust risk
+    "own_pct":        0.171473,   # higher ownership → chalk trap bust risk
+    "proj_min":       0.434169,   # more minutes → more bust (higher bar)
+    "fp_per_min":     0.306536,   # higher efficiency priced in → more bust if miss
+    "rolling_ratio": -0.162230,   # cold recent form → more bust
 }
-_V2_BUST_INTERCEPT = -1.813097
+_V2_BUST_INTERCEPT = -1.314904
 
 _V2_FEAT_ORDER = ["salary_k", "own_pct", "proj_min", "fp_per_min", "rolling_ratio"]
 _V2_MEAN_VEC = np.array([_V2_MEANS[f] for f in _V2_FEAT_ORDER])
