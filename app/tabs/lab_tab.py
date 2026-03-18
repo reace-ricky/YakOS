@@ -309,6 +309,20 @@ def render_lab_tab(sport: str) -> None:
     st.markdown("---")
     st.markdown("### Run Edge Analysis")
 
+    _last = st.session_state.pop(f"last_edge_result_{sport}", None)
+    if _last:
+        ea = _last["edge_analysis"]
+        st.success(f"Edge analysis complete \u2014 {_last['edge_df_len']} players scored")
+        for key, label in [
+            ("core_plays", "Core"), ("leverage_plays", "Leverage"),
+            ("value_plays", "Value"), ("fade_candidates", "Fades"),
+        ]:
+            players = ea.get(key, [])
+            names = ", ".join(p["player_name"] for p in players[:5])
+            st.markdown(f"**{label} ({len(players)}):** {names}")
+        for b in ea.get("bullets", []):
+            st.markdown(f"- {b}")
+
     if st.button("Run Edge Analysis", key=f"lab_edge_{sport}"):
         if not pool_path.exists():
             st.warning("Load a pool first.")
@@ -316,20 +330,13 @@ def render_lab_tab(sport: str) -> None:
             with st.spinner("Computing edge metrics..."):
                 try:
                     edge_df, edge_analysis, edge_state = _run_edge(sport, slate_date, out_dir)
-                    st.success(f"Edge analysis complete \u2014 {len(edge_df)} players scored")
+                    st.session_state[f"last_edge_result_{sport}"] = {
+                        "edge_analysis": edge_analysis,
+                        "edge_df_len": len(edge_df),
+                    }
                     from app.data_loader import invalidate_published_cache
                     invalidate_published_cache()
-
-                    for key, label in [
-                        ("core_plays", "Core"), ("leverage_plays", "Leverage"),
-                        ("value_plays", "Value"), ("fade_candidates", "Fades"),
-                    ]:
-                        players = edge_analysis.get(key, [])
-                        names = ", ".join(p["player_name"] for p in players[:5])
-                        st.markdown(f"**{label} ({len(players)}):** {names}")
-
-                    for b in edge_analysis.get("bullets", []):
-                        st.markdown(f"- {b}")
+                    st.rerun()
 
                 except Exception as e:
                     st.error(f"Edge analysis error: {e}")
