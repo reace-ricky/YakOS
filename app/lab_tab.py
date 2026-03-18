@@ -31,6 +31,12 @@ _DK_TO_POOL_TEAM = {v: k for k, v in _POOL_TO_DK_TEAM.items()}
 def render_lab_tab(sport: str) -> None:
     from app.data_loader import published_dir
 
+    # Re-read sport from session state to guard against stale parameter
+    # during Streamlit reruns (e.g. button click rerun can pass the
+    # default radio value instead of the user's selection).
+    _ss_sport = st.session_state.get("sport_toggle", sport)
+    if _ss_sport and _ss_sport.upper() != sport.upper():
+        sport = _ss_sport
     is_pga = sport.upper() == "PGA"
     out_dir = published_dir(sport)
     try:
@@ -82,6 +88,32 @@ def render_lab_tab(sport: str) -> None:
             )
 
     if st.button("Load Pool", key=f"lab_load_{sport}"):
+        # Re-derive sport from session state at click time to guard
+        # against Streamlit rerun passing stale default ("NBA").
+        _click_sport = st.session_state.get("sport_toggle", sport)
+        _click_is_pga = str(_click_sport).upper() == "PGA"
+        if _click_is_pga != is_pga:
+            print(f"[render_lab_tab] sport mismatch: param={sport!r}, "
+                  f"session_state={_click_sport!r} → using {_click_sport!r}")
+            is_pga = _click_is_pga
+            out_dir = published_dir(_click_sport)
+            pool_path = out_dir / "slate_pool.parquet"
+            # Re-derive api_key for the correct sport
+            if is_pga:
+                api_key = os.environ.get("DATAGOLF_API_KEY") or _get_secret("DATAGOLF_API_KEY")
+                if not api_key:
+                    st.error("Missing DATAGOLF_API_KEY. Set it in Streamlit secrets or environment.")
+                    return
+            else:
+                api_key = (
+                    os.environ.get("RAPIDAPI_KEY")
+                    or os.environ.get("TANK01_RAPIDAPI_KEY")
+                    or _get_secret("RAPIDAPI_KEY")
+                    or _get_secret("TANK01_RAPIDAPI_KEY")
+                )
+                if not api_key:
+                    st.error("Missing RAPIDAPI_KEY. Set it in Streamlit secrets or environment.")
+                    return
         pga_slate = "showdown"
         with st.spinner("Loading pool..."):
             try:
