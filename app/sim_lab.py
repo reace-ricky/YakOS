@@ -406,6 +406,13 @@ def _run_pipeline(
     # Step 4: Compute edge
     edge_df = compute_edge_metrics(pool_df, calibration_state=None, sport=sport)
 
+    # Step 4b: Clean NaN/inf values that crash PuLP's LP solver
+    numeric_cols = edge_df.select_dtypes(include="number").columns
+    edge_df[numeric_cols] = edge_df[numeric_cols].replace([np.inf, -np.inf], np.nan).fillna(0)
+
+    # Step 4c: Drop players with no usable projection
+    edge_df = edge_df[edge_df["proj"] > 0].copy()
+
     # Step 5: Fetch actuals
     if sport == "NBA":
         actuals_df = fetch_actuals_from_api(date_key, cfg)
@@ -423,6 +430,11 @@ def _run_pipeline(
 
     if lineups_df is None or lineups_df.empty:
         raise ValueError("Optimizer returned no lineups. Try adjusting config.")
+
+    n_lineups = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else (
+        lineups_df["lineup_id"].nunique() if "lineup_id" in lineups_df.columns else 1
+    )
+    st.write(f"**{n_lineups} lineups generated**")
 
     # Step 7: Score lineups
     if "player_name" not in actuals_df.columns:
