@@ -78,23 +78,15 @@ _PRIMARY_BACKUP_BOOST_MULT: float = 2.0   # weight multiplier for primary backup
 _PRIMARY_BACKUP_MAX_EXTRA_MINS: float = 12.0  # hard cap on extra mins per injury
 
 # ---------------------------------------------------------------------------
-# Position-based FP/min floor rates (NBA)
+# Position-based FP/min floor rates (NBA) — DEPRECATED
 # ---------------------------------------------------------------------------
-# Cheap players ($3.5K-$5.5K) have low projected FP/min (~1.15) because their
-# projections are already low.  But cascade beneficiaries get starter-quality
-# minutes and can produce well above their baseline rate.  These floors prevent
-# the cascade bump from being unrealistically small for value-priced players.
-_POS_FPMIN_FLOOR: Dict[str, float] = {
-    "PG": 1.3,
-    "SG": 1.2,
-    "SF": 1.25,
-    "PF": 1.35,
-    "C":  1.4,
-}
-
-# Cascade beneficiaries get starter-quality minutes — apply a small multiplier
-# to the floor rate to reflect higher-quality opportunity.
-_CASCADE_OPPORTUNITY_MULT: float = 1.15
+# These floors and the opportunity multiplier were removed from the FP
+# calculation path.  They inflated value guys' projections by 20-35% over RG.
+# Kept here as reference only.
+# _POS_FPMIN_FLOOR: Dict[str, float] = {
+#     "PG": 1.3, "SG": 1.2, "SF": 1.25, "PF": 1.35, "C": 1.4,
+# }
+# _CASCADE_OPPORTUNITY_MULT: float = 1.15
 
 
 # ---------------------------------------------------------------------------
@@ -188,16 +180,45 @@ def _headroom(proj_minutes: float, ceiling: Optional[float] = None) -> float:
 
 
 def _effective_fp_per_min(orig_proj: float, orig_mins: float, pos: str) -> float:
-    """Return the FP/min rate for cascade bump calculation.
+    """DEPRECATED — kept for reference only. Not used in the FP calculation path.
 
-    Uses the higher of the player's own rate and the position-based floor
-    (with the opportunity multiplier applied).  This prevents cheap players
-    from getting unrealistically small cascade bumps.
+    Previously used position-based floors and opportunity multipliers which
+    inflated value guys' projections by 20-35% over RG.
     """
     player_rate = orig_proj / orig_mins if orig_mins > 0 else 0.0
-    primary = _primary_pos(pos)
-    floor_rate = _POS_FPMIN_FLOOR.get(primary, 1.2) * _CASCADE_OPPORTUNITY_MULT
-    return max(player_rate, floor_rate)
+    return player_rate
+
+
+def _player_fp_per_min(
+    row: pd.Series, orig_proj: float, orig_mins: float,
+) -> float:
+    """Return the player's own RG-derived FP/min rate for cascade bump calculation.
+
+    Fallback chain:
+      1. rg_proj / proj_minutes  (RG-derived rate)
+      2. original_proj / proj_minutes  (pre-cascade rate)
+      3. salary / 1000 * 4.0 / 30.0  (salary-implied rate)
+    """
+    # Try rg_proj first
+    rg_proj = None
+    if "rg_proj" in row.index:
+        rg_raw = pd.to_numeric(row.get("rg_proj"), errors="coerce")
+        if pd.notna(rg_raw) and float(rg_raw) > 0:
+            rg_proj = float(rg_raw)
+
+    if rg_proj is not None and orig_mins > 0:
+        return rg_proj / orig_mins
+
+    # Fallback to original_proj / proj_minutes
+    if orig_proj > 0 and orig_mins > 0:
+        return orig_proj / orig_mins
+
+    # Last resort: salary-implied rate
+    sal = pd.to_numeric(row.get("salary", 0), errors="coerce")
+    if pd.notna(sal) and float(sal) > 0:
+        return float(sal) / 1000.0 * 4.0 / 30.0
+
+    return 1.0
 
 
 def _find_primary_backup_idx(
@@ -505,7 +526,7 @@ def apply_injury_cascade(
                 pd.to_numeric(df.at[idx2, "proj_minutes"], errors="coerce") or 0
             )
             player_pos = str(df.at[idx2, "pos"])
-            fp_per_min = _effective_fp_per_min(orig_proj, orig_mins, player_pos)
+            fp_per_min = _player_fp_per_min(df.loc[idx2], orig_proj, orig_mins)
             bump_fp = round(extra * fp_per_min, 2)
 
             # Cap per-injury bump by remaining bump room (_MAX_BUMP_MULTIPLIER)
@@ -561,8 +582,7 @@ def apply_injury_cascade(
         orig_mins = float(
             pd.to_numeric(df.at[idx, "proj_minutes"], errors="coerce") or 0
         )
-        player_pos = str(df.at[idx, "pos"])
-        fp_per_min = _effective_fp_per_min(orig_proj, orig_mins, player_pos)
+        fp_per_min = _player_fp_per_min(df.loc[idx], orig_proj, orig_mins)
         total_bump = round(total_extra * fp_per_min, 2)
 
         # Safety net: cap bump at _MAX_BUMP_MULTIPLIER × original projection
@@ -575,21 +595,9 @@ def apply_injury_cascade(
     # Make proj = adjusted_proj so all downstream consumers pick up the change
     df["proj"] = df["adjusted_proj"]
 
-    # Scale ceil and floor proportionally so proj never exceeds ceil.
-    # If original proj was 20 and ceil was 35, that's a 1.75× ratio.
-    # After a +10 cascade bump (proj→30), ceil should be 30 × 1.75 = 52.5.
-    _orig = pd.to_numeric(df["original_proj"], errors="coerce").fillna(0)
-    _adj = pd.to_numeric(df["adjusted_proj"], errors="coerce").fillna(0)
-    _bumped = _adj > _orig  # only touch rows that actually got bumped
-    if _bumped.any() and "ceil" in df.columns:
-        _ceil = pd.to_numeric(df["ceil"], errors="coerce").fillna(0)
-        # Ratio of ceil-to-proj (before cascade); clamp to >= 1.0
-        _ratio = (_ceil / _orig.clip(lower=0.1)).clip(lower=1.0)
-        df.loc[_bumped, "ceil"] = (_adj[_bumped] * _ratio[_bumped]).round(2)
-    if _bumped.any() and "floor" in df.columns:
-        _floor = pd.to_numeric(df["floor"], errors="coerce").fillna(0)
-        _floor_ratio = (_floor / _orig.clip(lower=0.1)).clip(lower=0.0, upper=1.0)
-        df.loc[_bumped, "floor"] = (_adj[_bumped] * _floor_ratio[_bumped]).round(2)
+    # ceil/floor stay anchored to their RG/sim values — no rescaling.
+    # Previously cascade stretched ceil/floor proportionally, which inflated
+    # the range for value guys beyond what RG/sim supported.
 
     return df, cascade_report
 
