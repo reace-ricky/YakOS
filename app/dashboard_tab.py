@@ -731,10 +731,11 @@ def _inject_rg_mae(slate_date: str, pool_df: pd.DataFrame, sport: str = "NBA") -
     Looks for an RG archive file matching the slate date. If found, merges
     RG projections with actuals from pool_df and stores the MAE.
     """
-    if sport.lower() != "nba":
-        return  # Only NBA for now
+    sport_lower = sport.lower()
+    if sport_lower not in ("nba", "pga"):
+        return
 
-    rg_dir = REPO_ROOT / "data" / "rg_archive" / "nba"
+    rg_dir = REPO_ROOT / "data" / "rg_archive" / sport_lower
     rg_path = rg_dir / f"rg_{slate_date}.csv"
     if not rg_path.exists():
         return
@@ -763,7 +764,7 @@ def _inject_rg_mae(slate_date: str, pool_df: pd.DataFrame, sport: str = "NBA") -
         rg_mae = float((merged["rg_proj"] - merged["actual_fp"]).abs().mean())
 
         # Inject into slate_errors.json
-        errors_path = REPO_ROOT / "data" / "calibration_feedback" / "nba" / "slate_errors.json"
+        errors_path = REPO_ROOT / "data" / "calibration_feedback" / sport_lower / "slate_errors.json"
         if errors_path.exists():
             import json as _json
             with open(errors_path) as f:
@@ -973,8 +974,62 @@ def _run_post_slate(sport: str, slate_date: str) -> Dict[str, Any]:
                 on="player_name",
                 how="left",
             )
+        elif sport.upper() == "PGA":
+            dg_key = _resolve_datagolf_key()
+            if not dg_key:
+                return {"status": "error", "message": "Missing DATAGOLF_API_KEY for fetching PGA actuals"}
+
+            from yak_core.datagolf import DataGolfClient
+            from yak_core.pga_calibration import get_pga_event_list, fetch_pga_actuals
+
+            dg = DataGolfClient(dg_key)
+
+            # Find the event matching the slate_date
+            events = get_pga_event_list(dg)
+            if events.empty:
+                return {"status": "error", "message": "Could not fetch PGA event list from DataGolf"}
+
+            # Match event to slate_date
+            latest = None
+            if "date" in events.columns:
+                events["_date_str"] = events["date"].astype(str)
+                candidates = events[events["_date_str"] <= slate_date]
+                if not candidates.empty:
+                    latest = candidates.iloc[0]
+                else:
+                    latest = events.iloc[0]
+            else:
+                latest = events.iloc[0]
+
+            if latest is None:
+                return {"status": "error", "message": "No matching PGA event found"}
+
+            event_id = int(latest.get("event_id", 0))
+            year = int(latest.get("calendar_year", date.today().year))
+            event_name = str(latest.get("event_name", f"Event {event_id}"))
+
+            # Fetch actuals
+            actuals = fetch_pga_actuals(dg, event_id=event_id, year=year)
+            if actuals.empty:
+                return {"status": "error", "message": f"No PGA actuals available for {event_name}. The event may still be in progress, or your DataGolf plan may not include historical DFS data."}
+
+            # Merge actuals into pool
+            if "actual_fp" in pool.columns:
+                pool = pool.drop(columns=["actual_fp"])
+
+            # Try merging on dg_id first, then player_name fallback
+            if "dg_id" in pool.columns and "dg_id" in actuals.columns:
+                act_map = actuals.set_index("dg_id")["actual_fp"].to_dict()
+                pool["actual_fp"] = pool["dg_id"].map(act_map)
+
+            if "actual_fp" not in pool.columns or pool["actual_fp"].isna().all():
+                if "player_name" in pool.columns and "player_name" in actuals.columns:
+                    act_map = actuals.set_index("player_name")["actual_fp"].to_dict()
+                    pool["actual_fp"] = pool["player_name"].map(act_map)
+
+            pool_with_actuals = pool
         else:
-            return {"status": "error", "message": "PGA post-slate actuals not yet implemented"}
+            return {"status": "error", "message": f"{sport} post-slate actuals not yet implemented"}
     except Exception as e:
         return {"status": "error", "message": f"Could not fetch actuals: {e}"}
 
