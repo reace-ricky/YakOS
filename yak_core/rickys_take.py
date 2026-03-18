@@ -386,10 +386,22 @@ def generate_tonights_edges(pool: pd.DataFrame) -> List[str]:
     if pool.empty:
         return []
 
+    # ── Filter OUT / IR / Suspended players ──
+    # These players can't play — never generate callouts about them.
+    _OUT_STATUSES = {"OUT", "IR", "SUSPENDED"}
+    _pool = pool.copy()
+    if "status" in _pool.columns:
+        _before = len(_pool)
+        _pool = _pool[
+            ~_pool["status"].fillna("").str.strip().str.upper().isin(_OUT_STATUSES)
+        ].reset_index(drop=True)
+        _removed = _before - len(_pool)
+        if _removed:
+            print(f"[generate_tonights_edges] Excluded {_removed} OUT/IR/Suspended player(s) from callouts")
+
     # ── Strip cascade-inflated players before generating callouts ──
     # If the injury bump is >= 40% of the original (pre-cascade) projection,
     # the number is mostly cascade math, not a real expectation.
-    _pool = pool.copy()
     if "injury_bump_fp" in _pool.columns and "original_proj" in _pool.columns:
         _bump = pd.to_numeric(_pool["injury_bump_fp"], errors="coerce").fillna(0)
         _orig = pd.to_numeric(_pool["original_proj"], errors="coerce").fillna(0)
@@ -482,8 +494,20 @@ def generate_bust_call(
     if not required.issubset(pool.columns) or own_col is None:
         return _bust_from_fades(fade_candidates)
 
+    # Filter OUT / IR / Suspended players — can't bust if you can't play
+    _OUT_STATUSES = {"OUT", "IR", "SUSPENDED"}
+    _work = pool.copy()
+    if "status" in _work.columns:
+        _before = len(_work)
+        _work = _work[
+            ~_work["status"].fillna("").str.strip().str.upper().isin(_OUT_STATUSES)
+        ].reset_index(drop=True)
+        _removed = _before - len(_work)
+        if _removed:
+            print(f"[generate_bust_call] Excluded {_removed} OUT/IR/Suspended player(s) from bust candidates")
+
     # Only consider relevant players (meaningful salary and ownership)
-    df = pool[(pool["salary"] >= 5000) & (pool[own_col] > 3) & (pool["proj"] > 10)].copy()
+    df = _work[(_work["salary"] >= 5000) & (_work[own_col] > 3) & (_work["proj"] > 10)].copy()
     if df.empty:
         return _bust_from_fades(fade_candidates)
 
