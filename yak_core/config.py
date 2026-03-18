@@ -141,11 +141,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # gpp_score = proj * PROJ_W + upside * UPSIDE_W + boom * BOOM_W + own_adj
     # where upside = SIM99TH (true ceiling), boom = SIM99TH - SIM50TH,
     # and own_adj uses a non-linear (log-based) penalty instead of flat -3.0.
-    "GPP_PROJ_WEIGHT": 0.60,          # projection weight
-    "GPP_UPSIDE_WEIGHT": 0.25,        # weight on sim 99th pctile (true ceiling from sims)
-    "GPP_BOOM_WEIGHT": 0.15,          # weight on boom potential (sim99 - sim50 spread)
-    "GPP_OWN_PENALTY_STRENGTH": 0.6,  # scales the log-based ownership penalty
-    "GPP_OWN_LOW_BOOST": 0.2,         # modest boost for low-ownership (<8%) players
+    "GPP_PROJ_WEIGHT": 0.25,          # projection weight (low — ceiling/boom carry GPP)
+    "GPP_UPSIDE_WEIGHT": 0.35,        # weight on sim 99th pctile (true ceiling from sims)
+    "GPP_BOOM_WEIGHT": 0.40,          # weight on boom potential (sim99 - sim50 spread)
+    "GPP_OWN_PENALTY_STRENGTH": 1.0,  # scales the log-based ownership penalty
+    "GPP_OWN_LOW_BOOST": 0.50,        # boost for low-ownership (<8%) players
     # v9 edge signal weights (additive on top of base GPP formula)
     "GPP_SMASH_WEIGHT": 0.8,          # boost high smash probability players
     "GPP_LEVERAGE_WEIGHT": 0.5,       # prefer underowned edges
