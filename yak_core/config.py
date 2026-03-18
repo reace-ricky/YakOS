@@ -486,7 +486,7 @@ PGA_CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "archetype": "Balanced",
         "internal_contest": "CASH",
         "CONTEST_TYPE": "cash",
-        "projection_slate": "showdown",
+        "projection_slate": "main",
         "projection_style": "floor",
         "volatility": "low",
         "correlation_mode": None,
