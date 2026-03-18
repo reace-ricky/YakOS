@@ -691,10 +691,20 @@ def auto_flag_injuries(
                     if pname and pname != "nan":
                         _name_to_idx[pname] = idx
 
+            _HARD_OUT = {"OUT", "IR", "SUSPENDED"}
             for entry in espn_injuries:
                 inj_name = entry["player_name"].strip().lower()
                 matched_idx = _name_to_idx.get(inj_name)
                 if matched_idx is not None:
+                    existing_status = str(pool.at[matched_idx, "status"]).strip().upper()
+                    new_status = str(entry["status"]).strip().upper()
+                    # Never downgrade from a hard-OUT status — manual overrides
+                    # and prior signals should not be overwritten by a softer
+                    # ESPN designation (e.g. GTD when player is confirmed OUT).
+                    if existing_status in _HARD_OUT and new_status not in _HARD_OUT:
+                        # Still update the injury note for context
+                        pool.at[matched_idx, "injury_note"] = f"ESPN: {entry['comment']} [kept {existing_status}]"
+                        continue
                     pool.at[matched_idx, "status"] = entry["status"]
                     pool.at[matched_idx, "injury_note"] = f"ESPN: {entry['comment']}"
                     flagged_count += 1
