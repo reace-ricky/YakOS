@@ -120,7 +120,12 @@ def render_lab_tab(sport: str) -> None:
                 if is_pga:
                     pool, meta = _load_pga_pool(api_key, slate_date, pga_slate)
                     if pool.empty:
-                        st.warning(f"No PGA pool data available for {slate_date}. Check if an archive exists.")
+                        st.warning(
+                            f"No DFS pool available from DataGolf for {slate_date}. "
+                            "PGA pools typically appear Wednesday evening for Thursday tournaments. "
+                            "If the tournament has started, check your DataGolf API key and plan."
+                        )
+                        return
                 else:
                     # RG merge now happens INSIDE _load_nba_pool() before
                     # the injury cascade, so cascade bumps are not overwritten.
@@ -258,73 +263,77 @@ def render_lab_tab(sport: str) -> None:
     if pool_path.exists():
         pool = pd.read_parquet(pool_path)
 
-        preview_cols = ["player_name", "pos", "team", "salary", "proj", "floor", "ceil", "ownership", "breakout_score"]
-        if is_pga:
-            preview_cols += ["wave", "r1_teetime"]
-            if "early_late_wave" in pool.columns and "wave" not in pool.columns:
-                pool["wave"] = pool["early_late_wave"].map(
-                    {0: "Early", 1: "Late", "Early": "Early", "Late": "Late"}
-                ).fillna("")
-        if "r1_teetime" in pool.columns:
-            def _preview_teetime(v):
-                if isinstance(v, dict):
-                    return v.get("teetime", v.get("1", v.get(1, next(iter(v.values()), ""))))
-                try:
-                    if pd.isna(v):
-                        return ""
-                except (ValueError, TypeError):
-                    pass
-                return str(v)
-            pool["r1_teetime"] = pool["r1_teetime"].apply(_preview_teetime)
-        avail = [c for c in preview_cols if c in pool.columns]
-        display_pool = pool[avail].copy().sort_values("salary", ascending=False).reset_index(drop=True)
+        if pool.empty:
+            st.info("No pool data loaded. Click Load Pool above.")
+        else:
 
-        _excl_file = out_dir / "excluded_players.json"
-        _saved_excl: list[str] = []
-        if _excl_file.exists():
-            _saved_excl = json.loads(_excl_file.read_text())
-
-        with st.expander(f"Pool Preview ({len(display_pool)} players)", expanded=False):
+            preview_cols = ["player_name", "pos", "team", "salary", "proj", "floor", "ceil", "ownership", "breakout_score"]
             if is_pga:
-                pool_names = set(display_pool["player_name"])
-                _excl_in_pool = [n for n in _saved_excl if n in pool_names]
-                _excl_not_in_pool = [n for n in _saved_excl if n not in pool_names]
+                preview_cols += ["wave", "r1_teetime"]
+                if "early_late_wave" in pool.columns and "wave" not in pool.columns:
+                    pool["wave"] = pool["early_late_wave"].map(
+                        {0: "Early", 1: "Late", "Early": "Early", "Late": "Late"}
+                    ).fillna("")
+            if "r1_teetime" in pool.columns:
+                def _preview_teetime(v):
+                    if isinstance(v, dict):
+                        return v.get("teetime", v.get("1", v.get(1, next(iter(v.values()), ""))))
+                    try:
+                        if pd.isna(v):
+                            return ""
+                    except (ValueError, TypeError):
+                        pass
+                    return str(v)
+                pool["r1_teetime"] = pool["r1_teetime"].apply(_preview_teetime)
+            avail = [c for c in preview_cols if c in pool.columns]
+            display_pool = pool[avail].copy().sort_values("salary", ascending=False).reset_index(drop=True)
 
-                display_pool.insert(0, "exclude", display_pool["player_name"].isin(_saved_excl))
-                st.markdown(f"**Current pool:** {len(display_pool)} players \u2014 check to exclude")
-                edited = st.data_editor(
-                    display_pool,
-                    use_container_width=True,
-                    hide_index=True,
-                    height=500,
-                    column_config={
-                        "exclude": st.column_config.CheckboxColumn("Exclude", default=False),
-                    },
-                    disabled=[c for c in avail],
-                    key=f"lab_pool_editor_{sport}",
-                )
-                _editor_excl = edited[edited["exclude"]]["player_name"].tolist()
-                new_excl = list(set(_editor_excl + _excl_not_in_pool))
-                if set(new_excl) != set(_saved_excl):
-                    _excl_file.write_text(json.dumps(new_excl))
-                n_excl = len(new_excl)
-                if n_excl > 0:
-                    st.caption(f"\u274c {n_excl} player(s) excluded from builds")
-                if _excl_not_in_pool:
-                    st.caption(f"\u2139\ufe0f Also excluded (not in this pool): {', '.join(_excl_not_in_pool)}")
-            else:
-                st.markdown(f"**Current pool:** {len(display_pool)} players")
-                st.dataframe(display_pool, use_container_width=True, hide_index=True, height=400)
+            _excl_file = out_dir / "excluded_players.json"
+            _saved_excl: list[str] = []
+            if _excl_file.exists():
+                _saved_excl = json.loads(_excl_file.read_text())
 
-        sal_col = pd.to_numeric(pool.get("salary", pd.Series(dtype=float)), errors="coerce")
-        proj_col = pd.to_numeric(pool.get("proj", pd.Series(dtype=float)), errors="coerce")
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.metric("Players", len(pool))
-        with c2:
-            st.metric("Salary range", f"${int(sal_col.min()):,} \u2013 ${int(sal_col.max()):,}")
-        with c3:
-            st.metric("Proj range", f"{proj_col.min():.1f} \u2013 {proj_col.max():.1f}")
+            with st.expander(f"Pool Preview ({len(display_pool)} players)", expanded=False):
+                if is_pga:
+                    pool_names = set(display_pool["player_name"])
+                    _excl_in_pool = [n for n in _saved_excl if n in pool_names]
+                    _excl_not_in_pool = [n for n in _saved_excl if n not in pool_names]
+
+                    display_pool.insert(0, "exclude", display_pool["player_name"].isin(_saved_excl))
+                    st.markdown(f"**Current pool:** {len(display_pool)} players \u2014 check to exclude")
+                    edited = st.data_editor(
+                        display_pool,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=500,
+                        column_config={
+                            "exclude": st.column_config.CheckboxColumn("Exclude", default=False),
+                        },
+                        disabled=[c for c in avail],
+                        key=f"lab_pool_editor_{sport}",
+                    )
+                    _editor_excl = edited[edited["exclude"]]["player_name"].tolist()
+                    new_excl = list(set(_editor_excl + _excl_not_in_pool))
+                    if set(new_excl) != set(_saved_excl):
+                        _excl_file.write_text(json.dumps(new_excl))
+                    n_excl = len(new_excl)
+                    if n_excl > 0:
+                        st.caption(f"\u274c {n_excl} player(s) excluded from builds")
+                    if _excl_not_in_pool:
+                        st.caption(f"\u2139\ufe0f Also excluded (not in this pool): {', '.join(_excl_not_in_pool)}")
+                else:
+                    st.markdown(f"**Current pool:** {len(display_pool)} players")
+                    st.dataframe(display_pool, use_container_width=True, hide_index=True, height=400)
+
+            sal_col = pd.to_numeric(pool.get("salary", pd.Series(dtype=float)), errors="coerce")
+            proj_col = pd.to_numeric(pool.get("proj", pd.Series(dtype=float)), errors="coerce")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.metric("Players", len(pool))
+            with c2:
+                st.metric("Salary range", f"${int(sal_col.min()):,} \u2013 ${int(sal_col.max()):,}")
+            with c3:
+                st.metric("Proj range", f"{proj_col.min():.1f} \u2013 {proj_col.max():.1f}")
 
     st.markdown("---")
     with st.expander("Run Edge Analysis", expanded=False):
@@ -483,7 +492,12 @@ def render_lab_tab(sport: str) -> None:
                             _pga_slate = preset.get("projection_slate", "showdown")
                             pool_fresh, meta_fresh = _load_pga_pool(api_key, slate_date, _pga_slate)
                             if pool_fresh.empty:
-                                st.warning(f"No PGA pool data available for {slate_date}. Check if an archive exists.")
+                                st.warning(
+                                    f"No DFS pool available from DataGolf for {slate_date}. "
+                                    "PGA pools typically appear Wednesday evening for Thursday tournaments. "
+                                    "If the tournament has started, check your DataGolf API key and plan."
+                                )
+                                return
                         else:
                             pool_fresh, meta_fresh = _load_nba_pool(api_key, slate_date)
                         try:
