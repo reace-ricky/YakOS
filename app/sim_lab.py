@@ -486,12 +486,42 @@ def _run_pipeline(
 # Config Panel (v2 — grouped knobs)
 # ---------------------------------------------------------------------------
 
+# Map slider config keys to the preset's alternate key names.
+# Presets use e.g. "default_lineups" instead of "NUM_LINEUPS".
+_PRESET_KEY_ALIASES: Dict[str, str] = {
+    "NUM_LINEUPS": "default_lineups",
+    "MAX_EXPOSURE": "default_max_exposure",
+    "MIN_SALARY_USED": "min_salary",
+}
+
+
 def _slider_default(preset_name: str, key: str, fallback: Any) -> Any:
-    """Look up the default value for a config key from preset, then DEFAULT_CONFIG, then fallback."""
+    """Look up the default value for a config key.
+
+    Resolution order:
+    1. Preset dict (exact key, e.g. GPP_BOOM_WEIGHT)
+    2. Preset dict (alias key, e.g. default_lineups for NUM_LINEUPS)
+    3. merge_config(preset) result (catches alias-mapped keys)
+    4. DEFAULT_CONFIG
+    5. Hardcoded fallback
+    """
     preset = CONTEST_PRESETS[preset_name]
+    # Direct lookup in preset
     val = preset.get(key)
     if val is not None:
         return val
+    # Check preset alias (e.g. NUM_LINEUPS -> default_lineups)
+    alias = _PRESET_KEY_ALIASES.get(key)
+    if alias:
+        val = preset.get(alias)
+        if val is not None:
+            return val
+    # Check the fully merged config (catches _KEY_ALIASES mappings)
+    merged = merge_config(preset)
+    val = merged.get(key)
+    if val is not None:
+        return val
+    # DEFAULT_CONFIG direct
     val = DEFAULT_CONFIG.get(key)
     if val is not None:
         return val
@@ -499,24 +529,32 @@ def _slider_default(preset_name: str, key: str, fallback: Any) -> Any:
 
 
 def _render_config_panel(preset_name: str) -> Dict[str, Any]:
-    """Render the 4-group config panel. Returns current overrides dict."""
+    """Render the 4-group config panel. Returns ONLY keys the user changed."""
     sk = _sandbox_config_key(preset_name)
     if sk not in st.session_state:
         st.session_state[sk] = {}
     overrides: Dict[str, Any] = st.session_state[sk]
 
     def _sl(label: str, key: str, mn: float, mx: float, step: float, fallback: Any, fmt: str = "%.2f") -> Any:
-        """Helper to render a slider and store the value."""
-        default = overrides.get(key, _slider_default(preset_name, key, fallback))
-        # Clamp default to valid range
-        if isinstance(default, (int, float)):
-            default = max(mn, min(mx, default))
+        """Render a slider. Only store in overrides if user changed from preset default."""
+        preset_default = _slider_default(preset_name, key, fallback)
+        # Use the user's override if they set one, else the preset default
+        current = overrides.get(key, preset_default)
+        # Clamp to valid range
+        if isinstance(current, (int, float)):
+            current = max(mn, min(mx, current))
         # For integer sliders
         if isinstance(mn, int) and isinstance(mx, int) and isinstance(step, int):
-            val = st.slider(label, min_value=mn, max_value=mx, value=int(default), step=step, key=f"sl_{preset_name}_{key}")
+            val = st.slider(label, min_value=mn, max_value=mx, value=int(current), step=step, key=f"sl_{preset_name}_{key}")
         else:
-            val = st.slider(label, min_value=float(mn), max_value=float(mx), value=float(default), step=float(step), format=fmt, key=f"sl_{preset_name}_{key}")
-        overrides[key] = val
+            val = st.slider(label, min_value=float(mn), max_value=float(mx), value=float(current), step=float(step), format=fmt, key=f"sl_{preset_name}_{key}")
+        # Only store override if different from preset default
+        clamped_default = max(mn, min(mx, preset_default)) if isinstance(preset_default, (int, float)) else preset_default
+        if val != clamped_default:
+            overrides[key] = val
+        elif key in overrides:
+            # User moved slider back to default — remove override
+            del overrides[key]
         return val
 
     # Group 1: Smash/Bust (expanded by default)
