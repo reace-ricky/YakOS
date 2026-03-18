@@ -4,30 +4,30 @@
   "core_names": [
     "Nikola Jokic",
     "Victor Wembanyama",
-    "Stephon Castle",
-    "LaMelo Ball",
-    "Karl-Anthony Towns"
+    "Russell Westbrook",
+    "Karl-Anthony Towns",
+    "Jamal Murray"
   ],
   "leverage_names": [
-    "Russell Westbrook",
-    "Jamal Murray",
-    "Quentin Grimes",
+    "DeMar DeRozan",
     "Tyler Kolek",
-    "Keldon Johnson"
+    "Maxime Raynaud",
+    "Moe Wagner",
+    "De'Aaron Fox"
   ],
   "value_names": [
-    "Bilal Coulibaly",
-    "Tre Johnson",
-    "Harrison Barnes",
+    "Carlton Carrington",
+    "Keldon Johnson",
+    "Ayo Dosunmu",
     "Julian Champagnie",
-    "Ajay Mitchell"
+    "Mitchell Robinson"
   ],
   "fade_names": [
-    "Larry Nance Jr.",
+    "Ariel Hukporti",
     "Khaman Maluach",
     "Jamal Cain",
-    "Josh Green",
-    "Marcus Sasser"
+    "Jase Richardson",
+    "Larry Nance Jr."
   ],
-  "calibration_slates": 15
+  "calibration_slates": 9
 }
