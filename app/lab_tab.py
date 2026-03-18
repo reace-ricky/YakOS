@@ -1442,8 +1442,13 @@ def _build_late_swap_alerts(
     _CLEARED_NEW = {"ACTIVE", "AVAILABLE", ""}
 
     # Normalize status columns for comparison
-    before_status = pool_before.set_index("player_name")["status"].fillna("Active").str.strip().str.upper()
-    after_status = pool_after.set_index("player_name")["status"].fillna("Active").str.strip().str.upper()
+    # Deduplicate by player_name (keep first) so set_index produces a unique
+    # index — duplicate names (e.g. showdown slates) cause boolean mask
+    # mismatches when .loc returns multiple rows for the same name.
+    _before_dedup = pool_before.drop_duplicates(subset="player_name", keep="first")
+    _after_dedup = pool_after.drop_duplicates(subset="player_name", keep="first")
+    before_status = _before_dedup.set_index("player_name")["status"].fillna("Active").str.strip().str.upper()
+    after_status = _after_dedup.set_index("player_name")["status"].fillna("Active").str.strip().str.upper()
 
     # Find players whose status changed
     common = before_status.index.intersection(after_status.index)
