@@ -1,8 +1,8 @@
 """yak_core.rickys_take -- Deterministic voice generation for Ricky's Take.
 
 Generates three sections for the Edge Analysis tab:
-  1. Last Night -- recap of previous slate hits/misses in Ricky's voice
-  2. Tonight's Edges -- data-driven callouts about the current slate
+  1. Last Slate -- recap of previous slate hits/misses in Ricky's voice
+  2. The Board -- data-driven callouts about the current slate
   3. Bust Call -- one bold prediction for the biggest underperformer
 
 All text is template-based with data slots. No LLM calls.
@@ -69,7 +69,7 @@ _PATTERN_TEMPLATES_CHALK_HELD = [
     "Top salaries went {hit_count}-of-{total}. Chalk held, but that's not the norm. Don't get comfortable.",
     "Chalk went {hit_count}-of-{total}. Even a broken clock. Don't let one good night turn into lazy process.",
     "Top salaries cleared at {hit_count}-of-{total}. The field got lucky. Luck doesn't compound.",
-    "{hit_count}-of-{total} top salaries hit. Chalk held tonight. Regression is patient — it'll collect eventually.",
+    "{hit_count}-of-{total} top salaries hit. Chalk held this slate. Regression is patient — it'll collect eventually.",
     "High-priced chalk: {hit_count}-of-{total}. Credit where it's due. But one night doesn't change the base rates.",
 ]
 
@@ -229,13 +229,13 @@ def _find_ownership_traps(pool: pd.DataFrame, mentioned: set) -> List[str]:
 
     # Ownership Trap templates (target: 10)
     _TRAP_TEMPLATES = [
-        "{own:.0f}% of the field is on {name} tonight. {flags}. The scoreboard doesn't care how popular the pick was.",
+        "{own:.0f}% of the field is on {name} this slate. {flags}. The scoreboard doesn't care how popular the pick was.",
         "{own:.0f}% of the field lined up behind {name}. {flags}. That's not conviction, that's a crowded trade.",
         "{name} at {own:.0f}% owned. {flags}. When everyone agrees, that's usually the wrong answer.",
         "{own:.0f}% on {name}. {flags}. Popularity and profitability have a negative correlation in GPPs.",
         "{name}: {own:.0f}% owned. {flags}. The field is betting this one the same way. That's the risk.",
         "{own:.0f}% ownership on {name}. {flags}. A crowded position with a thin margin. Bad math.",
-        "{name} at {own:.0f}% owned tonight. {flags}. When the whole room agrees, check the exits.",
+        "{name} at {own:.0f}% owned this slate. {flags}. When the whole room agrees, check the exits.",
         "{own:.0f}% of the field lined up for {name}. {flags}. The consensus loved this one. Consensus has a losing record.",
         "{name}, {own:.0f}% owned. {flags}. Everyone's on the same side of this. That's not an edge — it's exposure.",
         "{own:.0f}% on {name}. {flags}. This is what a crowded trade looks like. Same mechanics every time.",
@@ -402,7 +402,7 @@ def _find_game_environment_edges(pool: pd.DataFrame, mentioned: set = None) -> L
 
     # Game Environment templates (target: 6)
     _GAME_ENV_TEMPLATES = [
-        "{t1}-{t2} has a {ou:.0f} total. Pace and points. This is where the math lives tonight.",
+        "{t1}-{t2} has a {ou:.0f} total. Pace and points. This is where the math lives this slate.",
         "{t1}-{t2}: {ou:.0f} total. High-volume environment. Stack here or explain why not.",
         "{ou:.0f} total on {t1}-{t2}. The environment is doing the heavy lifting. Lean into it.",
         "{t1}-{t2} at {ou:.0f}. Pace means possessions. Possessions mean opportunity. Simple math.",
@@ -427,7 +427,7 @@ def _find_game_environment_edges(pool: pd.DataFrame, mentioned: set = None) -> L
 
 
 def generate_tonights_edges(pool: pd.DataFrame) -> List[str]:
-    """Generate 3-5 data-driven callouts about tonight's slate.
+    """Generate 3-5 data-driven callouts about the current slate.
 
     Each callout covers a different player — no name repeats. The sub-generators
     run in order (mismatches → traps → contrarian → environment) and share a
@@ -521,7 +521,7 @@ _BUST_EXPLANATIONS_LOW_OWN = [
 # Bust: high ownership fallback — no specific reasons (target: 6)
 _BUST_FALLBACK_HIGH_OWN = [
     "{own:.0f}% owned and the numbers don't support it. Popularity isn't an edge. Never was.",
-    "The field loves {name} tonight at {own:.0f}%. The data doesn't. I'll take the data.",
+    "The field loves {name} at {own:.0f}% this slate. The data doesn't. I'll take the data.",
     "{name} at {own:.0f}% owned. The field is confident. The numbers are not. I know which one I trust.",
     "{own:.0f}% ownership on {name}. High conviction from the field, low conviction from the model. Mismatch.",
     "{name}: {own:.0f}% owned. The crowd says yes. The math says no. This isn't a close call.",

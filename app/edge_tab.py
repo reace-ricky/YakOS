@@ -2,7 +2,7 @@
 
 Displays the pre-computed edge analysis from data/published/{sport}/:
   - Analysis bullets + recommendation up top
-  - Ricky's Take: Last Night recap, Tonight's Edges, Bust Call
+  - Ricky's Take: Last Slate recap, The Board, Bust Call
   - 3-box dashboard: Core, Leverage, Value (boxed cards)
   - PGA wave split summary
   - Published lineups by contest type
@@ -177,8 +177,8 @@ def _render_rickys_take(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str,
     """Render the Ricky's Take section.
 
     Three parts:
-      1. Last Night -- recap of previous slate in Ricky's voice
-      2. Tonight's Edges -- data-driven callouts about current slate
+      1. Last Slate -- recap of previous slate in Ricky's voice
+      2. The Board -- data-driven callouts about current slate
       3. Bust Call -- one bold prediction
     """
     from yak_core.rickys_take import generate_bust_call, generate_last_night, generate_tonights_edges
@@ -208,19 +208,19 @@ def _render_rickys_take(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str,
     # -- Build HTML --
     parts = []
 
-    # Last Night (muted, secondary)
+    # Last Slate (muted, secondary)
     if last_night:
         slate_date = recap.get("slate_date", "") if recap else ""
         date_label = f' <span style="color:rgba(240,240,240,0.4);font-size:0.8rem;">({slate_date})</span>' if slate_date else ""
         parts.append(
-            f'<div style="margin-bottom:4px;font-weight:600;font-size:0.88rem;color:rgba(240,240,240,0.5);">Last Night{date_label}</div>'
+            f'<div style="margin-bottom:4px;font-weight:600;font-size:0.88rem;color:rgba(240,240,240,0.5);">Last Slate{date_label}</div>'
             f'<div class="rickys-last-night">{last_night}</div>'
         )
 
-    # Tonight's Edges (primary content)
+    # The Board (primary content)
     if edges:
         parts.append(
-            '<div style="margin-bottom:4px;font-weight:600;font-size:0.88rem;">Tonight\'s Edges</div>'
+            '<div style="margin-bottom:4px;font-weight:600;font-size:0.88rem;">The Board</div>'
         )
         for callout in edges:
             parts.append(f'<div class="rickys-edge-callout">{callout}</div>')
@@ -229,7 +229,7 @@ def _render_rickys_take(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str,
     if bust:
         parts.append(
             f'<div class="rickys-bust-call">'
-            f'<strong>💀 Tonight\'s bust: {bust["name"]} (${bust["salary"]:,}).</strong> '
+            f'<strong>💀 Fade of the slate: {bust["name"]} (${bust["salary"]:,}).</strong> '
             f'{bust["explanation"]}'
             f'</div>'
         )
