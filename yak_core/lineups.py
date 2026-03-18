@@ -505,6 +505,20 @@ def _add_scores(
         rest = pd.to_numeric(df["rest_factor"], errors="coerce").fillna(0.0)
         edge_bonus = edge_bonus + _norm01(rest) * gpp_rest_w
 
+    # 12. Ricky Signals edge_composite — wires the Edge Analysis "Top Edges"
+    #     directly into lineup construction so those signals actually influence builds.
+    gpp_ricky_edge_w = float(cfg.get("GPP_RICKY_EDGE_WEIGHT", 0.10))
+    if gpp_ricky_edge_w > 0:
+        try:
+            from yak_core.ricky_signals import compute_ricky_signals
+            ricky_df = compute_ricky_signals(df)
+            if "edge_composite" in ricky_df.columns:
+                ec = pd.to_numeric(ricky_df["edge_composite"], errors="coerce").fillna(0.0)
+                ec = ec.reindex(df.index, fill_value=0.0)
+                edge_bonus = edge_bonus + _norm01(ec) * gpp_ricky_edge_w
+        except Exception:
+            pass  # graceful fallback — don't break builds if ricky_signals unavailable
+
     df["gpp_score"] = (
         df["proj"] * gpp_proj_w
         + upside * gpp_upside_w
@@ -726,6 +740,46 @@ def prepare_pool(
                     df.loc[_inflated, _sim_col] = (_vals * _scale)[_inflated]
             n_deflated = _inflated.sum()
             print(f"[prepare_pool] Dampened {n_deflated} cascade-inflated projection(s) (kept 50% of bump)")
+
+    # ---- Apply calibration correction factors BEFORE scoring ----
+    # Adjusts projections using position-level and overall bias corrections
+    # from historical calibration feedback data.
+    try:
+        from yak_core.calibration_feedback import get_correction_factors
+        _sport = cfg.get("SPORT", "NBA")
+        _corrections = get_correction_factors(sport=_sport)
+        if _corrections.get("n_slates", 0) > 0:
+            _overall_bias = float(_corrections.get("overall_bias_correction", 0.0))
+            _pos_corr = _corrections.get("by_position", {})
+            _n_adjusted = 0
+            _total_adj = 0.0
+
+            # Get primary position for each player
+            if "position" in df.columns:
+                _primary_pos = df["position"].astype(str).str.split("/").str[0].str.strip().str.upper()
+            else:
+                _primary_pos = pd.Series("", index=df.index)
+
+            # Compute per-player adjustment
+            _adjustment = pd.Series(0.0, index=df.index)
+            _adjustment += _overall_bias * 0.5
+            _pos_adj = _primary_pos.map(_pos_corr).fillna(0.0)
+            _adjustment += _pos_adj
+
+            # Apply only where adjustment is non-zero
+            _mask = _adjustment.abs() > 0.001
+            if _mask.any():
+                df.loc[_mask, "proj"] = (df.loc[_mask, "proj"] + _adjustment[_mask]).clip(lower=0)
+                _n_adjusted = int(_mask.sum())
+                _total_adj = float(_adjustment[_mask].mean())
+                logger.info(
+                    "[prepare_pool] Applied calibration corrections to %d players (avg adj: %.2f FP)",
+                    _n_adjusted, _total_adj,
+                )
+    except ImportError:
+        pass  # calibration_feedback module not available
+    except Exception as e:
+        logger.debug("[prepare_pool] Skipping calibration corrections: %s", e)
 
     # ---- Derived scores ----
     df = _add_scores(df, cfg)

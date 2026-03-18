@@ -141,23 +141,24 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # gpp_score = proj * PROJ_W + upside * UPSIDE_W + boom * BOOM_W + own_adj
     # where upside = SIM99TH (true ceiling), boom = SIM99TH - SIM50TH,
     # and own_adj uses a non-linear (log-based) penalty instead of flat -3.0.
-    "GPP_PROJ_WEIGHT": 0.25,          # projection weight (low — ceiling/boom carry GPP)
+    "GPP_PROJ_WEIGHT": 0.35,          # projection weight — balanced with ceiling/boom
     "GPP_UPSIDE_WEIGHT": 0.35,        # weight on sim 99th pctile (true ceiling from sims)
-    "GPP_BOOM_WEIGHT": 0.40,          # weight on boom potential (sim99 - sim50 spread)
-    "GPP_OWN_PENALTY_STRENGTH": 1.0,  # scales the log-based ownership penalty
+    "GPP_BOOM_WEIGHT": 0.20,          # weight on boom potential (sim99 - sim50 spread)
+    "GPP_OWN_PENALTY_STRENGTH": 1.2,  # scales the log-based ownership penalty
     "GPP_OWN_LOW_BOOST": 0.50,        # boost for low-ownership (<8%) players
     # v9 edge signal weights (additive on top of base GPP formula)
-    "GPP_SMASH_WEIGHT": 0.8,          # boost high smash probability players
-    "GPP_LEVERAGE_WEIGHT": 0.5,       # prefer underowned edges
-    "GPP_BUST_PENALTY": 0.4,          # penalize high bust risk
-    "GPP_CATALYST_WEIGHT": 0.3,       # reward situational upside
-    "GPP_EFFICIENCY_WEIGHT": 0.3,     # reward FP-per-minute efficiency
-    "GPP_FORM_WEIGHT": 0.2,           # slight recent form boost
-    "GPP_DVP_WEIGHT": 0.2,            # slight matchup boost
+    "GPP_SMASH_WEIGHT": 0.15,         # boost high smash probability players
+    "GPP_LEVERAGE_WEIGHT": 0.10,      # prefer underowned edges
+    "GPP_BUST_PENALTY": 0.10,         # penalize high bust risk
+    "GPP_CATALYST_WEIGHT": 0.05,      # reward situational upside
+    "GPP_EFFICIENCY_WEIGHT": 0.05,    # reward FP-per-minute efficiency
+    "GPP_FORM_WEIGHT": 0.10,          # recent form boost
+    "GPP_DVP_WEIGHT": 0.05,           # matchup boost
+    "GPP_RICKY_EDGE_WEIGHT": 0.10,    # weight for Ricky Signals edge_composite in GPP scoring
     "GPP_PROJ_FLOOR": 280,            # flag/filter lineups projecting below this total
     "GPP_MIN_LINEUP_CEILING": 350,    # re-enabled — studs constraint + ceiling objective prevent infeasibility
     # GPP optimizer overhaul keys
-    "GPP_MIN_STUD_PLAYERS": 3,        # min players with salary >= GPP_STUD_SALARY_THRESHOLD
+    "GPP_MIN_STUD_PLAYERS": 1,        # min players with salary >= GPP_STUD_SALARY_THRESHOLD (reduced from 3 — RG winners avg 1.5 studs)
     "GPP_STUD_SALARY_THRESHOLD": 8000,# salary cutoff for "stud"
     "GPP_OBJECTIVE": "ceiling",        # "ceiling" (LP optimizes on sim ceiling) or "blended" (gpp_score)
     "MIN_UNIQUES": 0,                  # min unique players between each lineup pair (0 = disabled)
@@ -186,7 +187,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # Only active when using build_showdown_lineups
     "SD_CAPTAIN_OWN_PENALTY": 10.0,  # penalize high-owned captains
     "SD_CAPTAIN_CEIL_BONUS": 0.2,    # bonus weight on ceiling for captain selection
-    "SD_NOISE_STD": 0.10,            # per-solve noise std dev for lineup diversity (±10%)
+    "SD_NOISE_STD": 0.15,            # per-solve noise std dev for lineup diversity (±15%, raised from 0.10)
+    # Showdown-specific GPP calibration (distinct from classic GPP — upside-heavy with stronger own penalty)
+    "SD_GPP_PROJ_WEIGHT": 0.30,
+    "SD_GPP_UPSIDE_WEIGHT": 0.40,
+    "SD_GPP_BOOM_WEIGHT": 0.30,
+    "SD_GPP_OWN_PENALTY_STRENGTH": 1.5,
     # Auto-sim: run player-level Monte Carlo before lineup build if sim columns missing
     "AUTO_RUN_SIMS": True,
 }
@@ -344,6 +350,11 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "archetype": "Ceiling Hunter",
         "internal_contest": "Captain",
         "CONTEST_TYPE": "showdown",
+        # Showdown-specific GPP scoring weights (distinct from classic GPP)
+        "GPP_PROJ_WEIGHT": 0.30,
+        "GPP_UPSIDE_WEIGHT": 0.40,
+        "GPP_BOOM_WEIGHT": 0.30,
+        "GPP_OWN_PENALTY_STRENGTH": 1.5,
         "projection_style": "ceil",
         "volatility": "high",
         "correlation_mode": "stack",

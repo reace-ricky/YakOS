@@ -47,6 +47,41 @@ _SIGNAL_DEFS = {
     },
 }
 
+# ── Optimizer edge signal definitions (Fix 7) ───────────────────────────────
+# These 7 signals are used in _add_scores() edge_bonus computation.
+# We track their hit rates alongside the Ricky Signal tracking above so
+# both are captured per slate.  "Above median" = flagged, "actual > proj" = hit.
+_OPTIMIZER_SIGNAL_DEFS = {
+    "opt_smash_prob": {
+        "description": "Smash probability above slate median",
+        "column": "smash_prob",
+    },
+    "opt_leverage": {
+        "description": "Leverage score above slate median",
+        "column": "leverage",
+    },
+    "opt_form": {
+        "description": "Recent form (rolling_fp_5) above slate median",
+        "column": "rolling_fp_5",
+    },
+    "opt_dvp_boost": {
+        "description": "DvP matchup boost above slate median",
+        "column": "dvp_boost",
+    },
+    "opt_catalyst": {
+        "description": "Pop catalyst score above slate median",
+        "column": "pop_catalyst_score",
+    },
+    "opt_bust_prob": {
+        "description": "Bust probability above slate median (anti-signal)",
+        "column": "bust_prob",
+    },
+    "opt_fp_efficiency": {
+        "description": "FP efficiency above slate median",
+        "column": "fp_efficiency",
+    },
+}
+
 # What counts as a "hit" for each signal
 _HIT_DEFS = {
     "high_leverage": lambda df: df["actual_fp"] >= df["ceil"] * 0.85,
@@ -142,6 +177,50 @@ def record_edge_outcomes(
             "avg_proj": round(float(subset["proj"].mean()), 2) if "proj" in subset.columns else None,
         }
 
+    # ── Track optimizer edge signals (Fix 7) ─────────────────────────────────
+    # For each of the 7 optimizer signals, flag players above the slate median
+    # and track whether they outperformed their projection (actual > proj).
+    for opt_sig_name, opt_sig_def in _OPTIMIZER_SIGNAL_DEFS.items():
+        col = opt_sig_def["column"]
+        if col not in df.columns:
+            slate_record["signals"][opt_sig_name] = {
+                "n_flagged": 0, "n_hit": 0, "hit_rate": None,
+                "avg_actual": None, "avg_proj": None,
+            }
+            continue
+
+        try:
+            vals = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+            median_val = float(vals.median())
+            flagged = vals > median_val
+            n_flagged = int(flagged.sum())
+
+            if n_flagged == 0:
+                slate_record["signals"][opt_sig_name] = {
+                    "n_flagged": 0, "n_hit": 0, "hit_rate": None,
+                    "avg_actual": None, "avg_proj": None,
+                }
+                continue
+
+            subset = df[flagged]
+            # Hit = actual outperformed projection
+            hits = subset["actual_fp"] > subset["proj"]
+            n_hit = int(hits.sum())
+            hit_rate = round(n_hit / n_flagged, 3) if n_flagged > 0 else 0.0
+
+            slate_record["signals"][opt_sig_name] = {
+                "n_flagged": n_flagged,
+                "n_hit": n_hit,
+                "hit_rate": hit_rate,
+                "avg_actual": round(float(subset["actual_fp"].mean()), 2),
+                "avg_proj": round(float(subset["proj"].mean()), 2),
+            }
+        except Exception:
+            slate_record["signals"][opt_sig_name] = {
+                "n_flagged": 0, "n_hit": 0, "hit_rate": None,
+                "avg_actual": None, "avg_proj": None,
+            }
+
     # Persist
     _ensure_dir()
     history = {}
@@ -181,7 +260,10 @@ def _recompute_weights(history: Dict[str, Any]) -> None:
     """Compute rolling hit rates and derive signal weights."""
     signal_stats: Dict[str, Dict[str, float]] = {}
 
-    for signal_name in _SIGNAL_DEFS:
+    # Track both Ricky Signals and optimizer edge signals
+    all_signal_names = list(_SIGNAL_DEFS.keys()) + list(_OPTIMIZER_SIGNAL_DEFS.keys())
+
+    for signal_name in all_signal_names:
         total_flagged = 0
         total_hit = 0
         weighted_hr = 0.0
@@ -266,8 +348,11 @@ def get_edge_feedback_summary() -> Dict[str, Any]:
         return {"status": "error"}
 
     rows = []
+    # Merge signal descriptions from both Ricky and optimizer signal defs
+    _all_descs = {k: v.get("description", "") for k, v in _SIGNAL_DEFS.items()}
+    _all_descs.update({k: v.get("description", "") for k, v in _OPTIMIZER_SIGNAL_DEFS.items()})
     for sig, stats in data.get("signal_stats", {}).items():
-        desc = _SIGNAL_DEFS.get(sig, {}).get("description", "")
+        desc = _all_descs.get(sig, "")
         rows.append({
             "signal": sig,
             "description": desc,
