@@ -287,6 +287,148 @@ def _compute_smash_bust(
     return smash_prob, bust_prob
 
 
+# ── Smash/Bust V2: empirical logistic model ──────────────────────────────
+# Replaces the Normal-CDF model above which was structurally inverted for GPP
+# (high smash_prob → low actual smash rate).  Trained on 555 NBA players across
+# 10 clean slates (2026-03-01 → 2026-03-16) using raw RG projections + Tank
+# actuals with zero calibration corrections.
+#
+# Performance vs old CDF model:
+#   Smash AUC:  0.679  (was 0.320 clean / 0.453 YakOS)
+#   Bust AUC:   0.664  (was 0.627 floor / 0.530 salary)
+#   Smash label hit rate: 56.9%  (was 10-19%)
+#   Overall signal hit rate: 77.4%  (was 27-41%)
+#
+# v1 — 2026-03-17 — trained on 555 players / 10 slates
+# Retrain when 20+ clean slates accumulate in the archive.
+# ─────────────────────────────────────────────────────────────────────────
+
+# Scaler parameters (StandardScaler fit on training data)
+_V2_MEANS = {
+    "salary_k":      4.962162,
+    "own_pct":       4.693914,
+    "proj_min":     24.577477,
+    "fp_per_min":    0.944554,
+    "rolling_ratio": 1.034385,
+}
+_V2_STDS = {
+    "salary_k":      2.323715,
+    "own_pct":       9.563013,
+    "proj_min":      7.406677,
+    "fp_per_min":    0.200534,
+    "rolling_ratio": 0.446307,
+}
+
+# Smash logistic coefficients
+_V2_SMASH_COEF = {
+    "salary_k":       0.355614,   # higher salary → more smash
+    "own_pct":       -0.273852,   # lower ownership → more smash
+    "proj_min":      -0.464636,   # fewer minutes → more smash
+    "fp_per_min":    -0.390111,   # lower efficiency → more smash (upside not priced in)
+    "rolling_ratio":  0.137422,   # hot recent form → more smash
+}
+_V2_SMASH_INTERCEPT = -1.131903
+
+# Bust logistic coefficients
+_V2_BUST_COEF = {
+    "salary_k":      -0.333912,   # lower salary → more bust
+    "own_pct":        0.202290,   # higher ownership → more bust (chalk traps)
+    "proj_min":      -0.166555,   # fewer minutes → more bust
+    "fp_per_min":    -0.285929,   # lower efficiency → more bust
+    "rolling_ratio": -0.202349,   # cold recent form → more bust
+}
+_V2_BUST_INTERCEPT = -1.813097
+
+_V2_FEAT_ORDER = ["salary_k", "own_pct", "proj_min", "fp_per_min", "rolling_ratio"]
+_V2_MEAN_VEC = np.array([_V2_MEANS[f] for f in _V2_FEAT_ORDER])
+_V2_STD_VEC  = np.array([_V2_STDS[f]  for f in _V2_FEAT_ORDER])
+_V2_SMASH_COEF_VEC = np.array([_V2_SMASH_COEF[f] for f in _V2_FEAT_ORDER])
+_V2_BUST_COEF_VEC  = np.array([_V2_BUST_COEF[f]  for f in _V2_FEAT_ORDER])
+
+
+def _sigmoid(z: np.ndarray) -> np.ndarray:
+    """Numerically stable sigmoid."""
+    return np.where(
+        z >= 0,
+        1.0 / (1.0 + np.exp(-z)),
+        np.exp(z) / (1.0 + np.exp(z)),
+    )
+
+
+def _compute_smash_bust_v2(
+    proj: pd.Series,
+    salary: pd.Series,
+    own: pd.Series,
+    proj_minutes: pd.Series,
+    rolling_fp_5: pd.Series,
+    # Legacy params accepted but ignored (preserves call-site flexibility)
+    ceil: pd.Series | None = None,      # noqa: ARG001
+    floor: pd.Series | None = None,     # noqa: ARG001
+    variance: float = 1.0,              # noqa: ARG001
+) -> tuple[pd.Series, pd.Series]:
+    """Return (smash_prob, bust_prob) via empirical logistic model.
+
+    Unlike the CDF model this replaces, probabilities are driven by
+    features that empirically predict GPP smash/bust outcomes:
+    salary tier, ownership, projected minutes, FP/min efficiency,
+    and recent rolling form.
+
+    Parameters
+    ----------
+    proj : pd.Series
+        Point projection (used for FP/min and rolling ratio).
+    salary : pd.Series
+        DraftKings salary.
+    own : pd.Series
+        Projected ownership percentage.
+    proj_minutes : pd.Series
+        Projected minutes.  Falls back to 20.0 if missing/zero.
+    rolling_fp_5 : pd.Series
+        5-game rolling fantasy points average.  Falls back to proj if missing.
+    ceil, floor, variance :
+        Accepted for backward compatibility but not used.
+
+    Returns
+    -------
+    (smash_prob, bust_prob) : tuple[pd.Series, pd.Series]
+        Each clipped to [0.01, 0.95].
+    """
+    idx = proj.index
+
+    # ── Build feature matrix ─────────────────────────────────────────
+    salary_k = salary.values.astype(float) / 1000.0
+
+    own_arr = pd.to_numeric(own, errors="coerce").fillna(1.0).clip(lower=0.5).values
+
+    pm = pd.to_numeric(proj_minutes, errors="coerce").fillna(20.0).values
+    pm = np.clip(pm, 5.0, None)
+    # Players with 0 projected minutes → default 20 (avoids distortion)
+    pm[pm < 1.0] = 20.0
+
+    proj_arr = proj.values.astype(float)
+    fp_per_min = proj_arr / pm
+
+    # Rolling ratio: recent form vs projection
+    rfp = pd.to_numeric(rolling_fp_5, errors="coerce").values
+    proj_safe = np.clip(proj_arr, 1.0, None)
+    rolling_ratio = np.where(np.isnan(rfp) | (rfp <= 0), 1.0, rfp / proj_safe)
+
+    # Stack into (n, 5) matrix
+    X = np.column_stack([salary_k, own_arr, pm, fp_per_min, rolling_ratio])
+
+    # ── Scale ────────────────────────────────────────────────────────
+    X_scaled = (X - _V2_MEAN_VEC) / _V2_STD_VEC
+
+    # ── Predict ──────────────────────────────────────────────────────
+    z_smash = X_scaled @ _V2_SMASH_COEF_VEC + _V2_SMASH_INTERCEPT
+    z_bust  = X_scaled @ _V2_BUST_COEF_VEC  + _V2_BUST_INTERCEPT
+
+    smash_prob = pd.Series(np.clip(_sigmoid(z_smash), 0.01, 0.95), index=idx)
+    bust_prob  = pd.Series(np.clip(_sigmoid(z_bust),  0.01, 0.95), index=idx)
+
+    return smash_prob, bust_prob
+
+
 # Keep the old function name as a no-op for any tests that import it directly.
 def _ceiling_gap_factor(
     proj: pd.Series, ceil: pd.Series, floor: pd.Series,
@@ -773,9 +915,18 @@ def compute_edge_metrics(
     _bad_post = ceil <= proj
     ceil = ceil.where(~_bad_post, proj * 1.4)
 
-    # Compute smash/bust probabilities (empirical model, calibrated from backtest)
-    # Now incorporates ceiling/floor gap — narrow-range players get dampened.
-    smash_prob, bust_prob = _compute_smash_bust(eff_proj, salary, own, ceil, floor, variance)
+    # ── Smash/Bust V2: empirical logistic model ────────────────────────
+    # Replaces CDF-based _compute_smash_bust which was structurally inverted
+    # (high smash_prob → low actual smash rate). V2 uses salary, ownership,
+    # projected minutes, FP/min efficiency, and rolling form.
+    # See _compute_smash_bust_v2 docstring for training data and AUC benchmarks.
+    _rolling_fp_5 = pd.to_numeric(
+        df.get("rolling_fp_5", pd.Series(np.nan, index=df.index)),
+        errors="coerce",
+    )
+    smash_prob, bust_prob = _compute_smash_bust_v2(
+        eff_proj, salary, own, proj_minutes, _rolling_fp_5,
+    )
 
     # Compute leverage: proj / (own * scale_factor)
     # Represents: reward-per-ownership-unit.
@@ -810,7 +961,10 @@ def compute_edge_metrics(
     lev_norm_capped = lev_norm.copy()
     lev_norm_capped[_is_stud] = lev_norm[_is_stud].clip(lower=0.35)
 
-    # ── Minutes-stability dampening ──
+    # ── Minutes-stability dampening (DEPRECATED — 2026-03-17) ──
+    # With V2 logistic smash/bust, rolling form is a first-class feature.
+    # This dampening was patching the old CDF model and is now redundant.
+    # Left in place for safety; can be removed in a later cleanup pass.
     # If a player has high rolling variance (rolling_cv), dampen their
     # smash prob slightly to avoid boosting inconsistent players.
     _dampen = pd.Series(1.0, index=df.index)
