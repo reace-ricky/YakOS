@@ -28,20 +28,21 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "description": "Ceiling-chasing, leverage-aware, one best lineup for the slate",
             "SPORT": "NBA",
             "CONTEST_TYPE": "gpp",
-            # GPP scoring weights (v10 — recalibrated for smash/ceiling)
-            "GPP_PROJ_WEIGHT": 0.25,
+            # GPP scoring weights (v10 — calibrated against RG winning lineups)
+            "GPP_PROJ_WEIGHT": 0.35,
             "GPP_UPSIDE_WEIGHT": 0.35,
-            "GPP_BOOM_WEIGHT": 0.40,
+            "GPP_BOOM_WEIGHT": 0.20,
             "GPP_OWN_PENALTY_STRENGTH": 1.20,
             "GPP_OWN_LOW_BOOST": 0.50,
-            # Edge signal weights (aggressive ceiling-chasing)
-            "GPP_SMASH_WEIGHT": 0.80,
-            "GPP_LEVERAGE_WEIGHT": 0.55,
-            "GPP_CATALYST_WEIGHT": 0.30,
-            "GPP_EFFICIENCY_WEIGHT": 0.30,
-            "GPP_BUST_PENALTY": 0.35,
-            "GPP_FORM_WEIGHT": 0.20,
-            "GPP_DVP_WEIGHT": 0.20,
+            # Edge signal weights (matched to optimizer_overrides.json)
+            "GPP_SMASH_WEIGHT": 0.15,
+            "GPP_LEVERAGE_WEIGHT": 0.10,
+            "GPP_CATALYST_WEIGHT": 0.05,
+            "GPP_EFFICIENCY_WEIGHT": 0.05,
+            "GPP_BUST_PENALTY": 0.10,
+            "GPP_FORM_WEIGHT": 0.10,
+            "GPP_DVP_WEIGHT": 0.05,
+            "GPP_RICKY_EDGE_WEIGHT": 0.10,
             # FP Cheatsheet signal weights (GPP: higher pace/dvp for ceiling)
             "GPP_SPREAD_PENALTY_WEIGHT": 0.05,
             "GPP_PACE_ENV_WEIGHT": 0.10,
@@ -81,27 +82,28 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "description": "Multiple lineups around 2-3 game stories, uniqueness between lineups",
             "SPORT": "NBA",
             "CONTEST_TYPE": "gpp",
-            # GPP scoring weights (balanced multi-entry — lower own penalty)
-            "GPP_PROJ_WEIGHT": 0.25,
+            # GPP scoring weights (calibrated against RG winning lineups — lower own penalty for MME)
+            "GPP_PROJ_WEIGHT": 0.35,
             "GPP_UPSIDE_WEIGHT": 0.35,
-            "GPP_BOOM_WEIGHT": 0.40,
+            "GPP_BOOM_WEIGHT": 0.20,
             "GPP_OWN_PENALTY_STRENGTH": 1.00,
             "GPP_OWN_LOW_BOOST": 0.50,
-            # Edge signal weights (aggressive ceiling-chasing)
-            "GPP_SMASH_WEIGHT": 0.80,
-            "GPP_LEVERAGE_WEIGHT": 0.50,
-            "GPP_CATALYST_WEIGHT": 0.30,
-            "GPP_EFFICIENCY_WEIGHT": 0.30,
-            "GPP_BUST_PENALTY": 0.30,
-            "GPP_FORM_WEIGHT": 0.20,
-            "GPP_DVP_WEIGHT": 0.20,
+            # Edge signal weights (matched to optimizer_overrides.json)
+            "GPP_SMASH_WEIGHT": 0.15,
+            "GPP_LEVERAGE_WEIGHT": 0.10,
+            "GPP_CATALYST_WEIGHT": 0.05,
+            "GPP_EFFICIENCY_WEIGHT": 0.05,
+            "GPP_BUST_PENALTY": 0.10,
+            "GPP_FORM_WEIGHT": 0.10,
+            "GPP_DVP_WEIGHT": 0.05,
+            "GPP_RICKY_EDGE_WEIGHT": 0.10,
             # FP Cheatsheet signal weights (GPP: higher pace/dvp for ceiling)
             "GPP_SPREAD_PENALTY_WEIGHT": 0.05,
             "GPP_PACE_ENV_WEIGHT": 0.10,
             "GPP_VALUE_WEIGHT": 0.05,
             "GPP_REST_WEIGHT": 0.03,
             # Optimizer constraints
-            "GPP_MIN_STUD_PLAYERS": 2,
+            "GPP_MIN_STUD_PLAYERS": 1,   # reduced from 2 — RG winners avg 1.5 studs
             "GPP_STUD_SALARY_THRESHOLD": 8000,
             "GPP_OBJECTIVE": "ceiling",
             "GPP_OWN_CAP": 2.0,
@@ -201,14 +203,15 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "GPP_BOOM_WEIGHT": 0.30,         # boom — every spot needs explosion potential
             "GPP_OWN_PENALTY_STRENGTH": 1.5, # strong — concentrated pools need differentiation
             "GPP_OWN_LOW_BOOST": 0.6,        # boost low-owned picks — leverage is paramount
-            # Edge signal weights — smash-heavy, leverage-dominant
-            "GPP_SMASH_WEIGHT": 0.9,         # very high — 6 spots means every pick must smash
-            "GPP_LEVERAGE_WEIGHT": 0.9,      # very high — small pools make ownership key
-            "GPP_CATALYST_WEIGHT": 0.5,      # high catalyst — game script is critical in single-game
-            "GPP_EFFICIENCY_WEIGHT": 0.2,    # low efficiency — ceiling matters more than per-dollar
-            "GPP_BUST_PENALTY": 0.2,         # low bust penalty — need to take risks to win
-            "GPP_FORM_WEIGHT": 0.25,         # moderate form — recent performance matters
-            "GPP_DVP_WEIGHT": 0.3,           # moderate-high DvP — single-game matchup is directional
+            # Edge signal weights (matched to optimizer_overrides.json showdown)
+            "GPP_SMASH_WEIGHT": 0.20,        # higher than classic GPP — 6 spots, need smash
+            "GPP_LEVERAGE_WEIGHT": 0.15,     # ownership matters more in small pools
+            "GPP_CATALYST_WEIGHT": 0.05,     # game script is relevant but don't overweight
+            "GPP_EFFICIENCY_WEIGHT": 0.05,   # ceiling matters more than per-dollar
+            "GPP_BUST_PENALTY": 0.10,        # still penalize bust risk
+            "GPP_FORM_WEIGHT": 0.10,         # recent performance matters
+            "GPP_DVP_WEIGHT": 0.05,          # single-game matchup
+            "GPP_RICKY_EDGE_WEIGHT": 0.10,   # wire ricky signals into showdown too
             # FP Cheatsheet signal weights (Showdown: pace and spread are critical)
             "GPP_SPREAD_PENALTY_WEIGHT": 0.12, # higher spread penalty — blowouts kill showdown lineups
             "GPP_PACE_ENV_WEIGHT": 0.15,     # high pace — single-game pace drives total FP

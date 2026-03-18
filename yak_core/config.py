@@ -141,19 +141,19 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # gpp_score = proj * PROJ_W + upside * UPSIDE_W + boom * BOOM_W + own_adj
     # where upside = SIM99TH (true ceiling), boom = SIM99TH - SIM50TH,
     # and own_adj uses a non-linear (log-based) penalty instead of flat -3.0.
-    "GPP_PROJ_WEIGHT": 0.25,          # projection weight (low — ceiling/boom carry GPP)
+    "GPP_PROJ_WEIGHT": 0.35,          # projection weight — balanced with ceiling/boom
     "GPP_UPSIDE_WEIGHT": 0.35,        # weight on sim 99th pctile (true ceiling from sims)
-    "GPP_BOOM_WEIGHT": 0.40,          # weight on boom potential (sim99 - sim50 spread)
-    "GPP_OWN_PENALTY_STRENGTH": 1.0,  # scales the log-based ownership penalty
+    "GPP_BOOM_WEIGHT": 0.20,          # weight on boom potential (sim99 - sim50 spread)
+    "GPP_OWN_PENALTY_STRENGTH": 1.2,  # scales the log-based ownership penalty
     "GPP_OWN_LOW_BOOST": 0.50,        # boost for low-ownership (<8%) players
     # v9 edge signal weights (additive on top of base GPP formula)
-    "GPP_SMASH_WEIGHT": 0.8,          # boost high smash probability players
-    "GPP_LEVERAGE_WEIGHT": 0.5,       # prefer underowned edges
-    "GPP_BUST_PENALTY": 0.4,          # penalize high bust risk
-    "GPP_CATALYST_WEIGHT": 0.3,       # reward situational upside
-    "GPP_EFFICIENCY_WEIGHT": 0.3,     # reward FP-per-minute efficiency
-    "GPP_FORM_WEIGHT": 0.2,           # slight recent form boost
-    "GPP_DVP_WEIGHT": 0.2,            # slight matchup boost
+    "GPP_SMASH_WEIGHT": 0.15,         # boost high smash probability players
+    "GPP_LEVERAGE_WEIGHT": 0.10,      # prefer underowned edges
+    "GPP_BUST_PENALTY": 0.10,         # penalize high bust risk
+    "GPP_CATALYST_WEIGHT": 0.05,      # reward situational upside
+    "GPP_EFFICIENCY_WEIGHT": 0.05,    # reward FP-per-minute efficiency
+    "GPP_FORM_WEIGHT": 0.10,          # recent form boost
+    "GPP_DVP_WEIGHT": 0.05,           # matchup boost
     "GPP_RICKY_EDGE_WEIGHT": 0.10,    # weight for Ricky Signals edge_composite in GPP scoring
     "GPP_PROJ_FLOOR": 280,            # flag/filter lineups projecting below this total
     "GPP_MIN_LINEUP_CEILING": 350,    # re-enabled — studs constraint + ceiling objective prevent infeasibility
