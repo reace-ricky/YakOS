@@ -1,7 +1,7 @@
 {
   "bullets": [
     "Core anchors: Nikola Jokic, Victor Wembanyama, Devin Booker",
-    "Leverage plays: Jamal Murray, DeMar DeRozan",
+    "Leverage plays: Jamal Murray, Moe Wagner",
     "Value targets: Carlton Carrington, Keldon Johnson",
     "Fade candidates: Khaman Maluach, Kam Jones"
   ],
@@ -18,7 +18,7 @@
       "proj_minutes": 34.6,
       "sim90th": 91.61,
       "ceil": 84.36,
-      "sim_leverage": 85.11
+      "sim_leverage": 87.64
     },
     {
       "player_name": "Victor Wembanyama",
@@ -31,7 +31,7 @@
       "proj_minutes": 29.2,
       "sim90th": 73.53,
       "ceil": 67.78,
-      "sim_leverage": 83.43
+      "sim_leverage": 85.96
     },
     {
       "player_name": "Devin Booker",
@@ -44,7 +44,7 @@
       "proj_minutes": 33.9,
       "sim90th": 55.27,
       "ceil": 51.55,
-      "sim_leverage": 1.69
+      "sim_leverage": 2.25
     },
     {
       "player_name": "Karl-Anthony Towns",
@@ -57,7 +57,7 @@
       "proj_minutes": 30.2,
       "sim90th": 62.769999999999996,
       "ceil": 57.6,
-      "sim_leverage": 9.55
+      "sim_leverage": 10.67
     },
     {
       "player_name": "Shai Gilgeous-Alexander",
@@ -70,7 +70,7 @@
       "proj_minutes": 33.9,
       "sim90th": 68.75,
       "ceil": 64.0,
-      "sim_leverage": 13.48
+      "sim_leverage": 15.17
     }
   ],
   "leverage_plays": [
@@ -85,7 +85,20 @@
       "proj_minutes": 35.0,
       "sim90th": 59.2,
       "ceil": 54.23,
-      "sim_leverage": 75.56
+      "sim_leverage": 77.53
+    },
+    {
+      "player_name": "Moe Wagner",
+      "salary": 3500,
+      "proj": 16.26,
+      "ownership": 0.11,
+      "edge": 0.46471074508605276,
+      "value": 4.645714285714286,
+      "risk_score": 25.7,
+      "proj_minutes": 14.6,
+      "sim90th": 31.590000000000003,
+      "ceil": 25.82,
+      "sim_leverage": 0.56
     },
     {
       "player_name": "DeMar DeRozan",
@@ -98,7 +111,7 @@
       "proj_minutes": 26.2,
       "sim90th": 63.70000000000001,
       "ceil": 56.97,
-      "sim_leverage": 79.49
+      "sim_leverage": 81.46
     },
     {
       "player_name": "Russell Westbrook",
@@ -111,7 +124,7 @@
       "proj_minutes": 28.2,
       "sim90th": 61.86,
       "ceil": 53.75,
-      "sim_leverage": 76.12
+      "sim_leverage": 78.09
     },
     {
       "player_name": "Maxime Raynaud",
@@ -124,20 +137,7 @@
       "proj_minutes": 28.2,
       "sim90th": 55.76,
       "ceil": 50.14,
-      "sim_leverage": 75.0
-    },
-    {
-      "player_name": "Tyler Kolek",
-      "salary": 3000,
-      "proj": 21.84,
-      "ownership": 0.17,
-      "edge": 0.4284571931706474,
-      "value": 7.28,
-      "risk_score": 49.5,
-      "proj_minutes": 12.0,
-      "sim90th": 39.57,
-      "ceil": 32.09,
-      "sim_leverage": 16.85
+      "sim_leverage": 76.97
     }
   ],
   "value_plays": [
@@ -165,7 +165,7 @@
       "proj_minutes": 21.9,
       "sim90th": 43.64,
       "ceil": 36.5,
-      "sim_leverage": 58.15
+      "sim_leverage": 58.99
     },
     {
       "player_name": "Ayo Dosunmu",
@@ -178,7 +178,7 @@
       "proj_minutes": 29.3,
       "sim90th": 46.349999999999994,
       "ceil": 36.59,
-      "sim_leverage": -41.01
+      "sim_leverage": -43.26
     },
     {
       "player_name": "Julian Champagnie",
@@ -191,7 +191,7 @@
       "proj_minutes": 23.2,
       "sim90th": 46.440000000000005,
       "ceil": 40.09,
-      "sim_leverage": 64.89
+      "sim_leverage": 65.73
     },
     {
       "player_name": "Tre Johnson",
@@ -204,7 +204,7 @@
       "proj_minutes": 24.8,
       "sim90th": 43.79,
       "ceil": 36.13,
-      "sim_leverage": -20.79
+      "sim_leverage": -21.35
     }
   ],
   "fade_candidates": [
@@ -219,7 +219,7 @@
       "proj_minutes": 5.4,
       "sim90th": 11.55,
       "ceil": 11.92,
-      "sim_leverage": -41.01
+      "sim_leverage": -42.7
     },
     {
       "player_name": "Kam Jones",
@@ -232,7 +232,7 @@
       "proj_minutes": 16.4,
       "sim90th": 8.65,
       "ceil": 7.62,
-      "sim_leverage": -39.33
+      "sim_leverage": -41.01
     },
     {
       "player_name": "Ariel Hukporti",
@@ -258,7 +258,7 @@
       "proj_minutes": 16.7,
       "sim90th": 11.67,
       "ceil": 11.39,
-      "sim_leverage": -43.26
+      "sim_leverage": -45.51
     },
     {
       "player_name": "Jamal Cain",
@@ -271,7 +271,7 @@
       "proj_minutes": 9.6,
       "sim90th": 3.9300000000000006,
       "ceil": 6.48,
-      "sim_leverage": -48.6
+      "sim_leverage": -51.4
     }
   ],
   "signals_df_path": "signals.parquet"
