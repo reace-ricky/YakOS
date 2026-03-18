@@ -106,7 +106,7 @@ _BOX_CONFIG = {
 }
 
 
-def _render_player_card_html(player: Dict[str, Any], is_pga: bool) -> str:
+def _render_player_card_html(player: Dict[str, Any], is_pga: bool, cleared_players: list | None = None) -> str:
     """Build HTML for a single player card."""
     name = player.get("player_name", "")
     salary = player.get("salary", 0)
@@ -138,15 +138,19 @@ def _render_player_card_html(player: Dict[str, Any], is_pga: bool) -> str:
         elif wave == "Late":
             wave_html = f'<span class="wave-badge wave-late">🌙 Late{". " + teetime if teetime else ""}</span>'
 
+    cleared_html = ""
+    if cleared_players and name in cleared_players:
+        cleared_html = ' <span style="color:#4CAF50;font-size:0.8rem;font-weight:600;">✅ Cleared</span>'
+
     return (
         f'<div class="player-card">'
-        f'<div class="name">{name}{wave_html}</div>'
+        f'<div class="name">{name}{cleared_html}{wave_html}</div>'
         f'<div class="stats">{" . ".join(stats_parts)}</div>'
         f'</div>'
     )
 
 
-def _render_edge_box(key: str, players: List[Dict], is_pga: bool) -> None:
+def _render_edge_box(key: str, players: List[Dict], is_pga: bool, cleared_players: list | None = None) -> None:
     """Render one of the edge classification boxes."""
     cfg = _BOX_CONFIG[key]
     title = cfg["title"]
@@ -158,7 +162,7 @@ def _render_edge_box(key: str, players: List[Dict], is_pga: bool) -> None:
         cards_html = '<p style="color:rgba(240,240,240,0.4); font-size:0.85rem;">No players in this category.</p>'
     else:
         for p in players:
-            cards_html += _render_player_card_html(p, is_pga)
+            cards_html += _render_player_card_html(p, is_pga, cleared_players)
 
     box_html = (
         f'<div class="edge-box" style="border-left: 4px solid {color};">'
@@ -239,6 +243,86 @@ def _render_rickys_take(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str,
     st.markdown(html, unsafe_allow_html=True)
 
 
+def _render_late_swap_alerts(alerts: list, sport: str, lineups: dict | None = None) -> None:
+    """Render late swap alert boxes above Ricky's Take.
+
+    - Red (high impact): st.error with cascade, pivots, lineup flags
+    - Yellow (medium): st.warning one-liner
+    - Cleared: stored in session state for inline badge rendering
+    - Hidden/low: suppressed entirely
+    - No changes: tiny caption confirming check ran
+    """
+    if not alerts:
+        st.caption("Injury check complete (0 impactful changes)")
+        return
+
+    high = [a for a in alerts if a.get("impact") == "high"]
+    med = [a for a in alerts if a.get("impact") == "medium"]
+    cleared = [a for a in alerts if a.get("impact") == "cleared"]
+    # "low" impact alerts are suppressed entirely
+
+    timestamp = alerts[0].get("timestamp", "") if alerts else ""
+
+    if high:
+        n = len(high)
+        with st.container():
+            st.error(f"🔴 LATE SWAP ALERT — {n} high-impact change{'s' if n != 1 else ''} since pool load ({timestamp})")
+            for a in high:
+                note = f" ({a['injury_note']})" if a.get("injury_note") else ""
+                st.markdown(f"**{a['player_name']}** → {a['new_status']}{note} — was {a['old_status']} at load")
+
+                # Cascade beneficiaries
+                for b in a.get("cascade_beneficiaries", [])[:3]:
+                    st.markdown(
+                        f"&nbsp;&nbsp;&nbsp;&nbsp;└ {b['name']} (${b['salary']:,}, "
+                        f"+{b['extra_minutes']:.0f} min, +{b['fp_bump']:.1f} FP)"
+                    )
+
+                # Replacement pivots
+                if a.get("cash_pivot"):
+                    cp = a["cash_pivot"]
+                    st.markdown(
+                        f"&nbsp;&nbsp;&nbsp;&nbsp;└ **Cash pivot:** {cp['name']} "
+                        f"(${cp['salary']:,}, proj {cp['proj']:.1f}, {cp['ownership']:.0f}% owned) — safe floor"
+                    )
+                if a.get("gpp_pivot"):
+                    gp = a["gpp_pivot"]
+                    st.markdown(
+                        f"&nbsp;&nbsp;&nbsp;&nbsp;└ **GPP pivot:** {gp['name']} "
+                        f"(${gp['salary']:,}, proj {gp['proj']:.1f}, {gp['ownership']:.0f}% owned) — leverage play"
+                    )
+
+                # Lineup impact
+                in_lu = a.get("in_lineups", [])
+                if in_lu:
+                    lu_str = ", ".join(f"Lineup {i + 1}" for i in in_lu)
+                    st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;└ ⚠️ **IN YOUR LINEUPS:** {lu_str}")
+                    # "View affected lineups" button
+                    btn_key = f"view_affected_{a['player_name']}_{sport}"
+                    if st.button(f"View affected lineups for {a['player_name']}", key=btn_key):
+                        st.session_state[f"filter_lineups_player_{sport}"] = a["player_name"]
+                else:
+                    st.markdown("&nbsp;&nbsp;&nbsp;&nbsp;└ Not in any saved lineups")
+
+    if med:
+        n = len(med)
+        lines = []
+        for a in med:
+            note = f" ({a.get('injury_note', '')})" if a.get("injury_note") else ""
+            lines.append(
+                f"**{a['player_name']}** → {a['new_status']}{note} "
+                f"(proj {a['proj']:.1f}, ${a['salary']:,}) — low rotation impact"
+            )
+        st.warning(f"🟡 STATUS UPDATE — {n} change{'s' if n != 1 else ''} since pool load\n\n" + "\n\n".join(lines))
+
+    # Cleared players: store in session state for inline badge rendering
+    if cleared:
+        st.session_state[f"cleared_players_{sport}"] = [a["player_name"] for a in cleared]
+
+    if not high and not med:
+        st.caption(f"Injury check complete (0 impactful changes) · Last checked {timestamp}")
+
+
 def render_edge_tab(sport: str) -> None:
     """Render Ricky's Edge Analysis tab."""
     from app.data_loader import invalidate_published_cache, load_published_data
@@ -268,6 +352,10 @@ def render_edge_tab(sport: str) -> None:
     # ── Header ──
     st.markdown(f"## 📐 Right Angle Ricky — {sport}")
     st.caption(f"{slate_date} · {pool_size} players · DraftKings")
+
+    # ── Late Swap Alerts (above Ricky's Take) ────────────────────────────
+    _late_swap = edge_analysis.get("late_swap_alerts", [])
+    _render_late_swap_alerts(_late_swap, sport, lineups)
 
     # ── Ricky's Take ─────────────────────────────────────────────────────
     _render_rickys_take(sport, pool, edge_analysis)
@@ -300,18 +388,27 @@ def render_edge_tab(sport: str) -> None:
             st.markdown("")
 
     # ── 3-box dashboard ──
+    _cleared = st.session_state.get(f"cleared_players_{sport}", [])
     col1, col2, col3 = st.columns(3)
     with col1:
-        _render_edge_box("core_plays", edge_analysis.get("core_plays", []), is_pga)
+        _render_edge_box("core_plays", edge_analysis.get("core_plays", []), is_pga, _cleared)
     with col2:
-        _render_edge_box("leverage_plays", edge_analysis.get("leverage_plays", []), is_pga)
+        _render_edge_box("leverage_plays", edge_analysis.get("leverage_plays", []), is_pga, _cleared)
     with col3:
-        _render_edge_box("value_plays", edge_analysis.get("value_plays", []), is_pga)
+        _render_edge_box("value_plays", edge_analysis.get("value_plays", []), is_pga, _cleared)
 
     # ── Published lineups ──
     if lineups:
         st.markdown("---")
         st.markdown("### 📋 Published Lineups")
+
+        # Check for "View affected lineups" filter
+        _filter_player = st.session_state.get(f"filter_lineups_player_{sport}", "")
+        if _filter_player:
+            st.info(f"Showing lineups containing **{_filter_player}**")
+            if st.button("Clear filter", key=f"clear_lineup_filter_{sport}"):
+                del st.session_state[f"filter_lineups_player_{sport}"]
+                st.rerun()
 
         # Load matchup labels from per-contest meta files for better display
         from app.data_loader import DATA_DIR
@@ -338,18 +435,48 @@ def render_edge_tab(sport: str) -> None:
                 if "lineup_index" not in ldf.columns:
                     st.dataframe(ldf, use_container_width=True, hide_index=True)
                     continue
-                for idx in sorted(ldf["lineup_index"].unique()):
-                    lu = ldf[ldf["lineup_index"] == idx]
+
+                # Determine which lineup indices to show
+                _all_indices = sorted(ldf["lineup_index"].unique())
+                if _filter_player and "player_name" in ldf.columns:
+                    _affected = ldf[ldf["player_name"] == _filter_player]["lineup_index"].unique()
+                    _show_indices = sorted(set(_all_indices) & set(_affected))
+                    if not _show_indices:
+                        st.caption(f"{_filter_player} not in any {label} lineups")
+                        continue
+                else:
+                    _show_indices = _all_indices
+
+                for idx in _show_indices:
+                    lu = ldf[ldf["lineup_index"] == idx].copy()
                     total_sal = int(pd.to_numeric(lu["salary"], errors="coerce").fillna(0).sum()) if "salary" in lu.columns else 0
                     total_proj = float(pd.to_numeric(lu["proj"], errors="coerce").fillna(0).sum()) if "proj" in lu.columns else 0.0
                     total_ceil = float(pd.to_numeric(lu["ceil"], errors="coerce").fillna(0).sum()) if "ceil" in lu.columns else 0.0
                     ceil_part = f" · {total_ceil:.1f} ceil" if total_ceil > 0 else ""
                     st.markdown(f"**Lineup {idx + 1}** — ${total_sal:,} sal · {total_proj:.1f} proj{ceil_part}")
+
+                    # Apply cleared badge and highlight filtered player
+                    if "player_name" in lu.columns:
+                        if _cleared:
+                            lu["player_name"] = lu["player_name"].apply(
+                                lambda n: f"✅ {n}" if n in _cleared else n
+                            )
+                        if _filter_player:
+                            # Show salary remaining if the filtered player were removed
+                            _filt_sal = pd.to_numeric(
+                                lu.loc[lu["player_name"].str.contains(_filter_player, na=False), "salary"],
+                                errors="coerce",
+                            ).sum() if "salary" in lu.columns else 0
+                            if _filt_sal > 0:
+                                st.caption(f"Salary freed if {_filter_player} removed: ${int(_filt_sal):,}")
+                            lu["player_name"] = lu["player_name"].apply(
+                                lambda n: f"🔴 {n}" if _filter_player in str(n) else n
+                            )
+
                     display_cols = ["slot", "player_name", "pos", "salary", "proj", "ceil"]
                     if is_pga:
                         display_cols = ["slot", "player_name", "salary", "proj", "wave", "r1_teetime"]
                         if "wave" not in lu.columns and "early_late_wave" in lu.columns:
-                            lu = lu.copy()
                             lu["wave"] = lu["early_late_wave"].map(
                                 {0: "Early", 1: "Late", "Early": "Early", "Late": "Late"}
                             )
