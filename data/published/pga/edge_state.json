@@ -9,32 +9,32 @@
     "J.J. Spaun"
   ],
   "leverage_names": [
-    "Davis Chatfield",
-    "Dylan Wu",
-    "Kensei Hirata",
     "Brandt Snedeker",
-    "Adrien Saddier"
+    "Dylan Wu",
+    "Davis Chatfield",
+    "Joel Dahmen",
+    "Henrik Norlander"
   ],
   "value_names": [],
   "fade_names": [
     "Davis Riley",
-    "Michael Brennan",
-    "Billy Horschel",
+    "Blades Brown",
+    "Matti Schmid",
     "Marco Penge",
-    "Matti Schmid"
+    "Billy Horschel"
   ],
-  "calibration_slates": 15,
+  "calibration_slates": 8,
   "wave_split": {
-    "early_count": 66,
-    "late_count": 65,
-    "early_avg_proj": 52.3,
-    "late_avg_proj": 53.2,
+    "early_count": 69,
+    "late_count": 66,
+    "early_avg_proj": 52.7,
+    "late_avg_proj": 53.7,
     "early_players": [
       "Matt Fitzpatrick",
       "Jacob Bridgeman",
       "Justin Thomas",
-      "Ryo Hisatsune",
-      "Jordan Spieth"
+      "Jordan Spieth",
+      "Ben Griffin"
     ],
     "late_players": [
       "Xander Schauffele",

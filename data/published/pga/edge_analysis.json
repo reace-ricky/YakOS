@@ -1,112 +1,112 @@
 {
   "bullets": [
     "Core anchors: Matt Fitzpatrick, Aaron Rai, Christiaan Bezuidenhout",
-    "Leverage plays: Davis Chatfield, Dylan Wu",
-    "Fade candidates: Davis Riley, Michael Brennan"
+    "Leverage plays: Brandt Snedeker, Dylan Wu",
+    "Fade candidates: Davis Riley, Blades Brown"
   ],
   "recommendation": "5 core plays anchored at $7,500\u2013$9,800. 5 leverage plays at 0\u20130% ownership.",
   "core_plays": [
     {
       "player_name": "Matt Fitzpatrick",
       "salary": 9800,
-      "proj": 76.41,
-      "ownership": 21.79,
-      "edge": 0.7414473034840705,
+      "proj": 75.91,
+      "ownership": 22.73,
+      "edge": 0.7344122948610924,
       "value": 1.0,
       "risk_score": 0.0,
-      "ceil": 98.81
+      "ceil": 100.57
     },
     {
       "player_name": "Aaron Rai",
       "salary": 7900,
-      "proj": 62.49,
-      "ownership": 9.36,
-      "edge": 0.729959601613775,
-      "value": 0.55,
+      "proj": 63.58,
+      "ownership": 9.33,
+      "edge": 0.7309734568573868,
+      "value": 0.54,
       "risk_score": 0.0,
-      "ceil": 81.92
+      "ceil": 83.24
     },
     {
       "player_name": "Christiaan Bezuidenhout",
       "salary": 7700,
-      "proj": 61.74,
-      "ownership": 6.08,
-      "edge": 0.7096004342369078,
+      "proj": 62.96,
+      "ownership": 6.05,
+      "edge": 0.7114278175334262,
       "value": 0.59,
       "risk_score": 0.0,
-      "ceil": 80.84
+      "ceil": 82.38
     },
     {
       "player_name": "Max McGreevy",
       "salary": 7500,
-      "proj": 62.0,
-      "ownership": 7.4,
-      "edge": 0.6943835308752573,
-      "value": 0.74,
+      "proj": 63.74,
+      "ownership": 7.12,
+      "edge": 0.6982477905786483,
+      "value": 0.77,
       "risk_score": 0.0,
-      "ceil": 81.76
+      "ceil": 83.77
     },
     {
       "player_name": "J.J. Spaun",
       "salary": 8700,
-      "proj": 67.68,
-      "ownership": 13.43,
-      "edge": 0.6923250451779546,
-      "value": 0.63,
+      "proj": 68.65,
+      "ownership": 14.16,
+      "edge": 0.6919338792090697,
+      "value": 0.6,
       "risk_score": 0.0,
-      "ceil": 88.04
+      "ceil": 89.46
     }
   ],
   "leverage_plays": [
     {
-      "player_name": "Davis Chatfield",
-      "salary": 6100,
-      "proj": 45.7,
-      "ownership": 0.07,
-      "edge": 0.6650570884960574,
-      "value": -0.09,
+      "player_name": "Brandt Snedeker",
+      "salary": 6200,
+      "proj": 47.14,
+      "ownership": 0.23,
+      "edge": 0.6775505139903198,
+      "value": -0.07,
       "risk_score": 0.0,
-      "ceil": 60.91
+      "ceil": 63.02
     },
     {
       "player_name": "Dylan Wu",
       "salary": 6500,
-      "proj": 49.63,
+      "proj": 50.18,
       "ownership": 0.19,
-      "edge": 0.6458075595908068,
-      "value": 0.02,
+      "edge": 0.6724345726982419,
+      "value": 0.01,
       "risk_score": 0.0,
-      "ceil": 66.08
+      "ceil": 67.07
     },
     {
-      "player_name": "Kensei Hirata",
+      "player_name": "Davis Chatfield",
       "salary": 6100,
-      "proj": 44.04,
+      "proj": 46.55,
       "ownership": 0.0,
-      "edge": 0.6254501592105028,
-      "value": -0.19,
+      "edge": 0.6656409038313855,
+      "value": -0.08,
       "risk_score": 0.0,
-      "ceil": 58.72
+      "ceil": 62.02
     },
     {
-      "player_name": "Brandt Snedeker",
-      "salary": 6200,
-      "proj": 46.87,
-      "ownership": 0.07,
-      "edge": 0.6117166687543153,
-      "value": -0.05,
+      "player_name": "Joel Dahmen",
+      "salary": 7600,
+      "proj": 57.69,
+      "ownership": 0.0,
+      "edge": 0.6518966422998479,
+      "value": 0.14,
       "risk_score": 0.0,
-      "ceil": 62.52
+      "ceil": 76.75
     },
     {
-      "player_name": "Adrien Saddier",
-      "salary": 6500,
-      "proj": 50.47,
-      "ownership": 0.0,
-      "edge": 0.6066335654933911,
-      "value": 0.11,
+      "player_name": "Henrik Norlander",
+      "salary": 6300,
+      "proj": 45.02,
+      "ownership": 0.18,
+      "edge": 0.6411522861813674,
+      "value": -0.23,
       "risk_score": 0.0,
-      "ceil": 67.9
+      "ceil": 59.98
     }
   ],
   "value_plays": [],
@@ -114,52 +114,52 @@
     {
       "player_name": "Davis Riley",
       "salary": 6500,
-      "proj": 43.68,
-      "ownership": 4.3,
-      "edge": 0.4528194183618591,
-      "value": -0.34,
+      "proj": 43.83,
+      "ownership": 4.31,
+      "edge": 0.4515250156069884,
+      "value": -0.36,
       "risk_score": 0.0,
-      "ceil": 58.82
+      "ceil": 58.93
     },
     {
-      "player_name": "Michael Brennan",
-      "salary": 6700,
-      "proj": 55.29,
-      "ownership": 4.77,
-      "edge": 0.5536964155130416,
-      "value": 0.5,
-      "risk_score": 0.0,
-      "ceil": 74.52
-    },
-    {
-      "player_name": "Billy Horschel",
+      "player_name": "Blades Brown",
       "salary": 7200,
-      "proj": 49.55,
-      "ownership": 7.28,
-      "edge": 0.5543489103499808,
-      "value": -0.22,
+      "proj": 49.65,
+      "ownership": 3.52,
+      "edge": 0.5428828624677732,
+      "value": -0.25,
       "risk_score": 0.0,
-      "ceil": 66.49
-    },
-    {
-      "player_name": "Marco Penge",
-      "salary": 7300,
-      "proj": 56.42,
-      "ownership": 3.66,
-      "edge": 0.5553112779404944,
-      "value": 0.26,
-      "risk_score": 0.0,
-      "ceil": 75.72
+      "ceil": 66.89
     },
     {
       "player_name": "Matti Schmid",
       "salary": 7100,
-      "proj": 53.73,
-      "ownership": 5.03,
-      "edge": 0.5555442207574964,
-      "value": 0.1,
+      "proj": 54.16,
+      "ownership": 4.63,
+      "edge": 0.5548554997624277,
+      "value": 0.07,
       "risk_score": 0.0,
-      "ceil": 72.11
+      "ceil": 72.81
+    },
+    {
+      "player_name": "Marco Penge",
+      "salary": 7300,
+      "proj": 56.84,
+      "ownership": 3.45,
+      "edge": 0.5548624486067956,
+      "value": 0.22,
+      "risk_score": 0.0,
+      "ceil": 76.44
+    },
+    {
+      "player_name": "Billy Horschel",
+      "salary": 7200,
+      "proj": 50.27,
+      "ownership": 7.3,
+      "edge": 0.5554347049420315,
+      "value": -0.21,
+      "risk_score": 0.0,
+      "ceil": 67.24
     }
   ],
   "signals_df_path": "signals.parquet"
