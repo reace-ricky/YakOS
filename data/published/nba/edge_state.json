@@ -2,32 +2,30 @@
   "sport": "NBA",
   "date": "2026-03-18",
   "core_names": [
-    "Nikola Jokic",
     "Jalen Johnson",
     "Luka Doncic",
     "Kawhi Leonard",
-    "Jayson Tatum"
+    "Jayson Tatum",
+    "Jamal Murray"
   ],
   "leverage_names": [
-    "Amen Thompson",
     "Gui Santos",
     "Kevin Durant",
     "Nickeil Alexander-Walker",
-    "Danny Wolf"
+    "Danny Wolf",
+    "Chet Holmgren"
   ],
   "value_names": [
-    "Cam Spencer",
     "Ayo Dosunmu",
-    "Obi Toppin",
-    "Sandro Mamukelashvili",
-    "Ajay Mitchell"
+    "Ajay Mitchell",
+    "Spencer Jones"
   ],
   "fade_names": [
     "E.J. Liddell",
     "Drake Powell",
     "Dorian Finney-Smith",
-    "Sam Hauser",
-    "Jalen Slawson"
+    "Ja'Kobe Walter",
+    "Patrick Williams"
   ],
   "calibration_slates": 15
 }
