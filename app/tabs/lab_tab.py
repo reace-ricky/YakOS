@@ -1272,6 +1272,40 @@ def _run_edge(sport: str, slate_date: str, out_dir: Path) -> tuple:
 
     pool = pd.read_parquet(out_dir / "slate_pool.parquet")
 
+    # ── Late Swap: snapshot pool status before re-check ──
+    _snap_cols = ["player_name", "status", "injury_note"]
+    _snap_cols = [c for c in _snap_cols if c in pool.columns]
+    pool_before_status = pool[_snap_cols].copy() if "status" in pool.columns else None
+
+    # ── NBA: live re-check for injuries before edge analysis ──
+    late_swap_alerts: list = []
+    if sport.upper() == "NBA":
+        try:
+            from yak_core.live import auto_flag_injuries
+            api_key = (
+                os.environ.get("RAPIDAPI_KEY")
+                or os.environ.get("TANK01_RAPIDAPI_KEY")
+                or _get_secret("RAPIDAPI_KEY")
+                or _get_secret("TANK01_RAPIDAPI_KEY")
+            )
+            if api_key:
+                pool = auto_flag_injuries(pool, api_key=api_key, slate_date=slate_date)
+        except Exception as exc:
+            print(f"[_run_edge] Late swap injury re-check failed (non-fatal): {exc}")
+
+        # Load published lineups for lineup membership check
+        _pub_lineups: dict = {}
+        for lf in out_dir.glob("*_lineups.parquet"):
+            try:
+                _pub_lineups[lf.stem] = pd.read_parquet(lf)
+            except Exception:
+                pass
+
+        late_swap_alerts = _build_late_swap_alerts(pool_before_status, pool, _pub_lineups or None)
+
+        # Re-save updated pool so edge metrics compute on fresh data
+        pool.to_parquet(str(out_dir / "slate_pool.parquet"), index=False)
+
     # ── PGA: live re-check for withdrawals before edge analysis ──
     if sport.upper() == "PGA":
         pool = _recheck_pga_withdrawals(pool)
@@ -1325,6 +1359,9 @@ def _run_edge(sport: str, slate_date: str, out_dir: Path) -> tuple:
             "late_players": late_df.nlargest(5, "proj")["player_name"].tolist(),
         }
     edge_analysis = {"bullets": bullets, "recommendation": recommendation, **classified, "signals_df_path": "signals.parquet"}
+    # Attach late swap alerts so they persist in edge_analysis.json
+    if late_swap_alerts:
+        edge_analysis["late_swap_alerts"] = late_swap_alerts
     with open(out_dir / "edge_state.json", "w") as f:
         json.dump(edge_state, f, indent=2, default=str)
     with open(out_dir / "edge_analysis.json", "w") as f:
@@ -1524,6 +1561,262 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
         "value_plays": _to_records(value, 5),
         "fade_candidates": _to_records(fade, 5),
     }
+
+
+def _build_late_swap_alerts(
+    pool_before: pd.DataFrame | None,
+    pool_after: pd.DataFrame,
+    lineups_df: pd.DataFrame | None = None,
+) -> list:
+    """Diff pool status before/after injury re-check and build alert dicts.
+
+    Returns list of alert dicts with impact tier, cascade beneficiaries,
+    replacement pivots, and lineup membership info.
+    """
+    from datetime import datetime
+    try:
+        from zoneinfo import ZoneInfo
+        now_str = datetime.now(ZoneInfo("America/New_York")).strftime("%-I:%M %p ET")
+    except Exception:
+        now_str = datetime.utcnow().strftime("%-I:%M %p UTC")
+
+    if pool_before is None or pool_before.empty:
+        return []
+
+    alerts = []
+    _OUT_STATUSES = {"OUT", "IR", "SUSPENDED"}
+    _CLEARED_NEW = {"ACTIVE", "AVAILABLE", ""}
+
+    # Normalize status columns for comparison
+    before_status = pool_before.set_index("player_name")["status"].fillna("Active").str.strip().str.upper()
+    after_status = pool_after.set_index("player_name")["status"].fillna("Active").str.strip().str.upper()
+
+    # Find players whose status changed
+    common = before_status.index.intersection(after_status.index)
+    changed = common[before_status.loc[common] != after_status.loc[common]]
+
+    if changed.empty:
+        return []
+
+    # Build a lookup for pool_after rows by player_name
+    after_lookup = pool_after.set_index("player_name")
+
+    # Build lineup membership lookup: player_name -> list of lineup indices
+    lineup_membership: dict = {}
+    if lineups_df is not None and not lineups_df.empty:
+        for _, ldf in lineups_df.items() if isinstance(lineups_df, dict) else [(None, lineups_df)]:
+            if "player_name" in ldf.columns and "lineup_index" in ldf.columns:
+                for _, row in ldf.iterrows():
+                    pn = str(row.get("player_name", ""))
+                    li = int(row.get("lineup_index", 0))
+                    lineup_membership.setdefault(pn, [])
+                    if li not in lineup_membership[pn]:
+                        lineup_membership[pn].append(li)
+
+    for player_name in changed:
+        old_st = str(before_status.loc[player_name])
+        new_st = str(after_status.loc[player_name])
+
+        # Skip stale re-confirmations (already OUT at load)
+        if old_st in _OUT_STATUSES and new_st in _OUT_STATUSES:
+            continue
+
+        row = after_lookup.loc[player_name] if player_name in after_lookup.index else None
+        if row is None:
+            continue
+        if isinstance(row, pd.DataFrame):
+            row = row.iloc[0]
+
+        salary = int(row.get("salary", 0) or 0)
+        proj = float(row.get("proj", 0) or 0)
+        proj_minutes = float(row.get("proj_minutes", 0) or 0)
+        team = str(row.get("team", "") or "")
+        pos = str(row.get("pos", "") or "")
+        injury_note = str(row.get("injury_note", "") or "")
+        in_lineups = lineup_membership.get(player_name, [])
+
+        # Determine if this is a cleared (GTD/Q -> Active) or an OUT
+        is_newly_out = new_st in _OUT_STATUSES
+        is_cleared = (old_st in {"GTD", "QUESTIONABLE", "DAY-TO-DAY"}) and (
+            new_st in _CLEARED_NEW or new_st == "ACTIVE"
+        )
+
+        if is_cleared:
+            alerts.append({
+                "player_name": player_name,
+                "salary": salary,
+                "old_status": old_st,
+                "new_status": "AVAILABLE",
+                "proj": proj,
+                "proj_minutes": proj_minutes,
+                "impact": "cleared",
+                "cascade_beneficiaries": [],
+                "cash_pivot": None,
+                "gpp_pivot": None,
+                "in_lineups": [],
+                "injury_note": injury_note,
+                "timestamp": now_str,
+            })
+            continue
+
+        if not is_newly_out:
+            # Other changes (e.g. Active->GTD) — not actionable yet
+            continue
+
+        # --- Determine impact tier ---
+        is_red = (
+            proj_minutes >= 20
+            or salary >= 6000
+            or len(in_lineups) > 0
+            or (old_st in {"GTD", "QUESTIONABLE", "DAY-TO-DAY"} and proj_minutes >= 20)
+        )
+        is_yellow = (
+            not is_red
+            and (
+                (10 <= proj_minutes < 20 and 4000 <= salary < 6000)
+                or (proj >= 15 and not is_red)
+            )
+        )
+        is_hidden = (
+            not is_red
+            and not is_yellow
+            and (proj_minutes < 10 or proj < 10 or salary < 3500)
+        )
+        if is_hidden:
+            impact = "low"
+        elif is_yellow:
+            impact = "medium"
+        else:
+            impact = "high"
+
+        # --- Cascade beneficiaries (simplified) ---
+        cascade = []
+        if impact == "high" and team and pos:
+            # Find same-team players who could absorb minutes
+            teammates = pool_after[
+                (pool_after["team"] == team)
+                & (pool_after["player_name"] != player_name)
+                & (~pool_after["status"].fillna("Active").str.strip().str.upper().isin(_OUT_STATUSES))
+            ].copy() if "team" in pool_after.columns else pd.DataFrame()
+
+            if not teammates.empty:
+                # Positional overlap: same position group gets most minutes
+                pos_primary = pos.split("/")[0] if "/" in pos else pos
+                _POS_GROUPS = {
+                    "PG": {"PG", "SG"}, "SG": {"PG", "SG", "SF"},
+                    "SF": {"SG", "SF", "PF"}, "PF": {"SF", "PF", "C"},
+                    "C": {"PF", "C"},
+                }
+                related_pos = _POS_GROUPS.get(pos_primary, {pos_primary})
+
+                # Score teammates by positional fit and current proj_minutes
+                for _, tm in teammates.iterrows():
+                    tm_pos = str(tm.get("pos", ""))
+                    tm_pos_set = set(tm_pos.split("/")) if "/" in tm_pos else {tm_pos}
+                    if tm_pos_set & related_pos:
+                        tm_proj_min = float(tm.get("proj_minutes", 0) or 0)
+                        tm_proj = float(tm.get("proj", 0) or 0)
+                        # Estimate extra minutes: proportional redistribution
+                        # Top backup gets ~50% of vacated minutes, next ~25%, etc.
+                        cascade.append({
+                            "name": str(tm.get("player_name", "")),
+                            "salary": int(tm.get("salary", 0) or 0),
+                            "proj_minutes": tm_proj_min,
+                            "proj": tm_proj,
+                        })
+
+                # Sort by proj_minutes desc (likely primary backup) and estimate bumps
+                cascade.sort(key=lambda x: x["proj_minutes"], reverse=True)
+                vacated = proj_minutes
+                remaining = vacated
+                for i, c in enumerate(cascade[:3]):
+                    share = 0.50 if i == 0 else (0.25 if i == 1 else 0.15)
+                    extra_min = round(vacated * share, 1)
+                    remaining -= extra_min
+                    fp_per_min = c["proj"] / max(c["proj_minutes"], 1)
+                    c["extra_minutes"] = extra_min
+                    c["fp_bump"] = round(extra_min * fp_per_min, 1)
+                cascade = cascade[:3]
+
+        # --- Replacement pivots (Red tier only) ---
+        cash_pivot = None
+        gpp_pivot = None
+        if impact == "high":
+            pos_primary = pos.split("/")[0] if "/" in pos else pos
+            # Candidates: same pos, not OUT, not the player
+            candidates = pool_after[
+                (pool_after["pos"].fillna("").str.contains(pos_primary, case=False, na=False))
+                & (~pool_after["status"].fillna("Active").str.strip().str.upper().isin(_OUT_STATUSES))
+                & (pool_after["player_name"] != player_name)
+            ].copy() if "pos" in pool_after.columns else pd.DataFrame()
+
+            if not candidates.empty:
+                own_col = "ownership" if "ownership" in candidates.columns and candidates["ownership"].notna().any() else "own_pct"
+                cand_own = pd.to_numeric(candidates.get(own_col, 0), errors="coerce").fillna(0)
+                cand_proj = pd.to_numeric(candidates.get("proj", 0), errors="coerce").fillna(0)
+                cand_sal = pd.to_numeric(candidates.get("salary", 0), errors="coerce").fillna(0)
+
+                # Cash pivot: within ±$800, highest proj, ownership > 5%
+                cash_mask = (
+                    (cand_sal >= salary - 800)
+                    & (cand_sal <= salary + 800)
+                    & (cand_own > 5)
+                    & (cand_proj > 0)
+                )
+                cash_cands = candidates[cash_mask]
+                if not cash_cands.empty:
+                    best_cash = cash_cands.loc[pd.to_numeric(cash_cands["proj"], errors="coerce").idxmax()]
+                    cash_pivot = {
+                        "name": str(best_cash.get("player_name", "")),
+                        "salary": int(best_cash.get("salary", 0) or 0),
+                        "proj": float(best_cash.get("proj", 0) or 0),
+                        "ownership": float(best_cash.get(own_col, 0) or 0),
+                    }
+
+                # GPP pivot: within ±$1200, proj > 15, lowest own or best edge, own < 5%
+                edge_col = "edge_score" if "edge_score" in candidates.columns else "edge"
+                cand_edge = pd.to_numeric(candidates.get(edge_col, 0), errors="coerce").fillna(0)
+                gpp_mask = (
+                    (cand_sal >= salary - 1200)
+                    & (cand_sal <= salary + 1200)
+                    & (cand_own < 5)
+                    & (cand_proj > 15)
+                )
+                gpp_cands = candidates[gpp_mask]
+                if not gpp_cands.empty:
+                    # Prefer best edge, then lowest ownership
+                    if edge_col in gpp_cands.columns and pd.to_numeric(gpp_cands[edge_col], errors="coerce").abs().sum() > 0:
+                        best_gpp = gpp_cands.loc[pd.to_numeric(gpp_cands[edge_col], errors="coerce").idxmax()]
+                    else:
+                        best_gpp = gpp_cands.loc[pd.to_numeric(gpp_cands[own_col], errors="coerce").idxmin()]
+                    gpp_pivot = {
+                        "name": str(best_gpp.get("player_name", "")),
+                        "salary": int(best_gpp.get("salary", 0) or 0),
+                        "proj": float(best_gpp.get("proj", 0) or 0),
+                        "ownership": float(best_gpp.get(own_col, 0) or 0),
+                        "edge_score": float(best_gpp.get(edge_col, 0) or 0),
+                    }
+
+        alerts.append({
+            "player_name": player_name,
+            "salary": salary,
+            "old_status": old_st,
+            "new_status": new_st,
+            "proj": proj,
+            "proj_minutes": proj_minutes,
+            "impact": impact,
+            "cascade_beneficiaries": cascade,
+            "cash_pivot": cash_pivot,
+            "gpp_pivot": gpp_pivot,
+            "in_lineups": in_lineups,
+            "injury_note": injury_note,
+            "timestamp": now_str,
+        })
+
+    # Sort: high first, then medium, then cleared, then low
+    _IMPACT_ORDER = {"high": 0, "medium": 1, "cleared": 2, "low": 3}
+    alerts.sort(key=lambda a: _IMPACT_ORDER.get(a["impact"], 9))
+    return alerts
 
 
 def _build_bullets(classified: dict, edge_df, sport: str) -> list:
