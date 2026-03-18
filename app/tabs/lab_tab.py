@@ -934,16 +934,32 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
         pass
 
     # ── Fetch betting odds and apply blowout-risk minute adjustments ──
+    # Cheatsheet is source of truth when available; Tank01 is fallback for gaps.
     try:
         odds_df = fetch_betting_odds(slate_date, api_key)
         if not odds_df.empty and "team" in pool.columns:
+            # Identify teams that already have cheatsheet spread data
+            _has_cheatsheet_spread = set()
+            if "spread" in pool.columns:
+                _teams_with_spread = pool.loc[
+                    pd.to_numeric(pool["spread"], errors="coerce").notna()
+                    & (pd.to_numeric(pool["spread"], errors="coerce") != 0),
+                    "team",
+                ]
+                _has_cheatsheet_spread = set(_teams_with_spread.dropna().unique())
+
             # Build game_spreads dict for apply_blowout_cascade
+            # Only include games where the pool doesn't already have
+            # cheatsheet-derived spread data for those teams.
             game_spreads = {}
             for _, row in odds_df.iterrows():
                 spread_val = float(row.get("spread", 0))
                 home = str(row.get("home_team", "")).upper()
                 away = str(row.get("away_team", "")).upper()
                 if not home or not away:
+                    continue
+                # Skip games where cheatsheet already provided spread
+                if home in _has_cheatsheet_spread or away in _has_cheatsheet_spread:
                     continue
                 # Determine favorite/underdog
                 if spread_val < 0:  # negative = home is favored
@@ -956,13 +972,26 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
                     "spread": abs(spread_val),
                     "total": float(row.get("vegas_total", 0)),
                 }
+
+            # Preserve cheatsheet blowout_risk before cascade overwrites
+            _pre_blowout_risk = None
+            if "blowout_risk" in pool.columns:
+                _pre_blowout_risk = pool["blowout_risk"].copy()
+
             if game_spreads:
                 pool, _bo_report = apply_blowout_cascade(pool, game_spreads)
                 _n_adj = int((pool.get("blowout_min_adj", pd.Series(0, index=pool.index)).abs() > 0).sum())
                 if _n_adj:
                     print(f"[_load_nba_pool] Blowout risk adjusted minutes for {_n_adj} player(s)")
 
+            # Restore cheatsheet blowout_risk for players that already had
+            # a non-zero value (cheatsheet is source of truth)
+            if _pre_blowout_risk is not None and "blowout_risk" in pool.columns:
+                _keep = _pre_blowout_risk.notna() & (_pre_blowout_risk != 0)
+                pool.loc[_keep, "blowout_risk"] = _pre_blowout_risk[_keep]
+
             # Map spread to each player for b2b/spread minute dampening
+            # Only fill where pool doesn't already have spread from cheatsheet
             spread_map = {}
             for _, row in odds_df.iterrows():
                 home = str(row.get("home_team", "")).upper()
@@ -970,9 +999,15 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
                 sp = abs(float(row.get("spread", 0)))
                 spread_map[home] = sp
                 spread_map[away] = sp
-            pool["spread"] = pool["team"].map(spread_map).fillna(0.0)
+            _tank01_spread = pool["team"].map(spread_map)
+            if "spread" not in pool.columns:
+                pool["spread"] = _tank01_spread.fillna(0.0)
+            else:
+                _spread_missing = pd.to_numeric(pool["spread"], errors="coerce").isna() | (pd.to_numeric(pool["spread"], errors="coerce") == 0)
+                pool.loc[_spread_missing, "spread"] = _tank01_spread[_spread_missing].fillna(0.0)
 
             # Map vegas_total to each player
+            # Only fill over_under where pool doesn't already have it from cheatsheet
             vegas_total_map = {}
             for _, row in odds_df.iterrows():
                 home = str(row.get("home_team", "")).upper()
@@ -980,7 +1015,11 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
                 total = float(row.get("vegas_total", 0))
                 vegas_total_map[home] = total
                 vegas_total_map[away] = total
-            pool["vegas_total"] = pool["team"].map(vegas_total_map).fillna(0.0)
+            _tank01_total = pool["team"].map(vegas_total_map)
+            pool["vegas_total"] = _tank01_total.fillna(0.0)
+            if "over_under" in pool.columns:
+                _ou_missing = pd.to_numeric(pool["over_under"], errors="coerce").isna() | (pd.to_numeric(pool["over_under"], errors="coerce") == 0)
+                pool.loc[_ou_missing, "over_under"] = _tank01_total[_ou_missing].fillna(0.0)
     except Exception as exc:
         print(f"[_load_nba_pool] betting odds / blowout cascade failed (non-fatal): {exc}")
 
