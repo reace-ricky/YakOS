@@ -131,43 +131,46 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
 
         # ──────────────────────────────────────────────────────────
         # 3. Cash (H2H / 50-50 / Double-Up)
+        # Philosophy: FLOOR and CONSISTENCY — beat ~50% of the field,
+        # not win outright.  Maximize safe, high-floor players.  Chalk
+        # is fine, busts are fatal, ceiling is irrelevant.
         # ──────────────────────────────────────────────────────────
         "Cash (H2H / 50-50)": {
             "description": "Safe, high-floor, minutes = money. Embrace chalk, full salary cap",
             "SPORT": "NBA",
             "CONTEST_TYPE": "cash",
-            # Cash scoring weights (overrides CASH_FLOOR_WEIGHT / CASH_PROJ_WEIGHT)
-            "CASH_FLOOR_WEIGHT": 0.60,
-            "CASH_PROJ_WEIGHT": 0.40,
-            # GPP weights still set for the formula (low boom, high proj)
-            "GPP_PROJ_WEIGHT": 0.70,
-            "GPP_UPSIDE_WEIGHT": 0.15,
-            "GPP_BOOM_WEIGHT": 0.05,
-            "GPP_OWN_PENALTY_STRENGTH": 0.0,
-            "GPP_OWN_LOW_BOOST": 0.0,
-            "FLOOR_WEIGHT": 0.10,  # TODO: wire sim25 floor into scoring
-            # Edge signal weights (safety-focused)
-            "GPP_SMASH_WEIGHT": 0.5,
-            "GPP_LEVERAGE_WEIGHT": 0.0,
-            "GPP_CATALYST_WEIGHT": 0.1,
-            "GPP_EFFICIENCY_WEIGHT": 0.5,
-            "GPP_BUST_PENALTY": 0.8,
-            "GPP_FORM_WEIGHT": 0.2,
-            "GPP_DVP_WEIGHT": 0.15,
-            # FP Cheatsheet signal weights (Cash: higher rest/spread for safety)
-            "GPP_SPREAD_PENALTY_WEIGHT": 0.08,
-            "GPP_PACE_ENV_WEIGHT": 0.05,
-            "GPP_VALUE_WEIGHT": 0.03,
-            "GPP_REST_WEIGHT": 0.06,
-            # Optimizer constraints
-            "GPP_OBJECTIVE": "blended",
-            "GPP_MIN_LINEUP_CEILING": 0,
-            "GPP_FORCE_GAME_STACK": False,
-            "GPP_MIN_TEAM_STACK": 0,
-            "GPP_FORCE_BRING_BACK": False,
-            "MIN_SALARY_USED": 49500,
-            "MAX_SALARY_REMAINING": 500,  # TODO: enforce in solver
-            "MIN_PLAYER_MINUTES": 30,
+            # Cash scoring weights — floor-dominant blend
+            "CASH_FLOOR_WEIGHT": 0.65,       # floor is king in cash
+            "CASH_PROJ_WEIGHT": 0.35,        # proj supports floor, not the objective
+            # GPP weights (feeds gpp_score used by solver) — projection-heavy, no boom
+            "GPP_PROJ_WEIGHT": 0.75,         # high projection weight for floor safety
+            "GPP_UPSIDE_WEIGHT": 0.15,       # minimal upside — ceiling doesn't matter
+            "GPP_BOOM_WEIGHT": 0.00,         # zero boom — explosion potential irrelevant
+            "GPP_OWN_PENALTY_STRENGTH": 0.0, # no ownership penalty — chalk is fine in cash
+            "GPP_OWN_LOW_BOOST": 0.0,        # no contrarian boost — don't seek leverage
+            "FLOOR_WEIGHT": 0.10,            # TODO: wire sim25 floor into scoring
+            # Edge signal weights — safety-focused, penalize variance
+            "GPP_SMASH_WEIGHT": 0.1,         # minimal smash — not chasing ceiling
+            "GPP_LEVERAGE_WEIGHT": 0.0,      # zero leverage — contrarian play irrelevant
+            "GPP_CATALYST_WEIGHT": 0.05,     # near-zero catalyst — situational upside not needed
+            "GPP_EFFICIENCY_WEIGHT": 0.6,    # high efficiency — FP per dollar drives floor
+            "GPP_BUST_PENALTY": 1.0,         # max bust penalty — one bust sinks a cash lineup
+            "GPP_FORM_WEIGHT": 0.4,          # high form — recent performance predicts floor
+            "GPP_DVP_WEIGHT": 0.35,          # high DvP — matchup quality is a strong floor signal
+            # FP Cheatsheet signal weights (Cash: rest/spread for safety, low pace)
+            "GPP_SPREAD_PENALTY_WEIGHT": 0.10, # penalize blowout risk — starters get pulled
+            "GPP_PACE_ENV_WEIGHT": 0.03,     # minimal pace — pace chasing is a GPP thing
+            "GPP_VALUE_WEIGHT": 0.02,        # near-zero value signal — pay up for safety
+            "GPP_REST_WEIGHT": 0.08,         # higher rest — well-rested players have stable floors
+            # Optimizer constraints — no GPP-specific constraints
+            "GPP_OBJECTIVE": "blended",      # blended objective (gpp_score) not ceiling
+            "GPP_MIN_LINEUP_CEILING": 0,     # no ceiling floor — ceiling is irrelevant
+            "GPP_FORCE_GAME_STACK": False,   # no stacking — correlation not needed in cash
+            "GPP_MIN_TEAM_STACK": 0,         # no team stacking
+            "GPP_FORCE_BRING_BACK": False,   # no bring-back — not stacking
+            "MIN_SALARY_USED": 49500,        # spend almost all salary — floor optimization
+            "MAX_SALARY_REMAINING": 500,     # TODO: enforce in solver
+            "MIN_PLAYER_MINUTES": 30,        # high minutes floor — minutes = floor
             # Lineup controls
             "NUM_LINEUPS": 1,
             "MAX_EXPOSURE": 1.0,
@@ -182,42 +185,47 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
 
         # ──────────────────────────────────────────────────────────
         # 4. Showdown GPP (Single-Game)
+        # Philosophy: 6-player, single-game format with a Captain at
+        # 1.5x points.  Captain selection is everything.  Small player
+        # pools mean ownership is highly concentrated — differentiation
+        # matters more than regular GPP.  Every roster spot must smash.
+        # Game script, pace, and blowout risk are critical.
         # ──────────────────────────────────────────────────────────
         "Showdown GPP": {
             "description": "Unique CPT choice, leverage in a tiny player pool, correlate with game script",
             "SPORT": "NBA",
             "CONTEST_TYPE": "showdown",
-            # GPP scoring weights (ceiling-heavy)
-            "GPP_PROJ_WEIGHT": 0.20,
-            "GPP_UPSIDE_WEIGHT": 0.40,
-            "GPP_BOOM_WEIGHT": 0.40,
-            "GPP_OWN_PENALTY_STRENGTH": 1.5,
-            "GPP_OWN_LOW_BOOST": 0.5,
-            # Edge signal weights
-            "GPP_SMASH_WEIGHT": 0.6,
-            "GPP_LEVERAGE_WEIGHT": 0.8,
-            "GPP_CATALYST_WEIGHT": 0.4,
-            "GPP_EFFICIENCY_WEIGHT": 0.2,
-            "GPP_BUST_PENALTY": 0.3,
-            "GPP_FORM_WEIGHT": 0.2,
-            "GPP_DVP_WEIGHT": 0.2,
-            # FP Cheatsheet signal weights (Showdown GPP)
-            "GPP_SPREAD_PENALTY_WEIGHT": 0.05,
-            "GPP_PACE_ENV_WEIGHT": 0.10,
-            "GPP_VALUE_WEIGHT": 0.05,
-            "GPP_REST_WEIGHT": 0.03,
-            # Optimizer constraints
-            "GPP_OBJECTIVE": "ceiling",
-            "GPP_MIN_LINEUP_CEILING": 0,  # different dynamics for showdown
-            "GPP_FORCE_GAME_STACK": False,
-            "GPP_MIN_TEAM_STACK": 0,
-            "GPP_FORCE_BRING_BACK": False,
-            "MIN_SALARY_USED": 49000,
-            "MAX_SALARY_REMAINING": 1000,  # TODO: enforce in solver
-            "MIN_PLAYER_MINUTES": 15,
+            # GPP scoring weights — ceiling-heavy, captain multiplier drives upside
+            "GPP_PROJ_WEIGHT": 0.20,         # moderate proj — still need a baseline
+            "GPP_UPSIDE_WEIGHT": 0.40,       # high upside — captain ceiling drives wins
+            "GPP_BOOM_WEIGHT": 0.40,         # high boom — every spot needs explosion potential
+            "GPP_OWN_PENALTY_STRENGTH": 1.8, # very high — concentrated pools need differentiation
+            "GPP_OWN_LOW_BOOST": 0.6,        # boost low-owned picks — leverage is paramount
+            # Edge signal weights — smash-heavy, leverage-dominant
+            "GPP_SMASH_WEIGHT": 0.9,         # very high — 6 spots means every pick must smash
+            "GPP_LEVERAGE_WEIGHT": 0.9,      # very high — small pools make ownership key
+            "GPP_CATALYST_WEIGHT": 0.5,      # high catalyst — game script is critical in single-game
+            "GPP_EFFICIENCY_WEIGHT": 0.2,    # low efficiency — ceiling matters more than per-dollar
+            "GPP_BUST_PENALTY": 0.2,         # low bust penalty — need to take risks to win
+            "GPP_FORM_WEIGHT": 0.25,         # moderate form — recent performance matters
+            "GPP_DVP_WEIGHT": 0.3,           # moderate-high DvP — single-game matchup is directional
+            # FP Cheatsheet signal weights (Showdown: pace and spread are critical)
+            "GPP_SPREAD_PENALTY_WEIGHT": 0.12, # higher spread penalty — blowouts kill showdown lineups
+            "GPP_PACE_ENV_WEIGHT": 0.15,     # high pace — single-game pace drives total FP
+            "GPP_VALUE_WEIGHT": 0.05,        # low value — pay for ceiling, not savings
+            "GPP_REST_WEIGHT": 0.02,         # minimal rest — single-game, everyone plays
+            # Optimizer constraints — no classic GPP stacking (already single-game)
+            "GPP_OBJECTIVE": "ceiling",      # ceiling objective — chase the highest upside
+            "GPP_MIN_LINEUP_CEILING": 0,     # no ceiling floor — showdown has different dynamics
+            "GPP_FORCE_GAME_STACK": False,   # N/A — single-game format
+            "GPP_MIN_TEAM_STACK": 0,         # N/A — single-game format
+            "GPP_FORCE_BRING_BACK": False,   # N/A — single-game format
+            "MIN_SALARY_USED": 49000,        # spend most salary — but leave room for CPT premium
+            "MAX_SALARY_REMAINING": 1000,    # TODO: enforce in solver
+            "MIN_PLAYER_MINUTES": 15,        # lower minutes floor — role players viable in showdown
             # Captain strategy
-            "CPT_STRATEGY": "ceiling",  # TODO: implement in build_showdown_lineups
-            "MIN_LEVERAGE_PIECES": 1,  # TODO: constraint in solver
+            "CPT_STRATEGY": "ceiling",       # CPT picked by ceiling, not projection
+            "MIN_LEVERAGE_PIECES": 1,        # TODO: constraint in solver
             # Lineup controls
             "NUM_LINEUPS": 1,
             "MAX_EXPOSURE": 1.0,
@@ -234,45 +242,50 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
 
         # ──────────────────────────────────────────────────────────
         # 5. Cash Showdown (Single-Game)
+        # Philosophy: Cash in a Showdown format — optimize for floor
+        # in a single-game context.  Only 6 roster spots means each
+        # bust is devastating.  Projection is king, chalk is fine,
+        # high-minute starters dominate.  Captain should be the
+        # highest-floor star, not a ceiling play.
         # ──────────────────────────────────────────────────────────
         "Cash Showdown": {
             "description": "Cash logic in single-game format. High-minute, high-usage players everywhere",
             "SPORT": "NBA",
             "CONTEST_TYPE": "cash",
-            # Cash scoring weights
-            "CASH_FLOOR_WEIGHT": 0.60,
-            "CASH_PROJ_WEIGHT": 0.40,
-            # GPP weights (projection-dominant, no boom)
-            "GPP_PROJ_WEIGHT": 0.75,
-            "GPP_UPSIDE_WEIGHT": 0.15,
-            "GPP_BOOM_WEIGHT": 0.00,
-            "GPP_OWN_PENALTY_STRENGTH": 0.0,
-            "GPP_OWN_LOW_BOOST": 0.0,
-            "FLOOR_WEIGHT": 0.10,  # TODO: wire sim25 floor into scoring
-            # Edge signal weights (safety-focused)
-            "GPP_SMASH_WEIGHT": 0.3,
-            "GPP_LEVERAGE_WEIGHT": 0.0,
-            "GPP_CATALYST_WEIGHT": 0.1,
-            "GPP_EFFICIENCY_WEIGHT": 0.6,
-            "GPP_BUST_PENALTY": 0.9,
-            "GPP_FORM_WEIGHT": 0.2,
-            "GPP_DVP_WEIGHT": 0.15,
-            # FP Cheatsheet signal weights (Cash Showdown: safety-focused)
-            "GPP_SPREAD_PENALTY_WEIGHT": 0.08,
-            "GPP_PACE_ENV_WEIGHT": 0.05,
-            "GPP_VALUE_WEIGHT": 0.03,
-            "GPP_REST_WEIGHT": 0.06,
-            # Optimizer constraints
-            "GPP_OBJECTIVE": "blended",
-            "GPP_MIN_LINEUP_CEILING": 0,
-            "GPP_FORCE_GAME_STACK": False,
-            "GPP_MIN_TEAM_STACK": 0,
-            "GPP_FORCE_BRING_BACK": False,
-            "MIN_SALARY_USED": 49700,
-            "MAX_SALARY_REMAINING": 300,  # TODO: enforce in solver
-            "MIN_PLAYER_MINUTES": 25,  # TODO: filter pool by proj_minutes
-            # Captain strategy
-            "CPT_STRATEGY": "projection",  # TODO: implement in build_showdown_lineups
+            # Cash scoring weights — floor-dominant for single-game safety
+            "CASH_FLOOR_WEIGHT": 0.70,       # very high floor weight — 6 spots, no margin for error
+            "CASH_PROJ_WEIGHT": 0.30,        # projection supports floor
+            # GPP weights (feeds solver) — projection-heavy, zero boom
+            "GPP_PROJ_WEIGHT": 0.80,         # very high proj — floor optimization in small roster
+            "GPP_UPSIDE_WEIGHT": 0.10,       # minimal upside — floor matters, not ceiling
+            "GPP_BOOM_WEIGHT": 0.00,         # zero boom — no explosion needed in cash
+            "GPP_OWN_PENALTY_STRENGTH": 0.0, # no ownership penalty — chalk is fine in cash
+            "GPP_OWN_LOW_BOOST": 0.0,        # no contrarian boost
+            "FLOOR_WEIGHT": 0.10,            # TODO: wire sim25 floor into scoring
+            # Edge signal weights — maximum safety, punish variance
+            "GPP_SMASH_WEIGHT": 0.05,        # near-zero smash — not chasing ceiling
+            "GPP_LEVERAGE_WEIGHT": 0.0,      # zero leverage — chalk is fine
+            "GPP_CATALYST_WEIGHT": 0.05,     # near-zero catalyst — stability over upside
+            "GPP_EFFICIENCY_WEIGHT": 0.6,    # high efficiency — FP per dollar drives floor
+            "GPP_BUST_PENALTY": 1.0,         # max bust penalty — 6 spots means busts are fatal
+            "GPP_FORM_WEIGHT": 0.4,          # high form — recent performance = floor predictor
+            "GPP_DVP_WEIGHT": 0.4,           # very high DvP — single-game matchup is the whole slate
+            # FP Cheatsheet signal weights (Cash Showdown: safety + matchup)
+            "GPP_SPREAD_PENALTY_WEIGHT": 0.12, # high spread penalty — blowouts pull starters early
+            "GPP_PACE_ENV_WEIGHT": 0.04,     # low pace — not chasing pace in cash
+            "GPP_VALUE_WEIGHT": 0.02,        # near-zero value — pay up for safety
+            "GPP_REST_WEIGHT": 0.05,         # moderate rest — stable starters preferred
+            # Optimizer constraints — no GPP constraints
+            "GPP_OBJECTIVE": "blended",      # blended (gpp_score), not ceiling
+            "GPP_MIN_LINEUP_CEILING": 0,     # no ceiling floor
+            "GPP_FORCE_GAME_STACK": False,   # N/A — single-game
+            "GPP_MIN_TEAM_STACK": 0,         # N/A — single-game
+            "GPP_FORCE_BRING_BACK": False,   # N/A — single-game
+            "MIN_SALARY_USED": 49700,        # spend nearly all salary — floor optimization
+            "MAX_SALARY_REMAINING": 300,     # TODO: enforce in solver
+            "MIN_PLAYER_MINUTES": 28,        # high minutes — minutes = floor in single-game
+            # Captain strategy — projection-based for floor safety
+            "CPT_STRATEGY": "projection",    # CPT picked by projection, not ceiling
             # Lineup controls
             "NUM_LINEUPS": 1,
             "MAX_EXPOSURE": 1.0,
