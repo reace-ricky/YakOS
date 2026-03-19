@@ -353,6 +353,10 @@ def render_edge_tab(sport: str) -> None:
     st.markdown(f"## 📐 Right Angle Ricky — {sport}")
     st.caption(f"{slate_date} · {pool_size} players · DraftKings")
 
+    # PGA: Under Construction banner
+    if is_pga:
+        st.info("🚧 PGA — Under Construction. Course fit, SG breakdowns, and PGA-specific callouts coming soon.")
+
     # ── Late Swap Alerts (above Ricky's Take) ────────────────────────────
     _late_swap = edge_analysis.get("late_swap_alerts", [])
     _render_late_swap_alerts(_late_swap, sport, lineups)
