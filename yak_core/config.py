@@ -100,8 +100,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         (6000, 0.35),   # $6K-$9K → 35% max exposure
         (0,    0.25),   # <$6K → 25% max exposure
     ],
-    "MIN_TEAM_STACK": 0,
-    "MIN_GAME_STACK": 0,
+    "MIN_TEAM_STACK": 2,
+    "MIN_GAME_STACK": 3,
     "LOGIC_PROFILE": "ours",
     "BAND": "core",
     "MIN_SALARY_USED": 49000,
@@ -154,6 +154,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "GPP_EFFICIENCY_WEIGHT": 0.05,    # reward FP-per-minute efficiency
     "GPP_FORM_WEIGHT": 0.08,          # recent form boost (reduced from 0.10)
     "GPP_DVP_WEIGHT": 0.12,           # matchup boost (increased from 0.05)
+    "GPP_PACE_ENV_WEIGHT": 0.10,      # pace environment boost (promoted from Sim Lab GPP Main)
+    "GPP_SPREAD_PENALTY_WEIGHT": 0.08, # spread penalty (promoted from Sim Lab GPP Main)
     "GPP_RICKY_EDGE_WEIGHT": 0.10,    # weight for Ricky Signals edge_composite in GPP scoring
     "GPP_PROJ_FLOOR": 280,            # flag/filter lineups projecting below this total
     "GPP_MIN_LINEUP_CEILING": 350,    # re-enabled — studs constraint + ceiling objective prevent infeasibility
@@ -170,11 +172,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # Only active when CONTEST_TYPE == "gpp"
     # v6 had max_punts=2, min_mid=3 which over-represented punts (1.4 avg vs
     # 0.8 in winners) and under-represented mid-tier (4.0 avg vs 4.8 in winners).
-    "GPP_MAX_PUNT_PLAYERS": 1,      # max players with salary < $4000 (winners avg 0.8)
-    "GPP_MIN_MID_PLAYERS": 4,       # min players in $4000-$7000 range (winners avg 4.8)
-    "GPP_OWN_CAP": 2.0,             # max total lineup ownership (0-1 scale, 2.0 = ~25% avg)
+    "GPP_MAX_PUNT_PLAYERS": 2,      # max players with salary < $4000 (promoted from Sim Lab GPP Main)
+    "GPP_MIN_MID_PLAYERS": 3,       # min players in $4000-$7000 range (promoted from Sim Lab GPP Main)
+    "GPP_OWN_CAP": 6.0,             # max total lineup ownership (promoted from Sim Lab GPP Main — looser)
     "GPP_MIN_LOW_OWN_PLAYERS": 1,   # min players below GPP_LOW_OWN_THRESHOLD
-    "GPP_LOW_OWN_THRESHOLD": 0.10,  # ownership threshold for "low-owned" (under 10%)
+    "GPP_LOW_OWN_THRESHOLD": 0.40,  # ownership threshold for "low-owned" (promoted from Sim Lab GPP Main)
     "GPP_FORCE_GAME_STACK": True,   # require 3+ players from one game
     "GPP_MIN_GAME_STACK": 3,        # min players from stacked game
     "GPP_MIN_TEAM_STACK": 2,        # min players from same team (0=disabled)
