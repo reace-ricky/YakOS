@@ -29,6 +29,7 @@ from yak_core.lineups import (
     prepare_pool,
 )
 from yak_core.live import fetch_actuals_from_api, fetch_live_dfs
+from yak_core.ricky_rank import rank_lineups_for_se
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -644,17 +645,29 @@ def _run_pipeline(
         else:
             scored["lineup_index"] = 0
 
+    # ── Aggregate lineup-level metrics ────────────────────────────────────
+    # Ensure columns exist for ranking even if missing from pool
+    for _col, _default in [("gpp_score", 0.0), ("ceil", 0.0), ("own_pct", 0.0)]:
+        if _col not in scored.columns:
+            scored[_col] = _default
+
     summary = (
         scored.groupby("lineup_index")
         .agg(
             total_actual=("actual_fp", "sum"),
             total_proj=("proj", "sum"),
             total_salary=("salary", "sum"),
+            total_gpp_score=("gpp_score", "sum"),
+            total_ceil=("ceil", "sum"),
+            avg_own_pct=("own_pct", "mean"),
         )
         .reset_index()
     )
     summary["diff"] = summary["total_actual"] - summary["total_proj"]
     summary = summary.sort_values("total_actual", ascending=False).reset_index(drop=True)
+
+    # ── Ricky SE ranking (non-destructive layer on top) ─────────────────
+    summary = rank_lineups_for_se(summary)
 
     beat_proj_pct = 0.0
     if len(summary) > 0:
@@ -971,6 +984,218 @@ def _render_comparison_table() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Ricky SE Shortlist + Per-Slate Detail
+# ---------------------------------------------------------------------------
+
+def _render_ricky_shortlist() -> None:
+    """Render the Ricky SE Shortlist from the latest batch's runs."""
+    batches: List[Dict[str, Any]] = st.session_state.get("sim_lab_batches", [])
+    if not batches:
+        return
+
+    latest_batch = batches[-1]
+    runs = latest_batch.get("runs", [])
+    if not runs:
+        return
+
+    st.subheader("Ricky SE Shortlist")
+    st.caption(
+        "Top-ranked lineups per slate — SE Core / SE Spicy / SE Alt. "
+        "Ranking uses GPP score, ceiling, and ownership leverage."
+    )
+
+    # Collect shortlisted lineups across all dates in this batch
+    shortlist_rows: List[Dict[str, Any]] = []
+    for run in runs:
+        run_summary = run.get("summary_df")
+        if run_summary is None or run_summary.empty:
+            continue
+        tagged = run_summary[run_summary["ricky_tag"] != ""].copy()
+        if tagged.empty:
+            continue
+        tagged["date"] = run["date"]
+        tagged["preset"] = run["preset"]
+        tagged["archetype"] = run.get("archetype", "Default")
+        shortlist_rows.append(tagged)
+
+    if not shortlist_rows:
+        st.caption("No lineups tagged in this batch.")
+        return
+
+    shortlist_df = pd.concat(shortlist_rows, ignore_index=True)
+
+    # Display columns
+    display_cols = ["date", "ricky_tag", "ricky_rank", "ricky_score"]
+    for c in ["total_gpp_score", "total_ceil", "total_proj", "total_actual", "avg_own_pct", "total_salary", "diff"]:
+        if c in shortlist_df.columns:
+            display_cols.append(c)
+    display = shortlist_df[[c for c in display_cols if c in shortlist_df.columns]].copy()
+
+    col_rename = {
+        "date": "Date",
+        "ricky_tag": "Tag",
+        "ricky_rank": "Rank",
+        "ricky_score": "Score",
+        "total_gpp_score": "GPP Score",
+        "total_ceil": "Ceiling",
+        "total_proj": "Proj",
+        "total_actual": "Actual",
+        "avg_own_pct": "Avg Own%",
+        "total_salary": "Salary",
+        "diff": "Diff",
+    }
+    display = display.rename(columns=col_rename)
+
+    fmt = {
+        "Score": "{:.4f}",
+        "GPP Score": "{:.1f}",
+        "Ceiling": "{:.1f}",
+        "Proj": "{:.1f}",
+        "Actual": "{:.1f}",
+        "Avg Own%": "{:.1f}",
+        "Salary": "${:,.0f}",
+        "Diff": "{:+.1f}",
+    }
+    fmt = {k: v for k, v in fmt.items() if k in display.columns}
+
+    st.dataframe(
+        display.style.format(fmt),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+def _render_per_slate_detail() -> None:
+    """Render expandable per-slate lineup tables with ricky_rank + ricky_tag."""
+    batches: List[Dict[str, Any]] = st.session_state.get("sim_lab_batches", [])
+    if not batches:
+        return
+
+    latest_batch = batches[-1]
+    runs = latest_batch.get("runs", [])
+    if not runs:
+        return
+
+    with st.expander("Per-Slate Lineup Detail", expanded=False):
+        date_options = [r["date"] for r in runs]
+        if not date_options:
+            return
+        selected_date = st.selectbox(
+            "Select Date",
+            options=date_options,
+            key="sim_lab_slate_detail_date",
+        )
+        run = next((r for r in runs if r["date"] == selected_date), None)
+        if run is None:
+            return
+
+        run_summary = run.get("summary_df")
+        if run_summary is None or run_summary.empty:
+            st.caption("No lineup data for this date.")
+            return
+
+        # Sort by ricky_rank for display
+        display = run_summary.sort_values("ricky_rank").reset_index(drop=True).copy()
+
+        show_cols = ["lineup_index", "ricky_tag", "ricky_rank", "ricky_score"]
+        for c in ["total_gpp_score", "total_ceil", "total_proj", "total_actual",
+                  "avg_own_pct", "total_salary", "diff"]:
+            if c in display.columns:
+                show_cols.append(c)
+        display = display[[c for c in show_cols if c in display.columns]]
+
+        col_rename = {
+            "lineup_index": "#",
+            "ricky_tag": "Tag",
+            "ricky_rank": "Rank",
+            "ricky_score": "Score",
+            "total_gpp_score": "GPP Score",
+            "total_ceil": "Ceiling",
+            "total_proj": "Proj",
+            "total_actual": "Actual",
+            "avg_own_pct": "Avg Own%",
+            "total_salary": "Salary",
+            "diff": "Diff",
+        }
+        display = display.rename(columns=col_rename)
+
+        fmt = {
+            "Score": "{:.4f}",
+            "GPP Score": "{:.1f}",
+            "Ceiling": "{:.1f}",
+            "Proj": "{:.1f}",
+            "Actual": "{:.1f}",
+            "Avg Own%": "{:.1f}",
+            "Salary": "${:,.0f}",
+            "Diff": "{:+.1f}",
+        }
+        fmt = {k: v for k, v in fmt.items() if k in display.columns}
+
+        st.dataframe(
+            display.style.format(fmt),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+
+def _build_ranked_lineups_csv() -> Optional[pd.DataFrame]:
+    """Build a combined CSV of all ranked lineups across the latest batch.
+
+    Returns None if no batch data is available.
+    """
+    batches: List[Dict[str, Any]] = st.session_state.get("sim_lab_batches", [])
+    if not batches:
+        return None
+
+    latest_batch = batches[-1]
+    runs = latest_batch.get("runs", [])
+    if not runs:
+        return None
+
+    all_rows: List[pd.DataFrame] = []
+    for run in runs:
+        run_summary = run.get("summary_df")
+        if run_summary is None or run_summary.empty:
+            continue
+        chunk = run_summary.copy()
+        chunk["date"] = run["date"]
+        chunk["preset"] = run["preset"]
+        chunk["archetype"] = run.get("archetype", "Default")
+        chunk["config_hash"] = run.get("config_hash", "")
+        all_rows.append(chunk)
+
+    if not all_rows:
+        return None
+
+    combined = pd.concat(all_rows, ignore_index=True)
+
+    # Reorder columns for export
+    lead_cols = ["date", "preset", "archetype", "config_hash",
+                 "lineup_index", "ricky_rank", "ricky_tag", "ricky_score"]
+    data_cols = ["total_gpp_score", "total_ceil", "total_proj",
+                 "total_actual", "avg_own_pct", "total_salary", "diff"]
+    ordered = [c for c in lead_cols + data_cols if c in combined.columns]
+    extra = [c for c in combined.columns if c not in ordered]
+    return combined[ordered + extra]
+
+
+def _render_download_button() -> None:
+    """Render a 'Download Ricky Ranked Lineups' button."""
+    csv_df = _build_ranked_lineups_csv()
+    if csv_df is None:
+        return
+
+    csv_bytes = csv_df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="\U0001f4e5 Download Ricky Ranked Lineups (CSV)",
+        data=csv_bytes,
+        file_name="ricky_ranked_lineups.csv",
+        mime="text/csv",
+        key="sim_lab_download_ricky_csv",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Run Log
 # ---------------------------------------------------------------------------
 
@@ -1090,6 +1315,15 @@ def render_sim_lab(sport: str) -> None:
                                 st.warning(f"{err['date']}: {err['error']}")
         else:
             st.warning("No RG archive files found in data/rg_archive/nba/")
+
+        # Ricky SE Shortlist (tagged lineups from latest batch)
+        _render_ricky_shortlist()
+
+        # Per-slate lineup detail with ricky_rank/tag
+        _render_per_slate_detail()
+
+        # Download CSV of all ranked lineups
+        _render_download_button()
 
         # Trend chart (if batches exist)
         _render_trend_chart()
