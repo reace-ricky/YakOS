@@ -1088,111 +1088,163 @@ new Chart(ctx,{{
         components.html(chart_html, height=440, scrolling=False)
 
 
+def _ema(values: list[float], alpha: float = 0.35) -> list[float]:
+    """Compute exponential moving average over a list of floats."""
+    if not values:
+        return []
+    result = [values[0]]
+    for v in values[1:]:
+        result.append(alpha * v + (1 - alpha) * result[-1])
+    return result
+
+
+def _is_main_config(row: "pd.Series") -> bool:
+    """Return True if the batch used the unmodified preset config (no slider overrides)."""
+    ov = row.get("overrides_json", "{}")
+    if not isinstance(ov, str) or not ov.strip():
+        return True
+    try:
+        parsed = json.loads(ov)
+    except (json.JSONDecodeError, TypeError):
+        return True
+    return len(parsed) == 0
+
+
 def _render_persistent_trend(preset_name: str) -> None:
-    """Persistent trend charts from batch_history — survives restarts.
+    """Persistent EMA cloud chart from batch_history — survives restarts.
 
-    Renders two charts:
-    1. **Avg Actual FP** — mean performance across all dates in each batch.
-    2. **Best Actual FP** — best single-slate performance in each batch.
+    Renders an EMA cloud comparing **Main Config** (production defaults,
+    no slider overrides) vs **Sim Lab** (slider-tweaked runs).  Each band
+    is filled between the EMA of avg actual (bottom) and EMA of best
+    actual (top), giving a visual spread of floor-to-ceiling performance.
 
-    Each chart draws batch runs as solid lines and the active baseline as
-    a dashed horizontal reference.
+    When only one group has data the chart still renders a single cloud.
     """
     history = _load_batch_history()
     if history.empty:
         return
 
     for col, default in [("is_baseline", False), ("removed", False),
-                          ("config_label", ""), ("best_slate", 0.0)]:
+                          ("config_label", ""), ("best_slate", 0.0),
+                          ("overrides_json", "{}")]:
         if col not in history.columns:
             history[col] = default
 
     df = history[(history["preset"] == preset_name) & (~history["removed"])].copy()
-    if df.empty or len(df) < 1:
+    if df.empty:
         return
 
     if "timestamp" in df.columns:
         df = df.sort_values("timestamp")
 
+    # Classify each row
+    df["_is_main"] = df.apply(_is_main_config, axis=1)
+
+    main_df = df[df["_is_main"]].reset_index(drop=True)
+    lab_df = df[~df["_is_main"]].reset_index(drop=True)
+
+    # Need at least one group with 2+ points for a meaningful trend
+    if len(main_df) < 1 and len(lab_df) < 1:
+        return
+
     st.subheader("Performance Trend")
 
-    # Build shared X-axis labels (de-duped, ordered)
-    all_labels: list[str] = []
-    for _, row in df.iterrows():
+    # ---- Build datasets for the cloud chart ----
+    datasets_js: list[dict] = []
+    all_ts_labels: list[str] = []
+
+    def _ts_label(ts: str) -> str:
         try:
-            ts_label = pd.to_datetime(row["timestamp"]).strftime("%m/%d %I:%M%p")
+            return pd.to_datetime(ts).strftime("%m/%d %I:%M%p")
         except Exception:
-            ts_label = str(row["timestamp"])[:16]
-        all_labels.append(ts_label)
-    unique_labels = list(dict.fromkeys(all_labels))
+            return str(ts)[:16]
 
-    non_bl = df[~df["is_baseline"]]
-    bl_rows = df[df["is_baseline"] == True]  # noqa: E712
+    # Collect all labels in order for the shared X axis
+    for _, row in df.iterrows():
+        all_ts_labels.append(_ts_label(row["timestamp"]))
+    unique_labels = list(dict.fromkeys(all_ts_labels))
 
-    # ---- Chart configs: (metric_col, chart_id, run_color, label, y_title, bl_label_fmt) ----
-    chart_specs = [
-        ("avg_actual", "persistTrendAvg", "#4dabf7", "Avg Actual",
-         "Avg Actual FP", "\u2693 Baseline Avg ({val:.1f} FP)"),
-        ("best_slate", "persistTrendBest", "#ffd43b", "Best Actual",
-         "Best Actual FP", "\u2693 Baseline Best ({val:.1f} FP)"),
-    ]
+    # -- Helper: build a cloud (avg bottom + best top) for a group --
+    def _add_cloud(
+        group_df: pd.DataFrame,
+        label: str,
+        color_best: str,
+        color_avg: str,
+        fill_color: str,
+    ) -> None:
+        if group_df.empty:
+            return
+        labels = [_ts_label(r["timestamp"]) for _, r in group_df.iterrows()]
+        avg_raw = [float(r.get("avg_actual", 0)) for _, r in group_df.iterrows()]
+        best_raw = [float(r.get("best_slate", 0)) for _, r in group_df.iterrows()]
 
-    for metric_col, chart_id, run_color, run_label, y_title, bl_fmt in chart_specs:
-        datasets_js: list[dict] = []
+        avg_ema = _ema(avg_raw)
+        best_ema = _ema(best_raw)
 
-        # Solid line — non-baseline batch runs
-        if not non_bl.empty:
-            data_points = []
-            for _, row in non_bl.iterrows():
-                try:
-                    ts_label = pd.to_datetime(row["timestamp"]).strftime("%m/%d %I:%M%p")
-                except Exception:
-                    ts_label = str(row["timestamp"])[:16]
-                val = row.get(metric_col, 0.0)
-                data_points.append({"x": ts_label, "y": round(float(val), 1)})
-            datasets_js.append({
-                "label": run_label,
-                "data": data_points,
-                "borderColor": run_color,
-                "backgroundColor": run_color,
-                "tension": 0.2,
-                "pointRadius": 5,
-                "pointHoverRadius": 7,
-                "fill": False,
-            })
+        avg_points = [{"x": labels[i], "y": round(avg_ema[i], 1)} for i in range(len(labels))]
+        best_points = [{"x": labels[i], "y": round(best_ema[i], 1)} for i in range(len(labels))]
 
-        # Dashed baseline reference
-        if not bl_rows.empty:
-            bl_val = float(bl_rows.iloc[-1].get(metric_col, 0.0))
-            if bl_val > 0:
-                bl_points = [{"x": lbl, "y": round(bl_val, 1)} for lbl in unique_labels]
-                datasets_js.append({
-                    "label": bl_fmt.format(val=bl_val),
-                    "data": bl_points,
-                    "borderColor": "#00ff87",
-                    "backgroundColor": "#00ff87",
-                    "borderDash": [8, 4],
-                    "tension": 0,
-                    "pointRadius": 0,
-                    "fill": False,
-                })
+        # Best line (top of cloud) — order matters: this is added first so
+        # the avg line can reference it for fill.
+        best_idx = len(datasets_js)
+        datasets_js.append({
+            "label": f"{label} Best",
+            "data": best_points,
+            "borderColor": color_best,
+            "backgroundColor": "transparent",
+            "tension": 0.3,
+            "pointRadius": 3,
+            "pointHoverRadius": 5,
+            "borderWidth": 2,
+            "fill": False,
+        })
 
-        if not datasets_js:
-            continue
+        # Avg line (bottom of cloud) — fills up to the best line
+        datasets_js.append({
+            "label": f"{label} Avg",
+            "data": avg_points,
+            "borderColor": color_avg,
+            "backgroundColor": fill_color,
+            "tension": 0.3,
+            "pointRadius": 3,
+            "pointHoverRadius": 5,
+            "borderWidth": 2,
+            "fill": f"{best_idx}",  # fill between this line and the best line
+        })
 
-        datasets_json = json.dumps(datasets_js, separators=(",", ":"))
-        labels_json = json.dumps(unique_labels, separators=(",", ":"))
+    _add_cloud(
+        main_df,
+        label="Main Config",
+        color_best="#00ff87",
+        color_avg="#00cc6a",
+        fill_color="rgba(0, 255, 135, 0.12)",
+    )
+    _add_cloud(
+        lab_df,
+        label="Sim Lab",
+        color_best="#ffd43b",
+        color_avg="#4dabf7",
+        fill_color="rgba(77, 171, 247, 0.12)",
+    )
 
-        chart_html = f"""
-<div style="width:100%;height:320px;background:#0f1117;border-radius:8px;padding:12px;margin-bottom:8px;">
-<canvas id="{chart_id}"></canvas>
+    if not datasets_js:
+        return
+
+    datasets_json = json.dumps(datasets_js, separators=(",", ":"))
+    labels_json = json.dumps(unique_labels, separators=(",", ":"))
+
+    chart_html = f"""
+<div style="width:100%;height:400px;background:#0f1117;border-radius:8px;padding:12px;">
+<canvas id="emaCloud"></canvas>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7"></script>
 <script>
 (function(){{
 const ds={datasets_json};
 const labels={labels_json};
-const ctx=document.getElementById('{chart_id}').getContext('2d');
+// Convert string fill references to integers for Chart.js
+ds.forEach(function(d){{ if(typeof d.fill==='string' && !isNaN(d.fill)) d.fill={{target:parseInt(d.fill),above:d.backgroundColor,below:'transparent'}}; }});
+const ctx=document.getElementById('emaCloud').getContext('2d');
 new Chart(ctx,{{
   type:'line',
   data:{{labels:labels,datasets:ds}},
@@ -1203,12 +1255,13 @@ new Chart(ctx,{{
       legend:{{display:true,labels:{{color:'#ccc',font:{{size:12}}}}}},
       tooltip:{{
         mode:'index',intersect:false,
-        callbacks:{{label:function(ctx){{return ctx.dataset.label+': '+ctx.parsed.y.toFixed(1)+' FP';}}}}
-      }}
+        callbacks:{{label:function(c){{return c.dataset.label+': '+c.parsed.y.toFixed(1)+' FP';}}}}
+      }},
+      filler:{{propagate:true}}
     }},
     scales:{{
       x:{{type:'category',title:{{display:true,text:'Batch Run',color:'#ccc'}},grid:{{color:'rgba(255,255,255,0.06)'}},ticks:{{color:'#aaa',maxRotation:45}}}},
-      y:{{title:{{display:true,text:'{y_title}',color:'#ccc'}},grid:{{color:'rgba(255,255,255,0.06)'}},ticks:{{color:'#aaa'}}}}
+      y:{{title:{{display:true,text:'Actual FP (EMA)',color:'#ccc'}},grid:{{color:'rgba(255,255,255,0.06)'}},ticks:{{color:'#aaa'}}}}
     }},
     interaction:{{mode:'nearest',axis:'x',intersect:false}}
   }}
@@ -1216,7 +1269,7 @@ new Chart(ctx,{{
 }})();
 </script>
 """
-        components.html(chart_html, height=360, scrolling=False)
+    components.html(chart_html, height=440, scrolling=False)
 
 
 # ---------------------------------------------------------------------------
