@@ -542,10 +542,10 @@ def _render_config_panel(preset_name: str) -> Dict[str, Any]:
     with st.expander("Core Weights", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
-            _sl("Proj Weight", "GPP_PROJ_WEIGHT", 0.0, 0.60, 0.05, 0.30)
-            _sl("Upside Weight", "GPP_UPSIDE_WEIGHT", 0.0, 0.60, 0.05, 0.30)
+            _sl("Proj Weight", "GPP_PROJ_WEIGHT", 0.0, 1.0, 0.05, 0.30)
+            _sl("Upside Weight", "GPP_UPSIDE_WEIGHT", 0.0, 1.0, 0.05, 0.30)
         with c2:
-            _sl("Boom Weight", "GPP_BOOM_WEIGHT", 0.0, 0.60, 0.05, 0.35)
+            _sl("Boom Weight", "GPP_BOOM_WEIGHT", 0.0, 1.0, 0.05, 0.35)
             _sl("Own Penalty Strength", "GPP_OWN_PENALTY_STRENGTH", 0.0, 3.0, 0.1, 1.0, fmt="%.1f")
 
     # Group 2: Edge Signals
@@ -553,14 +553,14 @@ def _render_config_panel(preset_name: str) -> Dict[str, Any]:
         c1, c2 = st.columns(2)
         with c1:
             _sl("Smash Weight", "GPP_SMASH_WEIGHT", 0.0, 0.50, 0.05, 0.15)
-            _sl("DVP Weight", "GPP_DVP_WEIGHT", 0.0, 0.30, 0.01, 0.12)
-            _sl("Pace Env Weight", "GPP_PACE_ENV_WEIGHT", 0.0, 0.30, 0.01, 0.10)
-            _sl("Form Weight", "GPP_FORM_WEIGHT", 0.0, 0.30, 0.01, 0.08)
+            _sl("DVP Weight", "GPP_DVP_WEIGHT", 0.0, 0.50, 0.01, 0.12)
+            _sl("Pace Env Weight", "GPP_PACE_ENV_WEIGHT", 0.0, 0.50, 0.01, 0.10)
+            _sl("Form Weight", "GPP_FORM_WEIGHT", 0.0, 0.50, 0.01, 0.08)
         with c2:
             _sl("Bust Penalty", "GPP_BUST_PENALTY", 0.0, 0.50, 0.05, 0.10)
-            _sl("Spread Penalty", "GPP_SPREAD_PENALTY_WEIGHT", 0.0, 0.30, 0.01, 0.08)
-            _sl("Catalyst Weight", "GPP_CATALYST_WEIGHT", 0.0, 0.30, 0.05, 0.05)
-            _sl("Efficiency Weight", "GPP_EFFICIENCY_WEIGHT", 0.0, 0.30, 0.05, 0.05)
+            _sl("Spread Penalty", "GPP_SPREAD_PENALTY_WEIGHT", 0.0, 0.50, 0.01, 0.08)
+            _sl("Catalyst Weight", "GPP_CATALYST_WEIGHT", 0.0, 0.50, 0.05, 0.05)
+            _sl("Efficiency Weight", "GPP_EFFICIENCY_WEIGHT", 0.0, 0.50, 0.05, 0.05)
 
     # Group 3: Ownership Edge
     with st.expander("Ownership Edge"):
