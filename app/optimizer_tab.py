@@ -534,13 +534,33 @@ def render_optimizer_tab(sport: str) -> None:
         result_contest = st.session_state.get(f"opt_contest_{sport}_result", "")
         result_showdown = st.session_state.get(f"opt_is_showdown_{sport}", False)
 
+        # Let the user choose: tagged only (SE Core/Spicy/Alt) or all lineups
+        _has_tags = (
+            _lu_ranked_df is not None
+            and not _lu_ranked_df.empty
+            and (_lu_ranked_df["ricky_tag"] != "").any()
+        )
+        _export_tagged_only = False
+        if _has_tags:
+            _export_tagged_only = st.checkbox(
+                "Export tagged lineups only (SE Core / Spicy / Alt)",
+                value=True,
+                key=f"opt_export_tagged_{sport}",
+            )
+
         try:
+            # Filter to tagged lineups if requested
+            _export_df = lineups_df
+            if _export_tagged_only and _lu_ranked_df is not None:
+                _tagged_idxs = _lu_ranked_df[_lu_ranked_df["ricky_tag"] != ""]["lineup_index"].tolist()
+                _export_df = lineups_df[lineups_df["lineup_index"].isin(_tagged_idxs)].copy()
+
             if result_showdown and not is_pga:
                 from yak_core.lineups import to_dk_showdown_upload_format
-                dk_df = to_dk_showdown_upload_format(lineups_df)
+                dk_df = to_dk_showdown_upload_format(_export_df)
             else:
                 # Build a simple DK-upload-style CSV from the lineups DataFrame
-                dk_df = _build_dk_csv(lineups_df, is_pga=is_pga)
+                dk_df = _build_dk_csv(_export_df, is_pga=is_pga)
 
             # Add profile_name column for downstream analysis
             if _profile_name:
@@ -548,10 +568,11 @@ def render_optimizer_tab(sport: str) -> None:
 
             csv_data = dk_df.to_csv(index=False)
             slug = _slugify(result_contest) if result_contest else "lineups"
+            _tag_suffix = "_se_picks" if _export_tagged_only else ""
             st.download_button(
-                "Download DK CSV",
+                f"Download DK CSV ({len(dk_df)} lineup{'s' if len(dk_df) != 1 else ''})",
                 data=csv_data,
-                file_name=f"{sport.lower()}_{slug}_lineups.csv",
+                file_name=f"{sport.lower()}_{slug}{_tag_suffix}_lineups.csv",
                 mime="text/csv",
                 key=f"opt_dl_{sport}",
             )

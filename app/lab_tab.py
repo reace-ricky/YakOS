@@ -639,6 +639,43 @@ def render_lab_tab(sport: str) -> None:
                                 with st.expander(f"{_tag} — Lineup #{int(_li)}"):
                                     st.dataframe(_lu_players[_p_avail], use_container_width=True, hide_index=True)
 
+                        # DK CSV download for tagged lineups only
+                        if not _tagged.empty:
+                            _tagged_idxs = _tagged["lineup_index"].tolist()
+                            _tagged_lu = lineups_df[lineups_df["lineup_index"].isin(_tagged_idxs)].copy()
+                            # Build DK-upload-style rows
+                            _dk_rows = []
+                            for _tidx in _tagged_idxs:
+                                _tlu = _tagged_lu[_tagged_lu["lineup_index"] == _tidx]
+                                _dk_row = {}
+                                if "slot" in _tlu.columns:
+                                    for _, _tp in _tlu.iterrows():
+                                        _slot = _tp["slot"]
+                                        _col = _slot
+                                        _si = 1
+                                        while _col in _dk_row:
+                                            _si += 1
+                                            _col = f"{_slot}{_si}"
+                                        _dk_row[_col] = _tp.get("player_name", "")
+                                else:
+                                    for _pi, (_, _tp) in enumerate(_tlu.iterrows()):
+                                        _dk_row[f"P{_pi+1}"] = _tp.get("player_name", "")
+                                # Add the SE tag
+                                _tag_val = _tagged.loc[_tagged["lineup_index"] == _tidx, "ricky_tag"].values
+                                _dk_row["ricky_tag"] = _tag_val[0] if len(_tag_val) else ""
+                                if _build_profile != _NONE_PROFILE_BUILD:
+                                    _dk_row["profile_name"] = _build_profile
+                                _dk_rows.append(_dk_row)
+                            _dk_tagged_df = pd.DataFrame(_dk_rows)
+                            _dk_csv = _dk_tagged_df.to_csv(index=False)
+                            st.download_button(
+                                f"Download SE Picks DK CSV ({len(_dk_rows)} lineup{'s' if len(_dk_rows) != 1 else ''})",
+                                data=_dk_csv,
+                                file_name=f"{sport.lower()}_se_picks_lineups.csv",
+                                mime="text/csv",
+                                key=f"lab_dl_tagged_{sport}",
+                            )
+
                         # Full ranking table
                         with st.expander("Full Ricky Ranking"):
                             _full_display = _lu_ranked.sort_values("ricky_rank")[[
