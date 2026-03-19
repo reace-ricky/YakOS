@@ -1088,99 +1088,168 @@ new Chart(ctx,{{
         components.html(chart_html, height=440, scrolling=False)
 
 
-def _render_persistent_trend(preset_name: str) -> None:
-    """Persistent trend line from batch_history — survives restarts.
+def _ema(values: list[float], alpha: float = 0.35) -> list[float]:
+    """Compute exponential moving average over a list of floats."""
+    if not values:
+        return []
+    result = [values[0]]
+    for v in values[1:]:
+        result.append(alpha * v + (1 - alpha) * result[-1])
+    return result
 
-    X = batch run time, Y = avg actual FP.  Baseline shown as dashed line.
+
+def _is_main_config(row: "pd.Series") -> bool:
+    """Return True if the batch used the unmodified preset config (no slider overrides)."""
+    ov = row.get("overrides_json", "{}")
+    if not isinstance(ov, str) or not ov.strip():
+        return True
+    try:
+        parsed = json.loads(ov)
+    except (json.JSONDecodeError, TypeError):
+        return True
+    return len(parsed) == 0
+
+
+def _render_persistent_trend(preset_name: str) -> None:
+    """Persistent EMA cloud chart from batch_history — survives restarts.
+
+    Renders an EMA cloud comparing **Main Config** (production defaults,
+    no slider overrides) vs **Sim Lab** (slider-tweaked runs).  Each band
+    is filled between the EMA of avg actual (bottom edge) and EMA of best
+    actual (top edge), giving a visual spread of floor-to-ceiling performance.
+
+    * Green cloud = Main Config (what you’d get with no slider changes).
+    * Blue/gold cloud = Sim Lab (your tweaked config).
+    * When the Sim Lab cloud rises above Main Config, the tweaks are winning.
+
+    If only one group has data the chart still renders a single cloud.
     """
     history = _load_batch_history()
     if history.empty:
         return
 
     for col, default in [("is_baseline", False), ("removed", False),
-                          ("config_label", "")]:
+                          ("config_label", ""), ("best_slate", 0.0),
+                          ("overrides_json", "{}")]:
         if col not in history.columns:
             history[col] = default
 
     df = history[(history["preset"] == preset_name) & (~history["removed"])].copy()
-    if df.empty or len(df) < 1:
+    if df.empty:
         return
 
     if "timestamp" in df.columns:
         df = df.sort_values("timestamp")
 
+    # Classify each row as Main Config vs Sim Lab
+    df["_is_main"] = df.apply(_is_main_config, axis=1)
+
+    main_df = df[df["_is_main"]].reset_index(drop=True)
+    lab_df = df[~df["_is_main"]].reset_index(drop=True)
+
+    if len(main_df) < 1 and len(lab_df) < 1:
+        return
+
     st.subheader("Performance Trend")
 
-    # Build datasets
-    datasets_js = []
+    # ---- Build datasets for the cloud chart ----
+    datasets_js: list[dict] = []
+    all_ts_labels: list[str] = []
 
-    # Non-baseline runs as solid line
-    non_bl = df[~df["is_baseline"]]
-    if not non_bl.empty:
-        data_points = []
-        for _, row in non_bl.iterrows():
-            try:
-                ts_label = pd.to_datetime(row["timestamp"]).strftime("%m/%d %I:%M%p")
-            except Exception:
-                ts_label = str(row["timestamp"])[:16]
-            data_points.append({"x": ts_label, "y": round(row["avg_actual"], 1)})
+    def _ts_label(ts: str) -> str:
+        try:
+            return pd.to_datetime(ts).strftime("%m/%d %I:%M%p")
+        except Exception:
+            return str(ts)[:16]
+
+    # Shared X axis
+    for _, row in df.iterrows():
+        all_ts_labels.append(_ts_label(row["timestamp"]))
+    unique_labels = list(dict.fromkeys(all_ts_labels))
+
+    def _add_cloud(
+        group_df: pd.DataFrame,
+        label: str,
+        color_best: str,
+        color_avg: str,
+        fill_color: str,
+    ) -> None:
+        """Add a filled EMA cloud (avg → best) for one config group."""
+        if group_df.empty:
+            return
+        labels = [_ts_label(r["timestamp"]) for _, r in group_df.iterrows()]
+        avg_raw = [float(r.get("avg_actual", 0)) for _, r in group_df.iterrows()]
+        best_raw = [float(r.get("best_slate", 0)) for _, r in group_df.iterrows()]
+
+        avg_ema = _ema(avg_raw)
+        best_ema = _ema(best_raw)
+
+        avg_points = [{"x": labels[i], "y": round(avg_ema[i], 1)} for i in range(len(labels))]
+        best_points = [{"x": labels[i], "y": round(best_ema[i], 1)} for i in range(len(labels))]
+
+        # Best line (top of cloud) — added first so avg can reference its index
+        best_idx = len(datasets_js)
         datasets_js.append({
-            "label": "Batch Runs",
-            "data": data_points,
-            "borderColor": "#4dabf7",
-            "backgroundColor": "#4dabf7",
-            "tension": 0.2,
-            "pointRadius": 5,
-            "pointHoverRadius": 7,
+            "label": f"{label} Best",
+            "data": best_points,
+            "borderColor": color_best,
+            "backgroundColor": "transparent",
+            "tension": 0.3,
+            "pointRadius": 3,
+            "pointHoverRadius": 5,
+            "borderWidth": 2,
             "fill": False,
         })
 
-    # Baseline as dashed horizontal reference
-    bl_rows = df[df["is_baseline"] == True]  # noqa: E712
-    if not bl_rows.empty:
-        bl_val = bl_rows.iloc[-1]["avg_actual"]
-        # Draw baseline as a flat line spanning all X labels
-        all_labels = []
-        for _, row in df.iterrows():
-            try:
-                ts_label = pd.to_datetime(row["timestamp"]).strftime("%m/%d %I:%M%p")
-            except Exception:
-                ts_label = str(row["timestamp"])[:16]
-            all_labels.append(ts_label)
-
-        bl_points = [{"x": lbl, "y": round(bl_val, 1)} for lbl in all_labels]
+        # Avg line (bottom of cloud) — fills up to the best line
         datasets_js.append({
-            "label": f"\u2693 Baseline ({bl_val:.1f} FP)",
-            "data": bl_points,
-            "borderColor": "#00ff87",
-            "backgroundColor": "#00ff87",
-            "borderDash": [8, 4],
-            "tension": 0,
-            "pointRadius": 0,
-            "fill": False,
+            "label": f"{label} Avg",
+            "data": avg_points,
+            "borderColor": color_avg,
+            "backgroundColor": fill_color,
+            "tension": 0.3,
+            "pointRadius": 3,
+            "pointHoverRadius": 5,
+            "borderWidth": 2,
+            "fill": f"{best_idx}",
         })
+
+    _add_cloud(
+        main_df,
+        label="Main Config",
+        color_best="#00ff87",
+        color_avg="#00cc6a",
+        fill_color="rgba(0, 255, 135, 0.12)",
+    )
+    _add_cloud(
+        lab_df,
+        label="Sim Lab",
+        color_best="#ffd43b",
+        color_avg="#4dabf7",
+        fill_color="rgba(77, 171, 247, 0.12)",
+    )
 
     if not datasets_js:
         return
 
     datasets_json = json.dumps(datasets_js, separators=(",", ":"))
-    all_labels_json = json.dumps(
-        list(dict.fromkeys(
-            pd.to_datetime(df["timestamp"]).dt.strftime("%m/%d %I:%M%p").tolist()
-        )),
-        separators=(",", ":"),
-    )
+    labels_json = json.dumps(unique_labels, separators=(",", ":"))
 
     chart_html = f"""
-<div style="width:100%;height:360px;background:#0f1117;border-radius:8px;padding:12px;">
-<canvas id="persistTrend"></canvas>
+<div style="width:100%;height:400px;background:#0f1117;border-radius:8px;padding:12px;">
+<canvas id="emaCloud"></canvas>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7"></script>
 <script>
 (function(){{
 const ds={datasets_json};
-const labels={all_labels_json};
-const ctx=document.getElementById('persistTrend').getContext('2d');
+const labels={labels_json};
+// Convert string fill references to Chart.js fill objects
+ds.forEach(function(d){{
+  if(typeof d.fill==='string' && !isNaN(d.fill))
+    d.fill={{target:parseInt(d.fill),above:d.backgroundColor,below:'transparent'}};
+}});
+const ctx=document.getElementById('emaCloud').getContext('2d');
 new Chart(ctx,{{
   type:'line',
   data:{{labels:labels,datasets:ds}},
@@ -1191,12 +1260,13 @@ new Chart(ctx,{{
       legend:{{display:true,labels:{{color:'#ccc',font:{{size:12}}}}}},
       tooltip:{{
         mode:'index',intersect:false,
-        callbacks:{{label:function(ctx){{return ctx.dataset.label+': '+ctx.parsed.y.toFixed(1)+' FP';}}}}
-      }}
+        callbacks:{{label:function(c){{return c.dataset.label+': '+c.parsed.y.toFixed(1)+' FP';}}}}
+      }},
+      filler:{{propagate:true}}
     }},
     scales:{{
       x:{{type:'category',title:{{display:true,text:'Batch Run',color:'#ccc'}},grid:{{color:'rgba(255,255,255,0.06)'}},ticks:{{color:'#aaa',maxRotation:45}}}},
-      y:{{title:{{display:true,text:'Avg Actual FP',color:'#ccc'}},grid:{{color:'rgba(255,255,255,0.06)'}},ticks:{{color:'#aaa'}}}}
+      y:{{title:{{display:true,text:'Actual FP (EMA)',color:'#ccc'}},grid:{{color:'rgba(255,255,255,0.06)'}},ticks:{{color:'#aaa'}}}}
     }},
     interaction:{{mode:'nearest',axis:'x',intersect:false}}
   }}
@@ -1204,7 +1274,7 @@ new Chart(ctx,{{
 }})();
 </script>
 """
-    components.html(chart_html, height=400, scrolling=False)
+    components.html(chart_html, height=440, scrolling=False)
 
 
 # ---------------------------------------------------------------------------
