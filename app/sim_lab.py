@@ -100,6 +100,8 @@ _BATCH_COLORS = ["#4dabf7", "#00ff87", "#ffa726", "#ef5350", "#ab47bc", "#26c6da
 _HISTORY_DIR = Path(__file__).resolve().parent.parent / "data" / "sim_lab"
 _HISTORY_FILE = _HISTORY_DIR / "batch_history.parquet"
 _HISTORY_REL_PATH = "data/sim_lab/batch_history.parquet"
+# Baselines are tracked inside batch_history.parquet via is_baseline flag.
+# No separate baselines file needed — single source of truth.
 
 _logger = logging.getLogger(__name__)
 
@@ -140,15 +142,27 @@ def _config_hash(overrides: Dict[str, Any], archetype: str = "Default") -> str:
     ).hexdigest()[:8]
 
 
+
 # ---------------------------------------------------------------------------
 # Batch history persistence
 # ---------------------------------------------------------------------------
 
-def _append_batch_history(batch: Dict[str, Any]) -> None:
+def _append_batch_history(
+    batch: Dict[str, Any],
+    *,
+    is_baseline: bool = False,
+) -> None:
     """Append a batch summary row to the persistent history file.
 
     Writes to data/sim_lab/batch_history.parquet and syncs to GitHub
     so the history survives Streamlit Cloud restarts.
+
+    Parameters
+    ----------
+    is_baseline : bool
+        If *True*, this row is stored as the active baseline for its preset.
+        Previous baselines for the same preset are kept (``is_baseline`` flipped
+        to *False*) so long-term trends are never lost.
     """
     successful_runs = batch.get("runs", [])
     best_slate_fp = 0.0
@@ -165,6 +179,10 @@ def _append_batch_history(batch: Dict[str, Any]) -> None:
         "preset": batch.get("preset", ""),
         "archetype": batch.get("archetype", "Default"),
         "config_hash": batch.get("config_hash", ""),
+        "config_label": batch.get("config_label", ""),
+        "overrides_json": json.dumps(
+            batch.get("overrides", {}), sort_keys=True, default=str,
+        ),
         "num_dates": len(successful_runs) + len(batch.get("errors", [])),
         "num_lineups": successful_runs[0].get("num_lineups", 0) if successful_runs else 0,
         "avg_actual": batch.get("avg_actual", 0.0),
@@ -173,6 +191,8 @@ def _append_batch_history(batch: Dict[str, Any]) -> None:
         "worst_slate": worst_slate_fp,
         "beat_proj_pct": batch.get("beat_proj_pct", 0.0),
         "errors": len(batch.get("errors", [])),
+        "is_baseline": is_baseline,
+        "removed": False,
     }
 
     new_df = pd.DataFrame([row])
@@ -182,6 +202,18 @@ def _append_batch_history(batch: Dict[str, Any]) -> None:
 
         if _HISTORY_FILE.is_file():
             existing = pd.read_parquet(_HISTORY_FILE)
+            # Ensure new columns exist on legacy data
+            for col, default in [("is_baseline", False), ("removed", False),
+                                  ("config_label", ""), ("overrides_json", "{}")]:
+                if col not in existing.columns:
+                    existing[col] = default
+            # If promoting a new baseline, demote the old one for same preset
+            if is_baseline:
+                mask = (
+                    (existing["preset"] == batch.get("preset", ""))
+                    & (existing["is_baseline"] == True)  # noqa: E712
+                )
+                existing.loc[mask, "is_baseline"] = False
             combined = pd.concat([existing, new_df], ignore_index=True)
         else:
             combined = new_df
@@ -213,11 +245,101 @@ def _load_batch_history() -> pd.DataFrame:
     return pd.DataFrame()
 
 
+# ---------------------------------------------------------------------------
+# Baseline helpers  (stored inside batch_history.parquet via is_baseline flag)
+# ---------------------------------------------------------------------------
+
+def _promote_baseline(row_timestamp: str, preset_name: str) -> None:
+    """Promote a batch_history row to active baseline for its preset.
+
+    Demotes any previous baseline (keeps the row, just flips the flag)
+    so long-term trends are preserved.
+    """
+    if not _HISTORY_FILE.is_file():
+        return
+    try:
+        df = pd.read_parquet(_HISTORY_FILE)
+        for col, default in [("is_baseline", False), ("removed", False),
+                              ("config_label", ""), ("overrides_json", "{}")]:
+            if col not in df.columns:
+                df[col] = default
+
+        # Demote old baseline for this preset
+        mask_old = (df["preset"] == preset_name) & (df["is_baseline"] == True)  # noqa: E712
+        df.loc[mask_old, "is_baseline"] = False
+
+        # Promote the target row
+        mask_new = df["timestamp"] == row_timestamp
+        df.loc[mask_new, "is_baseline"] = True
+
+        df.to_parquet(_HISTORY_FILE, index=False)
+        _logger.info("Promoted baseline for %s (ts=%s)", preset_name, row_timestamp)
+
+        try:
+            from yak_core.github_persistence import sync_feedback_async
+            sync_feedback_async(
+                files=[_HISTORY_REL_PATH],
+                commit_message=f"Promote Sim Lab baseline ({preset_name})",
+            )
+        except Exception as sync_err:
+            _logger.warning("GitHub sync failed: %s", sync_err)
+    except Exception as exc:
+        _logger.warning("Failed to promote baseline: %s", exc)
+
+
+def _remove_history_rows(timestamps: List[str]) -> None:
+    """Soft-delete rows from batch history by setting removed=True."""
+    if not _HISTORY_FILE.is_file() or not timestamps:
+        return
+    try:
+        df = pd.read_parquet(_HISTORY_FILE)
+        if "removed" not in df.columns:
+            df["removed"] = False
+        df.loc[df["timestamp"].isin(timestamps), "removed"] = True
+        df.to_parquet(_HISTORY_FILE, index=False)
+        _logger.info("Soft-deleted %d batch history rows", len(timestamps))
+
+        try:
+            from yak_core.github_persistence import sync_feedback_async
+            sync_feedback_async(
+                files=[_HISTORY_REL_PATH],
+                commit_message="Remove Sim Lab batch history rows",
+            )
+        except Exception as sync_err:
+            _logger.warning("GitHub sync failed: %s", sync_err)
+    except Exception as exc:
+        _logger.warning("Failed to remove history rows: %s", exc)
+
+
+def _get_active_baseline(preset_name: str) -> Optional[pd.Series]:
+    """Return the active baseline row for a preset, or None."""
+    history = _load_batch_history()
+    if history.empty or "is_baseline" not in history.columns:
+        return None
+    bl = history[(history["preset"] == preset_name) & (history["is_baseline"] == True)]  # noqa: E712
+    if bl.empty:
+        return None
+    if "timestamp" in bl.columns:
+        bl = bl.sort_values("timestamp", ascending=False)
+    return bl.iloc[0]
+
+
 def _render_history_table() -> None:
-    """Render the persistent batch history table."""
+    """Render the persistent batch history table (all presets, full log)."""
     history = _load_batch_history()
     if history.empty:
         st.caption("No batch history yet — run a batch to start tracking.")
+        return
+
+    # Ensure new columns on legacy data
+    for col, default in [("is_baseline", False), ("removed", False),
+                          ("config_label", "")]:
+        if col not in history.columns:
+            history[col] = default
+
+    # Exclude soft-deleted rows
+    history = history[~history["removed"]].copy()
+    if history.empty:
         return
 
     st.subheader("Batch History")
@@ -232,9 +354,16 @@ def _render_history_table() -> None:
     if "timestamp" in display.columns:
         display["timestamp"] = pd.to_datetime(display["timestamp"]).dt.strftime("%m/%d %I:%M %p")
 
+    # Add baseline indicator column
+    if "is_baseline" in display.columns:
+        display["role"] = display["is_baseline"].apply(lambda x: "\u2693 Baseline" if x else "")
+    else:
+        display["role"] = ""
+
     col_rename = {
         "timestamp": "When",
         "preset": "Preset",
+        "role": "Role",
         "archetype": "Archetype",
         "config_hash": "Config",
         "num_dates": "Dates",
@@ -962,42 +1091,139 @@ new Chart(ctx,{{
 # Comparison Table
 # ---------------------------------------------------------------------------
 
-def _render_comparison_table() -> None:
-    """Render a summary table comparing all batch runs."""
-    batches: List[Dict[str, Any]] = st.session_state.get("sim_lab_batches", [])
-    if not batches:
+def _render_comparison_table(preset_name: str) -> None:
+    """Render a persistent comparison table with baseline pinning, deltas, and checkboxes.
+
+    Reads from ``batch_history.parquet`` — everything persists across sessions.
+    Active baseline is pinned at the top.  Δ Actual and Δ Beat% columns show
+    each row's difference vs the baseline.  Checkboxes let the user soft-delete
+    rows (they stay in the file for trend tracking but are hidden from view).
+    A "Promote as Baseline" button lets the user promote any row.
+    """
+    history = _load_batch_history()
+    if history.empty:
+        return
+
+    # Ensure new columns on legacy data
+    for col, default in [("is_baseline", False), ("removed", False),
+                          ("config_label", ""), ("overrides_json", "{}")]:
+        if col not in history.columns:
+            history[col] = default
+
+    # Filter to current preset, exclude soft-deleted
+    mask = (history["preset"] == preset_name) & (~history["removed"])
+    df = history[mask].copy()
+    if df.empty:
         return
 
     st.subheader("Batch Comparison")
-    rows = []
-    for batch in batches:
-        successful_runs = batch["runs"]
-        best_slate = ""
-        worst_slate = ""
-        if successful_runs:
-            best_run = max(successful_runs, key=lambda r: r["avg_actual"])
-            worst_run = min(successful_runs, key=lambda r: r["avg_actual"])
-            best_slate = f"{best_run['date']} ({best_run['avg_actual']:.1f})"
-            worst_slate = f"{worst_run['date']} ({worst_run['avg_actual']:.1f})"
 
-        rows.append({
-            "Run": batch["config_label"],
-            "Archetype": batch.get("archetype", "Default"),
-            "Config Hash": batch["config_hash"],
-            "Avg Actual": batch["avg_actual"],
-            "Avg Proj": batch["avg_proj"],
-            "Best Slate": best_slate,
-            "Worst Slate": worst_slate,
-            "Beat Proj %": f"{batch['beat_proj_pct']:.0f}%",
-            "Errors": len(batch["errors"]),
+    # Sort: baseline first, then newest-first
+    df["_sort_key"] = df["is_baseline"].astype(int) * -1  # baseline = -1 → top
+    if "timestamp" in df.columns:
+        df = df.sort_values(["_sort_key", "timestamp"], ascending=[True, False])
+    df = df.reset_index(drop=True)
+
+    # Compute deltas against active baseline
+    bl_row = df[df["is_baseline"] == True]  # noqa: E712
+    bl_actual = bl_row["avg_actual"].iloc[0] if not bl_row.empty else None
+    bl_beat = bl_row["beat_proj_pct"].iloc[0] if not bl_row.empty else None
+
+    # Build display rows
+    display_rows = []
+    for _, row in df.iterrows():
+        label = row.get("config_label", "") or row.get("config_hash", "")
+        if row.get("is_baseline"):
+            label = f"\u2693 {label}" if label else "\u2693 Baseline"
+
+        ts = ""
+        if "timestamp" in row.index and pd.notna(row["timestamp"]):
+            try:
+                ts = pd.to_datetime(row["timestamp"]).strftime("%m/%d %I:%M %p")
+            except Exception:
+                ts = str(row["timestamp"])[:16]
+
+        d_actual = ""
+        d_beat = ""
+        if bl_actual is not None and not row.get("is_baseline"):
+            diff_a = row["avg_actual"] - bl_actual
+            d_actual = f"{diff_a:+.1f}"
+            if bl_beat is not None:
+                diff_b = row["beat_proj_pct"] - bl_beat
+                d_beat = f"{diff_b:+.0f}%"
+
+        display_rows.append({
+            "_ts": row["timestamp"],  # hidden key for actions
+            "Run": label,
+            "When": ts,
+            "Archetype": row.get("archetype", "Default"),
+            "Dates": int(row.get("num_dates", 0)),
+            "Avg Actual": row["avg_actual"],
+            "Avg Proj": row.get("avg_proj", 0.0),
+            "\u0394 Actual": d_actual,
+            "Beat %": f"{row['beat_proj_pct']:.0f}%",
+            "\u0394 Beat%": d_beat,
+            "Baseline": bool(row.get("is_baseline")),
         })
 
-    df = pd.DataFrame(rows)
-    st.dataframe(
-        df.style.format({"Avg Actual": "{:.1f}", "Avg Proj": "{:.1f}"}),
-        use_container_width=True,
-        hide_index=True,
-    )
+    display_df = pd.DataFrame(display_rows)
+
+    # --- Checkboxes to remove rows ---
+    with st.form(key="sim_lab_comparison_form"):
+        # Show the table using st.dataframe (read-only) above the action buttons
+        show_cols = [c for c in display_df.columns if c != "_ts"]
+        st.dataframe(
+            display_df[show_cols].style.format(
+                {"Avg Actual": "{:.1f}", "Avg Proj": "{:.1f}"}
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        # Multiselect for removal (show labels + timestamps)
+        remove_options = {}
+        for _, r in display_df.iterrows():
+            key = r["_ts"]
+            lbl = f"{r['Run']}  ({r['When']})"
+            remove_options[lbl] = key
+
+        selected_remove = st.multiselect(
+            "Select rows to remove",
+            options=list(remove_options.keys()),
+            key="sim_lab_remove_rows",
+        )
+
+        # Promote selector — only non-baseline rows
+        non_bl = display_df[~display_df["Baseline"]]
+        promote_options = {"(none)": None}
+        for _, r in non_bl.iterrows():
+            lbl = f"{r['Run']}  ({r['When']})"
+            promote_options[lbl] = r["_ts"]
+
+        selected_promote = st.selectbox(
+            "Promote as Baseline",
+            options=list(promote_options.keys()),
+            key="sim_lab_promote_baseline",
+        )
+
+        submitted = st.form_submit_button("Apply Changes", use_container_width=True)
+
+    if submitted:
+        changed = False
+        # Handle removals
+        if selected_remove:
+            ts_to_remove = [remove_options[lbl] for lbl in selected_remove]
+            _remove_history_rows(ts_to_remove)
+            changed = True
+
+        # Handle promotion
+        promote_ts = promote_options.get(selected_promote)
+        if promote_ts is not None:
+            _promote_baseline(promote_ts, preset_name)
+            changed = True
+
+        if changed:
+            st.rerun()
 
 
 # ---------------------------------------------------------------------------
@@ -1440,6 +1666,30 @@ def render_sim_lab(sport: str) -> None:
                 key="sim_lab_batch_run",
                 disabled=len(_run_dates) == 0 if _date_mode == "Select Dates" else False,
             ):
+                # ── Auto-run baseline (main config, no overrides) on first batch ──
+                # Only if there is no active baseline for this preset yet.
+                active_bl = _get_active_baseline(preset_name)
+                if active_bl is None:
+                    with st.spinner("Running baseline (main config)..."):
+                        _bl_batch = _run_batch(
+                            sport, preset_name, {}, _run_dates,
+                            archetype="Default",
+                            ricky_w_gpp=_ricky_weights["w_gpp"],
+                            ricky_w_ceil=_ricky_weights["w_ceil"],
+                            ricky_w_own=_ricky_weights["w_own"],
+                        )
+                        _bl_batch["config_label"] = "Baseline (main config)"
+                        _bl_batch["overrides"] = {}
+
+                        # Also add to session batches so trend chart sees it
+                        if "sim_lab_batches" not in st.session_state:
+                            st.session_state["sim_lab_batches"] = []
+                        st.session_state["sim_lab_batches"].insert(0, _bl_batch)
+
+                        # Persist as baseline
+                        _append_batch_history(_bl_batch, is_baseline=True)
+
+                # ── Run the user's tweaked config ────────────────────────────
                 with st.spinner("Running batch..."):
                     batch = _run_batch(
                         sport, preset_name, sandbox_overrides, _run_dates,
@@ -1448,6 +1698,7 @@ def render_sim_lab(sport: str) -> None:
                         ricky_w_ceil=_ricky_weights["w_ceil"],
                         ricky_w_own=_ricky_weights["w_own"],
                     )
+                    batch["overrides"] = dict(sandbox_overrides)
 
                     if "sim_lab_batches" not in st.session_state:
                         st.session_state["sim_lab_batches"] = []
@@ -1466,6 +1717,9 @@ def render_sim_lab(sport: str) -> None:
                         with st.expander("Batch Errors"):
                             for err in batch["errors"]:
                                 st.warning(f"{err['date']}: {err['error']}")
+
+            # ── Manual baseline promotion button (outside batch run) ────────
+            # Rendered in the comparison table form below.
         else:
             st.warning("No RG archive files found in data/rg_archive/nba/")
 
@@ -1501,8 +1755,8 @@ def render_sim_lab(sport: str) -> None:
         # Trend chart (if batches exist)
         _render_trend_chart()
 
-        # Comparison table
-        _render_comparison_table()
+        # Comparison table (persistent, with baseline pinning + checkboxes)
+        _render_comparison_table(preset_name)
 
         # Persistent history (survives restarts)
         _render_history_table()
