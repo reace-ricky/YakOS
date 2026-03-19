@@ -190,6 +190,8 @@ def _append_batch_history(
         "best_slate": best_slate_fp,
         "worst_slate": worst_slate_fp,
         "beat_proj_pct": batch.get("beat_proj_pct", 0.0),
+        "se_avg_actual": batch.get("se_avg_actual", 0.0),
+        "se_best_actual": batch.get("se_best_actual", 0.0),
         "errors": len(batch.get("errors", [])),
         "is_baseline": is_baseline,
         "removed": False,
@@ -975,6 +977,24 @@ def _run_batch(
     avg_proj = round(mean(r["avg_proj"] for r in runs), 2) if runs else 0
     beat_proj_pct = round(mean(r["beat_proj_pct"] for r in runs), 1) if runs else 0
 
+    # SE-tagged lineup stats (Core / Alt / Spicy) — per-date then averaged
+    se_actuals_per_date: list[list[float]] = []
+    for r in runs:
+        sdf = r.get("summary_df")
+        if sdf is not None and "ricky_tag" in sdf.columns:
+            tagged = sdf[sdf["ricky_tag"].astype(str).str.strip() != ""]
+            if not tagged.empty:
+                se_actuals_per_date.append(tagged["total_actual"].tolist())
+    se_avg_actual = 0.0
+    se_best_actual = 0.0
+    if se_actuals_per_date:
+        se_avg_actual = round(mean(
+            mean(vals) for vals in se_actuals_per_date
+        ), 2)
+        se_best_actual = round(max(
+            max(vals) for vals in se_actuals_per_date
+        ), 2)
+
     # Config label includes archetype for non-Default
     label = f"Run {batch_number}"
     if archetype != "Default":
@@ -992,6 +1012,8 @@ def _run_batch(
         "avg_actual": avg_actual,
         "avg_proj": avg_proj,
         "beat_proj_pct": beat_proj_pct,
+        "se_avg_actual": se_avg_actual,
+        "se_best_actual": se_best_actual,
     }
 
 
@@ -1118,7 +1140,8 @@ def _render_persistent_trend(preset_name: str) -> None:
 
     for col, default in [("is_baseline", False), ("removed", False),
                           ("config_label", ""), ("best_slate", 0.0),
-                          ("overrides_json", "{}")]:
+                          ("overrides_json", "{}"),
+                          ("se_avg_actual", 0.0), ("se_best_actual", 0.0)]:
         if col not in history.columns:
             history[col] = default
 
@@ -1219,6 +1242,43 @@ def _render_persistent_trend(preset_name: str) -> None:
             "borderWidth": 2,
             "fill": f"{best_idx}",
         })
+
+    # ---- SE Tagged (Core / Alt / Spicy): EMA lines (solid, amber) ----
+    if not lab_df.empty:
+        se_avg_raw = [float(r.get("se_avg_actual", 0)) for _, r in lab_df.iterrows()]
+        se_best_raw = [float(r.get("se_best_actual", 0)) for _, r in lab_df.iterrows()]
+        # Only render if we have non-zero SE data
+        if any(v > 0 for v in se_avg_raw):
+            ts_labels_se = [_ts_label(r["timestamp"]) for _, r in lab_df.iterrows()]
+            se_avg_ema = _ema(se_avg_raw)
+            se_best_ema = _ema(se_best_raw)
+
+            se_best_pts = [{"x": ts_labels_se[i], "y": round(se_best_ema[i], 1)} for i in range(len(ts_labels_se))]
+            se_avg_pts = [{"x": ts_labels_se[i], "y": round(se_avg_ema[i], 1)} for i in range(len(ts_labels_se))]
+
+            se_best_idx = len(datasets_js)
+            datasets_js.append({
+                "label": "SE Tagged Best",
+                "data": se_best_pts,
+                "borderColor": "#f59e0b",
+                "backgroundColor": "transparent",
+                "tension": 0.3,
+                "pointRadius": 3,
+                "pointHoverRadius": 5,
+                "borderWidth": 2,
+                "fill": False,
+            })
+            datasets_js.append({
+                "label": "SE Tagged Avg",
+                "data": se_avg_pts,
+                "borderColor": "#d97706",
+                "backgroundColor": "rgba(245, 158, 11, 0.10)",
+                "tension": 0.3,
+                "pointRadius": 3,
+                "pointHoverRadius": 5,
+                "borderWidth": 2,
+                "fill": f"{se_best_idx}",
+            })
 
     if not datasets_js:
         return
