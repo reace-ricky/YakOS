@@ -1000,37 +1000,38 @@ def _run_batch(
 # ---------------------------------------------------------------------------
 
 def _render_trend_chart() -> None:
-    """Render a Chart.js line chart: X = date, Y = avg actual FP, one line per batch."""
+    """Render trend charts.
+
+    1. **Session chart** (per-date detail) — only when batches exist in session.
+    2. **Persistent chart** — reads from ``batch_history.parquet`` so it
+       survives page refreshes.  X = batch run time, Y = avg actual FP.
+       Baseline is drawn as a dashed reference line.
+    """
+    # ---- Session per-date chart (when available) ----
     batches: List[Dict[str, Any]] = st.session_state.get("sim_lab_batches", [])
-    if not batches:
-        return
+    if batches:
+        st.subheader("Config Comparison — Avg Actual FP by Date")
 
-    st.subheader("Config Comparison — Avg Actual FP by Date")
+        datasets_js = []
+        for i, batch in enumerate(batches):
+            color = _BATCH_COLORS[i % len(_BATCH_COLORS)]
+            sorted_runs = sorted(batch["runs"], key=lambda r: r["date"])
+            data_points = [{"x": run["date"], "y": run["avg_actual"]} for run in sorted_runs]
 
-    # Build datasets for Chart.js
-    datasets_js = []
-    for i, batch in enumerate(batches):
-        color = _BATCH_COLORS[i % len(_BATCH_COLORS)]
-        # Sort runs by date
-        sorted_runs = sorted(batch["runs"], key=lambda r: r["date"])
-        data_points = []
-        for run in sorted_runs:
-            data_points.append({"x": run["date"], "y": run["avg_actual"]})
+            label = f"{batch['config_label']} ({batch['config_hash']})"
+            datasets_js.append({
+                "label": label,
+                "data": data_points,
+                "borderColor": color,
+                "backgroundColor": color,
+                "tension": 0.2,
+                "pointRadius": 4,
+                "pointHoverRadius": 6,
+                "fill": False,
+            })
 
-        label = f"{batch['config_label']} ({batch['config_hash']})"
-        datasets_js.append({
-            "label": label,
-            "data": data_points,
-            "borderColor": color,
-            "backgroundColor": color,
-            "tension": 0.2,
-            "pointRadius": 4,
-            "pointHoverRadius": 6,
-            "fill": False,
-        })
-
-    datasets_json = json.dumps(datasets_js, separators=(",", ":"))
-    chart_html = f"""
+        datasets_json = json.dumps(datasets_js, separators=(",", ":"))
+        chart_html = f"""
 <div style="width:100%;height:400px;background:#0f1117;border-radius:8px;padding:12px;">
 <canvas id="trendChart"></canvas>
 </div>
@@ -1084,7 +1085,126 @@ new Chart(ctx,{{
 }})();
 </script>
 """
-    components.html(chart_html, height=440, scrolling=False)
+        components.html(chart_html, height=440, scrolling=False)
+
+
+def _render_persistent_trend(preset_name: str) -> None:
+    """Persistent trend line from batch_history — survives restarts.
+
+    X = batch run time, Y = avg actual FP.  Baseline shown as dashed line.
+    """
+    history = _load_batch_history()
+    if history.empty:
+        return
+
+    for col, default in [("is_baseline", False), ("removed", False),
+                          ("config_label", "")]:
+        if col not in history.columns:
+            history[col] = default
+
+    df = history[(history["preset"] == preset_name) & (~history["removed"])].copy()
+    if df.empty or len(df) < 1:
+        return
+
+    if "timestamp" in df.columns:
+        df = df.sort_values("timestamp")
+
+    st.subheader("Performance Trend")
+
+    # Build datasets
+    datasets_js = []
+
+    # Non-baseline runs as solid line
+    non_bl = df[~df["is_baseline"]]
+    if not non_bl.empty:
+        data_points = []
+        for _, row in non_bl.iterrows():
+            try:
+                ts_label = pd.to_datetime(row["timestamp"]).strftime("%m/%d %I:%M%p")
+            except Exception:
+                ts_label = str(row["timestamp"])[:16]
+            data_points.append({"x": ts_label, "y": round(row["avg_actual"], 1)})
+        datasets_js.append({
+            "label": "Batch Runs",
+            "data": data_points,
+            "borderColor": "#4dabf7",
+            "backgroundColor": "#4dabf7",
+            "tension": 0.2,
+            "pointRadius": 5,
+            "pointHoverRadius": 7,
+            "fill": False,
+        })
+
+    # Baseline as dashed horizontal reference
+    bl_rows = df[df["is_baseline"] == True]  # noqa: E712
+    if not bl_rows.empty:
+        bl_val = bl_rows.iloc[-1]["avg_actual"]
+        # Draw baseline as a flat line spanning all X labels
+        all_labels = []
+        for _, row in df.iterrows():
+            try:
+                ts_label = pd.to_datetime(row["timestamp"]).strftime("%m/%d %I:%M%p")
+            except Exception:
+                ts_label = str(row["timestamp"])[:16]
+            all_labels.append(ts_label)
+
+        bl_points = [{"x": lbl, "y": round(bl_val, 1)} for lbl in all_labels]
+        datasets_js.append({
+            "label": f"\u2693 Baseline ({bl_val:.1f} FP)",
+            "data": bl_points,
+            "borderColor": "#00ff87",
+            "backgroundColor": "#00ff87",
+            "borderDash": [8, 4],
+            "tension": 0,
+            "pointRadius": 0,
+            "fill": False,
+        })
+
+    if not datasets_js:
+        return
+
+    datasets_json = json.dumps(datasets_js, separators=(",", ":"))
+    all_labels_json = json.dumps(
+        list(dict.fromkeys(
+            pd.to_datetime(df["timestamp"]).dt.strftime("%m/%d %I:%M%p").tolist()
+        )),
+        separators=(",", ":"),
+    )
+
+    chart_html = f"""
+<div style="width:100%;height:360px;background:#0f1117;border-radius:8px;padding:12px;">
+<canvas id="persistTrend"></canvas>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7"></script>
+<script>
+(function(){{
+const ds={datasets_json};
+const labels={all_labels_json};
+const ctx=document.getElementById('persistTrend').getContext('2d');
+new Chart(ctx,{{
+  type:'line',
+  data:{{labels:labels,datasets:ds}},
+  options:{{
+    responsive:true,
+    maintainAspectRatio:false,
+    plugins:{{
+      legend:{{display:true,labels:{{color:'#ccc',font:{{size:12}}}}}},
+      tooltip:{{
+        mode:'index',intersect:false,
+        callbacks:{{label:function(ctx){{return ctx.dataset.label+': '+ctx.parsed.y.toFixed(1)+' FP';}}}}
+      }}
+    }},
+    scales:{{
+      x:{{type:'category',title:{{display:true,text:'Batch Run',color:'#ccc'}},grid:{{color:'rgba(255,255,255,0.06)'}},ticks:{{color:'#aaa',maxRotation:45}}}},
+      y:{{title:{{display:true,text:'Avg Actual FP',color:'#ccc'}},grid:{{color:'rgba(255,255,255,0.06)'}},ticks:{{color:'#aaa'}}}}
+    }},
+    interaction:{{mode:'nearest',axis:'x',intersect:false}}
+  }}
+}});
+}})();
+</script>
+"""
+    components.html(chart_html, height=400, scrolling=False)
 
 
 # ---------------------------------------------------------------------------
@@ -1752,8 +1872,11 @@ def render_sim_lab(sport: str) -> None:
         # Download CSV of all ranked lineups
         _render_download_button()
 
-        # Trend chart (if batches exist)
+        # Trend chart — session per-date detail (when batches exist in memory)
         _render_trend_chart()
+
+        # Persistent performance trend — survives restarts, shows baseline ref line
+        _render_persistent_trend(preset_name)
 
         # Comparison table (persistent, with baseline pinning + checkboxes)
         _render_comparison_table(preset_name)
