@@ -1089,16 +1089,21 @@ new Chart(ctx,{{
 
 
 def _render_persistent_trend(preset_name: str) -> None:
-    """Persistent trend line from batch_history — survives restarts.
+    """Persistent trend charts from batch_history — survives restarts.
 
-    X = batch run time, Y = avg actual FP.  Baseline shown as dashed line.
+    Renders two charts:
+    1. **Avg Actual FP** — mean performance across all dates in each batch.
+    2. **Best Actual FP** — best single-slate performance in each batch.
+
+    Each chart draws batch runs as solid lines and the active baseline as
+    a dashed horizontal reference.
     """
     history = _load_batch_history()
     if history.empty:
         return
 
     for col, default in [("is_baseline", False), ("removed", False),
-                          ("config_label", "")]:
+                          ("config_label", ""), ("best_slate", 0.0)]:
         if col not in history.columns:
             history[col] = default
 
@@ -1111,76 +1116,83 @@ def _render_persistent_trend(preset_name: str) -> None:
 
     st.subheader("Performance Trend")
 
-    # Build datasets
-    datasets_js = []
+    # Build shared X-axis labels (de-duped, ordered)
+    all_labels: list[str] = []
+    for _, row in df.iterrows():
+        try:
+            ts_label = pd.to_datetime(row["timestamp"]).strftime("%m/%d %I:%M%p")
+        except Exception:
+            ts_label = str(row["timestamp"])[:16]
+        all_labels.append(ts_label)
+    unique_labels = list(dict.fromkeys(all_labels))
 
-    # Non-baseline runs as solid line
     non_bl = df[~df["is_baseline"]]
-    if not non_bl.empty:
-        data_points = []
-        for _, row in non_bl.iterrows():
-            try:
-                ts_label = pd.to_datetime(row["timestamp"]).strftime("%m/%d %I:%M%p")
-            except Exception:
-                ts_label = str(row["timestamp"])[:16]
-            data_points.append({"x": ts_label, "y": round(row["avg_actual"], 1)})
-        datasets_js.append({
-            "label": "Batch Runs",
-            "data": data_points,
-            "borderColor": "#4dabf7",
-            "backgroundColor": "#4dabf7",
-            "tension": 0.2,
-            "pointRadius": 5,
-            "pointHoverRadius": 7,
-            "fill": False,
-        })
-
-    # Baseline as dashed horizontal reference
     bl_rows = df[df["is_baseline"] == True]  # noqa: E712
-    if not bl_rows.empty:
-        bl_val = bl_rows.iloc[-1]["avg_actual"]
-        # Draw baseline as a flat line spanning all X labels
-        all_labels = []
-        for _, row in df.iterrows():
-            try:
-                ts_label = pd.to_datetime(row["timestamp"]).strftime("%m/%d %I:%M%p")
-            except Exception:
-                ts_label = str(row["timestamp"])[:16]
-            all_labels.append(ts_label)
 
-        bl_points = [{"x": lbl, "y": round(bl_val, 1)} for lbl in all_labels]
-        datasets_js.append({
-            "label": f"\u2693 Baseline ({bl_val:.1f} FP)",
-            "data": bl_points,
-            "borderColor": "#00ff87",
-            "backgroundColor": "#00ff87",
-            "borderDash": [8, 4],
-            "tension": 0,
-            "pointRadius": 0,
-            "fill": False,
-        })
+    # ---- Chart configs: (metric_col, chart_id, run_color, label, y_title, bl_label_fmt) ----
+    chart_specs = [
+        ("avg_actual", "persistTrendAvg", "#4dabf7", "Avg Actual",
+         "Avg Actual FP", "\u2693 Baseline Avg ({val:.1f} FP)"),
+        ("best_slate", "persistTrendBest", "#ffd43b", "Best Actual",
+         "Best Actual FP", "\u2693 Baseline Best ({val:.1f} FP)"),
+    ]
 
-    if not datasets_js:
-        return
+    for metric_col, chart_id, run_color, run_label, y_title, bl_fmt in chart_specs:
+        datasets_js: list[dict] = []
 
-    datasets_json = json.dumps(datasets_js, separators=(",", ":"))
-    all_labels_json = json.dumps(
-        list(dict.fromkeys(
-            pd.to_datetime(df["timestamp"]).dt.strftime("%m/%d %I:%M%p").tolist()
-        )),
-        separators=(",", ":"),
-    )
+        # Solid line — non-baseline batch runs
+        if not non_bl.empty:
+            data_points = []
+            for _, row in non_bl.iterrows():
+                try:
+                    ts_label = pd.to_datetime(row["timestamp"]).strftime("%m/%d %I:%M%p")
+                except Exception:
+                    ts_label = str(row["timestamp"])[:16]
+                val = row.get(metric_col, 0.0)
+                data_points.append({"x": ts_label, "y": round(float(val), 1)})
+            datasets_js.append({
+                "label": run_label,
+                "data": data_points,
+                "borderColor": run_color,
+                "backgroundColor": run_color,
+                "tension": 0.2,
+                "pointRadius": 5,
+                "pointHoverRadius": 7,
+                "fill": False,
+            })
 
-    chart_html = f"""
-<div style="width:100%;height:360px;background:#0f1117;border-radius:8px;padding:12px;">
-<canvas id="persistTrend"></canvas>
+        # Dashed baseline reference
+        if not bl_rows.empty:
+            bl_val = float(bl_rows.iloc[-1].get(metric_col, 0.0))
+            if bl_val > 0:
+                bl_points = [{"x": lbl, "y": round(bl_val, 1)} for lbl in unique_labels]
+                datasets_js.append({
+                    "label": bl_fmt.format(val=bl_val),
+                    "data": bl_points,
+                    "borderColor": "#00ff87",
+                    "backgroundColor": "#00ff87",
+                    "borderDash": [8, 4],
+                    "tension": 0,
+                    "pointRadius": 0,
+                    "fill": False,
+                })
+
+        if not datasets_js:
+            continue
+
+        datasets_json = json.dumps(datasets_js, separators=(",", ":"))
+        labels_json = json.dumps(unique_labels, separators=(",", ":"))
+
+        chart_html = f"""
+<div style="width:100%;height:320px;background:#0f1117;border-radius:8px;padding:12px;margin-bottom:8px;">
+<canvas id="{chart_id}"></canvas>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7"></script>
 <script>
 (function(){{
 const ds={datasets_json};
-const labels={all_labels_json};
-const ctx=document.getElementById('persistTrend').getContext('2d');
+const labels={labels_json};
+const ctx=document.getElementById('{chart_id}').getContext('2d');
 new Chart(ctx,{{
   type:'line',
   data:{{labels:labels,datasets:ds}},
@@ -1196,7 +1208,7 @@ new Chart(ctx,{{
     }},
     scales:{{
       x:{{type:'category',title:{{display:true,text:'Batch Run',color:'#ccc'}},grid:{{color:'rgba(255,255,255,0.06)'}},ticks:{{color:'#aaa',maxRotation:45}}}},
-      y:{{title:{{display:true,text:'Avg Actual FP',color:'#ccc'}},grid:{{color:'rgba(255,255,255,0.06)'}},ticks:{{color:'#aaa'}}}}
+      y:{{title:{{display:true,text:'{y_title}',color:'#ccc'}},grid:{{color:'rgba(255,255,255,0.06)'}},ticks:{{color:'#aaa'}}}}
     }},
     interaction:{{mode:'nearest',axis:'x',intersect:false}}
   }}
@@ -1204,7 +1216,7 @@ new Chart(ctx,{{
 }})();
 </script>
 """
-    components.html(chart_html, height=400, scrolling=False)
+        components.html(chart_html, height=360, scrolling=False)
 
 
 # ---------------------------------------------------------------------------
