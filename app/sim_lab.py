@@ -29,7 +29,12 @@ from yak_core.lineups import (
     prepare_pool,
 )
 from yak_core.live import fetch_actuals_from_api, fetch_live_dfs
-from yak_core.ricky_rank import rank_lineups_for_se
+from yak_core.ricky_rank import (
+    RICKY_W_CEIL,
+    RICKY_W_GPP,
+    RICKY_W_OWN,
+    rank_lineups_for_se,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -349,16 +354,12 @@ def _merge_rg_csv(pool: pd.DataFrame, rg_file: Path) -> pd.DataFrame:
     pool.drop(columns=["_join_name"], inplace=True)
 
     rg_fpts_range = f"{rg['FPTS'].min():.0f}-{rg['FPTS'].max():.0f}" if "FPTS" in rg.columns else "N/A"
-    st.info(
-        f"RG merge: {n_merged}/{len(pool)} players matched "
-        f"({n_missing} unmatched) | {len(rg)} rows in CSV | "
-        f"FPTS range {rg_fpts_range}"
+    _logger.info(
+        "RG merge: %d/%d players matched (%d unmatched) | %d rows | FPTS %s",
+        n_merged, len(pool), n_missing, len(rg), rg_fpts_range,
     )
     if n_merged == 0:
-        st.warning(
-            "No players matched from RG file. Projections will use "
-            "YakOS model values instead of RotoGrinders."
-        )
+        _logger.warning("No players matched from RG file — using YakOS model projections")
     return pool
 
 
@@ -531,6 +532,10 @@ def _run_pipeline(
     preset_name: str,
     sandbox_overrides: Dict[str, Any],
     archetype: str = "Default",
+    *,
+    ricky_w_gpp: Optional[float] = None,
+    ricky_w_ceil: Optional[float] = None,
+    ricky_w_own: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Execute the full fetch -> build -> score pipeline. Returns a run dict."""
     date_key = selected_date.strftime("%Y%m%d")
@@ -564,7 +569,7 @@ def _run_pipeline(
         if rg_path.is_file():
             pool_df = _merge_rg_csv(pool_df, rg_path)
         else:
-            st.warning(f"No RG archive file for {date_dash}. Using Tank01 projections.")
+            _logger.warning("No RG archive file for %s — using Tank01 projections", date_dash)
 
     # Step 3: Auto-run Monte Carlo sims (if sim columns missing)
     if sport == "NBA" and "sim90th" not in pool_df.columns and "SIM90TH" not in pool_df.columns:
@@ -584,9 +589,9 @@ def _run_pipeline(
             for _pct, _col in [(15, "sim15th"), (33, "sim33rd"), (50, "sim50th"),
                                 (66, "sim66th"), (85, "sim85th"), (90, "sim90th"), (99, "sim99th")]:
                 pool_df[_col] = np.percentile(_sim_matrix, _pct, axis=0).round(2)
-            st.info(f"Auto-ran {_n_sims} player sims — sim columns populated")
+            _logger.info("Auto-ran %d player sims — sim columns populated", _n_sims)
         except Exception as _sim_err:
-            st.warning(f"Auto-sim failed ({_sim_err}), continuing with fallback estimates")
+            _logger.warning("Auto-sim failed (%s), continuing with fallback estimates", _sim_err)
 
     # Step 4: Compute edge
     edge_df = compute_edge_metrics(pool_df, calibration_state=None, sport=sport)
@@ -619,7 +624,7 @@ def _run_pipeline(
     n_lineups = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else (
         lineups_df["lineup_id"].nunique() if "lineup_id" in lineups_df.columns else 1
     )
-    st.write(f"**{n_lineups} lineups generated**")
+    _logger.info("%d lineups generated for %s", n_lineups, date_dash)
 
     # Step 7: Score lineups
     if "player_name" not in actuals_df.columns:
@@ -667,7 +672,9 @@ def _run_pipeline(
     summary = summary.sort_values("total_actual", ascending=False).reset_index(drop=True)
 
     # ── Ricky SE ranking (non-destructive layer on top) ─────────────────
-    summary = rank_lineups_for_se(summary)
+    summary = rank_lineups_for_se(
+        summary, w_gpp=ricky_w_gpp, w_ceil=ricky_w_ceil, w_own=ricky_w_own,
+    )
 
     beat_proj_pct = 0.0
     if len(summary) > 0:
@@ -795,6 +802,10 @@ def _run_batch(
     sandbox_overrides: Dict[str, Any],
     dates: List[date],
     archetype: str = "Default",
+    *,
+    ricky_w_gpp: Optional[float] = None,
+    ricky_w_ceil: Optional[float] = None,
+    ricky_w_own: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Run the pipeline for every date. Returns a batch record."""
     runs: List[Dict[str, Any]] = []
@@ -807,7 +818,12 @@ def _run_batch(
             text=f"Running {d.strftime('%Y-%m-%d')} ({i + 1}/{len(dates)})",
         )
         try:
-            run = _run_pipeline(sport, d, preset_name, sandbox_overrides, archetype=archetype)
+            run = _run_pipeline(
+                    sport, d, preset_name, sandbox_overrides,
+                    archetype=archetype,
+                    ricky_w_gpp=ricky_w_gpp, ricky_w_ceil=ricky_w_ceil,
+                    ricky_w_own=ricky_w_own,
+                )
             runs.append(run)
             # Also store in the flat run log
             if "sim_lab_runs" not in st.session_state:
@@ -1285,16 +1301,80 @@ def render_sim_lab(sport: str) -> None:
     # Config panel (4 groups) — sliders read from sandbox overrides
     sandbox_overrides = _render_config_panel(preset_name)
 
+    # --- Ricky Ranking Weights (local to Sim Lab, per-contest-type) ---
+    _ricky_key = f"sim_lab_ricky_weights_{preset_name}"
+    if _ricky_key not in st.session_state:
+        st.session_state[_ricky_key] = {
+            "w_gpp": RICKY_W_GPP, "w_ceil": RICKY_W_CEIL, "w_own": RICKY_W_OWN,
+        }
+    with st.expander("Ricky Ranking Weights"):
+        _rw = st.session_state[_ricky_key]
+        rc1, rc2, rc3 = st.columns(3)
+        with rc1:
+            _rw["w_gpp"] = st.slider(
+                "GPP Score", 0.0, 2.0, float(_rw["w_gpp"]), 0.05,
+                key=f"sl_ricky_gpp_{preset_name}", format="%.2f",
+            )
+        with rc2:
+            _rw["w_ceil"] = st.slider(
+                "Ceiling", 0.0, 2.0, float(_rw["w_ceil"]), 0.05,
+                key=f"sl_ricky_ceil_{preset_name}", format="%.2f",
+            )
+        with rc3:
+            _rw["w_own"] = st.slider(
+                "Own Penalty", 0.0, 2.0, float(_rw["w_own"]), 0.05,
+                key=f"sl_ricky_own_{preset_name}", format="%.2f",
+            )
+        st.session_state[_ricky_key] = _rw
+
+        _rerank_clicked = st.button(
+            "\U0001f504 Re-rank Lineups", key="sim_lab_rerank",
+            use_container_width=True,
+        )
+
+    _ricky_weights = st.session_state[_ricky_key]
+
     if sport == "NBA":
-        # --- NBA: Batch run across all RG dates ---
+        # --- NBA: Batch run across RG dates ---
         rg_dates = _scan_rg_dates()
 
         if rg_dates:
             st.caption(f"{len(rg_dates)} RG archive dates available")
 
-            if st.button("\U0001f504 Run All Dates", use_container_width=True, key="sim_lab_batch_run"):
+            # Date selection: Run All vs Select Dates
+            _date_mode = st.radio(
+                "Date selection",
+                ["Run All", "Select Dates"],
+                horizontal=True,
+                key="sim_lab_date_mode",
+            )
+            if _date_mode == "Select Dates":
+                _selected_dates = st.multiselect(
+                    "Dates",
+                    options=[d.strftime("%Y-%m-%d") for d in rg_dates],
+                    default=[d.strftime("%Y-%m-%d") for d in rg_dates],
+                    key="sim_lab_selected_dates",
+                )
+                _run_dates = [
+                    d for d in rg_dates
+                    if d.strftime("%Y-%m-%d") in _selected_dates
+                ]
+            else:
+                _run_dates = rg_dates
+
+            if st.button(
+                "\U0001f504 Run Batch", use_container_width=True,
+                key="sim_lab_batch_run",
+                disabled=len(_run_dates) == 0 if _date_mode == "Select Dates" else False,
+            ):
                 with st.spinner("Running batch..."):
-                    batch = _run_batch(sport, preset_name, sandbox_overrides, rg_dates, archetype=archetype_name)
+                    batch = _run_batch(
+                        sport, preset_name, sandbox_overrides, _run_dates,
+                        archetype=archetype_name,
+                        ricky_w_gpp=_ricky_weights["w_gpp"],
+                        ricky_w_ceil=_ricky_weights["w_ceil"],
+                        ricky_w_own=_ricky_weights["w_own"],
+                    )
 
                     if "sim_lab_batches" not in st.session_state:
                         st.session_state["sim_lab_batches"] = []
@@ -1315,6 +1395,26 @@ def render_sim_lab(sport: str) -> None:
                                 st.warning(f"{err['date']}: {err['error']}")
         else:
             st.warning("No RG archive files found in data/rg_archive/nba/")
+
+        # --- Re-rank existing batch when slider button clicked ---
+        if _rerank_clicked:
+            batches = st.session_state.get("sim_lab_batches", [])
+            if batches:
+                latest = batches[-1]
+                for run in latest.get("runs", []):
+                    sdf = run.get("summary_df")
+                    if sdf is not None and not sdf.empty:
+                        # Drop old ranking cols so rank_lineups_for_se re-creates them
+                        for _drop_col in ("ricky_score", "ricky_rank", "ricky_tag"):
+                            if _drop_col in sdf.columns:
+                                sdf.drop(columns=[_drop_col], inplace=True)
+                        run["summary_df"] = rank_lineups_for_se(
+                            sdf,
+                            w_gpp=_ricky_weights["w_gpp"],
+                            w_ceil=_ricky_weights["w_ceil"],
+                            w_own=_ricky_weights["w_own"],
+                        )
+                st.toast("Lineups re-ranked with updated weights")
 
         # Ricky SE Shortlist (tagged lineups from latest batch)
         _render_ricky_shortlist()
