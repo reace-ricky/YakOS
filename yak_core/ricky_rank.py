@@ -12,17 +12,17 @@ on the main optimizer config or any state objects.
 
 Ranking formula
 ---------------
-    ricky_score = W_GPP * norm(gpp_score)
-                + W_CEIL * norm(ceiling)
-                + W_LEV * norm(leverage)
+    ricky_score = w_gpp * norm(gpp_score)
+                + w_ceil * norm(ceiling)
+                - w_own * norm(avg_own_pct)
 
-where norm() is min-max normalization per-slate and the weights are defined
-as module-level constants for easy tuning.
+where norm() is min-max normalization per-slate.  Ownership is SUBTRACTED
+so high-ownership lineups are penalized (lower score = chalky).
 
 Usage
 -----
     from yak_core.ricky_rank import rank_lineups_for_se
-    ranked = rank_lineups_for_se(summary_df)
+    ranked = rank_lineups_for_se(summary_df, w_gpp=1.0, w_ceil=0.8, w_own=0.3)
     shortlist = ranked[ranked["ricky_tag"] != ""]
 """
 
@@ -32,11 +32,13 @@ from typing import Dict, Optional
 
 import pandas as pd
 
-# ── Ranking weights (easy to tune) ──────────────────────────────────────────
-# Must sum to 1.0.  w_gpp >= w_ceil >= w_lev by default.
-RICKY_W_GPP: float = 0.50   # weight on total gpp_score across lineup
-RICKY_W_CEIL: float = 0.30  # weight on total ceiling (sum of per-player ceil)
-RICKY_W_LEV: float = 0.20   # weight on leverage metric (low-own edge)
+# ── Default ranking weights ─────────────────────────────────────────────────
+# These are the slider defaults shown in the UI.  They do NOT need to sum
+# to 1.0 — the formula uses raw weighted components so the user can crank
+# any knob independently.
+RICKY_W_GPP: float = 1.0    # GPP score weight (primary)
+RICKY_W_CEIL: float = 0.8   # ceiling weight (almost as important)
+RICKY_W_OWN: float = 0.3    # ownership penalty (soft — not the main driver)
 
 # Number of lineups to tag.  SE Core = rank 1, SE Spicy = rank 2,
 # SE Alt = rank 3.  Set to 2 to skip Alt tagging.
@@ -62,7 +64,7 @@ def rank_lineups_for_se(
     *,
     w_gpp: Optional[float] = None,
     w_ceil: Optional[float] = None,
-    w_lev: Optional[float] = None,
+    w_own: Optional[float] = None,
     tag_count: Optional[int] = None,
 ) -> pd.DataFrame:
     """Rank lineups and tag the top few for SE play.
@@ -75,7 +77,7 @@ def rank_lineups_for_se(
         - ``lineup_index`` — lineup identifier
         - ``total_gpp_score`` — sum of player gpp_score values in lineup
         - ``total_ceil`` — sum of player ceil values in lineup
-        - ``avg_own_pct`` — mean player ownership in lineup (lower = more leverage)
+        - ``avg_own_pct`` — mean player ownership in lineup (higher = chalkier)
         - ``total_proj`` — sum of player proj values (for display)
         - ``total_actual`` — sum of player actual FP (may be 0 in live mode)
         - ``total_salary`` — sum of player salary
@@ -83,9 +85,12 @@ def rank_lineups_for_se(
         Missing columns are tolerated; the corresponding weight component
         will be set to 0.
 
-    w_gpp, w_ceil, w_lev : float, optional
-        Override module-level weights for this call.
-
+    w_gpp : float, optional
+        Weight on GPP score.  Default 1.0.
+    w_ceil : float, optional
+        Weight on ceiling.  Default 0.8.
+    w_own : float, optional
+        Ownership penalty weight (subtracted).  Default 0.3.
     tag_count : int, optional
         Override RICKY_TAG_COUNT (number of lineups to tag).
 
@@ -107,7 +112,7 @@ def rank_lineups_for_se(
 
     _w_gpp = w_gpp if w_gpp is not None else RICKY_W_GPP
     _w_ceil = w_ceil if w_ceil is not None else RICKY_W_CEIL
-    _w_lev = w_lev if w_lev is not None else RICKY_W_LEV
+    _w_own = w_own if w_own is not None else RICKY_W_OWN
     _tag_count = tag_count if tag_count is not None else RICKY_TAG_COUNT
 
     out = summary.copy()
@@ -119,19 +124,16 @@ def rank_lineups_for_se(
     ceil_norm = _norm01(
         pd.to_numeric(out.get("total_ceil", pd.Series(0.0, index=out.index)), errors="coerce").fillna(0.0)
     )
-
-    # Leverage: lower ownership = MORE leverage, so we invert avg_own_pct.
-    avg_own = pd.to_numeric(
-        out.get("avg_own_pct", pd.Series(0.0, index=out.index)), errors="coerce"
-    ).fillna(0.0)
-    # Invert: high leverage = low ownership
-    lev_norm = _norm01(-avg_own)
+    own_norm = _norm01(
+        pd.to_numeric(out.get("avg_own_pct", pd.Series(0.0, index=out.index)), errors="coerce").fillna(0.0)
+    )
 
     # ── Composite score ─────────────────────────────────────────────────────
+    # Ownership is SUBTRACTED — higher ownership = lower score (penalty).
     out["ricky_score"] = (
         _w_gpp * gpp_norm
         + _w_ceil * ceil_norm
-        + _w_lev * lev_norm
+        - _w_own * own_norm
     ).round(4)
 
     # ── Rank (1 = best, dense ranking) ──────────────────────────────────────
