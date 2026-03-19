@@ -2374,10 +2374,10 @@
   "2026-03-18": {
     "slate_date": "2026-03-18",
     "overall": {
-      "mean_error": 0.01,
-      "mae": 7.43,
-      "rmse": 9.4,
-      "correlation": 0.7372,
+      "mean_error": 1.62,
+      "mae": 7.51,
+      "rmse": 9.56,
+      "correlation": 0.7368,
       "n_players": 174,
       "min_mae": 4.79,
       "min_rmse": 6.53,
@@ -2387,100 +2387,100 @@
     },
     "by_position": {
       "C": {
-        "mean_error": 1.14,
-        "median_error": 0.66,
+        "mean_error": 3.16,
+        "median_error": 2.58,
         "n": 24,
-        "mae": 5.04,
+        "mae": 5.49,
         "min_mae": 3.93,
         "min_mean_error": -0.4
       },
       "PF": {
-        "mean_error": -1.15,
-        "median_error": -1.01,
+        "mean_error": 0.91,
+        "median_error": 1.32,
         "n": 34,
-        "mae": 7.12,
+        "mae": 7.24,
         "min_mae": 5.49,
         "min_mean_error": -1.81
       },
       "PG": {
-        "mean_error": -1.44,
-        "median_error": -3.35,
+        "mean_error": 0.52,
+        "median_error": -1.62,
         "n": 35,
-        "mae": 8.43,
+        "mae": 8.23,
         "min_mae": 4.1,
         "min_mean_error": -0.59
       },
       "SF": {
-        "mean_error": -0.52,
-        "median_error": -0.46,
+        "mean_error": 0.32,
+        "median_error": 0.54,
         "n": 34,
-        "mae": 6.87,
+        "mae": 6.7,
         "min_mae": 5.56,
         "min_mean_error": 0.5
       },
       "SG": {
-        "mean_error": 1.73,
-        "median_error": 2.51,
+        "mean_error": 3.1,
+        "median_error": 3.87,
         "n": 47,
-        "mae": 8.54,
+        "mae": 8.79,
         "min_mae": 4.66,
         "min_mean_error": -0.54
       }
     },
     "by_salary_tier": {
       "<4K": {
-        "mean_error": 2.84,
-        "median_error": 2.75,
+        "mean_error": 4.14,
+        "median_error": 4.0,
         "n": 55,
-        "mae": 6.6,
+        "mae": 7.01,
         "min_mae": 6.47,
         "min_mean_error": -1.81
       },
       "4-5K": {
-        "mean_error": 0.18,
-        "median_error": -1.04,
+        "mean_error": 2.38,
+        "median_error": 0.86,
         "n": 38,
-        "mae": 7.28,
+        "mae": 7.38,
         "min_mae": 4.62,
         "min_mean_error": 0.67
       },
       "5-6K": {
-        "mean_error": 0.53,
-        "median_error": -0.88,
+        "mean_error": 2.67,
+        "median_error": 1.29,
         "n": 24,
-        "mae": 7.34,
+        "mae": 7.45,
         "min_mae": 4.59,
         "min_mean_error": -0.57
       },
       "6-7K": {
-        "mean_error": -1.8,
-        "median_error": -0.34,
+        "mean_error": -0.27,
+        "median_error": 0.32,
         "n": 21,
-        "mae": 8.9,
+        "mae": 8.92,
         "min_mae": 2.57,
         "min_mean_error": -0.35
       },
       "7-8K": {
-        "mean_error": -3.29,
-        "median_error": -4.54,
+        "mean_error": -2.41,
+        "median_error": -3.59,
         "n": 18,
-        "mae": 6.77,
+        "mae": 6.21,
         "min_mae": 3.24,
         "min_mean_error": -0.29
       },
       "8-9K": {
-        "mean_error": -2.09,
-        "median_error": -2.09,
+        "mean_error": -0.83,
+        "median_error": -0.5,
         "n": 10,
-        "mae": 8.29,
+        "mae": 8.38,
         "min_mae": 5.38,
         "min_mean_error": -0.73
       },
       "9K+": {
-        "mean_error": -7.05,
-        "median_error": -6.86,
+        "mean_error": -5.4,
+        "median_error": -4.92,
         "n": 8,
-        "mae": 10.74,
+        "mae": 9.86,
         "min_mae": 3.08,
         "min_mean_error": 0.92
       }
