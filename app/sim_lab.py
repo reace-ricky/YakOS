@@ -2,12 +2,14 @@
 
 Pick a contest preset, adjust knobs across 4 tuning groups,
 batch-run all available RG archive dates, and compare configs
-via trend chart + summary table.  Session-state only, no persistence.
+via trend chart + summary table.  Batch history persists to
+data/sim_lab/batch_history.parquet and syncs to GitHub.
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -36,6 +38,12 @@ _NBA_PRESETS = ["GPP Main", "GPP Early", "GPP Late", "Showdown", "Cash Main", "C
 _PGA_PRESETS = ["PGA GPP", "PGA Cash", "PGA Showdown"]
 
 _BATCH_COLORS = ["#4dabf7", "#00ff87", "#ffa726", "#ef5350", "#ab47bc", "#26c6da", "#d4e157", "#ff7043"]
+
+_HISTORY_DIR = Path(__file__).resolve().parent.parent / "data" / "sim_lab"
+_HISTORY_FILE = _HISTORY_DIR / "batch_history.parquet"
+_HISTORY_REL_PATH = "data/sim_lab/batch_history.parquet"
+
+_logger = logging.getLogger(__name__)
 
 
 def _get_secret(key: str) -> str:
@@ -70,6 +78,126 @@ def _config_hash(overrides: Dict[str, Any]) -> str:
     return hashlib.md5(
         json.dumps(overrides, sort_keys=True, default=str).encode()
     ).hexdigest()[:8]
+
+
+# ---------------------------------------------------------------------------
+# Batch history persistence
+# ---------------------------------------------------------------------------
+
+def _append_batch_history(batch: Dict[str, Any]) -> None:
+    """Append a batch summary row to the persistent history file.
+
+    Writes to data/sim_lab/batch_history.parquet and syncs to GitHub
+    so the history survives Streamlit Cloud restarts.
+    """
+    successful_runs = batch.get("runs", [])
+    best_slate_fp = 0.0
+    worst_slate_fp = 0.0
+    if successful_runs:
+        best_run = max(successful_runs, key=lambda r: r["avg_actual"])
+        worst_run = min(successful_runs, key=lambda r: r["avg_actual"])
+        best_slate_fp = best_run["avg_actual"]
+        worst_slate_fp = worst_run["avg_actual"]
+
+    row = {
+        "timestamp": datetime.now().isoformat(),
+        "sport": batch.get("runs", [{}])[0].get("sport", "NBA") if successful_runs else "NBA",
+        "preset": batch.get("preset", ""),
+        "config_hash": batch.get("config_hash", ""),
+        "num_dates": len(successful_runs) + len(batch.get("errors", [])),
+        "num_lineups": successful_runs[0].get("num_lineups", 0) if successful_runs else 0,
+        "avg_actual": batch.get("avg_actual", 0.0),
+        "avg_proj": batch.get("avg_proj", 0.0),
+        "best_slate": best_slate_fp,
+        "worst_slate": worst_slate_fp,
+        "beat_proj_pct": batch.get("beat_proj_pct", 0.0),
+        "errors": len(batch.get("errors", [])),
+    }
+
+    new_df = pd.DataFrame([row])
+
+    try:
+        _HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+
+        if _HISTORY_FILE.is_file():
+            existing = pd.read_parquet(_HISTORY_FILE)
+            combined = pd.concat([existing, new_df], ignore_index=True)
+        else:
+            combined = new_df
+
+        combined.to_parquet(_HISTORY_FILE, index=False)
+        _logger.info("Batch history appended: %s rows total", len(combined))
+
+        # Sync to GitHub so it survives cold starts
+        try:
+            from yak_core.github_persistence import sync_feedback_async
+            sync_feedback_async(
+                files=[_HISTORY_REL_PATH],
+                commit_message="Auto-sync Sim Lab batch history",
+            )
+        except Exception as sync_err:
+            _logger.warning("GitHub sync failed for batch history: %s", sync_err)
+
+    except Exception as exc:
+        _logger.warning("Failed to persist batch history: %s", exc)
+
+
+def _load_batch_history() -> pd.DataFrame:
+    """Load batch history from parquet. Returns empty DataFrame if missing."""
+    if _HISTORY_FILE.is_file():
+        try:
+            return pd.read_parquet(_HISTORY_FILE)
+        except Exception as exc:
+            _logger.warning("Failed to read batch history: %s", exc)
+    return pd.DataFrame()
+
+
+def _render_history_table() -> None:
+    """Render the persistent batch history table."""
+    history = _load_batch_history()
+    if history.empty:
+        st.caption("No batch history yet — run a batch to start tracking.")
+        return
+
+    st.subheader("Batch History")
+
+    # Sort newest first
+    if "timestamp" in history.columns:
+        history = history.sort_values("timestamp", ascending=False).reset_index(drop=True)
+
+    display = history.copy()
+
+    # Format timestamp for readability
+    if "timestamp" in display.columns:
+        display["timestamp"] = pd.to_datetime(display["timestamp"]).dt.strftime("%m/%d %I:%M %p")
+
+    col_rename = {
+        "timestamp": "When",
+        "preset": "Preset",
+        "config_hash": "Config",
+        "num_dates": "Dates",
+        "num_lineups": "Lineups",
+        "avg_actual": "Avg Actual",
+        "avg_proj": "Avg Proj",
+        "best_slate": "Best Slate",
+        "worst_slate": "Worst Slate",
+        "beat_proj_pct": "Beat Proj %",
+        "errors": "Errors",
+    }
+    show_cols = [c for c in col_rename if c in display.columns]
+    display = display[show_cols].rename(columns=col_rename)
+
+    st.dataframe(
+        display.style.format({
+            "Avg Actual": "{:.1f}",
+            "Avg Proj": "{:.1f}",
+            "Best Slate": "{:.1f}",
+            "Worst Slate": "{:.1f}",
+            "Beat Proj %": "{:.0f}%",
+        }),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -844,6 +972,9 @@ def render_sim_lab(sport: str) -> None:
                         st.session_state["sim_lab_batches"] = []
                     st.session_state["sim_lab_batches"].append(batch)
 
+                    # Persist to disk + GitHub
+                    _append_batch_history(batch)
+
                     n_ok = len(batch["runs"])
                     n_err = len(batch["errors"])
                     st.success(
@@ -862,6 +993,9 @@ def render_sim_lab(sport: str) -> None:
 
         # Comparison table
         _render_comparison_table()
+
+        # Persistent history (survives restarts)
+        _render_history_table()
 
     else:
         # --- PGA: single date flow (no RG archive) ---

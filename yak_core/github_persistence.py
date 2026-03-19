@@ -50,6 +50,7 @@ _FEEDBACK_FILES = [
     "data/calibration/active_config.json",
     "data/calibration/config_history.json",
     "data/calibration/optimizer_overrides.json",
+    "data/sim_lab/batch_history.parquet",
 ]
 
 # Binary file extensions that need base64 encoding directly from bytes
