@@ -137,23 +137,23 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "OWN_SOURCE": "auto",      # "auto" (salary-rank if missing), "salary_rank" (always generate)
     "STACK_WEIGHT": 0.10,      # prefer high-total games for stacking
     "VALUE_WEIGHT": 0.0,       # 0 = disabled; 0.1-0.3 = use value_score to boost value plays
-    # GPP scoring formula (v10 — ceiling-chasing for 350+ lineup totals)
-    # gpp_score = proj * PROJ_W + upside * UPSIDE_W + boom * BOOM_W + own_adj
+    # GPP scoring formula (v11 — rebalanced for 300+ lineup totals)
+    # gpp_score = proj * PROJ_W + upside * UPSIDE_W + boom * BOOM_W + own_adj + edge_bonus
     # where upside = SIM99TH (true ceiling), boom = SIM99TH - SIM50TH,
     # and own_adj uses a non-linear (log-based) penalty instead of flat -3.0.
-    "GPP_PROJ_WEIGHT": 0.35,          # projection weight — balanced with ceiling/boom
-    "GPP_UPSIDE_WEIGHT": 0.35,        # weight on sim 99th pctile (true ceiling from sims)
-    "GPP_BOOM_WEIGHT": 0.20,          # weight on boom potential (sim99 - sim50 spread)
-    "GPP_OWN_PENALTY_STRENGTH": 1.2,  # scales the log-based ownership penalty
+    "GPP_PROJ_WEIGHT": 0.30,          # projection weight — balanced with ceiling/boom
+    "GPP_UPSIDE_WEIGHT": 0.30,        # weight on sim 99th pctile (true ceiling from sims)
+    "GPP_BOOM_WEIGHT": 0.35,          # weight on boom potential (sim99 - sim50 spread)
+    "GPP_OWN_PENALTY_STRENGTH": 1.0,  # scales the log-based ownership penalty (reduced from 1.2)
     "GPP_OWN_LOW_BOOST": 0.50,        # boost for low-ownership (<8%) players
-    # v9 edge signal weights (additive on top of base GPP formula)
+    # v11 edge signal weights (additive on top of base GPP formula — all activated)
     "GPP_SMASH_WEIGHT": 0.15,         # boost high smash probability players
-    "GPP_LEVERAGE_WEIGHT": 0.10,      # prefer underowned edges
+    "GPP_LEVERAGE_WEIGHT": 0.05,      # prefer underowned edges (reduced from 0.10)
     "GPP_BUST_PENALTY": 0.10,         # penalize high bust risk
     "GPP_CATALYST_WEIGHT": 0.05,      # reward situational upside
     "GPP_EFFICIENCY_WEIGHT": 0.05,    # reward FP-per-minute efficiency
-    "GPP_FORM_WEIGHT": 0.10,          # recent form boost
-    "GPP_DVP_WEIGHT": 0.05,           # matchup boost
+    "GPP_FORM_WEIGHT": 0.08,          # recent form boost (reduced from 0.10)
+    "GPP_DVP_WEIGHT": 0.12,           # matchup boost (increased from 0.05)
     "GPP_RICKY_EDGE_WEIGHT": 0.10,    # weight for Ricky Signals edge_composite in GPP scoring
     "GPP_PROJ_FLOOR": 280,            # flag/filter lineups projecting below this total
     "GPP_MIN_LINEUP_CEILING": 350,    # re-enabled — studs constraint + ceiling objective prevent infeasibility
@@ -215,10 +215,20 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "archetype": "Ceiling Hunter",
         "internal_contest": "MME",
         "CONTEST_TYPE": "gpp",
-        # GPP scoring weights (canonical values — must match DEFAULT_CONFIG)
-        "GPP_PROJ_WEIGHT": 0.25,
-        "GPP_UPSIDE_WEIGHT": 0.35,
-        "GPP_BOOM_WEIGHT": 0.40,
+        # GPP scoring weights (v11 — rebalanced for 300+ lineup totals)
+        "GPP_PROJ_WEIGHT": 0.30,
+        "GPP_UPSIDE_WEIGHT": 0.30,
+        "GPP_BOOM_WEIGHT": 0.35,
+        "GPP_OWN_PENALTY_STRENGTH": 1.0,
+        # Edge signal weights (activated — v11)
+        "GPP_SMASH_WEIGHT": 0.15,
+        "GPP_DVP_WEIGHT": 0.12,
+        "GPP_PACE_ENV_WEIGHT": 0.10,
+        "GPP_FORM_WEIGHT": 0.08,
+        "GPP_BUST_PENALTY": 0.10,
+        "GPP_SPREAD_PENALTY_WEIGHT": 0.08,
+        "GPP_CATALYST_WEIGHT": 0.05,
+        "GPP_LEVERAGE_WEIGHT": 0.05,
         "projection_style": "ceil",
         "volatility": "high",
         "correlation_mode": "stack",
@@ -260,10 +270,20 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "archetype": "Ceiling Hunter",
         "internal_contest": "GPP",
         "CONTEST_TYPE": "gpp",
-        # GPP scoring weights (canonical values — must match DEFAULT_CONFIG)
-        "GPP_PROJ_WEIGHT": 0.25,
-        "GPP_UPSIDE_WEIGHT": 0.35,
-        "GPP_BOOM_WEIGHT": 0.40,
+        # GPP scoring weights (v11 — rebalanced for 300+ lineup totals)
+        "GPP_PROJ_WEIGHT": 0.30,
+        "GPP_UPSIDE_WEIGHT": 0.30,
+        "GPP_BOOM_WEIGHT": 0.35,
+        "GPP_OWN_PENALTY_STRENGTH": 1.0,
+        # Edge signal weights (activated — v11)
+        "GPP_SMASH_WEIGHT": 0.15,
+        "GPP_DVP_WEIGHT": 0.12,
+        "GPP_PACE_ENV_WEIGHT": 0.10,
+        "GPP_FORM_WEIGHT": 0.08,
+        "GPP_BUST_PENALTY": 0.10,
+        "GPP_SPREAD_PENALTY_WEIGHT": 0.08,
+        "GPP_CATALYST_WEIGHT": 0.05,
+        "GPP_LEVERAGE_WEIGHT": 0.05,
         "projection_style": "ceil",
         "volatility": "high",
         "correlation_mode": "stack",
@@ -305,10 +325,20 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "archetype": "Ceiling Hunter",
         "internal_contest": "GPP",
         "CONTEST_TYPE": "gpp",
-        # GPP scoring weights (canonical values — must match DEFAULT_CONFIG)
-        "GPP_PROJ_WEIGHT": 0.25,
-        "GPP_UPSIDE_WEIGHT": 0.35,
-        "GPP_BOOM_WEIGHT": 0.40,
+        # GPP scoring weights (v11 — rebalanced for 300+ lineup totals)
+        "GPP_PROJ_WEIGHT": 0.30,
+        "GPP_UPSIDE_WEIGHT": 0.30,
+        "GPP_BOOM_WEIGHT": 0.35,
+        "GPP_OWN_PENALTY_STRENGTH": 1.0,
+        # Edge signal weights (activated — v11)
+        "GPP_SMASH_WEIGHT": 0.15,
+        "GPP_DVP_WEIGHT": 0.12,
+        "GPP_PACE_ENV_WEIGHT": 0.10,
+        "GPP_FORM_WEIGHT": 0.08,
+        "GPP_BUST_PENALTY": 0.10,
+        "GPP_SPREAD_PENALTY_WEIGHT": 0.08,
+        "GPP_CATALYST_WEIGHT": 0.05,
+        "GPP_LEVERAGE_WEIGHT": 0.05,
         "projection_style": "ceil",
         "volatility": "high",
         "correlation_mode": "stack",
