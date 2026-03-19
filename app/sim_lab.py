@@ -577,7 +577,7 @@ def _render_config_panel(preset_name: str) -> Dict[str, Any]:
     with st.expander("Structure"):
         c1, c2 = st.columns(2)
         with c1:
-            _sl("Num Lineups", "NUM_LINEUPS", 1, 20, 1, 10)
+            _sl("Num Lineups", "NUM_LINEUPS", 1, 50, 1, 10)
             _sl("Min Salary Used", "MIN_SALARY_USED", 45000, 50000, 500, 49000)
         with c2:
             _sl("Max Exposure", "MAX_EXPOSURE", 0.1, 1.0, 0.05, 0.6)
