@@ -538,36 +538,40 @@ def _render_config_panel(preset_name: str) -> Dict[str, Any]:
             del overrides[key]
         return val
 
-    # Group 1: Smash/Bust (expanded by default)
-    with st.expander("Smash / Bust", expanded=True):
+    # Group 1: Core Weights (expanded by default)
+    with st.expander("Core Weights", expanded=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            _sl("Proj Weight", "GPP_PROJ_WEIGHT", 0.0, 0.60, 0.05, 0.30)
+            _sl("Upside Weight", "GPP_UPSIDE_WEIGHT", 0.0, 0.60, 0.05, 0.30)
+        with c2:
+            _sl("Boom Weight", "GPP_BOOM_WEIGHT", 0.0, 0.60, 0.05, 0.35)
+            _sl("Own Penalty Strength", "GPP_OWN_PENALTY_STRENGTH", 0.0, 3.0, 0.1, 1.0, fmt="%.1f")
+
+    # Group 2: Edge Signals
+    with st.expander("Edge Signals"):
         c1, c2 = st.columns(2)
         with c1:
             _sl("Smash Weight", "GPP_SMASH_WEIGHT", 0.0, 0.50, 0.05, 0.15)
-            _sl("Upside Weight", "GPP_UPSIDE_WEIGHT", 0.0, 0.60, 0.05, 0.35)
+            _sl("DVP Weight", "GPP_DVP_WEIGHT", 0.0, 0.30, 0.01, 0.12)
+            _sl("Pace Env Weight", "GPP_PACE_ENV_WEIGHT", 0.0, 0.30, 0.01, 0.10)
+            _sl("Form Weight", "GPP_FORM_WEIGHT", 0.0, 0.30, 0.01, 0.08)
         with c2:
             _sl("Bust Penalty", "GPP_BUST_PENALTY", 0.0, 0.50, 0.05, 0.10)
-            _sl("Boom Weight", "GPP_BOOM_WEIGHT", 0.0, 0.60, 0.05, 0.20)
-
-    # Group 2: Mins/Injury
-    with st.expander("Mins / Injury"):
-        c1, c2 = st.columns(2)
-        with c1:
+            _sl("Spread Penalty", "GPP_SPREAD_PENALTY_WEIGHT", 0.0, 0.30, 0.01, 0.08)
             _sl("Catalyst Weight", "GPP_CATALYST_WEIGHT", 0.0, 0.30, 0.05, 0.05)
-            _sl("Form Weight", "GPP_FORM_WEIGHT", 0.0, 0.30, 0.05, 0.10)
-        with c2:
             _sl("Efficiency Weight", "GPP_EFFICIENCY_WEIGHT", 0.0, 0.30, 0.05, 0.05)
-            _sl("Min Player Minutes", "MIN_PLAYER_MINUTES", 0, 20, 1, 0)
 
     # Group 3: Ownership Edge
     with st.expander("Ownership Edge"):
         c1, c2 = st.columns(2)
         with c1:
             _sl("Own Weight", "OWN_WEIGHT", 0.0, 1.0, 0.05, 0.0)
-            _sl("Leverage Weight", "GPP_LEVERAGE_WEIGHT", 0.0, 0.50, 0.05, 0.10)
+            _sl("Leverage Weight", "GPP_LEVERAGE_WEIGHT", 0.0, 0.50, 0.05, 0.05)
             _sl("Min Low Own Players", "GPP_MIN_LOW_OWN_PLAYERS", 0, 4, 1, 1)
         with c2:
-            _sl("Own Penalty Strength", "GPP_OWN_PENALTY_STRENGTH", 0.0, 3.0, 0.1, 1.2, fmt="%.1f")
             _sl("Low Own Threshold", "GPP_LOW_OWN_THRESHOLD", 0.0, 0.50, 0.05, 0.10)
+            _sl("Min Player Minutes", "MIN_PLAYER_MINUTES", 0, 30, 1, 0)
 
     # Group 4: Structure (collapsed)
     with st.expander("Structure"):
