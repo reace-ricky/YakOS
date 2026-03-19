@@ -37,6 +37,57 @@ from yak_core.live import fetch_actuals_from_api, fetch_live_dfs
 _NBA_PRESETS = ["GPP Main", "GPP Early", "GPP Late", "Showdown", "Cash Main", "Cash Game"]
 _PGA_PRESETS = ["PGA GPP", "PGA Cash", "PGA Showdown"]
 
+# ---------------------------------------------------------------------------
+# NBA GPP Archetypes — Sim Lab only, never touches main optimizer config.
+#
+# Each archetype is a named set of slider overrides applied on top of the
+# selected contest preset.  "Default" uses the preset as-is (no overrides).
+# Only active for NBA GPP presets (GPP Main, GPP Early, GPP Late).
+# ---------------------------------------------------------------------------
+
+_NBA_GPP_ARCHETYPES: Dict[str, Dict[str, Any]] = {
+    "Default": {
+        "description": "Current GPP preset — no overrides",
+        "overrides": {},
+    },
+    "Stars & Scrubs Ceiling": {
+        "description": "Heavy stud concentration + max ceiling. "
+                       "High boom weight, aggressive ownership penalty, "
+                       "fewer mid-range players.",
+        "overrides": {
+            "GPP_PROJ_WEIGHT": 0.20,
+            "GPP_UPSIDE_WEIGHT": 0.35,
+            "GPP_BOOM_WEIGHT": 0.45,
+            "GPP_OWN_PENALTY_STRENGTH": 1.4,
+            "GPP_SMASH_WEIGHT": 0.20,
+            "GPP_LEVERAGE_WEIGHT": 0.10,
+            "GPP_BUST_PENALTY": 0.05,
+            "NUM_LINEUPS": 20,
+            "MAX_EXPOSURE": 0.50,
+        },
+    },
+    "Balanced Leverage": {
+        "description": "Even weight split + strong ownership fade. "
+                       "Targets underowned edges across all salary tiers.",
+        "overrides": {
+            "GPP_PROJ_WEIGHT": 0.35,
+            "GPP_UPSIDE_WEIGHT": 0.30,
+            "GPP_BOOM_WEIGHT": 0.25,
+            "GPP_OWN_PENALTY_STRENGTH": 1.6,
+            "GPP_LEVERAGE_WEIGHT": 0.15,
+            "GPP_SMASH_WEIGHT": 0.10,
+            "GPP_BUST_PENALTY": 0.12,
+            "NUM_LINEUPS": 20,
+            "MAX_EXPOSURE": 0.45,
+        },
+    },
+}
+
+_NBA_GPP_ARCHETYPE_NAMES: List[str] = list(_NBA_GPP_ARCHETYPES.keys())
+
+# Presets that support archetypes (GPP-family only)
+_ARCHETYPE_ELIGIBLE_PRESETS = {"GPP Main", "GPP Early", "GPP Late"}
+
 _BATCH_COLORS = ["#4dabf7", "#00ff87", "#ffa726", "#ef5350", "#ab47bc", "#26c6da", "#d4e157", "#ff7043"]
 
 _HISTORY_DIR = Path(__file__).resolve().parent.parent / "data" / "sim_lab"
@@ -74,9 +125,11 @@ def _get_sandbox_overrides(preset: str) -> Dict[str, Any]:
     return dict(st.session_state.get(_sandbox_config_key(preset), {}))
 
 
-def _config_hash(overrides: Dict[str, Any]) -> str:
+def _config_hash(overrides: Dict[str, Any], archetype: str = "Default") -> str:
+    """Deterministic hash of slider overrides + archetype name."""
+    payload = {"archetype": archetype, **overrides}
     return hashlib.md5(
-        json.dumps(overrides, sort_keys=True, default=str).encode()
+        json.dumps(payload, sort_keys=True, default=str).encode()
     ).hexdigest()[:8]
 
 
@@ -103,6 +156,7 @@ def _append_batch_history(batch: Dict[str, Any]) -> None:
         "timestamp": datetime.now().isoformat(),
         "sport": batch.get("runs", [{}])[0].get("sport", "NBA") if successful_runs else "NBA",
         "preset": batch.get("preset", ""),
+        "archetype": batch.get("archetype", "Default"),
         "config_hash": batch.get("config_hash", ""),
         "num_dates": len(successful_runs) + len(batch.get("errors", [])),
         "num_lineups": successful_runs[0].get("num_lineups", 0) if successful_runs else 0,
@@ -174,6 +228,7 @@ def _render_history_table() -> None:
     col_rename = {
         "timestamp": "When",
         "preset": "Preset",
+        "archetype": "Archetype",
         "config_hash": "Config",
         "num_dates": "Dates",
         "num_lineups": "Lineups",
@@ -474,6 +529,7 @@ def _run_pipeline(
     selected_date: date,
     preset_name: str,
     sandbox_overrides: Dict[str, Any],
+    archetype: str = "Default",
 ) -> Dict[str, Any]:
     """Execute the full fetch -> build -> score pipeline. Returns a run dict."""
     date_key = selected_date.strftime("%Y%m%d")
@@ -604,12 +660,13 @@ def _run_pipeline(
     if len(summary) > 0:
         beat_proj_pct = float((summary["total_actual"] >= summary["total_proj"]).mean() * 100)
 
-    chash = _config_hash(sandbox_overrides)
+    chash = _config_hash(sandbox_overrides, archetype=archetype)
 
     return {
         "timestamp": datetime.now().isoformat(),
         "date": str(selected_date),
         "preset": preset_name,
+        "archetype": archetype,
         "sport": sport,
         "num_lineups": len(summary),
         "avg_actual": round(float(summary["total_actual"].mean()), 2) if len(summary) else 0,
@@ -724,6 +781,7 @@ def _run_batch(
     preset_name: str,
     sandbox_overrides: Dict[str, Any],
     dates: List[date],
+    archetype: str = "Default",
 ) -> Dict[str, Any]:
     """Run the pipeline for every date. Returns a batch record."""
     runs: List[Dict[str, Any]] = []
@@ -736,7 +794,7 @@ def _run_batch(
             text=f"Running {d.strftime('%Y-%m-%d')} ({i + 1}/{len(dates)})",
         )
         try:
-            run = _run_pipeline(sport, d, preset_name, sandbox_overrides)
+            run = _run_pipeline(sport, d, preset_name, sandbox_overrides, archetype=archetype)
             runs.append(run)
             # Also store in the flat run log
             if "sim_lab_runs" not in st.session_state:
@@ -747,7 +805,7 @@ def _run_batch(
 
     progress.empty()
 
-    chash = _config_hash(sandbox_overrides)
+    chash = _config_hash(sandbox_overrides, archetype=archetype)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # Determine batch number
@@ -758,11 +816,17 @@ def _run_batch(
     avg_proj = round(mean(r["avg_proj"] for r in runs), 2) if runs else 0
     beat_proj_pct = round(mean(r["beat_proj_pct"] for r in runs), 1) if runs else 0
 
+    # Config label includes archetype for non-Default
+    label = f"Run {batch_number}"
+    if archetype != "Default":
+        label = f"Run {batch_number} ({archetype})"
+
     return {
         "batch_id": f"{chash}_{timestamp}",
         "preset": preset_name,
+        "archetype": archetype,
         "config_hash": chash,
-        "config_label": f"Run {batch_number}",
+        "config_label": label,
         "overrides": sandbox_overrides.copy(),
         "runs": runs,
         "errors": errors,
@@ -888,6 +952,7 @@ def _render_comparison_table() -> None:
 
         rows.append({
             "Run": batch["config_label"],
+            "Archetype": batch.get("archetype", "Default"),
             "Config Hash": batch["config_hash"],
             "Avg Actual": batch["avg_actual"],
             "Avg Proj": batch["avg_proj"],
@@ -942,6 +1007,25 @@ def _render_run_log() -> None:
 # Main entry point
 # ---------------------------------------------------------------------------
 
+def _apply_archetype(preset_name: str, archetype_name: str) -> None:
+    """Seed slider overrides from an archetype when the user switches.
+
+    Only writes to the sandbox config dict stored in session_state;
+    the main optimizer config is never touched.
+    """
+    arch = _NBA_GPP_ARCHETYPES.get(archetype_name)
+    if not arch:
+        return
+
+    sk = _sandbox_config_key(preset_name)
+    if archetype_name == "Default":
+        # Clear overrides — sliders revert to preset defaults
+        st.session_state[sk] = {}
+    else:
+        # Seed overrides with archetype values
+        st.session_state[sk] = dict(arch["overrides"])
+
+
 def render_sim_lab(sport: str) -> None:
     """Render the Sim Lab tab."""
     st.header("\U0001f52c Sim Lab")
@@ -954,7 +1038,26 @@ def render_sim_lab(sport: str) -> None:
         key="sim_lab_preset",
     )
 
-    # Config panel (4 groups)
+    # --- Archetype selector (NBA GPP presets only) ---
+    archetype_name = "Default"
+    if sport == "NBA" and preset_name in _ARCHETYPE_ELIGIBLE_PRESETS:
+        archetype_name = st.selectbox(
+            "GPP Archetype",
+            options=_NBA_GPP_ARCHETYPE_NAMES,
+            key="sim_lab_archetype",
+            help=_NBA_GPP_ARCHETYPES.get(
+                st.session_state.get("sim_lab_archetype", "Default"), {}
+            ).get("description", ""),
+        )
+
+        # Detect archetype change and seed sliders
+        prev_arch = st.session_state.get("_sim_lab_prev_archetype", "Default")
+        if archetype_name != prev_arch:
+            _apply_archetype(preset_name, archetype_name)
+            st.session_state["_sim_lab_prev_archetype"] = archetype_name
+            st.rerun()
+
+    # Config panel (4 groups) — sliders read from sandbox overrides
     sandbox_overrides = _render_config_panel(preset_name)
 
     if sport == "NBA":
@@ -966,7 +1069,7 @@ def render_sim_lab(sport: str) -> None:
 
             if st.button("\U0001f504 Run All Dates", use_container_width=True, key="sim_lab_batch_run"):
                 with st.spinner("Running batch..."):
-                    batch = _run_batch(sport, preset_name, sandbox_overrides, rg_dates)
+                    batch = _run_batch(sport, preset_name, sandbox_overrides, rg_dates, archetype=archetype_name)
 
                     if "sim_lab_batches" not in st.session_state:
                         st.session_state["sim_lab_batches"] = []
