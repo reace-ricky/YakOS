@@ -21,7 +21,13 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-from yak_core.config import CONTEST_PRESETS, DEFAULT_CONFIG, merge_config
+from yak_core.config import (
+    CONTEST_PRESETS,
+    DEFAULT_CONFIG,
+    NAMED_PROFILES,
+    NAMED_PROFILE_LABELS,
+    merge_config,
+)
 from yak_core.edge import compute_edge_metrics
 from yak_core.lineups import (
     build_multiple_lineups_with_exposure,
@@ -180,6 +186,7 @@ def _append_batch_history(
         "archetype": batch.get("archetype", "Default"),
         "config_hash": batch.get("config_hash", ""),
         "config_label": batch.get("config_label", ""),
+        "profile_name": batch.get("profile_name", ""),
         "overrides_json": json.dumps(
             batch.get("overrides", {}), sort_keys=True, default=str,
         ),
@@ -204,7 +211,8 @@ def _append_batch_history(
             existing = pd.read_parquet(_HISTORY_FILE)
             # Ensure new columns exist on legacy data
             for col, default in [("is_baseline", False), ("removed", False),
-                                  ("config_label", ""), ("overrides_json", "{}")]:
+                                  ("config_label", ""), ("overrides_json", "{}"),
+                                  ("profile_name", "")]:
                 if col not in existing.columns:
                     existing[col] = default
             # If promoting a new baseline, demote the old one for same preset
@@ -260,7 +268,8 @@ def _promote_baseline(row_timestamp: str, preset_name: str) -> None:
     try:
         df = pd.read_parquet(_HISTORY_FILE)
         for col, default in [("is_baseline", False), ("removed", False),
-                              ("config_label", ""), ("overrides_json", "{}")]:
+                              ("config_label", ""), ("overrides_json", "{}"),
+                              ("profile_name", "")]:
             if col not in df.columns:
                 df[col] = default
 
@@ -333,7 +342,7 @@ def _render_history_table() -> None:
 
     # Ensure new columns on legacy data
     for col, default in [("is_baseline", False), ("removed", False),
-                          ("config_label", "")]:
+                          ("config_label", ""), ("profile_name", "")]:
         if col not in history.columns:
             history[col] = default
 
@@ -936,6 +945,7 @@ def _run_batch(
     ricky_w_gpp: Optional[float] = None,
     ricky_w_ceil: Optional[float] = None,
     ricky_w_own: Optional[float] = None,
+    profile_name: str = "",
 ) -> Dict[str, Any]:
     """Run the pipeline for every date. Returns a batch record."""
     runs: List[Dict[str, Any]] = []
@@ -986,6 +996,7 @@ def _run_batch(
         "archetype": archetype,
         "config_hash": chash,
         "config_label": label,
+        "profile_name": profile_name,
         "overrides": sandbox_overrides.copy(),
         "runs": runs,
         "errors": errors,
@@ -1118,7 +1129,7 @@ def _render_persistent_trend(preset_name: str) -> None:
 
     for col, default in [("is_baseline", False), ("removed", False),
                           ("config_label", ""), ("best_slate", 0.0),
-                          ("overrides_json", "{}")]:
+                          ("overrides_json", "{}"), ("profile_name", "")]:
         if col not in history.columns:
             history[col] = default
 
@@ -1286,7 +1297,8 @@ def _render_comparison_table(preset_name: str) -> None:
 
     # Ensure new columns on legacy data
     for col, default in [("is_baseline", False), ("removed", False),
-                          ("config_label", ""), ("overrides_json", "{}")]:
+                          ("config_label", ""), ("overrides_json", "{}"),
+                          ("profile_name", "")]:
         if col not in history.columns:
             history[col] = default
 
@@ -1332,9 +1344,14 @@ def _render_comparison_table(preset_name: str) -> None:
                 diff_b = row["beat_proj_pct"] - bl_beat
                 d_beat = f"{diff_b:+.0f}%"
 
+        profile_lbl = row.get("profile_name", "") or ""
+        if profile_lbl and profile_lbl in NAMED_PROFILES:
+            profile_lbl = NAMED_PROFILES[profile_lbl].get("display_name", profile_lbl)
+
         display_rows.append({
             "_ts": row["timestamp"],  # hidden key for actions
             "Run": label,
+            "Profile": profile_lbl,
             "When": ts,
             "Archetype": row.get("archetype", "Default"),
             "Dates": int(row.get("num_dates", 0)),
@@ -1746,9 +1763,64 @@ def _apply_archetype(preset_name: str, archetype_name: str) -> None:
         st.session_state[sk] = dict(arch["overrides"])
 
 
+def _apply_named_profile(profile_key: str) -> None:
+    """Apply a named profile: set preset, seed slider overrides, set Ricky weights.
+
+    Only writes to session_state sandbox config and Ricky weight keys.
+    Never touches the main optimizer config or CONTEST_PRESETS.
+    """
+    profile = NAMED_PROFILES.get(profile_key)
+    if not profile:
+        return
+    preset_name = profile["base_preset"]
+    sk = _sandbox_config_key(preset_name)
+    st.session_state[sk] = dict(profile["overrides"])
+
+    # Set Ricky weights
+    ricky_key = f"sim_lab_ricky_weights_{preset_name}"
+    st.session_state[ricky_key] = dict(profile["ricky_weights"])
+
+
 def render_sim_lab(sport: str) -> None:
     """Render the Sim Lab tab."""
     st.header("\U0001f52c Sim Lab")
+
+    # --- Named Profile selector (V1 profiles) ---
+    # Build profile options filtered by sport
+    _NONE_PROFILE = "(Manual)"
+    if sport == "NBA":
+        _profile_options = [_NONE_PROFILE] + [
+            k for k in NAMED_PROFILE_LABELS
+            if NAMED_PROFILES[k]["base_preset"] in _NBA_PRESETS
+        ]
+    else:
+        _profile_options = [_NONE_PROFILE] + [
+            k for k in NAMED_PROFILE_LABELS
+            if NAMED_PROFILES[k]["base_preset"] in _PGA_PRESETS
+        ]
+
+    selected_profile = st.selectbox(
+        "Named Profile",
+        options=_profile_options,
+        format_func=lambda k: NAMED_PROFILES[k]["display_name"] if k != _NONE_PROFILE else "Manual (custom sliders)",
+        key="sim_lab_profile",
+        help=(
+            NAMED_PROFILES.get(
+                st.session_state.get("sim_lab_profile", _NONE_PROFILE), {}
+            ).get("description", "Pick a frozen profile or use manual sliders.")
+        ),
+    )
+
+    # Detect profile change and seed everything
+    _prev_profile = st.session_state.get("_sim_lab_prev_profile", _NONE_PROFILE)
+    if selected_profile != _prev_profile:
+        st.session_state["_sim_lab_prev_profile"] = selected_profile
+        if selected_profile != _NONE_PROFILE:
+            _apply_named_profile(selected_profile)
+            # Force the contest preset selector to the profile's base preset
+            st.session_state["sim_lab_preset"] = NAMED_PROFILES[selected_profile]["base_preset"]
+            st.session_state["sim_lab_archetype"] = "Default"  # reset archetype
+            st.rerun()
 
     # Contest preset selector
     presets = _NBA_PRESETS if sport == "NBA" else _PGA_PRESETS
@@ -1757,6 +1829,11 @@ def render_sim_lab(sport: str) -> None:
         options=presets,
         key="sim_lab_preset",
     )
+
+    # Show active profile badge if using a named profile
+    if selected_profile != _NONE_PROFILE:
+        _p = NAMED_PROFILES[selected_profile]
+        st.caption(f"\u2705 Profile: **{_p['display_name']}** ({_p['version']}) — {_p['description']}")
 
     # --- Archetype selector (NBA GPP presets only) ---
     archetype_name = "Default"
@@ -1857,6 +1934,7 @@ def render_sim_lab(sport: str) -> None:
                             ricky_w_gpp=_ricky_weights["w_gpp"],
                             ricky_w_ceil=_ricky_weights["w_ceil"],
                             ricky_w_own=_ricky_weights["w_own"],
+                            profile_name=selected_profile if selected_profile != _NONE_PROFILE else "",
                         )
                         _bl_batch["config_label"] = "Baseline (main config)"
                         _bl_batch["overrides"] = {}
@@ -1877,6 +1955,7 @@ def render_sim_lab(sport: str) -> None:
                         ricky_w_gpp=_ricky_weights["w_gpp"],
                         ricky_w_ceil=_ricky_weights["w_ceil"],
                         ricky_w_own=_ricky_weights["w_own"],
+                        profile_name=selected_profile if selected_profile != _NONE_PROFILE else "",
                     )
                     batch["overrides"] = dict(sandbox_overrides)
 

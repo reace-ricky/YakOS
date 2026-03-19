@@ -606,6 +606,88 @@ PGA_CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
 # Merge PGA presets into the main dict
 CONTEST_PRESETS.update(PGA_CONTEST_PRESETS)
 
+# ============================================================
+# NAMED PROFILES (V1 — promoted configs + Ricky sorter weights)
+# ============================================================
+# Each profile is a frozen snapshot: base contest preset + slider overrides +
+# Ricky ranking weights.  Profiles are selectable in Sim Lab and Build pages.
+# The version tag (e.g. "V1") lets us track long-term trends across promotions.
+#
+# Keys:
+#   base_preset  — name of the CONTEST_PRESET this profile builds on
+#   overrides    — slider overrides applied on top of the preset (empty = use as-is)
+#   ricky_weights — {w_gpp, w_ceil, w_own} for rank_lineups_for_se
+#   version      — human-readable version tag
+#   description  — one-liner for the UI tooltip
+
+NAMED_PROFILES: Dict[str, Dict[str, Any]] = {
+    "GPP_MAIN_V1": {
+        "display_name": "GPP Main V1",
+        "base_preset": "GPP Main",
+        "overrides": {},  # Current GPP Main preset as-is — promoted baseline
+        "ricky_weights": {"w_gpp": 1.0, "w_ceil": 0.8, "w_own": 0.3},
+        "version": "V1",
+        "description": (
+            "Promoted GPP Main baseline — v11 scoring weights, "
+            "max_punt=2, min_mid=3, own_cap=6.0, Ricky sorter (1.0/0.8/0.3)"
+        ),
+    },
+    "CASH_MAIN_V1": {
+        "display_name": "Cash Main V1",
+        "base_preset": "Cash Main",
+        "overrides": {
+            # Floor-lock archetype: heavy projection weight, low volatility
+            "CASH_FLOOR_WEIGHT": 0.65,     # up from 0.60 — maximize floor
+            "CASH_PROJ_WEIGHT": 0.35,      # down from 0.40 — rely on floor
+            "NUM_LINEUPS": 1,              # single best cash lineup
+            "MAX_EXPOSURE": 0.80,
+            "MIN_SALARY_USED": 49500,      # tighter salary fill — cash hates dead money
+            "MIN_PLAYER_MINUTES": 20,      # only rostered rotation players
+            "GPP_MIN_PROJ_FLOOR": 15,      # higher floor bar for cash
+        },
+        "ricky_weights": {"w_gpp": 0.3, "w_ceil": 0.2, "w_own": 0.0},
+        "version": "V1",
+        "description": (
+            "Cash 50/50 & Double-Up — floor-lock, high minutes threshold, "
+            "chalk-friendly, single lineup, tight salary usage"
+        ),
+    },
+    "CASH_GAME_V1": {
+        "display_name": "Cash Game V1",
+        "base_preset": "Cash Game",
+        "overrides": {
+            # Small-field / 3-man cash — slightly looser than Cash Main
+            "CASH_FLOOR_WEIGHT": 0.55,     # less floor reliance — small fields reward upside
+            "CASH_PROJ_WEIGHT": 0.45,      # more projection weight
+            "NUM_LINEUPS": 1,
+            "MAX_EXPOSURE": 0.80,
+            "MIN_SALARY_USED": 49000,      # looser salary — fewer players to choose from
+            "MIN_PLAYER_MINUTES": 18,      # slightly lower — game slates have thin pools
+            "GPP_MIN_PROJ_FLOOR": 12,      # lower floor bar — thin pool needs flexibility
+        },
+        "ricky_weights": {"w_gpp": 0.5, "w_ceil": 0.4, "w_own": 0.1},
+        "version": "V1",
+        "description": (
+            "Cash for single-game / 3-man slates — slightly more ceiling than Cash Main, "
+            "looser constraints for thin player pools"
+        ),
+    },
+}
+
+NAMED_PROFILE_LABELS: List[str] = list(NAMED_PROFILES.keys())
+
+
+def get_profile_config(profile_key: str) -> Dict[str, Any]:
+    """Return a fully merged config dict for a named profile.
+
+    Resolves: DEFAULT_CONFIG ← base_preset ← profile overrides.
+    """
+    profile = NAMED_PROFILES[profile_key]
+    preset = CONTEST_PRESETS[profile["base_preset"]]
+    merged = merge_config({**preset, **profile["overrides"]})
+    return merged
+
+
 # Ordered list of ALL contest preset labels (internal, preserves display order)
 CONTEST_PRESET_LABELS: List[str] = list(CONTEST_PRESETS.keys())
 
