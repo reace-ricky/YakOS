@@ -372,7 +372,7 @@ def render_lab_tab(sport: str) -> None:
     st.markdown("---")
     st.markdown("### Build & Publish")
 
-    from yak_core.config import CONTEST_PRESETS
+    from yak_core.config import CONTEST_PRESETS, NAMED_PROFILES, NAMED_PROFILE_LABELS
 
     if is_pga:
         try:
@@ -385,14 +385,36 @@ def render_lab_tab(sport: str) -> None:
         else:
             contest_options = ["PGA Cash", "PGA Showdown"]
     else:
-        contest_options = ["GPP Main", "GPP Early", "Showdown", "Cash Main"]
+        contest_options = ["GPP Main", "GPP Early", "Showdown", "Cash Main", "Cash Game"]
     contest_options = [c for c in contest_options if c in CONTEST_PRESETS]
 
     _contest_display = {
         "PGA GPP": "PGA GPP (Full Tournament)",
     }
 
-    col_c, col_n = st.columns(2)
+    # Named profile selector — overrides contest preset config when active
+    _NONE_PROFILE_BUILD = "(None)"
+    _build_sport_presets = (
+        ["PGA GPP", "PGA Cash", "PGA Showdown"] if is_pga
+        else ["GPP Main", "GPP Early", "GPP Late", "Showdown", "Cash Main", "Cash Game"]
+    )
+    _build_profile_options = [_NONE_PROFILE_BUILD] + [
+        k for k in NAMED_PROFILE_LABELS
+        if NAMED_PROFILES[k]["base_preset"] in _build_sport_presets
+    ]
+
+    col_p, col_c, col_n = st.columns([2, 2, 1])
+    with col_p:
+        _build_profile = st.selectbox(
+            "Profile",
+            options=_build_profile_options,
+            format_func=lambda k: (
+                NAMED_PROFILES[k]["display_name"] if k != _NONE_PROFILE_BUILD
+                else "None (use preset defaults)"
+            ),
+            key=f"lab_profile_{sport}",
+            help="Select a named profile to apply its frozen config overrides.",
+        )
     with col_c:
         contest_label = st.selectbox(
             "Contest type", contest_options,
@@ -402,6 +424,21 @@ def render_lab_tab(sport: str) -> None:
     with col_n:
         preset = CONTEST_PRESETS.get(contest_label, {})
         num_lineups = st.number_input("Lineups", min_value=1, max_value=150, value=1, key=f"lab_nlu_{sport}")
+
+    # If a profile is selected, merge its overrides into the preset dict
+    _active_profile_overrides: dict = {}
+    if _build_profile != _NONE_PROFILE_BUILD:
+        _prof = NAMED_PROFILES[_build_profile]
+        _active_profile_overrides = dict(_prof["overrides"])
+        # Auto-switch contest type to match profile's base preset
+        if contest_label != _prof["base_preset"]:
+            st.info(
+                f"Profile **{_prof['display_name']}** is based on "
+                f"**{_prof['base_preset']}**. Switch contest type to match."
+            )
+        st.caption(f"\u2705 Profile: **{_prof['display_name']}** ({_prof['version']}) — {_prof['description']}")
+        # Merge overrides into preset so downstream build uses them
+        preset = {**preset, **_active_profile_overrides}
 
     if is_pga and contest_label == "PGA GPP":
         st.info("Full tournament lineup (4 rounds). Projections use multi-day model.")
@@ -521,6 +558,7 @@ def render_lab_tab(sport: str) -> None:
                         sport, contest_label, num_lineups, lock_list, exclude_list, out_dir,
                         showdown_teams=showdown_teams if showdown_teams else None,
                         dk_sd_file=dk_sd_file,
+                        profile_overrides=_active_profile_overrides if _active_profile_overrides else None,
                     )
                     n_built = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else 0
 
@@ -2041,7 +2079,7 @@ def _apply_dk_showdown_salaries(pool: pd.DataFrame, dk_sd_file) -> None:
     st.info(f"Showdown salaries applied: {_updated}/{len(pool)} players matched from DK CSV")
 
 
-def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None, dk_sd_file=None):
+def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None, dk_sd_file=None, profile_overrides=None):
     from yak_core.config import CONTEST_PRESETS, merge_config
     from yak_core.lineups import build_multiple_lineups_with_exposure, build_player_pool, build_showdown_lineups
     import re as _re
@@ -2054,8 +2092,11 @@ def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, o
         pool = _recheck_pga_withdrawals(pool)
 
     preset = CONTEST_PRESETS.get(contest_label, {})
+    # Merge profile overrides on top of the base preset (if a named profile is active)
+    _prof_ovr = profile_overrides or {}
     cfg = merge_config({
         **preset,
+        **_prof_ovr,
         "SPORT": sport.upper(),
         "NUM_LINEUPS": num_lineups,
         "LOCK": lock_list,
