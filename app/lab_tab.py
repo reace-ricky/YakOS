@@ -567,11 +567,105 @@ def render_lab_tab(sport: str) -> None:
 
                     st.success(f"Built {n_built} lineups for {contest_label}")
 
+                    # ── Ricky SE Ranking ─────────────────────────────────────
+                    # Rank lineups and tag top 3 as SE Core / Spicy / Alt
+                    try:
+                        from yak_core.ricky_rank import rank_lineups_for_se, RICKY_W_GPP, RICKY_W_CEIL, RICKY_W_OWN
+                        # Get Ricky weights from active profile, or use defaults
+                        _ricky_w = {"w_gpp": RICKY_W_GPP, "w_ceil": RICKY_W_CEIL, "w_own": RICKY_W_OWN}
+                        if _build_profile != _NONE_PROFILE_BUILD:
+                            _prof_rw = NAMED_PROFILES[_build_profile].get("ricky_weights", {})
+                            if _prof_rw:
+                                _ricky_w = _prof_rw
+
+                        # Summarize to one row per lineup
+                        _rank_cols = {
+                            "gpp_score": 0.0, "ceil": 0.0, "own_pct": 0.0,
+                            "proj": 0.0, "salary": 0,
+                        }
+                        for _rc, _rv in _rank_cols.items():
+                            if _rc not in lineups_df.columns:
+                                lineups_df[_rc] = _rv
+
+                        _lu_summary = (
+                            lineups_df.groupby("lineup_index")
+                            .agg(
+                                total_gpp_score=("gpp_score", "sum"),
+                                total_ceil=("ceil", "sum"),
+                                avg_own_pct=("own_pct", "mean"),
+                                total_proj=("proj", "sum"),
+                                total_salary=("salary", "sum"),
+                            )
+                            .reset_index()
+                        )
+
+                        _lu_ranked = rank_lineups_for_se(
+                            _lu_summary,
+                            w_gpp=_ricky_w.get("w_gpp", RICKY_W_GPP),
+                            w_ceil=_ricky_w.get("w_ceil", RICKY_W_CEIL),
+                            w_own=_ricky_w.get("w_own", RICKY_W_OWN),
+                        )
+
+                        # Show SE tagged lineups first
+                        _tagged = _lu_ranked[_lu_ranked["ricky_tag"] != ""].copy()
+                        if not _tagged.empty:
+                            st.markdown("#### \U0001f3af Ricky SE Picks")
+                            _tag_display = _tagged[[
+                                "lineup_index", "ricky_tag", "ricky_score",
+                                "total_gpp_score", "total_ceil", "total_proj",
+                                "avg_own_pct", "total_salary",
+                            ]].copy()
+                            _tag_display.columns = [
+                                "#", "Tag", "Score", "GPP",
+                                "Ceiling", "Proj", "Avg Own%", "Salary",
+                            ]
+                            st.dataframe(
+                                _tag_display.style.format({
+                                    "Score": "{:.3f}", "GPP": "{:.1f}",
+                                    "Ceiling": "{:.1f}", "Proj": "{:.1f}",
+                                    "Avg Own%": "{:.1%}", "Salary": "${:,.0f}",
+                                }),
+                                use_container_width=True, hide_index=True,
+                            )
+
+                            # Show players in each tagged lineup
+                            for _, _tag_row in _tagged.iterrows():
+                                _li = _tag_row["lineup_index"]
+                                _tag = _tag_row["ricky_tag"]
+                                _lu_players = lineups_df[lineups_df["lineup_index"] == _li].copy()
+                                _p_cols = ["player_name", "pos", "team", "salary", "proj", "ceil", "gpp_score", "own_pct"]
+                                _p_avail = [c for c in _p_cols if c in _lu_players.columns]
+                                with st.expander(f"{_tag} — Lineup #{int(_li)}"):
+                                    st.dataframe(_lu_players[_p_avail], use_container_width=True, hide_index=True)
+
+                        # Full ranking table
+                        with st.expander("Full Ricky Ranking"):
+                            _full_display = _lu_ranked.sort_values("ricky_rank")[[
+                                "lineup_index", "ricky_rank", "ricky_tag", "ricky_score",
+                                "total_gpp_score", "total_ceil", "total_proj",
+                                "avg_own_pct", "total_salary",
+                            ]].copy()
+                            _full_display.columns = [
+                                "#", "Rank", "Tag", "Score", "GPP",
+                                "Ceiling", "Proj", "Avg Own%", "Salary",
+                            ]
+                            st.dataframe(
+                                _full_display.style.format({
+                                    "Score": "{:.3f}", "GPP": "{:.1f}",
+                                    "Ceiling": "{:.1f}", "Proj": "{:.1f}",
+                                    "Avg Own%": "{:.1%}", "Salary": "${:,.0f}",
+                                }),
+                                use_container_width=True, hide_index=True,
+                            )
+                    except Exception as _rank_err:
+                        st.warning(f"Ricky ranking failed: {_rank_err}")
+
                     show_cols = ["lineup_index", "player_name", "pos", "salary", "proj"]
                     if "slot" in lineups_df.columns:
                         show_cols.insert(1, "slot")
                     avail = [c for c in show_cols if c in lineups_df.columns]
-                    st.dataframe(lineups_df[avail].head(40), use_container_width=True, hide_index=True)
+                    with st.expander("All Lineups (raw)"):
+                        st.dataframe(lineups_df[avail], use_container_width=True, hide_index=True)
                 except Exception as e:
                     st.error(f"Build lineups error: {e}")
 
