@@ -35,6 +35,7 @@ from yak_core.ricky_rank import (
     RICKY_W_OWN,
     rank_lineups_for_se,
 )
+from yak_core.sim_lab_report import summarize_sim_lab
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1212,6 +1213,78 @@ def _render_download_button() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Sim Lab Report (read-only analysis of CSV exports)
+# ---------------------------------------------------------------------------
+
+def _render_sim_lab_report() -> None:
+    """Render a read-only report from Sim Lab CSV exports."""
+    rank_summary, tag_summary, lineups_df = summarize_sim_lab(_HISTORY_DIR)
+
+    if rank_summary is None:
+        st.caption("No Sim Lab exports found yet — run a batch and download the CSV.")
+        return
+
+    # ── Rank Bucket Table ────────────────────────────────────────────────
+    st.markdown("**Lineup Performance by Ricky Rank Bucket**")
+    _fmt = {}
+    for c in ["Avg Diff", "Med Diff"]:
+        if c in rank_summary.columns:
+            _fmt[c] = "{:+.1f}"
+    for c in ["Avg Proj", "Avg Actual", "Avg GPP"]:
+        if c in rank_summary.columns:
+            _fmt[c] = "{:.1f}"
+    st.dataframe(
+        rank_summary.style.format(_fmt),
+        use_container_width=True,
+    )
+
+    # ── Rank Bucket Bar Chart ────────────────────────────────────────────
+    if "Avg Diff" in rank_summary.columns:
+        chart_df = rank_summary[["Avg Diff"]].copy()
+        if "Med Diff" in rank_summary.columns:
+            chart_df["Med Diff"] = rank_summary["Med Diff"]
+        st.bar_chart(chart_df)
+
+    # ── Tag Summary Table ────────────────────────────────────────────────
+    if tag_summary is not None and not tag_summary.empty:
+        st.markdown("**SE Tag Performance by Date**")
+        _tfmt = {}
+        for c in ["Avg Diff", "Med Diff"]:
+            if c in tag_summary.columns:
+                _tfmt[c] = "{:+.1f}"
+        for c in ["Avg Proj", "Avg Actual", "Avg Own%"]:
+            if c in tag_summary.columns:
+                _tfmt[c] = "{:.1f}"
+        st.dataframe(
+            tag_summary.style.format(_tfmt),
+            use_container_width=True,
+        )
+
+    # ── Ownership vs Diff Scatter ────────────────────────────────────────
+    if (lineups_df is not None
+            and not lineups_df.empty
+            and "avg_own_pct" in lineups_df.columns
+            and "diff" in lineups_df.columns):
+        st.markdown("**Ownership vs Diff**")
+        _tag_col = "ricky_tag" if "ricky_tag" in lineups_df.columns else None
+
+        scatter = lineups_df[["avg_own_pct", "diff"]].copy()
+        if _tag_col:
+            scatter["Tag"] = lineups_df[_tag_col].fillna("").replace("", "Untagged")
+        else:
+            scatter["Tag"] = "Untagged"
+        scatter = scatter.rename(columns={"avg_own_pct": "Avg Own%", "diff": "Diff"})
+
+        st.scatter_chart(
+            scatter,
+            x="Avg Own%",
+            y="Diff",
+            color="Tag",
+            use_container_width=True,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Run Log
 # ---------------------------------------------------------------------------
 
@@ -1483,6 +1556,10 @@ def render_sim_lab(sport: str) -> None:
                 ),
                 use_container_width=True,
             )
+
+    # Sim Lab Report (read-only analysis of CSV exports)
+    with st.expander("Sim Lab Report", expanded=False):
+        _render_sim_lab_report()
 
     # Run log (always visible at bottom)
     _render_run_log()
