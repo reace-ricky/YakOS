@@ -1,0 +1,170 @@
+"PLAYER (TEAM, POSITION)",REST,OPP (ET),DVP,SPREAD,O/U,"PRED
+SCORE","PROJ
+RANK","$
+RANK","RANK
+DIFF","PROJ
+PTS",SALARY,CPP
+Luka Doncic (LAL - PG),1,@MIA (Thu 8:00PM),24th,MIA -3.5,242.5,119.5,1,1,0,63.1,"$12,100",$192
+"Victor Wembanyama (SAS - C)
+DTD",2,PHO (Thu 8:00PM),15th,SAS -10,226.5,118.5,2,2,0,50.0,"$11,200",$224
+"Kawhi Leonard (LAC - SF)
+DTD",1,@NOR (Thu 8:00PM),24th,NOR -1.5,231.5,115,3,5,2,49.9,"$9,700",$195
+Jalen Duren (DET - C),2,@WAS (Thu 7:00PM),30th,DET -14.5,230.5,122.5,4,12,8,47.5,"$8,800",$185
+Donovan Mitchell (CLE - SG),2,@CHI (Thu 8:00PM),28th,-CLE 13,241,127,5,6,1,46.0,"$9,500",$207
+James Harden (CLE - PG),2,@CHI (Thu 8:00PM),18th,-CLE 13,241,127,6,8,2,45.4,"$9,100",$201
+Austin Reaves (LAL - PG/SG),1,@MIA (Thu 8:00PM),24th,MIA -3.5,242.5,119.5,7,18,11,42.3,"$8,000",$189
+Devin Booker (PHO - PG/SG),2,@SAS (Thu 8:00PM),10th,SAS -10,226.5,108.5,8,9,1,41.3,"$8,900",$215
+"Bam Adebayo (MIA - PF/C)
+DTD",5,LAL (Thu 8:00PM),10th,MIA -3.5,242.5,123,9,10,1,41.0,"$8,900",$217
+Paolo Banchero (ORL - PF),2,@CHA (Thu 7:00PM),14th,CHA -5.5,225.5,110,10,7,-3,40.7,"$9,400",$231
+Josh Giddey (CHI - PG),1,CLE (Thu 8:00PM),12th,-CLE 13,241,114,11,4,-7,40.6,"$10,000",$246
+LeBron James (LAL - PF),1,@MIA (Thu 8:00PM),29th,MIA -3.5,242.5,119.5,12,21,9,39.8,"$7,700",$193
+Evan Mobley (CLE - PF/C),2,@CHI (Thu 8:00PM),27th,-CLE 13,241,127,13,13,0,39.5,"$8,700",$220
+"LaMelo Ball (CHA - PG)
+DTD",2,ORL (Thu 7:00PM),19th,CHA -5.5,225.5,115.5,14,11,-3,39.2,"$8,800",$224
+Trey Murphy III (NOR - PG/SG),1,LAC (Thu 8:00PM),16th,NOR -1.5,231.5,116.5,15,15,0,38.7,"$8,100",$209
+Zion Williamson (NOR - PF),1,LAC (Thu 8:00PM),5th,NOR -1.5,231.5,116.5,16,19,3,38.0,"$7,900",$208
+"Darius Garland (LAC - PG)
+DTD",1,@NOR (Thu 8:00PM),15th,NOR -1.5,231.5,115,17,20,3,34.4,"$7,900",$229
+"Brandon Miller (CHA - SF)
+DTD",2,ORL (Thu 7:00PM),21st,CHA -5.5,225.5,115.5,18,16,-2,34.2,"$8,100",$237
+Desmond Bane (ORL - SG/SF),2,@CHA (Thu 7:00PM),12th,CHA -5.5,225.5,110,19,23,4,33.8,"$7,600",$225
+"Norman Powell (MIA - SG/SF)
+DTD",2,LAL (Thu 8:00PM),7th,MIA -3.5,242.5,123,20,35,15,33.5,"$6,700",$200
+"Tyler Herro (MIA - PG/SG)
+DTD",2,LAL (Thu 8:00PM),14th,MIA -3.5,242.5,123,21,14,-7,33.3,"$8,200",$246
+Jalen Green (PHO - SG/SF),2,@SAS (Thu 8:00PM),4th,SAS -10,226.5,108.5,22,31,9,32.8,"$7,300",$222
+Kon Knueppel (CHA - SG),2,ORL (Thu 7:00PM),6th,CHA -5.5,225.5,115.5,23,32,9,32.8,"$7,200",$220
+Stephon Castle (SAS - SG),2,PHO (Thu 8:00PM),2nd,SAS -10,226.5,118.5,24,22,-2,32.1,"$7,700",$240
+De'Aaron Fox (SAS - PG),2,PHO (Thu 8:00PM),4th,SAS -10,226.5,118.5,25,29,4,32.0,"$7,400",$231
+Matas Buzelis (CHI - SF/PF),1,CLE (Thu 8:00PM),10th,-CLE 13,241,114,26,28,2,31.9,"$7,500",$235
+Miles Bridges (CHA - PF),2,ORL (Thu 7:00PM),6th,CHA -5.5,225.5,115.5,27,41,14,31.4,"$6,200",$197
+Saddiq Bey (NOR - SF/PF),1,LAC (Thu 8:00PM),5th,NOR -1.5,231.5,116.5,28,38,10,29.8,"$6,600",$222
+Jalen Suggs (ORL - PG),2,@CHA (Thu 7:00PM),6th,CHA -5.5,225.5,110,29,33,4,29.3,"$7,000",$239
+Ausar Thompson (DET - SF),2,@WAS (Thu 7:00PM),29th,DET -14.5,230.5,122.5,30,43,13,29.3,"$6,200",$211
+Jordan Poole (NOR - PG/SG),3,LAC (Thu 8:00PM),16th,NOR -1.5,231.5,116.5,31,137,106,28.5,"$3,200",$112
+Collin Gillespie (PHO - PG),2,@SAS (Thu 8:00PM),10th,SAS -10,226.5,108.5,32,47,15,28.4,"$6,000",$212
+Tobias Harris (DET - PF),2,@WAS (Thu 7:00PM),30th,DET -14.5,230.5,122.5,33,46,13,27.9,"$6,000",$215
+"Jaime Jaquez Jr. (MIA - SF)
+DTD",2,LAL (Thu 8:00PM),23rd,MIA -3.5,242.5,123,34,42,8,27.9,"$6,200",$222
+"Grayson Allen (PHO - SG/SF)
+DTD",3,@SAS (Thu 8:00PM),4th,SAS -10,226.5,108.5,35,36,1,27.6,"$6,700",$243
+Deandre Ayton (LAL - C),1,@MIA (Thu 8:00PM),16th,MIA -3.5,242.5,119.5,36,60,24,26.9,"$5,100",$190
+John Collins (LAC - PF/C),1,@NOR (Thu 8:00PM),11th,NOR -1.5,231.5,115,37,49,12,26.8,"$5,700",$213
+Jaylon Tyson (CLE - SF/PF),2,@CHI (Thu 8:00PM),18th,-CLE 13,241,127,38,85,47,26.8,"$4,600",$171
+"Alex Sarr (WAS - C)
+DTD",5,DET (Thu 7:00PM),7th,DET -14.5,230.5,108,39,37,-2,26.8,"$6,700",$250
+Dennis Schroder (CLE - PG),2,@CHI (Thu 8:00PM),18th,-CLE 13,241,127,40,100,60,26.3,"$4,000",$152
+"Kel'el Ware (MIA - C)
+DTD",2,LAL (Thu 8:00PM),4th,MIA -3.5,242.5,123,41,40,-1,25.9,"$6,300",$243
+Tre Jones (CHI - PG/SG),1,CLE (Thu 8:00PM),12th,-CLE 13,241,114,42,45,3,25.4,"$6,100",$240
+"Devin Vassell (SAS - SF)
+DTD",3,PHO (Thu 8:00PM),13th,SAS -10,226.5,118.5,43,61,18,25.4,"$5,100",$201
+Wendell Carter Jr. (ORL - C),2,@CHA (Thu 7:00PM),3rd,CHA -5.5,225.5,110,44,55,11,25.3,"$5,300",$209
+Will Riley (WAS - SF/PF),2,DET (Thu 7:00PM),6th,DET -14.5,230.5,108,45,58,13,25.0,"$5,300",$212
+Jeremiah Fears (NOR - PG/SG),1,LAC (Thu 8:00PM),16th,NOR -1.5,231.5,116.5,46,83,37,24.0,"$4,700",$195
+"Collin Sexton (CHI - SG/SF)
+DTD",1,CLE (Thu 8:00PM),15th,-CLE 13,241,114,47,53,6,23.8,"$5,400",$227
+"Moussa Diabate (CHA - C)
+DTD",2,ORL (Thu 7:00PM),11th,CHA -5.5,225.5,115.5,48,51,3,23.2,"$5,600",$241
+Sam Merrill (CLE - SG),2,@CHI (Thu 8:00PM),28th,-CLE 13,241,127,49,90,41,23.1,"$4,400",$191
+Davion Mitchell (MIA - PG),2,LAL (Thu 8:00PM),14th,MIA -3.5,242.5,123,50,82,32,23.0,"$4,700",$205
+Julian Champagnie (SAS - SF/PF),2,PHO (Thu 8:00PM),13th,SAS -10,226.5,118.5,51,72,21,22.9,"$4,900",$214
+"Royce O'Neale (PHO - PF)
+DTD",2,@SAS (Thu 8:00PM),7th,SAS -10,226.5,108.5,52,69,17,22.8,"$4,900",$215
+Duncan Robinson (DET - SG),2,@WAS (Thu 7:00PM),27th,DET -14.5,230.5,122.5,53,70,17,22.8,"$4,900",$215
+Herbert Jones (NOR - SF/PF),1,LAC (Thu 8:00PM),5th,NOR -1.5,231.5,116.5,54,71,17,22.8,"$4,900",$215
+"Bilal Coulibaly (WAS - SF/PF)
+DTD",3,DET (Thu 7:00PM),6th,DET -14.5,230.5,108,55,65,10,22.8,"$5,000",$220
+Marcus Smart (LAL - SG/SF),1,@MIA (Thu 8:00PM),20th,MIA -3.5,242.5,119.5,56,80,24,22.7,"$4,700",$207
+Kevin Huerter (DET - SG/SF),2,@WAS (Thu 7:00PM),27th,DET -14.5,230.5,122.5,57,98,41,22.6,"$4,100",$182
+"Dylan Harper (SAS - PG/SG)
+DTD",2,PHO (Thu 8:00PM),4th,SAS -10,226.5,118.5,58,86,28,22.3,"$4,600",$207
+Keldon Johnson (SAS - SG/SF),2,PHO (Thu 8:00PM),2nd,SAS -10,226.5,118.5,59,92,33,22.0,"$4,300",$196
+"Dejounte Murray (NOR - PG)
+DTD",1,LAC (Thu 8:00PM),16th,NOR -1.5,231.5,116.5,60,25,-35,21.9,"$7,500",$343
+"Coby White (CHA - PG/SG)
+DTD",2,ORL (Thu 7:00PM),19th,CHA -5.5,225.5,115.5,61,81,20,21.9,"$4,700",$215
+Rui Hachimura (LAL - SF/PF),1,@MIA (Thu 8:00PM),20th,MIA -3.5,242.5,119.5,62,109,47,21.4,"$3,800",$178
+Bub Carrington (WAS - PG/SG),2,DET (Thu 7:00PM),3rd,DET -14.5,230.5,108,63,75,12,21.4,"$4,900",$229
+"Pelle Larsson (MIA - SG/SF)
+DTD",2,LAL (Thu 8:00PM),7th,MIA -3.5,242.5,123,64,59,-5,21.3,"$5,200",$244
+Kris Dunn (LAC - PG/SG),1,@NOR (Thu 8:00PM),15th,NOR -1.5,231.5,115,65,63,-2,21.2,"$5,000",$235
+Jalen Smith (CHI - C),1,CLE (Thu 8:00PM),13th,-CLE 13,241,114,66,52,-14,21.2,"$5,500",$259
+Jordan Goodwin (PHO - PG/SG),2,@SAS (Thu 8:00PM),10th,SAS -10,226.5,108.5,67,88,21,20.8,"$4,500",$217
+Derrick Jones Jr. (LAC - SF/PF),1,@NOR (Thu 8:00PM),24th,NOR -1.5,231.5,115,68,54,-14,20.7,"$5,300",$256
+Caris LeVert (DET - SG/SF),2,@WAS (Thu 7:00PM),27th,DET -14.5,230.5,122.5,69,104,35,20.4,"$3,900",$191
+Jake LaRavia (LAL - SG/SF),1,@MIA (Thu 8:00PM),20th,MIA -3.5,242.5,119.5,70,128,58,20.2,"$3,400",$168
+"Ryan Kalkbrenner (CHA - C)
+DTD",2,ORL (Thu 7:00PM),11th,CHA -5.5,225.5,115.5,71,103,32,20.1,"$4,000",$199
+Ronald Holland II (DET - PF),2,@WAS (Thu 7:00PM),30th,DET -14.5,230.5,122.5,72,110,38,19.7,"$3,800",$193
+Max Strus (CLE - SG/SF),2,@CHI (Thu 8:00PM),28th,-CLE 13,241,127,73,56,-17,19.2,"$5,300",$276
+Derik Queen (NOR - PF),1,LAC (Thu 8:00PM),5th,NOR -1.5,231.5,116.5,74,91,17,18.6,"$4,400",$237
+Daniss Jenkins (DET - PG),2,@WAS (Thu 7:00PM),25th,DET -14.5,230.5,122.5,75,68,-7,18.5,"$5,000",$270
+Tre Johnson (WAS - PG/SG),2,DET (Thu 7:00PM),3rd,DET -14.5,230.5,108,76,87,11,18.2,"$4,600",$253
+Isaiah Jackson (LAC - C),1,@NOR (Thu 8:00PM),24th,NOR -1.5,231.5,115,77,95,18,18.1,"$4,200",$232
+"Luke Kornet (SAS - C)
+DTD",2,PHO (Thu 8:00PM),15th,SAS -10,226.5,118.5,78,124,46,17.9,"$3,400",$190
+"Nikola Jovic (MIA - PF/C)
+DTD",27,LAL (Thu 8:00PM),10th,MIA -3.5,242.5,123,79,170,91,17.8,"$3,000",$168
+Tristan da Silva (ORL - SF/PF),2,@CHA (Thu 7:00PM),7th,CHA -5.5,225.5,110,80,66,-14,17.8,"$5,000",$282
+Oso Ighodaro (PHO - C),2,@SAS (Thu 8:00PM),19th,SAS -10,226.5,108.5,81,67,-14,17.4,"$5,000",$287
+Dean Wade (CLE - SF),2,@CHI (Thu 8:00PM),18th,-CLE 13,241,127,82,120,38,17.3,"$3,500",$203
+"Isaac Okoro (CHI - SG/SF)
+DTD",11,CLE (Thu 8:00PM),15th,-CLE 13,241,114,83,101,18,17.1,"$4,000",$234
+Justin Champagnie (WAS - PF),2,DET (Thu 7:00PM),9th,DET -14.5,230.5,108,84,77,-7,16.6,"$4,800",$289
+Bogdan Bogdanovic (LAC - PG/SG),1,@NOR (Thu 8:00PM),15th,NOR -1.5,231.5,115,85,151,66,16.5,"$3,000",$181
+Luke Kennard (LAL - PG/SG),1,@MIA (Thu 8:00PM),24th,MIA -3.5,242.5,119.5,86,115,29,16.5,"$3,600",$218
+Javonte Green (DET - SF/PF),2,@WAS (Thu 7:00PM),29th,DET -14.5,230.5,122.5,87,126,39,16.4,"$3,400",$208
+"Dru Smith (MIA - PG)
+DTD",2,LAL (Thu 8:00PM),14th,MIA -3.5,242.5,123,88,138,50,16.4,"$3,200",$195
+Goga Bitadze (ORL - C),2,@CHA (Thu 7:00PM),3rd,CHA -5.5,225.5,110,89,116,27,16.2,"$3,600",$223
+Grant Williams (CHA - PF),2,ORL (Thu 7:00PM),6th,CHA -5.5,225.5,115.5,90,117,27,16.2,"$3,600",$222
+"Simone Fontecchio (MIA - PF)
+DTD",2,LAL (Thu 8:00PM),10th,MIA -3.5,242.5,123,91,129,38,16.0,"$3,400",$213
+Ryan Dunn (PHO - PF),2,@SAS (Thu 8:00PM),7th,SAS -10,226.5,108.5,92,140,48,15.6,"$3,200",$205
+Jaxson Hayes (LAL - C),1,@MIA (Thu 8:00PM),16th,MIA -3.5,242.5,119.5,93,119,26,14.9,"$3,500",$234
+Patrick Williams (CHI - PF),1,CLE (Thu 8:00PM),24th,-CLE 13,241,114,94,112,18,14.9,"$3,700",$248
+Jarred Vanderbilt (LAL - PF),7,@MIA (Thu 8:00PM),29th,MIA -3.5,242.5,119.5,95,159,64,14.7,"$3,000",$204
+Keon Ellis (CLE - SF/PF),2,@CHI (Thu 8:00PM),18th,-CLE 13,241,127,96,89,-7,14.7,"$4,500",$305
+DeAndre Jordan (NOR - C),8,LAC (Thu 8:00PM),14th,NOR -1.5,231.5,116.5,97,148,51,14.3,"$3,000",$210
+"Tre Mann (CHA - PG/SG)
+DTD",2,ORL (Thu 7:00PM),19th,CHA -5.5,225.5,115.5,98,165,67,14.3,"$3,000",$209
+"Sion James (CHA - SF/PF)
+DTD",2,ORL (Thu 7:00PM),21st,CHA -5.5,225.5,115.5,99,135,36,14.1,"$3,300",$234
+Larry Nance Jr. (CLE - PF/C),6,@CHI (Thu 8:00PM),27th,-CLE 13,241,127,100,155,55,13.8,"$3,000",$218
+Jordan Miller (LAC - PG/SG),1,@NOR (Thu 8:00PM),15th,NOR -1.5,231.5,115,101,78,-23,13.1,"$4,800",$367
+Kevon Looney (NOR - C),36,LAC (Thu 8:00PM),14th,NOR -1.5,231.5,116.5,102,153,51,12.9,"$3,000",$232
+Tristan Vukcevic (WAS - C),2,DET (Thu 7:00PM),7th,DET -14.5,230.5,108,103,74,-29,12.5,"$4,900",$392
+D'Angelo Russell (WAS - PG),68,DET (Thu 7:00PM),3rd,DET -14.5,230.5,108,104,152,48,12.4,"$3,000",$242
+Marcus Sasser (DET - PG/SG),2,@WAS (Thu 7:00PM),25th,DET -14.5,230.5,122.5,105,62,-43,12.4,"$5,100",$411
+Brook Lopez (LAC - C),1,@NOR (Thu 8:00PM),24th,NOR -1.5,231.5,115,106,79,-27,12.3,"$4,700",$382
+Harrison Barnes (SAS - PF),2,PHO (Thu 8:00PM),13th,SAS -10,226.5,118.5,107,108,1,12.3,"$3,800",$310
+Guerschon Yabusele (CHI - PF/C),1,CLE (Thu 8:00PM),24th,-CLE 13,241,114,108,84,-24,12.3,"$4,600",$375
+Jevon Carter (ORL - PG/SG),2,@CHA (Thu 7:00PM),6th,CHA -5.5,225.5,110,109,105,-4,12.3,"$3,900",$317
+Kobe Sanders (LAC - SG/SF),1,@NOR (Thu 8:00PM),29th,NOR -1.5,231.5,115,110,141,31,12.2,"$3,200",$262
+Jaden Hardy (WAS - SG),2,DET (Thu 7:00PM),5th,DET -14.5,230.5,108,111,96,-15,11.8,"$4,200",$355
+Kelly Olynyk (SAS - PF/C),2,PHO (Thu 8:00PM),13th,SAS -10,226.5,118.5,112,136,24,11.7,"$3,200",$274
+Rob Dillingham (CHI - PG/SG),1,CLE (Thu 8:00PM),12th,-CLE 13,241,114,113,93,-20,11.7,"$4,300",$368
+Noah Penda (ORL - SF/PF),2,@CHA (Thu 7:00PM),7th,CHA -5.5,225.5,110,114,123,9,11.7,"$3,500",$298
+"Nicolas Batum (LAC - PF)
+DTD",3,@NOR (Thu 8:00PM),11th,NOR -1.5,231.5,115,115,142,27,11.3,"$3,100",$274
+Mac McClung (CHI - PG/SG),42,CLE (Thu 8:00PM),12th,-CLE 13,241,114,116,162,46,11.3,"$3,000",$265
+Karlo Matkovic (NOR - PF/C),1,LAC (Thu 8:00PM),5th,NOR -1.5,231.5,116.5,117,107,-10,11.3,"$3,900",$346
+Nae'Qwan Tomlin (CLE - PF),4,@CHI (Thu 8:00PM),27th,-CLE 13,241,127,118,202,84,10.8,"$3,000",$279
+Paul Reed (DET - C),2,@WAS (Thu 7:00PM),30th,DET -14.5,230.5,122.5,119,102,-17,10.6,"$4,000",$376
+Nick Smith Jr. (LAL - PG),37,@MIA (Thu 8:00PM),24th,MIA -3.5,242.5,119.5,120,177,57,9.9,"$3,000",$304
+Kasparas Jakucionis (MIA - PG),2,LAL (Thu 8:00PM),14th,MIA -3.5,242.5,123,121,122,1,8.9,"$3,500",$395
+Nick Richards (CHI - C),1,CLE (Thu 8:00PM),13th,-CLE 13,241,114,122,99,-23,8.7,"$4,100",$471
+Yves Missi (NOR - C),1,LAC (Thu 8:00PM),14th,NOR -1.5,231.5,116.5,123,97,-26,8.7,"$4,200",$485
+Mason Plumlee (SAS - C),3,PHO (Thu 8:00PM),15th,SAS -10,226.5,118.5,124,150,26,8.6,"$3,000",$351
+"Xavier Tillman Sr. (CHA - C)
+DTD",2,ORL (Thu 7:00PM),11th,CHA -5.5,225.5,115.5,125,164,39,8.5,"$3,000",$353
+"Bryce McGowens (NOR - SG/SF)
+DTD",11,LAC (Thu 8:00PM),17th,NOR -1.5,231.5,116.5,126,127,1,8.4,"$3,400",$407
+Thomas Bryant (CLE - C),2,@CHI (Thu 8:00PM),26th,-CLE 13,241,127,127,131,4,7.9,"$3,300",$417
+Dalton Knecht (LAL - SG/SF),9,@MIA (Thu 8:00PM),20th,MIA -3.5,242.5,119.5,128,181,53,7.7,"$3,000",$388
+"Maxi Kleber (LAL - PF/C)
+DTD",11,@MIA (Thu 8:00PM),29th,MIA -3.5,242.5,119.5,129,158,29,7.2,"$3,000",$419
+Jamir Watkins (WAS - SG/SF),2,DET (Thu 7:00PM),5th,DET -14.5,230.5,108,130,94,-36,7.2,"$4,300",$598
+Jordan Hawkins (NOR - SG/SF),3,LAC (Thu 8:00PM),17th,NOR -1.5,231.5,116.5,131,176,45,7.1,"$3,000",$421
