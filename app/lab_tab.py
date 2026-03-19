@@ -559,6 +559,7 @@ def render_lab_tab(sport: str) -> None:
                         showdown_teams=showdown_teams if showdown_teams else None,
                         dk_sd_file=dk_sd_file,
                         profile_overrides=_active_profile_overrides if _active_profile_overrides else None,
+                        profile_name=_build_profile if _build_profile != _NONE_PROFILE_BUILD else "",
                     )
                     n_built = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else 0
 
@@ -2173,7 +2174,7 @@ def _apply_dk_showdown_salaries(pool: pd.DataFrame, dk_sd_file) -> None:
     st.info(f"Showdown salaries applied: {_updated}/{len(pool)} players matched from DK CSV")
 
 
-def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None, dk_sd_file=None, profile_overrides=None):
+def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None, dk_sd_file=None, profile_overrides=None, profile_name=""):
     from yak_core.config import CONTEST_PRESETS, merge_config
     from yak_core.lineups import build_multiple_lineups_with_exposure, build_player_pool, build_showdown_lineups
     import re as _re
@@ -2319,11 +2320,16 @@ def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, o
     lineups_out = out_dir / f"{contest_slug}_lineups.parquet"
     exposure_out = out_dir / f"{contest_slug}_exposure.parquet"
     meta_out = out_dir / f"{contest_slug}_meta.json"
+    # Add profile_name column for downstream analysis/filtering
+    if profile_name:
+        lineups_df["profile_name"] = profile_name
+
     lineups_df.to_parquet(str(lineups_out), index=False)
     exposure_df.to_parquet(str(exposure_out), index=False)
     with open(meta_out, "w") as f:
         meta_data = {"contest": contest_label, "sport": sport.upper(), "num_lineups": num_lineups,
-                     "built_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %I:%M %p ET"), "lock": lock_list, "exclude": exclude_list}
+                     "built_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %I:%M %p ET"), "lock": lock_list, "exclude": exclude_list,
+                     "profile_name": profile_name}
         if showdown_teams:
             meta_data["matchup"] = " vs ".join(showdown_teams)
         json.dump(meta_data, f, indent=2)

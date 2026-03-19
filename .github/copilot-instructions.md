@@ -54,7 +54,7 @@ If these 3 steps aren’t present, the feature is NOT done.
 - `NAMED_PROFILES` in `yak_core/config.py` stores frozen, versioned config snapshots.
 - Each profile bundles: base contest preset + slider overrides + Ricky ranking weights.
 - Current profiles: `GPP_MAIN_V1`, `CASH_MAIN_V1`, `CASH_GAME_V1`.
-- Profiles are selectable in Sim Lab and Build & Publish pages.
+- Profiles are selectable in Sim Lab, The Lab (Build & Publish), and the Optimizer tab.
 - To promote a new version: copy the existing profile, bump version (V2), update overrides.
 - `get_profile_config(profile_key)` returns the fully merged config dict.
 - `batch_history.parquet` tracks which `profile_name` was used for each run.
