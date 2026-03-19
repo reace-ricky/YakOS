@@ -69,6 +69,42 @@ def _build_optimizer_cfg(
     return cfg
 
 
+def _build_dk_csv(lineups_df: pd.DataFrame, *, is_pga: bool = False) -> pd.DataFrame:
+    """Build a DK-upload-style CSV from long-format lineups.
+
+    Each output row = one lineup.  Columns: PG, SG, SF, PF, C, G, F, UTIL
+    (Classic NBA) or G1..G6 (PGA).  Falls back to positional slots.
+    """
+    if lineups_df.empty:
+        return pd.DataFrame()
+
+    from yak_core.config import DK_POS_SLOTS, DK_PGA_POS_SLOTS
+
+    slots = DK_PGA_POS_SLOTS if is_pga else DK_POS_SLOTS
+    rows = []
+    for lu_idx in sorted(lineups_df["lineup_index"].unique()):
+        lu = lineups_df[lineups_df["lineup_index"] == lu_idx]
+        row: dict = {"Entry ID": "", "Contest Name": "", "Contest ID": "", "Entry Fee": ""}
+        # Use slot column if available, otherwise assign by position order
+        if "slot" in lu.columns:
+            for _, p in lu.iterrows():
+                slot = p["slot"]
+                # Handle duplicate slot names (e.g. multiple G for PGA)
+                col_name = slot
+                i = 1
+                while col_name in row:
+                    i += 1
+                    col_name = f"{slot}{i}"
+                row[col_name] = p.get("player_name", "")
+        else:
+            for i, (_, p) in enumerate(lu.iterrows()):
+                col_name = slots[i] if i < len(slots) else f"UTIL{i}"
+                row[col_name] = p.get("player_name", "")
+        rows.append(row)
+
+    return pd.DataFrame(rows)
+
+
 def render_optimizer_tab(sport: str) -> None:
     """Render the Optimizer tab."""
     from app.data_loader import load_published_data
@@ -153,7 +189,7 @@ def render_optimizer_tab(sport: str) -> None:
     st.markdown("---")
     st.markdown("#### Build Settings")
 
-    from yak_core.config import CONTEST_PRESETS
+    from yak_core.config import CONTEST_PRESETS, NAMED_PROFILES, NAMED_PROFILE_LABELS
 
     if is_pga:
         contest_options = ["PGA GPP", "PGA Cash", "PGA Showdown"]
@@ -162,15 +198,67 @@ def render_optimizer_tab(sport: str) -> None:
 
     contest_options = [c for c in contest_options if c in CONTEST_PRESETS]
 
-    col_contest, col_count, col_exp = st.columns(3)
+    # Named profile selector — overrides contest preset config when active
+    _NONE_PROFILE = "(None)"
+    _sport_presets = (
+        ["PGA GPP", "PGA Cash", "PGA Showdown"] if is_pga
+        else ["GPP Main", "GPP Early", "GPP Late", "Showdown", "Cash Main", "Cash Game"]
+    )
+    _profile_options = [_NONE_PROFILE] + [
+        k for k in NAMED_PROFILE_LABELS
+        if NAMED_PROFILES[k]["base_preset"] in _sport_presets
+    ]
+
+    # Default to GPP_MAIN_V1 for NBA (first real profile) if available
+    _default_profile_idx = 0
+    if not is_pga and "GPP_MAIN_V1" in _profile_options:
+        _default_profile_idx = _profile_options.index("GPP_MAIN_V1")
+
+    col_profile, col_contest, col_count, col_exp = st.columns([2, 2, 1, 1])
+    with col_profile:
+        selected_profile = st.selectbox(
+            "Profile",
+            options=_profile_options,
+            index=_default_profile_idx,
+            format_func=lambda k: (
+                NAMED_PROFILES[k]["display_name"] if k != _NONE_PROFILE
+                else "None (use preset defaults)"
+            ),
+            key=f"opt_profile_{sport}",
+            help="Select a named profile to apply its frozen config overrides and Ricky ranking weights.",
+        )
     with col_contest:
-        contest_label = st.selectbox("Contest type", contest_options, key=f"opt_contest_{sport}")
+        # If profile selected, auto-set contest type to match
+        if selected_profile != _NONE_PROFILE:
+            _prof_base = NAMED_PROFILES[selected_profile]["base_preset"]
+            if _prof_base in contest_options:
+                _contest_idx = contest_options.index(_prof_base)
+            else:
+                _contest_idx = 0
+        else:
+            _contest_idx = 0
+        contest_label = st.selectbox(
+            "Contest type", contest_options, index=_contest_idx, key=f"opt_contest_{sport}"
+        )
     with col_count:
         preset = CONTEST_PRESETS.get(contest_label, {})
         num_lineups = st.number_input("Lineups", min_value=1, max_value=150, value=1, key=f"opt_nlu_{sport}")
     with col_exp:
         default_exp = preset.get("default_max_exposure", 0.35)
         max_exposure = st.slider("Max exposure", 0.1, 1.0, default_exp, 0.05, key=f"opt_exp_{sport}")
+
+    # Apply profile overrides to preset
+    _active_profile_overrides: dict = {}
+    if selected_profile != _NONE_PROFILE:
+        _prof = NAMED_PROFILES[selected_profile]
+        _active_profile_overrides = dict(_prof["overrides"])
+        if contest_label != _prof["base_preset"]:
+            st.info(
+                f"Profile **{_prof['display_name']}** is based on "
+                f"**{_prof['base_preset']}**. Switch contest type to match."
+            )
+        st.caption(f"\u2705 Profile: **{_prof['display_name']}** ({_prof['version']}) — {_prof['description']}")
+        preset = {**preset, **_active_profile_overrides}
 
     # ── Showdown game picker (NBA only) ──
     showdown_teams: list[str] = []
@@ -230,6 +318,9 @@ def render_optimizer_tab(sport: str) -> None:
             build_pool = build_pool[build_pool["team"].isin(showdown_teams)].reset_index(drop=True)
 
         cfg = _build_optimizer_cfg(preset, sport, num_lineups, max_exposure, locked, excluded)
+        # Apply profile overrides into the optimizer config
+        if _active_profile_overrides:
+            cfg.update(_active_profile_overrides)
         # Preserve projections already in the published pool (don't overwrite with salary_implied)
         cfg["PROJ_SOURCE"] = "parquet"
 
@@ -277,27 +368,144 @@ def render_optimizer_tab(sport: str) -> None:
             st.warning("Optimizer returned zero lineups. Try adjusting constraints.")
             return
 
+        # ── Ricky SE Ranking ────────────────────────────────────────────
+        # Rank all lineups and tag top 3 as SE Core / Spicy / Alt
+        _lu_ranked_df = None
+        try:
+            from yak_core.ricky_rank import rank_lineups_for_se, RICKY_W_GPP, RICKY_W_CEIL, RICKY_W_OWN
+            # Get Ricky weights from active profile, or use defaults
+            _ricky_w = {"w_gpp": RICKY_W_GPP, "w_ceil": RICKY_W_CEIL, "w_own": RICKY_W_OWN}
+            if selected_profile != _NONE_PROFILE:
+                _prof_rw = NAMED_PROFILES[selected_profile].get("ricky_weights", {})
+                if _prof_rw:
+                    _ricky_w = _prof_rw
+
+            # Ensure required columns exist for ranking
+            _rank_cols = {
+                "gpp_score": 0.0, "ceil": 0.0, "own_pct": 0.0,
+                "proj": 0.0, "salary": 0,
+            }
+            for _rc, _rv in _rank_cols.items():
+                if _rc not in lineups_df.columns:
+                    lineups_df[_rc] = _rv
+
+            # Summarize to one row per lineup
+            _lu_summary = (
+                lineups_df.groupby("lineup_index")
+                .agg(
+                    total_gpp_score=("gpp_score", "sum"),
+                    total_ceil=("ceil", "sum"),
+                    avg_own_pct=("own_pct", "mean"),
+                    total_proj=("proj", "sum"),
+                    total_salary=("salary", "sum"),
+                )
+                .reset_index()
+            )
+
+            _lu_ranked_df = rank_lineups_for_se(
+                _lu_summary,
+                w_gpp=_ricky_w.get("w_gpp", RICKY_W_GPP),
+                w_ceil=_ricky_w.get("w_ceil", RICKY_W_CEIL),
+                w_own=_ricky_w.get("w_own", RICKY_W_OWN),
+            )
+        except Exception as _rank_err:
+            st.warning(f"Ricky ranking failed: {_rank_err}")
+
+        # Determine active profile_name for logging
+        _profile_name = selected_profile if selected_profile != _NONE_PROFILE else ""
+
         # Store results in session state
         st.session_state[f"opt_lineups_{sport}"] = lineups_df
         st.session_state[f"opt_exposure_{sport}"] = exposure_df
         st.session_state[f"opt_contest_{sport}_result"] = contest_label
         st.session_state[f"opt_is_showdown_{sport}"] = is_showdown
-        st.success(f"Built {lineups_df['lineup_index'].nunique() if 'lineup_index' in lineups_df.columns else 0} lineups!")
+        st.session_state[f"opt_ranked_{sport}"] = _lu_ranked_df
+        st.session_state[f"opt_profile_{sport}_result"] = _profile_name
+        n_built = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else 0
+        st.success(f"Built {n_built} lineups!")
 
     # ── Display results ──
     lineups_df = st.session_state.get(f"opt_lineups_{sport}")
+    _lu_ranked_df = st.session_state.get(f"opt_ranked_{sport}")
+    _profile_name = st.session_state.get(f"opt_profile_{sport}_result", "")
+
     if lineups_df is not None and not lineups_df.empty:
         st.markdown("---")
-        st.markdown("#### Lineups")
 
+        # ── Ricky SE Picks (tagged lineups at top) ──
+        if _lu_ranked_df is not None and not _lu_ranked_df.empty:
+            _tagged = _lu_ranked_df[_lu_ranked_df["ricky_tag"] != ""].copy()
+            if not _tagged.empty:
+                st.markdown("#### \U0001f3af Ricky SE Picks")
+                _tag_display = _tagged[[
+                    "lineup_index", "ricky_tag", "ricky_score",
+                    "total_gpp_score", "total_ceil", "total_proj",
+                    "avg_own_pct", "total_salary",
+                ]].copy()
+                _tag_display.columns = [
+                    "#", "Tag", "Score", "GPP",
+                    "Ceiling", "Proj", "Avg Own%", "Salary",
+                ]
+                st.dataframe(
+                    _tag_display.style.format({
+                        "Score": "{:.3f}", "GPP": "{:.1f}",
+                        "Ceiling": "{:.1f}", "Proj": "{:.1f}",
+                        "Avg Own%": "{:.1%}", "Salary": "${:,.0f}",
+                    }),
+                    use_container_width=True, hide_index=True,
+                )
+
+                # Show players in each tagged lineup
+                for _, _tag_row in _tagged.iterrows():
+                    _li = _tag_row["lineup_index"]
+                    _tag = _tag_row["ricky_tag"]
+                    _lu_players = lineups_df[lineups_df["lineup_index"] == _li].copy()
+                    _p_cols = ["player_name", "pos", "team", "salary", "proj", "ceil", "gpp_score", "own_pct"]
+                    _p_avail = [c for c in _p_cols if c in _lu_players.columns]
+                    with st.expander(f"{_tag} — Lineup #{int(_li)}"):
+                        st.dataframe(_lu_players[_p_avail], use_container_width=True, hide_index=True)
+
+            # Full ranking table in expander
+            with st.expander("Full Ricky Ranking"):
+                _full_display = _lu_ranked_df.sort_values("ricky_rank")[[
+                    "lineup_index", "ricky_rank", "ricky_tag", "ricky_score",
+                    "total_gpp_score", "total_ceil", "total_proj",
+                    "avg_own_pct", "total_salary",
+                ]].copy()
+                _full_display.columns = [
+                    "#", "Rank", "Tag", "Score", "GPP",
+                    "Ceiling", "Proj", "Avg Own%", "Salary",
+                ]
+                st.dataframe(
+                    _full_display.style.format({
+                        "Score": "{:.3f}", "GPP": "{:.1f}",
+                        "Ceiling": "{:.1f}", "Proj": "{:.1f}",
+                        "Avg Own%": "{:.1%}", "Salary": "${:,.0f}",
+                    }),
+                    use_container_width=True, hide_index=True,
+                )
+
+        # ── All Lineups (raw) ──
+        st.markdown("#### Lineups")
         if "lineup_index" in lineups_df.columns:
-            for idx in sorted(lineups_df["lineup_index"].unique()):
+            # Sort by ricky_rank if available
+            _display_order = sorted(lineups_df["lineup_index"].unique())
+            if _lu_ranked_df is not None and not _lu_ranked_df.empty:
+                _rank_map = dict(zip(_lu_ranked_df["lineup_index"], _lu_ranked_df["ricky_rank"]))
+                _tag_map_lu = dict(zip(_lu_ranked_df["lineup_index"], _lu_ranked_df["ricky_tag"]))
+                _display_order = sorted(_display_order, key=lambda x: _rank_map.get(x, 999))
+            else:
+                _tag_map_lu = {}
+
+            for idx in _display_order:
                 lu = lineups_df[lineups_df["lineup_index"] == idx]
                 total_sal = int(pd.to_numeric(lu["salary"], errors="coerce").fillna(0).sum()) if "salary" in lu.columns else 0
                 total_proj = float(pd.to_numeric(lu["proj"], errors="coerce").fillna(0).sum()) if "proj" in lu.columns else 0.0
                 total_ceil = float(pd.to_numeric(lu["ceil"], errors="coerce").fillna(0).sum()) if "ceil" in lu.columns else 0.0
                 ceil_part = f" | {total_ceil:.1f} ceil" if total_ceil > 0 else ""
-                st.markdown(f"**Lineup {idx + 1}** — ${total_sal:,} sal | {total_proj:.1f} proj{ceil_part}")
+                rank_part = f" | Rank {_rank_map[idx]}" if _tag_map_lu and idx in _rank_map else ""
+                tag_part = f" | {_tag_map_lu[idx]}" if _tag_map_lu.get(idx) else ""
+                st.markdown(f"**Lineup {idx + 1}** — ${total_sal:,} sal | {total_proj:.1f} proj{ceil_part}{rank_part}{tag_part}")
                 show_cols = ["player_name", "pos", "salary", "proj", "ceil"]
                 if "slot" in lu.columns:
                     show_cols = ["slot"] + show_cols
@@ -321,28 +529,50 @@ def render_optimizer_tab(sport: str) -> None:
             st.markdown("#### Exposure")
             st.dataframe(exposure_df, use_container_width=True, hide_index=True)
 
-        # ── DK CSV download ──
+        # ── DK CSV download (with profile_name) ──
         st.markdown("#### Export")
         result_contest = st.session_state.get(f"opt_contest_{sport}_result", "")
         result_showdown = st.session_state.get(f"opt_is_showdown_{sport}", False)
 
+        # Let the user choose: tagged only (SE Core/Spicy/Alt) or all lineups
+        _has_tags = (
+            _lu_ranked_df is not None
+            and not _lu_ranked_df.empty
+            and (_lu_ranked_df["ricky_tag"] != "").any()
+        )
+        _export_tagged_only = False
+        if _has_tags:
+            _export_tagged_only = st.checkbox(
+                "Export tagged lineups only (SE Core / Spicy / Alt)",
+                value=True,
+                key=f"opt_export_tagged_{sport}",
+            )
+
         try:
+            # Filter to tagged lineups if requested
+            _export_df = lineups_df
+            if _export_tagged_only and _lu_ranked_df is not None:
+                _tagged_idxs = _lu_ranked_df[_lu_ranked_df["ricky_tag"] != ""]["lineup_index"].tolist()
+                _export_df = lineups_df[lineups_df["lineup_index"].isin(_tagged_idxs)].copy()
+
             if result_showdown and not is_pga:
                 from yak_core.lineups import to_dk_showdown_upload_format
-                dk_df = to_dk_showdown_upload_format(lineups_df)
-            elif is_pga:
-                from yak_core.lineups import to_dk_pga_upload_format
-                dk_df = to_dk_pga_upload_format(lineups_df)
+                dk_df = to_dk_showdown_upload_format(_export_df)
             else:
-                from yak_core.lineups import to_dk_upload_format
-                dk_df = to_dk_upload_format(lineups_df)
+                # Build a simple DK-upload-style CSV from the lineups DataFrame
+                dk_df = _build_dk_csv(_export_df, is_pga=is_pga)
+
+            # Add profile_name column for downstream analysis
+            if _profile_name:
+                dk_df["profile_name"] = _profile_name
 
             csv_data = dk_df.to_csv(index=False)
             slug = _slugify(result_contest) if result_contest else "lineups"
+            _tag_suffix = "_se_picks" if _export_tagged_only else ""
             st.download_button(
-                "Download DK CSV",
+                f"Download DK CSV ({len(dk_df)} lineup{'s' if len(dk_df) != 1 else ''})",
                 data=csv_data,
-                file_name=f"{sport.lower()}_{slug}_lineups.csv",
+                file_name=f"{sport.lower()}_{slug}{_tag_suffix}_lineups.csv",
                 mime="text/csv",
                 key=f"opt_dl_{sport}",
             )

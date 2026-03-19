@@ -559,6 +559,7 @@ def render_lab_tab(sport: str) -> None:
                         showdown_teams=showdown_teams if showdown_teams else None,
                         dk_sd_file=dk_sd_file,
                         profile_overrides=_active_profile_overrides if _active_profile_overrides else None,
+                        profile_name=_build_profile if _build_profile != _NONE_PROFILE_BUILD else "",
                     )
                     n_built = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else 0
 
@@ -637,6 +638,43 @@ def render_lab_tab(sport: str) -> None:
                                 _p_avail = [c for c in _p_cols if c in _lu_players.columns]
                                 with st.expander(f"{_tag} — Lineup #{int(_li)}"):
                                     st.dataframe(_lu_players[_p_avail], use_container_width=True, hide_index=True)
+
+                        # DK CSV download for tagged lineups only
+                        if not _tagged.empty:
+                            _tagged_idxs = _tagged["lineup_index"].tolist()
+                            _tagged_lu = lineups_df[lineups_df["lineup_index"].isin(_tagged_idxs)].copy()
+                            # Build DK-upload-style rows
+                            _dk_rows = []
+                            for _tidx in _tagged_idxs:
+                                _tlu = _tagged_lu[_tagged_lu["lineup_index"] == _tidx]
+                                _dk_row = {}
+                                if "slot" in _tlu.columns:
+                                    for _, _tp in _tlu.iterrows():
+                                        _slot = _tp["slot"]
+                                        _col = _slot
+                                        _si = 1
+                                        while _col in _dk_row:
+                                            _si += 1
+                                            _col = f"{_slot}{_si}"
+                                        _dk_row[_col] = _tp.get("player_name", "")
+                                else:
+                                    for _pi, (_, _tp) in enumerate(_tlu.iterrows()):
+                                        _dk_row[f"P{_pi+1}"] = _tp.get("player_name", "")
+                                # Add the SE tag
+                                _tag_val = _tagged.loc[_tagged["lineup_index"] == _tidx, "ricky_tag"].values
+                                _dk_row["ricky_tag"] = _tag_val[0] if len(_tag_val) else ""
+                                if _build_profile != _NONE_PROFILE_BUILD:
+                                    _dk_row["profile_name"] = _build_profile
+                                _dk_rows.append(_dk_row)
+                            _dk_tagged_df = pd.DataFrame(_dk_rows)
+                            _dk_csv = _dk_tagged_df.to_csv(index=False)
+                            st.download_button(
+                                f"Download SE Picks DK CSV ({len(_dk_rows)} lineup{'s' if len(_dk_rows) != 1 else ''})",
+                                data=_dk_csv,
+                                file_name=f"{sport.lower()}_se_picks_lineups.csv",
+                                mime="text/csv",
+                                key=f"lab_dl_tagged_{sport}",
+                            )
 
                         # Full ranking table
                         with st.expander("Full Ricky Ranking"):
@@ -2173,7 +2211,7 @@ def _apply_dk_showdown_salaries(pool: pd.DataFrame, dk_sd_file) -> None:
     st.info(f"Showdown salaries applied: {_updated}/{len(pool)} players matched from DK CSV")
 
 
-def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None, dk_sd_file=None, profile_overrides=None):
+def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None, dk_sd_file=None, profile_overrides=None, profile_name=""):
     from yak_core.config import CONTEST_PRESETS, merge_config
     from yak_core.lineups import build_multiple_lineups_with_exposure, build_player_pool, build_showdown_lineups
     import re as _re
@@ -2319,11 +2357,16 @@ def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, o
     lineups_out = out_dir / f"{contest_slug}_lineups.parquet"
     exposure_out = out_dir / f"{contest_slug}_exposure.parquet"
     meta_out = out_dir / f"{contest_slug}_meta.json"
+    # Add profile_name column for downstream analysis/filtering
+    if profile_name:
+        lineups_df["profile_name"] = profile_name
+
     lineups_df.to_parquet(str(lineups_out), index=False)
     exposure_df.to_parquet(str(exposure_out), index=False)
     with open(meta_out, "w") as f:
         meta_data = {"contest": contest_label, "sport": sport.upper(), "num_lineups": num_lineups,
-                     "built_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %I:%M %p ET"), "lock": lock_list, "exclude": exclude_list}
+                     "built_at": datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %I:%M %p ET"), "lock": lock_list, "exclude": exclude_list,
+                     "profile_name": profile_name}
         if showdown_teams:
             meta_data["matchup"] = " vs ".join(showdown_teams)
         json.dump(meta_data, f, indent=2)
