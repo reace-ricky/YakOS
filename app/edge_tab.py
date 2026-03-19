@@ -347,7 +347,7 @@ def render_edge_tab(sport: str) -> None:
 
     is_pga = sport.upper() == "PGA"
     slate_date = meta.get("date", "")
-    pool_size = meta.get("pool_size", len(pool))
+    pool_size = len(pool)  # actual filtered pool, not raw DK draftables
 
     # ── Header ──
     st.markdown(f"## 📐 Right Angle Ricky — {sport}")
