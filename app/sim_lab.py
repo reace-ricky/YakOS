@@ -1217,16 +1217,16 @@ def _render_persistent_trend(preset_name: str) -> None:
     _add_cloud(
         main_df,
         label="Main Config",
-        color_best="#00ff87",
-        color_avg="#00cc6a",
-        fill_color="rgba(0, 255, 135, 0.12)",
+        color_best="#22c55e",
+        color_avg="#16a34a",
+        fill_color="rgba(34, 197, 94, 0.14)",
     )
     _add_cloud(
         lab_df,
         label="Sim Lab",
-        color_best="#ffd43b",
-        color_avg="#4dabf7",
-        fill_color="rgba(77, 171, 247, 0.12)",
+        color_best="#60a5fa",
+        color_avg="#3b82f6",
+        fill_color="rgba(59, 130, 246, 0.14)",
     )
 
     if not datasets_js:
