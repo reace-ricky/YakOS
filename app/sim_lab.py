@@ -1098,31 +1098,21 @@ def _ema(values: list[float], alpha: float = 0.35) -> list[float]:
     return result
 
 
-def _is_main_config(row: "pd.Series") -> bool:
-    """Return True if the batch used the unmodified preset config (no slider overrides)."""
-    ov = row.get("overrides_json", "{}")
-    if not isinstance(ov, str) or not ov.strip():
-        return True
-    try:
-        parsed = json.loads(ov)
-    except (json.JSONDecodeError, TypeError):
-        return True
-    return len(parsed) == 0
-
-
 def _render_persistent_trend(preset_name: str) -> None:
     """Persistent EMA cloud chart from batch_history — survives restarts.
 
-    Renders an EMA cloud comparing **Main Config** (production defaults,
-    no slider overrides) vs **Sim Lab** (slider-tweaked runs).  Each band
-    is filled between the EMA of avg actual (bottom edge) and EMA of best
-    actual (top edge), giving a visual spread of floor-to-ceiling performance.
+    Renders an EMA cloud comparing **Main Config** (the promoted baseline)
+    vs **Sim Lab** (all other batch runs).  Each band is filled between
+    the EMA of avg actual (bottom edge) and EMA of best actual (top edge),
+    giving a visual spread of floor-to-ceiling performance.
 
-    * Green cloud = Main Config (what you’d get with no slider changes).
-    * Blue/gold cloud = Sim Lab (your tweaked config).
-    * When the Sim Lab cloud rises above Main Config, the tweaks are winning.
+    * Green cloud = Main Config (baseline / production reference).
+    * Blue cloud = Sim Lab (every non-baseline batch run).
+    * When the blue cloud rises above green, the tweaks are winning.
 
-    If only one group has data the chart still renders a single cloud.
+    The baseline is drawn as a flat reference band when only one baseline
+    row exists (not enough points for a trend).  Once multiple baselines
+    are promoted over time, they form their own EMA cloud.
     """
     history = _load_batch_history()
     if history.empty:
@@ -1141,11 +1131,9 @@ def _render_persistent_trend(preset_name: str) -> None:
     if "timestamp" in df.columns:
         df = df.sort_values("timestamp")
 
-    # Classify each row as Main Config vs Sim Lab
-    df["_is_main"] = df.apply(_is_main_config, axis=1)
-
-    main_df = df[df["_is_main"]].reset_index(drop=True)
-    lab_df = df[~df["_is_main"]].reset_index(drop=True)
+    # Classify: baseline rows = Main Config, everything else = Sim Lab
+    main_df = df[df["is_baseline"] == True].reset_index(drop=True)   # noqa: E712
+    lab_df = df[df["is_baseline"] != True].reset_index(drop=True)    # noqa: E712
 
     if len(main_df) < 1 and len(lab_df) < 1:
         return
@@ -1173,46 +1161,70 @@ def _render_persistent_trend(preset_name: str) -> None:
         color_best: str,
         color_avg: str,
         fill_color: str,
+        *,
+        flat_band: bool = False,
     ) -> None:
-        """Add a filled EMA cloud (avg → best) for one config group."""
+        """Add a filled EMA cloud (avg → best) for one config group.
+
+        When *flat_band* is True (or only 1 data point exists), the cloud
+        is drawn as flat horizontal lines spanning all X labels — useful for
+        a single baseline row that should appear as a persistent reference.
+        """
         if group_df.empty:
             return
-        labels = [_ts_label(r["timestamp"]) for _, r in group_df.iterrows()]
+
         avg_raw = [float(r.get("avg_actual", 0)) for _, r in group_df.iterrows()]
         best_raw = [float(r.get("best_slate", 0)) for _, r in group_df.iterrows()]
 
-        avg_ema = _ema(avg_raw)
-        best_ema = _ema(best_raw)
-
-        avg_points = [{"x": labels[i], "y": round(avg_ema[i], 1)} for i in range(len(labels))]
-        best_points = [{"x": labels[i], "y": round(best_ema[i], 1)} for i in range(len(labels))]
+        if flat_band or len(group_df) == 1:
+            # Draw flat band across entire X axis using latest values
+            avg_val = round(avg_raw[-1], 1)
+            best_val = round(best_raw[-1], 1)
+            avg_points = [{"x": lbl, "y": avg_val} for lbl in unique_labels]
+            best_points = [{"x": lbl, "y": best_val} for lbl in unique_labels]
+            dash = [6, 3]
+            pt_radius = 0
+        else:
+            labels = [_ts_label(r["timestamp"]) for _, r in group_df.iterrows()]
+            avg_ema = _ema(avg_raw)
+            best_ema = _ema(best_raw)
+            avg_points = [{"x": labels[i], "y": round(avg_ema[i], 1)} for i in range(len(labels))]
+            best_points = [{"x": labels[i], "y": round(best_ema[i], 1)} for i in range(len(labels))]
+            dash = None
+            pt_radius = 3
 
         # Best line (top of cloud) — added first so avg can reference its index
         best_idx = len(datasets_js)
-        datasets_js.append({
+        best_ds: dict = {
             "label": f"{label} Best",
             "data": best_points,
             "borderColor": color_best,
             "backgroundColor": "transparent",
             "tension": 0.3,
-            "pointRadius": 3,
+            "pointRadius": pt_radius,
             "pointHoverRadius": 5,
             "borderWidth": 2,
             "fill": False,
-        })
+        }
+        if dash:
+            best_ds["borderDash"] = dash
+        datasets_js.append(best_ds)
 
         # Avg line (bottom of cloud) — fills up to the best line
-        datasets_js.append({
+        avg_ds: dict = {
             "label": f"{label} Avg",
             "data": avg_points,
             "borderColor": color_avg,
             "backgroundColor": fill_color,
             "tension": 0.3,
-            "pointRadius": 3,
+            "pointRadius": pt_radius,
             "pointHoverRadius": 5,
             "borderWidth": 2,
             "fill": f"{best_idx}",
-        })
+        }
+        if dash:
+            avg_ds["borderDash"] = dash
+        datasets_js.append(avg_ds)
 
     _add_cloud(
         main_df,
@@ -1220,6 +1232,7 @@ def _render_persistent_trend(preset_name: str) -> None:
         color_best="#22c55e",
         color_avg="#16a34a",
         fill_color="rgba(34, 197, 94, 0.14)",
+        flat_band=True,
     )
     _add_cloud(
         lab_df,
