@@ -2081,6 +2081,17 @@ def _render_nudge_guidance(
         metrics = _compute_nudge_metrics(batch, profile_key)
         targets = CALIBRATION_TARGETS[profile_key]
 
+        # ── Compute off-target metrics for conflict detection ─────────
+        off_target_metrics: Dict[str, str] = {}
+        for _m_name, (_m_lo, _m_hi) in targets.items():
+            _m_val = metrics.get(_m_name)
+            if _m_val is None:
+                continue
+            if _m_val < _m_lo:
+                off_target_metrics[_m_name] = "low"
+            elif _m_val > _m_hi:
+                off_target_metrics[_m_name] = "high"
+
         # ── Column header ────────────────────────────────────────────────
         _COL_W = [2.2, 1.2, 1.4, 0.6, 2.4, 1.2, 1.2, 0.8]
         hdr = st.columns(_COL_W)
@@ -2122,6 +2133,7 @@ def _render_nudge_guidance(
                 current_overrides=sandbox_overrides,
                 preset_defaults=preset_defaults,
                 ricky_weights=ricky_weights,
+                off_target_metrics=off_target_metrics,
             )
 
             if not suggestions:
@@ -2161,6 +2173,9 @@ def _render_nudge_guidance(
                 )
                 row[5].write(str(cur_val))
 
+                if sug.get("clamped"):
+                    row[6].caption("(guardrail)")
+
                 if sug_val != cur_val:
                     delta = sug_val - cur_val
                     delta_str = f"{delta:+.0f}" if isinstance(sug_val, int) else f"{delta:+.2g}"
@@ -2197,6 +2212,8 @@ def _render_nudge_guidance(
                         )
                         st.toast(f"✅ {param} → {sug_val}")
                         st.rerun()
+                    if sug.get("warning"):
+                        row[7].caption(f"⚠️ {sug['warning']}")
                 else:
                     row[6].write(str(sug_val))
 
@@ -2205,36 +2222,58 @@ def _render_nudge_guidance(
         if not any_rows:
             st.caption("No metrics defined for this profile.")
 
-        # ── Re-run batch button ──────────────────────────────────────────
+        # ── Reset to Defaults + Re-run batch buttons ─────────────────────
         st.divider()
-        if st.button(
-            "🔄 Re-run batch with current settings",
-            key="nudge_rerun_batch",
-            use_container_width=True,
-        ):
-            with st.spinner("Re-running batch..."):
-                new_batch = _run_batch(
-                    sport,
-                    preset_name,
-                    sandbox_overrides,
-                    run_dates,
-                    archetype=archetype_name,
-                    ricky_w_gpp=ricky_weights.get("w_gpp"),
-                    ricky_w_ceil=ricky_weights.get("w_ceil"),
-                    ricky_w_own=ricky_weights.get("w_own"),
-                    profile_name=profile_key,
-                )
-                new_batch["overrides"] = dict(sandbox_overrides)
-                if "sim_lab_batches" not in st.session_state:
-                    st.session_state["sim_lab_batches"] = []
-                st.session_state["sim_lab_batches"].append(new_batch)
-                _append_batch_history(new_batch)
-                _save_slider_state(preset_name, sandbox_overrides, ricky_weights)
-                st.success(
-                    f"Re-run complete: {len(new_batch['runs'])} slates | "
-                    f"Avg Actual: {new_batch['avg_actual']:.1f} FP"
-                )
+        col_reset, col_rerun = st.columns(2)
+        with col_reset:
+            if st.button("↩️ Reset to Defaults", key="nudge_reset_defaults", use_container_width=True):
+                # Clear sandbox overrides
+                st.session_state[_sandbox_config_key(preset_name)] = {}
+                # Reset Ricky weights to defaults
+                st.session_state[f"sim_lab_ricky_weights_{preset_name}"] = {
+                    "w_gpp": 1.0, "w_ceil": 0.8, "w_own": 0.3,
+                }
+                # Pop slider widget keys so they re-render with defaults
+                _keys_to_pop = [
+                    k for k in list(st.session_state.keys())
+                    if k.startswith(f"sl_{preset_name}_") or
+                       (k.startswith("sl_ricky_") and k.endswith(f"_{preset_name}"))
+                ]
+                for k in _keys_to_pop:
+                    st.session_state.pop(k, None)
+                # Persist cleared state
+                _save_slider_state(preset_name, {}, {"w_gpp": 1.0, "w_ceil": 0.8, "w_own": 0.3})
+                st.toast("↩️ All parameters reset to defaults")
                 st.rerun()
+        with col_rerun:
+            if st.button(
+                "🔄 Re-run batch with current settings",
+                key="nudge_rerun_batch",
+                use_container_width=True,
+            ):
+                with st.spinner("Re-running batch..."):
+                    new_batch = _run_batch(
+                        sport,
+                        preset_name,
+                        sandbox_overrides,
+                        run_dates,
+                        archetype=archetype_name,
+                        ricky_w_gpp=ricky_weights.get("w_gpp"),
+                        ricky_w_ceil=ricky_weights.get("w_ceil"),
+                        ricky_w_own=ricky_weights.get("w_own"),
+                        profile_name=profile_key,
+                    )
+                    new_batch["overrides"] = dict(sandbox_overrides)
+                    if "sim_lab_batches" not in st.session_state:
+                        st.session_state["sim_lab_batches"] = []
+                    st.session_state["sim_lab_batches"].append(new_batch)
+                    _append_batch_history(new_batch)
+                    _save_slider_state(preset_name, sandbox_overrides, ricky_weights)
+                    st.success(
+                        f"Re-run complete: {len(new_batch['runs'])} slates | "
+                        f"Avg Actual: {new_batch['avg_actual']:.1f} FP"
+                    )
+                    st.rerun()
 
 
 # ---------------------------------------------------------------------------
