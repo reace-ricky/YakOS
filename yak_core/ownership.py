@@ -40,6 +40,14 @@ from .config import (
 # Lower variance → field converges on "obvious" plays → chalk-heavy.
 
 CONTEST_VARIANCE = {
+    # ── Canonical profile_key values (from utils.constants.CONTEST_PROFILE_KEY_MAP) ──
+    "classic_gpp_main":  {"sigma_frac": 0.25, "description": "GPP Main slate — moderate-high variance"},
+    "classic_gpp_20max": {"sigma_frac": 0.25, "description": "GPP 20-Max — moderate-high variance, more diverse builds"},
+    "classic_gpp_se":    {"sigma_frac": 0.15, "description": "GPP Single Entry — sharper field, lower variance"},
+    "classic_cash":      {"sigma_frac": 0.10, "description": "Cash/50-50 — very low variance, chalk-heavy"},
+    "showdown_gpp":      {"sigma_frac": 0.28, "description": "Showdown GPP Captain — moderate-high variance, fewer players"},
+    "showdown_cash":     {"sigma_frac": 0.12, "description": "Showdown Cash — low variance, chalk Captain"},
+    # ── Legacy keys — kept for backward compatibility (file names, scripts) ──
     "mme_large":      {"sigma_frac": 0.30, "description": "Large-field MME (Milly Maker) — high variance, diverse field"},
     "gpp_main":       {"sigma_frac": 0.25, "description": "Main GPP slate — moderate-high variance"},
     "gpp_early":      {"sigma_frac": 0.25, "description": "Early GPP slate — same as main"},
@@ -48,7 +56,6 @@ CONTEST_VARIANCE = {
     "cash":           {"sigma_frac": 0.10, "description": "Cash/50-50 — very low variance, chalk-heavy"},
     "showdown":       {"sigma_frac": 0.28, "description": "Showdown Captain — moderate-high variance, fewer players"},
 }
-
 
 # ---------------------------------------------------------------------------
 # Position scarcity multipliers (kept from original for backward compat)
@@ -419,9 +426,9 @@ def field_sim_ownership(
         return salary_rank_ownership(df, col="own_proj")
 
     # Resolve variance preset
-    preset = CONTEST_VARIANCE.get(contest_type, CONTEST_VARIANCE["gpp_main"])
+    preset = CONTEST_VARIANCE.get(contest_type, CONTEST_VARIANCE["classic_gpp_main"])
     sigma_frac = preset["sigma_frac"]
-    is_showdown = contest_type == "showdown"
+    is_showdown = contest_type in ("showdown", "showdown_gpp", "showdown_cash")
 
     # Prepare player list
     players = df.to_dict("records")
