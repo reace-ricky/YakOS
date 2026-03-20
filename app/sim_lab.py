@@ -154,6 +154,55 @@ def _config_hash(overrides: Dict[str, Any], archetype: str = "Default") -> str:
 
 
 # ---------------------------------------------------------------------------
+# Slider / weight persistence (survives page refreshes + cold starts)
+# ---------------------------------------------------------------------------
+
+_SLIDER_STATE_FILE = _HISTORY_DIR / "slider_state.json"
+_SLIDER_STATE_REL = str(Path("data/sim_lab/slider_state.json"))
+
+
+def _save_slider_state(preset_name: str, overrides: Dict[str, Any],
+                       ricky_weights: Dict[str, float]) -> None:
+    """Persist current slider overrides + Ricky weights to disk + GitHub."""
+    try:
+        _HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+        state: dict = {}
+        if _SLIDER_STATE_FILE.is_file():
+            state = json.loads(_SLIDER_STATE_FILE.read_text())
+        state.setdefault("configs", {})[preset_name] = {
+            "overrides": {k: v for k, v in overrides.items()},
+            "ricky_weights": {k: v for k, v in ricky_weights.items()},
+        }
+        _SLIDER_STATE_FILE.write_text(json.dumps(state, indent=2, default=str))
+
+        try:
+            from yak_core.github_persistence import sync_feedback_async
+            sync_feedback_async(
+                files=[_SLIDER_STATE_REL],
+                commit_message="Auto-sync Sim Lab slider state",
+            )
+        except Exception:
+            pass
+    except Exception as exc:
+        _logger.warning("Failed to save slider state: %s", exc)
+
+
+def _load_slider_state(preset_name: str) -> tuple[Dict[str, Any], Dict[str, float]]:
+    """Load persisted slider overrides + Ricky weights. Returns ({}, {}) on miss."""
+    try:
+        if _SLIDER_STATE_FILE.is_file():
+            state = json.loads(_SLIDER_STATE_FILE.read_text())
+            entry = state.get("configs", {}).get(preset_name, {})
+            return (
+                entry.get("overrides", {}),
+                entry.get("ricky_weights", {}),
+            )
+    except Exception:
+        pass
+    return {}, {}
+
+
+# ---------------------------------------------------------------------------
 # Batch history persistence
 # ---------------------------------------------------------------------------
 
@@ -2113,6 +2162,12 @@ def _render_nudge_guidance(
                             if has_slider:
                                 slider_key = f"sl_{preset_name}_{param}"
                                 st.session_state.pop(slider_key, None)
+                        # Persist to disk so it survives page refreshes
+                        _save_slider_state(
+                            preset_name,
+                            dict(st.session_state.get(_sandbox_config_key(preset_name), {})),
+                            dict(st.session_state.get(f"sim_lab_ricky_weights_{preset_name}", {})),
+                        )
                         st.toast(f"✅ {param} → {sug_val}")
                         st.rerun()
                 else:
@@ -2147,6 +2202,7 @@ def _render_nudge_guidance(
                     st.session_state["sim_lab_batches"] = []
                 st.session_state["sim_lab_batches"].append(new_batch)
                 _append_batch_history(new_batch)
+                _save_slider_state(preset_name, sandbox_overrides, ricky_weights)
                 st.success(
                     f"Re-run complete: {len(new_batch['runs'])} slates | "
                     f"Avg Actual: {new_batch['avg_actual']:.1f} FP"
@@ -2362,12 +2418,18 @@ def render_sim_lab(sport: str) -> None:
             _apply_named_profile(_named_key)
         if _prev_ct:  # skip initial render
             st.rerun()
-    elif not is_pga:
-        # First render (no _prev_ct yet): seed sandbox only if empty
+    else:
+        # Normal render (same contest type): restore from disk if session empty
         sk = _sandbox_config_key(preset_name)
+        _rk = f"sim_lab_ricky_weights_{preset_name}"
         if sk not in st.session_state:
-            if _named_key:
+            _disk_ovr, _disk_rw = _load_slider_state(preset_name)
+            if _disk_ovr:
+                st.session_state[sk] = _disk_ovr
+            elif not is_pga and _named_key:
                 _apply_named_profile(_named_key)
+            if _disk_rw and _rk not in st.session_state:
+                st.session_state[_rk] = _disk_rw
 
     # --- Archetype selector (NBA GPP presets only) ---
     archetype_name = "Default"
@@ -2511,6 +2573,7 @@ def render_sim_lab(sport: str) -> None:
 
                     # Persist to disk + GitHub
                     _append_batch_history(batch)
+                    _save_slider_state(preset_name, sandbox_overrides, _ricky_weights)
 
                     n_ok = len(batch["runs"])
                     n_err = len(batch["errors"])
@@ -2546,6 +2609,7 @@ def render_sim_lab(sport: str) -> None:
                             w_ceil=_ricky_weights["w_ceil"],
                             w_own=_ricky_weights["w_own"],
                         )
+                _save_slider_state(preset_name, sandbox_overrides, _ricky_weights)
                 st.toast("Lineups re-ranked with updated weights")
 
         # Ricky SE Shortlist (tagged lineups from latest batch)
