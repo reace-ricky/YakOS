@@ -8,7 +8,7 @@
         "GPP_CATALYST_WEIGHT": 0.1,
         "GPP_LOW_OWN_THRESHOLD": 0.3,
         "NUM_LINEUPS": 50,
-        "GPP_PROJ_WEIGHT": 0.25
+        "GPP_PROJ_WEIGHT": 0.35
       },
       "ricky_weights": {
         "w_gpp": 1.0,
