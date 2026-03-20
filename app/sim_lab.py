@@ -1914,6 +1914,17 @@ def _compute_nudge_metrics(
     return metrics
 
 
+def _fmt_nudge_value(metric_name: str, value: float) -> str:
+    """Format a metric value for display in the nudge table."""
+    if metric_name in ("top_1pct_rate", "cash_rate"):
+        return f"{value:.1%}"
+    if metric_name in ("mae", "bias", "correlation"):
+        return f"{value:.3f}"
+    if metric_name == "lineup_diversity_min_cores":
+        return f"{int(value)} cores"
+    return f"{value:.1f}"
+
+
 def _render_nudge_guidance(
     batch: Dict[str, Any],
     sport: str,
@@ -1925,8 +1936,9 @@ def _render_nudge_guidance(
 ) -> None:
     """Render the Calibration Nudge Guidance expander for a completed batch.
 
-    Shows a metrics vs targets table with status indicators and directional
-    nudge text.  Includes a Re-run batch button.
+    Shows a prescriptive metrics vs targets table with exact config.py
+    parameters, computed deltas, and one-click Apply buttons (RIG-8).
+    Includes a Re-run batch button.
     """
     from utils.calibration_targets import (
         CALIBRATION_TARGETS,
@@ -1934,6 +1946,7 @@ def _render_nudge_guidance(
         evaluate_metric,
         get_target_display,
     )
+    from utils.nudge_params import get_nudge_suggestions
 
     batches = st.session_state.get("sim_lab_batches", [])
     if not batches:
@@ -1943,56 +1956,129 @@ def _render_nudge_guidance(
     if not profile_key or profile_key not in CALIBRATION_TARGETS:
         return
 
+    # Resolve preset defaults (merged config) for "current value" lookup
+    preset_defaults: Dict[str, Any] = {}
+    try:
+        from yak_core.config import CONTEST_PRESETS, merge_config
+        if preset_name in CONTEST_PRESETS:
+            preset_defaults = merge_config(CONTEST_PRESETS[preset_name])
+    except Exception:
+        pass
+
     with st.expander("🎯 Calibration Nudge Guidance", expanded=False):
         st.caption(
-            f"Metrics vs. target ranges for **{profile_key}** — "
-            "Green = on target · Yellow = near boundary · Red = outside range"
+            f"Prescriptive nudges for **{profile_key}** — "
+            "click **Apply** to update the slider to the suggested value, "
+            "then re-run the batch to validate."
         )
 
         metrics = _compute_nudge_metrics(batch, profile_key)
         targets = CALIBRATION_TARGETS[profile_key]
 
-        # Build table rows
-        table_rows = []
+        # ── Column header ────────────────────────────────────────────────
+        _COL_W = [2.2, 1.2, 1.4, 0.6, 2.4, 1.2, 1.2, 0.8]
+        hdr = st.columns(_COL_W)
+        hdr[0].markdown("**Metric**")
+        hdr[1].markdown("**Your Batch**")
+        hdr[2].markdown("**Target Range**")
+        hdr[3].markdown("**Status**")
+        hdr[4].markdown("**Parameter**")
+        hdr[5].markdown("**Current**")
+        hdr[6].markdown("**Suggested**")
+        hdr[7].markdown("**Apply**")
+        st.divider()
+
+        any_rows = False
         for metric_name, (lo, hi) in targets.items():
             label = METRIC_LABELS.get(metric_name, metric_name)
             value = metrics.get(metric_name)
             target_str = get_target_display(metric_name, profile_key)
 
             if value is None:
-                table_rows.append({
-                    "Metric": label,
-                    "Your Batch": "No data",
-                    "Target Range": target_str,
-                    "Status": "⚪",
-                    "Nudge": "No data available",
-                })
+                row = st.columns(_COL_W)
+                row[0].write(label)
+                row[1].write("—")
+                row[2].write(target_str)
+                row[3].write("⚪")
+                # No suggestion possible without data
+                any_rows = True
                 continue
 
-            _status, dot, nudge = evaluate_metric(metric_name, value, profile_key)
+            _status, dot, _nudge = evaluate_metric(metric_name, value, profile_key)
+            value_str = _fmt_nudge_value(metric_name, value)
 
-            # Format value display
-            if metric_name in ("top_1pct_rate", "cash_rate"):
-                value_str = f"{value:.1%}"
-            elif metric_name in ("mae", "bias", "correlation"):
-                value_str = f"{value:.3f}"
-            elif metric_name == "lineup_diversity_min_cores":
-                value_str = f"{int(value)} unique cores"
-            else:
-                value_str = f"{value:.1f}"
+            # Get prescriptive suggestions for off-target metrics
+            suggestions = get_nudge_suggestions(
+                metric_name=metric_name,
+                batch_value=value,
+                lo=lo,
+                hi=hi,
+                current_overrides=sandbox_overrides,
+                preset_defaults=preset_defaults,
+            )
 
-            table_rows.append({
-                "Metric": label,
-                "Your Batch": value_str,
-                "Target Range": target_str,
-                "Status": dot,
-                "Nudge": nudge,
-            })
+            if not suggestions:
+                # On target or no mapping — simple status row
+                row = st.columns(_COL_W)
+                row[0].write(label)
+                row[1].write(value_str)
+                row[2].write(target_str)
+                row[3].write(dot)
+                any_rows = True
+                continue
 
-        if table_rows:
-            nudge_df = pd.DataFrame(table_rows)
-            st.dataframe(nudge_df, use_container_width=True, hide_index=True)
-        else:
+            # One sub-row per suggestion; metric info only on the first sub-row
+            for i, sug in enumerate(suggestions):
+                row = st.columns(_COL_W)
+                if i == 0:
+                    row[0].write(label)
+                    row[1].write(value_str)
+                    row[2].write(target_str)
+                    row[3].write(dot)
+                else:
+                    row[0].write("")
+                    row[1].write("")
+                    row[2].write("")
+                    row[3].write("")
+
+                param = sug["param"]
+                cur_val = sug["current_value"]
+                sug_val = sug["suggested_value"]
+                has_slider = sug["has_slider"]
+
+                # Format param display: inline code + description as caption
+                row[4].markdown(
+                    f"`{param}`  \n"
+                    f"<span style='font-size:0.75rem;color:#aaa'>{sug['description']}</span>",
+                    unsafe_allow_html=True,
+                )
+                row[5].write(str(cur_val))
+
+                if sug_val != cur_val:
+                    delta = sug_val - cur_val
+                    delta_str = f"{delta:+.0f}" if isinstance(sug_val, int) else f"{delta:+.2g}"
+                    row[6].markdown(
+                        f"**{sug_val}**",
+                        help=f"Delta: {delta_str}",
+                    )
+                    apply_key = f"nudge_apply_{preset_name}_{metric_name}_{param}_{i}"
+                    if row[7].button("Apply", key=apply_key, type="primary"):
+                        sk = _sandbox_config_key(preset_name)
+                        if sk not in st.session_state:
+                            st.session_state[sk] = {}
+                        st.session_state[sk][param] = sug_val
+                        # Also sync the slider widget state so it reflects new value
+                        if has_slider:
+                            slider_key = f"sl_{preset_name}_{param}"
+                            st.session_state[slider_key] = sug_val
+                        st.toast(f"✅ {param} → {sug_val}")
+                        st.rerun()
+                else:
+                    row[6].write(str(sug_val))
+
+                any_rows = True
+
+        if not any_rows:
             st.caption("No metrics defined for this profile.")
 
         # ── Re-run batch button ──────────────────────────────────────────
