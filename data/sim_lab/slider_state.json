@@ -2,12 +2,13 @@
   "configs": {
     "GPP Main": {
       "overrides": {
-        "GPP_BOOM_WEIGHT": 0.5,
+        "GPP_BOOM_WEIGHT": 0.55,
         "GPP_PACE_ENV_WEIGHT": 0.11,
         "GPP_FORM_WEIGHT": 0.1,
         "GPP_CATALYST_WEIGHT": 0.1,
         "GPP_LOW_OWN_THRESHOLD": 0.3,
-        "NUM_LINEUPS": 50
+        "NUM_LINEUPS": 50,
+        "GPP_PROJ_WEIGHT": 0.25
       },
       "ricky_weights": {
         "w_gpp": 1.0,
