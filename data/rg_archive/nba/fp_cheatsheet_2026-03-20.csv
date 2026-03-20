@@ -1,0 +1,121 @@
+"PLAYER (TEAM, POSITION)",REST,OPP (ET),DVP,SPREAD,O/U,"PRED
+SCORE","PROJ
+RANK","$
+RANK","RANK
+DIFF","PROJ
+PTS",SALARY,CPP
+Jaylen Brown (BOS - SG/SF),2,@MEM (Fri 8:00PM),24th,BOS -15,229,122,1,7,6,49.0,"$9,000",$184
+Jayson Tatum (BOS - PF),2,@MEM (Fri 8:00PM),19th,BOS -15,229,122,2,11,9,45.7,"$8,500",$186
+Jalen Johnson (ATL - PF),2,@HOU (Fri 8:00PM),1st,HOU -3.5,226.5,111.5,3,2,-1,45.5,"$10,600",$233
+"Karl-Anthony Towns (NYK - PF/C)
+DTD",3,@BKN (Fri 7:30PM),21st,NYK -17.5,214.5,116,4,6,2,45.3,"$9,200",$203
+Alperen Sengun (HOU - C),2,ATL (Fri 8:00PM),17th,HOU -3.5,226.5,115,5,10,5,44.7,"$8,600",$192
+Kevin Durant (HOU - SF),2,ATL (Fri 8:00PM),28th,HOU -3.5,226.5,115,6,8,2,44.2,"$8,800",$199
+Deni Avdija (POR - SF/PF),2,@MIN (Fri 8:00PM),17th,MIN -2.5,231.5,114.5,7,12,5,43.6,"$8,400",$193
+Julius Randle (MIN - PF),2,POR (Fri 8:00PM),15th,MIN -2.5,231.5,117,8,14,6,42.9,"$8,200",$191
+Jalen Duren (DET - C),1,GSW (Fri 7:30PM),21st,DET -4.5,216.5,110.5,9,9,0,42.5,"$8,700",$205
+"Jalen Brunson (NYK - PG)
+DTD",5,@BKN (Fri 7:30PM),9th,NYK -17.5,214.5,116,10,4,-6,42.4,"$9,500",$224
+Amen Thompson (HOU - PG),2,ATL (Fri 8:00PM),22nd,HOU -3.5,226.5,115,11,15,4,41.9,"$8,100",$193
+Derrick White (BOS - PG),2,@MEM (Fri 8:00PM),18th,BOS -15,229,122,12,19,7,36.9,"$7,300",$198
+Rudy Gobert (MIN - C),2,POR (Fri 8:00PM),27th,MIN -2.5,231.5,117,13,20,7,36.5,"$7,200",$197
+Neemias Queta (BOS - C),2,@MEM (Fri 8:00PM),22nd,BOS -15,229,122,14,43,29,35.2,"$5,900",$168
+Onyeka Okongwu (ATL - C),2,@HOU (Fri 8:00PM),11th,HOU -3.5,226.5,111.5,15,22,7,33.2,"$7,000",$211
+Kristaps Porzingis (GSW - PF/C),2,@DET (Fri 7:30PM),10th,DET -4.5,216.5,106,16,36,20,33.1,"$6,200",$188
+Jabari Smith Jr. (HOU - PF),2,ATL (Fri 8:00PM),20th,HOU -3.5,226.5,115,17,30,13,32.8,"$6,500",$198
+Jrue Holiday (POR - PG),2,@MIN (Fri 8:00PM),23rd,MIN -2.5,231.5,114.5,18,28,10,31.9,"$6,500",$204
+Tari Eason (HOU - SG),2,ATL (Fri 8:00PM),12th,HOU -3.5,226.5,115,19,48,29,31.8,"$5,600",$176
+Payton Pritchard (BOS - PG/SG),2,@MEM (Fri 8:00PM),18th,BOS -15,229,122,20,39,19,31.4,"$6,100",$194
+Nickeil Alexander-Walker (ATL - PG/SG),2,@HOU (Fri 8:00PM),5th,HOU -3.5,226.5,111.5,21,21,0,31.3,"$7,100",$227
+Donte DiVincenzo (MIN - PG),2,POR (Fri 8:00PM),19th,MIN -2.5,231.5,117,22,41,19,30.9,"$6,000",$194
+CJ McCollum (ATL - PG/SG),2,@HOU (Fri 8:00PM),5th,HOU -3.5,226.5,111.5,23,35,12,30.6,"$6,200",$202
+Jaden McDaniels (MIN - SF),2,POR (Fri 8:00PM),27th,MIN -2.5,231.5,117,24,38,14,30.6,"$6,100",$199
+Dyson Daniels (ATL - SG/SF),2,@HOU (Fri 8:00PM),3rd,HOU -3.5,226.5,111.5,25,25,0,30.4,"$6,800",$224
+"Naz Reid (MIN - PF/C)
+DTD",3,POR (Fri 8:00PM),15th,MIN -2.5,231.5,117,26,51,25,30.3,"$5,500",$181
+OG Anunoby (NYK - PF),3,@BKN (Fri 7:30PM),21st,NYK -17.5,214.5,116,27,24,-3,30.0,"$6,800",$227
+Draymond Green (GSW - PF/C),2,@DET (Fri 7:30PM),10th,DET -4.5,216.5,106,28,49,21,29.7,"$5,500",$185
+Ayo Dosunmu (MIN - SG/SF),2,POR (Fri 8:00PM),20th,MIN -2.5,231.5,117,29,37,8,29.7,"$6,200",$209
+Donovan Clingan (POR - C),2,@MIN (Fri 8:00PM),12th,MIN -2.5,231.5,114.5,30,17,-13,28.7,"$7,700",$268
+Jerami Grant (POR - PF),2,@MIN (Fri 8:00PM),4th,MIN -2.5,231.5,114.5,31,50,19,28.6,"$5,500",$192
+Gui Santos (GSW - PF),2,@DET (Fri 7:30PM),10th,DET -4.5,216.5,106,32,27,-5,28.3,"$6,700",$237
+Brandin Podziemski (GSW - PG/SG),2,@DET (Fri 7:30PM),3rd,DET -4.5,216.5,106,33,18,-15,27.6,"$7,600",$275
+Daniss Jenkins (DET - PG),1,GSW (Fri 7:30PM),17th,DET -4.5,216.5,110.5,34,52,18,27.6,"$5,500",$199
+Ty Jerome (MEM - PG),2,BOS (Fri 8:00PM),7th,BOS -15,229,107,35,23,-12,27.4,"$6,900",$252
+Reed Sheppard (HOU - PG/SG),2,ATL (Fri 8:00PM),22nd,HOU -3.5,226.5,115,36,33,-3,26.9,"$6,400",$238
+Tobias Harris (DET - PF),1,GSW (Fri 7:30PM),17th,DET -4.5,216.5,110.5,37,34,-3,26.7,"$6,300",$236
+"Mikal Bridges (NYK - SF)
+DTD",3,@BKN (Fri 7:30PM),22nd,NYK -17.5,214.5,116,38,46,8,26.5,"$5,700",$215
+Bones Hyland (MIN - PG/SG),2,POR (Fri 8:00PM),19th,MIN -2.5,231.5,117,39,67,28,26.5,"$4,700",$178
+Ausar Thompson (DET - SF),1,GSW (Fri 7:30PM),3rd,DET -4.5,216.5,110.5,40,32,-8,26.5,"$6,400",$241
+De'Anthony Melton (GSW - SG/SF),2,@DET (Fri 7:30PM),5th,DET -4.5,216.5,106,41,40,-1,26.0,"$6,000",$231
+"Cedric Coward (MEM - SG)
+DTD",2,BOS (Fri 8:00PM),2nd,BOS -15,229,107,42,59,17,24.7,"$5,100",$207
+Gary Payton II (GSW - SG/SF),2,@DET (Fri 7:30PM),5th,DET -4.5,216.5,106,43,65,22,24.1,"$4,700",$195
+Toumani Camara (POR - SG/SF),2,@MIN (Fri 8:00PM),6th,MIN -2.5,231.5,114.5,44,55,11,23.9,"$5,200",$218
+"Mitchell Robinson (NYK - C)
+DTD",3,@BKN (Fri 7:30PM),20th,NYK -17.5,214.5,116,45,77,32,23.8,"$4,300",$180
+"Robert Williams III (POR - C)
+DTD",2,@MIN (Fri 8:00PM),12th,MIN -2.5,231.5,114.5,46,69,23,22.4,"$4,600",$205
+Scoot Henderson (POR - PG),2,@MIN (Fri 8:00PM),23rd,MIN -2.5,231.5,114.5,47,62,15,22.2,"$4,800",$216
+Nic Claxton (BKN - C),2,NYK (Fri 7:30PM),3rd,NYK -17.5,214.5,98.5,48,47,-1,22.1,"$5,700",$259
+Danny Wolf (BKN - PF/C),2,NYK (Fri 7:30PM),2nd,NYK -17.5,214.5,98.5,49,44,-5,21.8,"$5,900",$271
+"Landry Shamet (NYK - SG)
+DTD",3,@BKN (Fri 7:30PM),21st,NYK -17.5,214.5,116,50,97,47,21.5,"$3,600",$167
+Duncan Robinson (DET - SG),1,GSW (Fri 7:30PM),15th,DET -4.5,216.5,110.5,51,57,6,20.9,"$5,100",$244
+Paul Reed (DET - C),1,GSW (Fri 7:30PM),21st,DET -4.5,216.5,110.5,52,83,31,20.8,"$4,200",$202
+Sam Hauser (BOS - SF/PF),2,@MEM (Fri 8:00PM),26th,BOS -15,229,122,53,78,25,20.7,"$4,300",$207
+Kevin Huerter (DET - SG/SF),1,GSW (Fri 7:30PM),15th,DET -4.5,216.5,110.5,54,85,31,20.6,"$4,100",$199
+Baylor Scheierman (BOS - SG),2,@MEM (Fri 8:00PM),24th,BOS -15,229,122,55,91,36,20.0,"$3,800",$190
+Olivier-Maxence Prosper (MEM - C),2,BOS (Fri 8:00PM),2nd,BOS -15,229,107,56,61,5,19.7,"$4,900",$248
+"Jordan Clarkson (NYK - SG/SF)
+DTD",3,@BKN (Fri 7:30PM),21st,NYK -17.5,214.5,116,57,90,33,19.6,"$3,800",$194
+Cam Spencer (MEM - PG/SF),2,BOS (Fri 8:00PM),7th,BOS -15,229,107,58,70,12,19.5,"$4,600",$236
+Jaylen Wells (MEM - SF),2,BOS (Fri 8:00PM),1st,BOS -15,229,107,59,64,5,19.5,"$4,800",$246
+Taylor Hendricks (MEM - PF/C),2,BOS (Fri 8:00PM),3rd,BOS -15,229,107,60,60,0,19.3,"$5,000",$260
+Chaney Johnson (BKN - PF),2,NYK (Fri 7:30PM),2nd,NYK -17.5,214.5,98.5,61,81,20,18.9,"$4,300",$227
+Kyle Anderson (MIN - PF/C),2,POR (Fri 8:00PM),15th,MIN -2.5,231.5,117,62,72,10,18.6,"$4,500",$242
+Caris LeVert (DET - SG/SF),1,GSW (Fri 7:30PM),15th,DET -4.5,216.5,110.5,63,76,13,18.5,"$4,300",$233
+Javon Small (MEM - PG),2,BOS (Fri 8:00PM),7th,BOS -15,229,107,64,56,-8,18.4,"$5,200",$283
+Ronald Holland II (DET - PF),1,GSW (Fri 7:30PM),17th,DET -4.5,216.5,110.5,65,93,28,17.8,"$3,800",$214
+Pat Spencer (GSW - PG),2,@DET (Fri 7:30PM),3rd,DET -4.5,216.5,106,66,74,8,17.4,"$4,500",$259
+"Nolan Traore (BKN - PG)
+DTD",2,NYK (Fri 7:30PM),1st,NYK -17.5,214.5,98.5,67,86,19,17.3,"$4,100",$237
+Zaccharie Risacher (ATL - SF),2,@HOU (Fri 8:00PM),10th,HOU -3.5,226.5,111.5,68,94,26,17.1,"$3,800",$222
+Will Richard (GSW - SG/SF),2,@DET (Fri 7:30PM),5th,DET -4.5,216.5,106,69,80,11,16.9,"$4,300",$254
+"Ziaire Williams (BKN - SF)
+DTD",2,NYK (Fri 7:30PM),11th,NYK -17.5,214.5,98.5,70,87,17,16.3,"$4,000",$245
+"Quinten Post (GSW - C)
+DTD",2,@DET (Fri 7:30PM),7th,DET -4.5,216.5,106,71,89,18,16.3,"$3,900",$239
+"Ben Saraf (BKN - PG)
+DTD",4,NYK (Fri 7:30PM),1st,NYK -17.5,214.5,98.5,72,75,3,16.2,"$4,500",$279
+Luka Garza (BOS - C),2,@MEM (Fri 8:00PM),22nd,BOS -15,229,122,73,109,36,16.0,"$3,200",$200
+Walter Clayton Jr. (MEM - PG/SG),2,BOS (Fri 8:00PM),7th,BOS -15,229,107,74,71,-3,16.0,"$4,600",$287
+"Jose Alvarado (NYK - PG)
+DTD",3,@BKN (Fri 7:30PM),9th,NYK -17.5,214.5,116,75,73,-2,15.0,"$4,500",$301
+Rayan Rupert (MEM - SF/PF),4,BOS (Fri 8:00PM),1st,BOS -15,229,107,76,79,3,13.9,"$4,300",$310
+"Mohamed Diawara (NYK - PF)
+DTD",3,@BKN (Fri 7:30PM),21st,NYK -17.5,214.5,116,77,121,44,13.7,"$3,100",$227
+Jock Landale (ATL - C),2,@HOU (Fri 8:00PM),11th,HOU -3.5,226.5,111.5,78,112,34,13.4,"$3,200",$240
+DeJon Jarreau (MEM - PG),2,BOS (Fri 8:00PM),7th,BOS -15,229,107,79,84,5,12.7,"$4,200",$332
+Corey Kispert (ATL - SG/SF),2,@HOU (Fri 8:00PM),3rd,HOU -3.5,226.5,111.5,80,118,38,12.2,"$3,100",$254
+Drake Powell (BKN - SG),2,NYK (Fri 7:30PM),14th,NYK -17.5,214.5,98.5,81,107,26,11.8,"$3,300",$280
+Marcus Sasser (DET - PG/SG),1,GSW (Fri 7:30PM),17th,DET -4.5,216.5,110.5,82,53,-29,11.1,"$5,400",$488
+Clint Capela (HOU - C),2,ATL (Fri 8:00PM),17th,HOU -3.5,226.5,115,83,82,-1,11.0,"$4,200",$381
+Matisse Thybulle (POR - SF/PF),2,@MIN (Fri 8:00PM),17th,MIN -2.5,231.5,114.5,84,116,32,10.8,"$3,100",$287
+Dorian Finney-Smith (HOU - SF/PF),2,ATL (Fri 8:00PM),28th,HOU -3.5,226.5,115,85,96,11,10.4,"$3,600",$347
+Josh Minott (BKN - PF/C),2,NYK (Fri 7:30PM),2nd,NYK -17.5,214.5,98.5,86,99,13,9.8,"$3,500",$359
+"Terance Mann (BKN - SG)
+DTD",2,NYK (Fri 7:30PM),14th,NYK -17.5,214.5,98.5,87,102,15,9.2,"$3,400",$369
+Tyler Burton (MEM - PF),2,BOS (Fri 8:00PM),3rd,BOS -15,229,107,88,98,10,8.9,"$3,600",$407
+"Jalen Wilson (BKN - SF)
+DTD",2,NYK (Fri 7:30PM),11th,NYK -17.5,214.5,98.5,89,120,31,8.8,"$3,100",$354
+Mouhamed Gueye (ATL - PF/C),4,@HOU (Fri 8:00PM),1st,HOU -3.5,226.5,111.5,90,150,60,8.7,"$3,000",$346
+"Vit Krejci (POR - SG)
+DTD",5,@MIN (Fri 8:00PM),6th,MIN -2.5,231.5,114.5,91,110,19,8.6,"$3,200",$372
+Tyson Etienne (BKN - PG/SG),2,NYK (Fri 7:30PM),1st,NYK -17.5,214.5,98.5,92,92,0,8.4,"$3,800",$452
+Ochai Agbaji (BKN - SG/SF),2,NYK (Fri 7:30PM),14th,NYK -17.5,214.5,98.5,93,111,18,8.2,"$3,200",$393
+Hugo Gonzalez (BOS - SG/SF),2,@MEM (Fri 8:00PM),24th,BOS -15,229,122,94,169,75,8.1,"$3,000",$373
+Josh Okogie (HOU - SG/SF),2,ATL (Fri 8:00PM),12th,HOU -3.5,226.5,115,95,115,20,7.1,"$3,100",$435
+E.J. Liddell (BKN - C),2,NYK (Fri 7:30PM),3rd,NYK -17.5,214.5,98.5,96,88,-8,6.9,"$3,900",$569
+Gabe Vincent (ATL - PG),2,@HOU (Fri 8:00PM),5th,HOU -3.5,226.5,111.5,97,108,11,6.1,"$3,200",$525
