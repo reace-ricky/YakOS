@@ -1966,7 +1966,34 @@ def _compute_nudge_metrics(
     # Fraction of slates where ≥1 Ricky pick is in the actual top 5.
     metrics["ricky_top3_hit"] = round(float(mean(hit_vals)), 4) if hit_vals else None
 
-    # ── 9. Lineup Diversity (20-max only) — unique top-3 salary cores ─────
+    # ── 9. Ricky Rank Correlation (Spearman) ────────────────────────────────
+    # Spearman rank correlation between ricky_rank and actual finish position.
+    # A continuous 0-to-1 signal that stress-tests the ranker across the full
+    # pool, unlike the binary ricky_top3_hit metric.
+    rank_corr_vals: list = []
+    for run in runs:
+        sdf = run.get("summary_df")
+        if sdf is None or sdf.empty or "ricky_rank" not in sdf.columns:
+            continue
+        if "total_actual" not in sdf.columns:
+            continue
+        # Need at least 4 lineups for a meaningful correlation
+        if len(sdf) < 4:
+            continue
+        # Actual finish rank: rank 1 = highest total_actual
+        actual_rank = sdf["total_actual"].rank(ascending=False, method="average")
+        ricky_r = sdf["ricky_rank"].astype(float)
+        # scipy-free Spearman: correlation of the two rank vectors
+        n = len(sdf)
+        d_sq = ((ricky_r.values - actual_rank.values) ** 2).sum()
+        if n > 1:
+            rho = 1.0 - (6.0 * d_sq) / (n * (n * n - 1.0))
+            rank_corr_vals.append(float(rho))
+    metrics["ricky_rank_corr"] = (
+        round(float(mean(rank_corr_vals)), 4) if rank_corr_vals else None
+    )
+
+    # ── 10. Lineup Diversity (20-max only) — unique top-3 salary cores ────
     if profile_key == "classic_gpp_20max":
         unique_cores: set = set()
         for run in runs:
@@ -1995,7 +2022,7 @@ def _fmt_nudge_value(metric_name: str, value: float) -> str:
     """Format a metric value for display in the nudge table."""
     if metric_name in ("top_1pct_rate", "cash_rate", "ricky_top3_hit"):
         return f"{value:.1%}"
-    if metric_name in ("mae", "bias", "correlation"):
+    if metric_name in ("mae", "bias", "correlation", "ricky_rank_corr"):
         return f"{value:.3f}"
     if metric_name == "lineup_diversity_min_cores":
         return f"{int(value)} cores"

@@ -268,6 +268,31 @@ NUDGE_PARAM_RULES: dict[tuple[str, str], list[dict[str, Any]]] = {
             "compute": lambda cur, val, lo, hi: round(max(cur - 0.10, 0.0), 2),
         },
     ],
+    # ── Ricky Rank Correlation ────────────────────────────────────────────────
+    ("ricky_rank_corr", "low"): [
+        {
+            "param": "w_gpp",
+            "label": "GPP Score Weight",
+            "has_slider": True,
+            "slider_min": 0.0,
+            "slider_max": 2.0,
+            "step": 0.05,
+            "storage": "ricky_weights",
+            "description": "Increase GPP score weight to lean ranking on projection quality",
+            "compute": lambda cur, val, lo, hi: round(min(cur + 0.10, 2.0), 2),
+        },
+        {
+            "param": "w_ceil",
+            "label": "Ceiling Weight",
+            "has_slider": True,
+            "slider_min": 0.0,
+            "slider_max": 2.0,
+            "step": 0.05,
+            "storage": "ricky_weights",
+            "description": "Increase ceiling emphasis to better predict top finishers",
+            "compute": lambda cur, val, lo, hi: round(min(cur + 0.10, 2.0), 2),
+        },
+    ],
     ("ricky_top3_hit", "low"): [
         {
             "param": "w_gpp",
