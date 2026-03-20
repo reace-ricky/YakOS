@@ -528,24 +528,25 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
         if _lu_ranked_df is not None and not _lu_ranked_df.empty:
             _tagged = _lu_ranked_df[_lu_ranked_df["ricky_tag"] != ""].copy()
             if not _tagged.empty:
-                st.markdown("#### \U0001f3af Ricky SE Picks")
-                _tag_display = _tagged[[
-                    "lineup_index", "ricky_tag", "ricky_score",
-                    "total_gpp_score", "total_ceil", "total_proj",
-                    "avg_own_pct", "total_salary",
-                ]].copy()
-                _tag_display.columns = [
-                    "#", "Tag", "Score", "GPP",
-                    "Ceiling", "Proj", "Avg Own%", "Salary",
-                ]
-                st.dataframe(
-                    _tag_display.style.format({
-                        "Score": "{:.3f}", "GPP": "{:.1f}",
-                        "Ceiling": "{:.1f}", "Proj": "{:.1f}",
-                        "Avg Own%": "{:.1%}", "Salary": "${:,.0f}",
-                    }),
-                    use_container_width=True, hide_index=True,
-                )
+                st.markdown("#### \U0001f3af Ricky's Picks")
+                                if is_admin:
+                    _tag_display = _tagged[[
+                        "lineup_index", "ricky_tag", "ricky_score",
+                        "total_gpp_score", "total_ceil", "total_proj",
+                        "avg_own_pct", "total_salary",
+                    ]].copy()
+                    _tag_display.columns = [
+                        "#", "Tag", "Score", "GPP",
+                        "Ceiling", "Proj", "Avg Own%", "Salary",
+                    ]
+                    st.dataframe(
+                        _tag_display.style.format({
+                            "Score": "{:.3f}", "GPP": "{:.1f}",
+                            "Ceiling": "{:.1f}", "Proj": "{:.1f}",
+                            "Avg Own%": "{:.1%}", "Salary": "${:,.0f}",
+                        }),
+                        use_container_width=True, hide_index=True,
+                    )
 
                 # Show players in each tagged lineup
                 for _, _tag_row in _tagged.iterrows():
@@ -554,32 +555,33 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
                     _lu_players = lineups_df[lineups_df["lineup_index"] == _li].copy()
                     _p_cols = ["player_name", "pos", "team", "salary", "proj", "ceil", "gpp_score", "own_pct"]
                     _p_avail = [c for c in _p_cols if c in _lu_players.columns]
-                    with st.expander(f"{_tag} — Lineup #{int(_li)}"):
+                    _exp_label = f"{_tag} \u2014 Lineup #{int(_li)}" if is_admin else f"Lineup #{int(_li)}"
+                                        with st.expander(_exp_label):
                         _tagged_disp = _lu_players[_p_avail].copy()
                         for _rc in ["proj", "ceil", "floor", "gpp_score", "own_pct"]:
                             if _rc in _tagged_disp.columns:
                                 _tagged_disp[_rc] = pd.to_numeric(_tagged_disp[_rc], errors="coerce").round(2)
                         st.dataframe(_tagged_disp, use_container_width=True, hide_index=True)
 
-            # Full ranking table in expander
-            with st.expander("Full Ricky Ranking"):
-                _full_display = _lu_ranked_df.sort_values("ricky_rank")[[
-                    "lineup_index", "ricky_rank", "ricky_tag", "ricky_score",
-                    "total_gpp_score", "total_ceil", "total_proj",
-                    "avg_own_pct", "total_salary",
-                ]].copy()
-                _full_display.columns = [
-                    "#", "Rank", "Tag", "Score", "GPP",
-                    "Ceiling", "Proj", "Avg Own%", "Salary",
-                ]
-                st.dataframe(
-                    _full_display.style.format({
-                        "Score": "{:.3f}", "GPP": "{:.1f}",
-                        "Ceiling": "{:.1f}", "Proj": "{:.1f}",
-                        "Avg Own%": "{:.1%}", "Salary": "${:,.0f}",
-                    }),
-                    use_container_width=True, hide_index=True,
-                )
+                        if is_admin:  # Full ranking table (admin only)
+                with st.expander("Full Ricky Ranking"):
+                    _full_display = _lu_ranked_df.sort_values("ricky_rank")[[
+                        "lineup_index", "ricky_rank", "ricky_tag", "ricky_score",
+                        "total_gpp_score", "total_ceil", "total_proj",
+                        "avg_own_pct", "total_salary",
+                    ]].copy()
+                    _full_display.columns = [
+                        "#", "Rank", "Tag", "Score", "GPP",
+                        "Ceiling", "Proj", "Avg Own%", "Salary",
+                    ]
+                    st.dataframe(
+                        _full_display.style.format({
+                            "Score": "{:.3f}", "GPP": "{:.1f}",
+                            "Ceiling": "{:.1f}", "Proj": "{:.1f}",
+                            "Avg Own%": "{:.1%}", "Salary": "${:,.0f}",
+                        }),
+                        use_container_width=True, hide_index=True,
+                    )
 
         # ── All Lineups (raw) ──
         st.markdown("#### Lineups")
@@ -599,8 +601,8 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
                 total_proj = float(pd.to_numeric(lu["proj"], errors="coerce").fillna(0).sum()) if "proj" in lu.columns else 0.0
                 total_ceil = float(pd.to_numeric(lu["ceil"], errors="coerce").fillna(0).sum()) if "ceil" in lu.columns else 0.0
                 ceil_part = f" | {total_ceil:.1f} ceil" if total_ceil > 0 else ""
-                rank_part = f" | Rank {_rank_map[idx]}" if _tag_map_lu and idx in _rank_map else ""
-                tag_part = f" | {_tag_map_lu[idx]}" if _tag_map_lu.get(idx) else ""
+                rank_part = f" | Rank {_rank_map[idx]}" if is_admin and _tag_map_lu and idx in _rank_map else ""
+                tag_part = f" | {_tag_map_lu[idx]}" if is_admin and _tag_map_lu.get(idx) else ""
                 st.markdown(f"**Lineup {idx + 1}** — ${total_sal:,} sal | {total_proj:.1f} proj{ceil_part}{rank_part}{tag_part}")
                 show_cols = ["player_name", "pos", "salary", "proj", "ceil"]
                 if "slot" in lu.columns:
@@ -641,7 +643,7 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
             and (_lu_ranked_df["ricky_tag"] != "").any()
         )
         _export_tagged_only = False
-        if _has_tags:
+        if is_admin and _has_tags:
             _export_tagged_only = st.checkbox(
                 "Export tagged lineups only (SE Core / Spicy / Alt)",
                 value=True,
@@ -682,7 +684,7 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
         # ── Publish SE Lineups button ──
         # Pushes ONLY the 3 SE-tagged lineups to data/published/{sport}/
         # so they appear on the Edge Share page.
-        if _has_tags:
+        if is_admin and _has_tags:
             st.markdown("---")
             st.markdown("#### Publish SE Lineups")
             if st.button(
