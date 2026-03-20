@@ -388,10 +388,6 @@ def render_lab_tab(sport: str) -> None:
         contest_options = ["GPP Main", "GPP Early", "Showdown", "Cash Main", "Cash Game"]
     contest_options = [c for c in contest_options if c in CONTEST_PRESETS]
 
-    _contest_display = {
-        "PGA GPP": "PGA GPP (Full Tournament)",
-    }
-
     # Named profile selector — overrides contest preset config when active
     _NONE_PROFILE_BUILD = "(None)"
     _build_sport_presets = (
@@ -418,7 +414,7 @@ def render_lab_tab(sport: str) -> None:
     with col_c:
         contest_label = st.selectbox(
             "Contest type", contest_options,
-            format_func=lambda x: _contest_display.get(x, x),
+            format_func=lambda k: CONTEST_PRESETS.get(k, {}).get("display_name", k),
             key=f"lab_contest_{sport}",
         )
     with col_n:

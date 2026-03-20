@@ -238,7 +238,9 @@ def render_optimizer_tab(sport: str) -> None:
         else:
             _contest_idx = 0
         contest_label = st.selectbox(
-            "Contest type", contest_options, index=_contest_idx, key=f"opt_contest_{sport}"
+            "Contest type", contest_options, index=_contest_idx,
+            format_func=lambda k: CONTEST_PRESETS.get(k, {}).get("display_name", k),
+            key=f"opt_contest_{sport}",
         )
     with col_count:
         preset = CONTEST_PRESETS.get(contest_label, {})

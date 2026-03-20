@@ -212,6 +212,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 
 CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
     "GPP Main": {
+        "display_name": "Single-Entry GPP",
         "description": "Main slate GPP — highest game count, max upside, 150 lineups",
         "slate_type": "Classic",
         "archetype": "Ceiling Hunter",
@@ -267,6 +268,7 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "ownership_contest_type": "gpp_main",
     },
     "GPP Early": {
+        "display_name": "20-Max GPP",
         "description": "Early slate GPP — afternoon games only, 20 lineups",
         "slate_type": "Classic",
         "archetype": "Ceiling Hunter",
@@ -322,6 +324,7 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "ownership_contest_type": "gpp_early",
     },
     "GPP Late": {
+        "display_name": "Late-Night GPP",
         "description": "Late slate GPP — 9:30pm EST and later, 20 lineups",
         "slate_type": "Classic",
         "archetype": "Ceiling Hunter",
@@ -377,6 +380,7 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "ownership_contest_type": "gpp_late",
     },
     "Showdown": {
+        "display_name": "Showdown GPP",
         "description": "Showdown — single-game Captain mode, 3 lineups per game",
         "slate_type": "Showdown Captain",
         "archetype": "Ceiling Hunter",
@@ -415,6 +419,7 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "ownership_contest_type": "showdown",
     },
     "Cash Main": {
+        "display_name": "Cash (H2H / 50-50)",
         "description": "Cash / 50-50 / Double-Up — high-floor plays, 1 lineup, low volatility",
         "slate_type": "Classic",
         "archetype": "Floor Lock",
@@ -446,6 +451,7 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "ownership_contest_type": "cash",
     },
     "Cash Game": {
+        "display_name": "Cash Showdown",
         "description": "Cash / 50-50 / Double-Up for single-game slates — high-floor, small pool",
         "slate_type": "Classic",
         "archetype": "Floor Lock",
@@ -484,6 +490,7 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
 # 6 golfers, no positions, no stacking.
 PGA_CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
     "PGA GPP": {
+        "display_name": "PGA · Tournament GPP",
         "description": "PGA tournament GPP — 6 golfers, max upside (4-day)",
         "slate_type": "Classic",
         "archetype": "Ceiling Hunter",
@@ -524,6 +531,7 @@ PGA_CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "ownership_contest_type": "gpp",
     },
     "PGA Cash": {
+        "display_name": "PGA · Cash (50-50)",
         "description": "PGA cash / double-up — 6 golfers, safe floor (single round)",
         "slate_type": "Classic",
         "archetype": "Balanced",
@@ -564,6 +572,7 @@ PGA_CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "ownership_contest_type": "cash",
     },
     "PGA Showdown": {
+        "display_name": "PGA · Showdown GPP",
         "description": "PGA single-round showdown — 6 golfers, ceiling-weighted (one round)",
         "slate_type": "Classic",
         "archetype": "Ceiling Hunter",

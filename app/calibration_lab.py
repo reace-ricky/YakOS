@@ -2216,7 +2216,13 @@ def render_calibration_lab(sport: str) -> None:
         )
     with col_contest:
         contest_types = ["GPP", "Showdown", "Cash Main", "Cash Game"]
-        contest_mode = st.radio("Contest Type", contest_types, key="cal_lab_contest_type", horizontal=True)
+        _cal_display = {"GPP": "Single-Entry GPP", "Showdown": "Showdown GPP",
+                        "Cash Main": "Cash (H2H / 50-50)", "Cash Game": "Cash Showdown"}
+        contest_mode = st.radio(
+            "Contest Type", contest_types,
+            format_func=lambda k: _cal_display.get(k, k),
+            key="cal_lab_contest_type", horizontal=True,
+        )
 
     contest_type_key = contest_mode.lower().replace(" ", "_")  # "gpp", "showdown", "cash_main", "cash_game"
 

@@ -1827,6 +1827,7 @@ def render_sim_lab(sport: str) -> None:
     preset_name = st.selectbox(
         "Contest Preset",
         options=presets,
+        format_func=lambda k: CONTEST_PRESETS.get(k, {}).get("display_name", k),
         key="sim_lab_preset",
     )
 
