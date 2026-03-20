@@ -2311,7 +2311,6 @@ def render_sim_lab(sport: str) -> None:
         _active_profile = None
         if _named_key and _named_key in NAMED_PROFILES:
             _active_profile = NAMED_PROFILES[_named_key]
-            _apply_named_profile(_named_key)
 
         _cur_ct = _contest_display
         _prev_ct = st.session_state.get("_sim_lab_prev_contest_type", "")
@@ -2320,8 +2319,17 @@ def render_sim_lab(sport: str) -> None:
     if _cur_ct != _prev_ct:
         st.session_state["_sim_lab_prev_contest_type"] = _cur_ct
         st.session_state["sim_lab_archetype"] = "Default"
+        # Seed sandbox with profile defaults on contest type change
+        if not is_pga and _named_key:
+            _apply_named_profile(_named_key)
         if _prev_ct:  # skip initial render
             st.rerun()
+    elif not is_pga:
+        # First render (no _prev_ct yet): seed sandbox only if empty
+        sk = _sandbox_config_key(preset_name)
+        if sk not in st.session_state:
+            if _named_key:
+                _apply_named_profile(_named_key)
 
     # --- Archetype selector (NBA GPP presets only) ---
     archetype_name = "Default"
