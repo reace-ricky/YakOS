@@ -73,6 +73,7 @@ CALIBRATION_TARGETS: dict[str, dict[str, tuple[float, float]]] = {
 _RICKY_WEIGHT_TARGETS: dict[str, tuple[float, float]] = {
     "ricky_top3_lift": (3.0, 20.0),
     "ricky_top3_hit":  (0.30, 1.0),
+    "ricky_rank_corr": (0.20, 1.0),
 }
 
 # Inject into every GPP profile (not cash profiles)
@@ -96,6 +97,7 @@ METRIC_LABELS: dict[str, str] = {
     "lineup_diversity_min_cores": "Lineup Diversity (unique cores)",
     "ricky_top3_lift": "Ricky Top-3 Lift %",
     "ricky_top3_hit": "Ricky Top-3 Hit Rate",
+    "ricky_rank_corr": "Ricky Rank Correlation",
 }
 
 # ── Nudge text: (metric, direction) → recommendation ─────────────────────────
@@ -158,6 +160,11 @@ NUDGE_TEXT: dict[tuple[str, str], str] = {
         "Increase GPP score weight to lean on projection quality."
     ),
     ("ricky_top3_hit", "high"): "",  # higher hit rate is always good
+    ("ricky_rank_corr", "low"): (
+        "Ricky rank ordering weakly correlated with actual finish. "
+        "Increase GPP score weight or ceiling weight to improve ranking signal."
+    ),
+    ("ricky_rank_corr", "high"): "",  # higher correlation is always good
 }
 
 
@@ -231,7 +238,7 @@ def get_target_display(metric_name: str, profile_key: str) -> str:
     lo, hi = targets[metric_name]
     # For metrics where hi=1.0 represents the natural maximum (rates, correlation),
     # show as ">= lo" instead of "lo – 1.0".
-    _unbounded_hi_metrics = {"top_1pct_rate", "cash_rate", "correlation", "ricky_top3_hit"}
+    _unbounded_hi_metrics = {"top_1pct_rate", "cash_rate", "correlation", "ricky_top3_hit", "ricky_rank_corr"}
     if metric_name in _unbounded_hi_metrics and hi == 1.0 and lo < 1.0:
         if metric_name in ("top_1pct_rate", "cash_rate"):
             return f"≥ {lo:.0%}"
