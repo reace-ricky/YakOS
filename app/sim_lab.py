@@ -2067,10 +2067,14 @@ def _render_nudge_guidance(
                         if sk not in st.session_state:
                             st.session_state[sk] = {}
                         st.session_state[sk][param] = sug_val
-                        # Also sync the slider widget state so it reflects new value
+                        # Clear the slider widget's cached value so it
+                        # re-initialises from the overrides dict on rerun.
+                        # Directly setting st.session_state[widget_key] after
+                        # the slider has rendered raises StreamlitAPIException
+                        # in Streamlit ≥1.41.
                         if has_slider:
                             slider_key = f"sl_{preset_name}_{param}"
-                            st.session_state[slider_key] = sug_val
+                            st.session_state.pop(slider_key, None)
                         st.toast(f"✅ {param} → {sug_val}")
                         st.rerun()
                 else:
