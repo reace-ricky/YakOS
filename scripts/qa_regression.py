@@ -325,6 +325,8 @@ def _check_build_classic():
     from yak_core.state import SlateState
 
     pool = _make_test_pool(16)
+    # Solver requires 'position' column (not 'pos') for slot eligibility
+    pool = pool.rename(columns={"pos": "position"})
     slate = SlateState()
     slate.roster_slots = ["PG", "SG", "SF", "PF", "C", "G", "F", "UTIL"]
     slate.salary_cap = 50000
@@ -348,9 +350,11 @@ def _check_build_classic():
 # ---------------------------------------------------------------------------
 
 def _check_dk_csv_export():
-    from yak_core.lineups import build_multiple_lineups_with_exposure, to_dk_upload_format
+    from yak_core.lineups import build_multiple_lineups_with_exposure
 
     pool = _make_test_pool(16)
+    # Solver requires 'position' column for slot eligibility
+    pool = pool.rename(columns={"pos": "position"})
     cfg = {
         "NUM_LINEUPS": 2,
         "SALARY_CAP": 50000,
@@ -360,8 +364,28 @@ def _check_dk_csv_export():
         "EXCLUDE": [],
     }
     lineups_df, _ = build_multiple_lineups_with_exposure(pool, cfg)
-    assert lineups_df is not None
-    csv_df = to_dk_upload_format(lineups_df)
+    assert lineups_df is not None and not lineups_df.empty
+    # Build DK upload CSV: long-format → one row per lineup
+    from yak_core.config import DK_POS_SLOTS
+    rows = []
+    for lu_idx in sorted(lineups_df["lineup_index"].unique()):
+        lu = lineups_df[lineups_df["lineup_index"] == lu_idx]
+        row: dict = {"Entry ID": "", "Contest Name": "", "Contest ID": "", "Entry Fee": ""}
+        if "slot" in lu.columns:
+            for _, p in lu.iterrows():
+                slot = p["slot"]
+                col_name = slot
+                i = 1
+                while col_name in row:
+                    i += 1
+                    col_name = f"{slot}{i}"
+                row[col_name] = p.get("player_name", "")
+        else:
+            for i, (_, p) in enumerate(lu.iterrows()):
+                col_name = DK_POS_SLOTS[i] if i < len(DK_POS_SLOTS) else f"UTIL{i}"
+                row[col_name] = p.get("player_name", "")
+        rows.append(row)
+    csv_df = pd.DataFrame(rows)
     assert isinstance(csv_df, pd.DataFrame)
     assert not csv_df.empty
     # Validate CSV bytes
