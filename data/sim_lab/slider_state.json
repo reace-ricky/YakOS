@@ -6,8 +6,7 @@
         "GPP_PACE_ENV_WEIGHT": 0.12,
         "GPP_FORM_WEIGHT": 0.09,
         "NUM_LINEUPS": 40,
-        "GPP_PROJ_WEIGHT": 0.35,
-        "GPP_OWN_PENALTY_STRENGTH": 0.0
+        "GPP_PROJ_WEIGHT": 0.3
       },
       "ricky_weights": {
         "w_gpp": 1.0,
