@@ -25,8 +25,10 @@ from yak_core.config import (
     CONTEST_PRESETS,
     DEFAULT_CONFIG,
     NAMED_PROFILES,
-    NAMED_PROFILE_LABELS,
     merge_config,
+)
+from utils.constants import (
+    CONTEST_TYPES, PGA_CONTEST_TYPES, DISPLAY_TO_PRESET, CONTEST_PROFILE_MAP,
 )
 from yak_core.edge import compute_edge_metrics
 from yak_core.lineups import (
@@ -1928,64 +1930,30 @@ def render_sim_lab(sport: str) -> None:
     """Render the Sim Lab tab."""
     st.header("\U0001f52c Sim Lab")
 
-    # --- Named Profile selector (V1 profiles + promoted configs) ---
-    from yak_core.promoted_configs import list_promoted, get_promoted_as_named_profile
-    _all_profiles: dict = dict(NAMED_PROFILES)  # copy
-    for _pc in list_promoted():
-        _pnp = get_promoted_as_named_profile(_pc["key"])
-        if _pnp and _pc["key"] not in _all_profiles:
-            _all_profiles[_pc["key"]] = _pnp
-    _all_profile_labels = list(_all_profiles.keys())
-
-    # Build profile options filtered by sport
-    _NONE_PROFILE = "(Manual)"
-    if sport == "NBA":
-        _profile_options = [_NONE_PROFILE] + [
-            k for k in _all_profile_labels
-            if _all_profiles[k]["base_preset"] in _NBA_PRESETS
-        ]
-    else:
-        _profile_options = [_NONE_PROFILE] + [
-            k for k in _all_profile_labels
-            if _all_profiles[k]["base_preset"] in _PGA_PRESETS
-        ]
-
-    selected_profile = st.selectbox(
-        "Named Profile",
-        options=_profile_options,
-        format_func=lambda k: _all_profiles[k]["display_name"] if k != _NONE_PROFILE else "Manual (custom sliders)",
-        key="sim_lab_profile",
-        help=(
-            _all_profiles.get(
-                st.session_state.get("sim_lab_profile", _NONE_PROFILE), {}
-            ).get("description", "Pick a frozen profile or use manual sliders.")
-        ),
+    # ── Contest type dropdown (single source — no Profile selector) ──
+    _display_options = PGA_CONTEST_TYPES if sport != "NBA" else CONTEST_TYPES
+    _contest_display = st.selectbox(
+        "Contest type", _display_options,
+        key="sim_lab_contest_type",
     )
 
-    # Detect profile change and seed everything
-    _prev_profile = st.session_state.get("_sim_lab_prev_profile", _NONE_PROFILE)
-    if selected_profile != _prev_profile:
-        st.session_state["_sim_lab_prev_profile"] = selected_profile
-        if selected_profile != _NONE_PROFILE:
-            _apply_named_profile(selected_profile)
-            # Force the contest preset selector to the profile's base preset
-            st.session_state["sim_lab_preset"] = _all_profiles[selected_profile]["base_preset"]
-            st.session_state["sim_lab_archetype"] = "Default"  # reset archetype
+    # Resolve display name → internal preset key + profile
+    preset_name = DISPLAY_TO_PRESET.get(_contest_display, _contest_display)
+
+    # Auto-wire the profile (hidden from UI)
+    _profile_key = CONTEST_PROFILE_MAP.get(_contest_display)
+    _active_profile: dict | None = None
+    if _profile_key and _profile_key in NAMED_PROFILES:
+        _active_profile = NAMED_PROFILES[_profile_key]
+        _apply_named_profile(_profile_key)
+
+    # Detect contest type change → reset archetype, seed sliders
+    _prev_ct = st.session_state.get("_sim_lab_prev_contest_type", "")
+    if _contest_display != _prev_ct:
+        st.session_state["_sim_lab_prev_contest_type"] = _contest_display
+        st.session_state["sim_lab_archetype"] = "Default"
+        if _prev_ct:  # skip initial render
             st.rerun()
-
-    # Contest preset selector
-    presets = _NBA_PRESETS if sport == "NBA" else _PGA_PRESETS
-    preset_name = st.selectbox(
-        "Contest Preset",
-        options=presets,
-        format_func=lambda k: CONTEST_PRESETS.get(k, {}).get("display_name", k),
-        key="sim_lab_preset",
-    )
-
-    # Show active profile badge if using a named profile
-    if selected_profile != _NONE_PROFILE:
-        _p = _all_profiles[selected_profile]
-        st.caption(f"\u2705 Profile: **{_p['display_name']}** ({_p['version']}) — {_p['description']}")
 
     # --- Archetype selector (NBA GPP presets only) ---
     archetype_name = "Default"
@@ -2097,7 +2065,7 @@ def render_sim_lab(sport: str) -> None:
                             ricky_w_gpp=_ricky_weights["w_gpp"],
                             ricky_w_ceil=_ricky_weights["w_ceil"],
                             ricky_w_own=_ricky_weights["w_own"],
-                            profile_name=selected_profile if selected_profile != _NONE_PROFILE else "",
+                            profile_name=_profile_key or "",
                         )
                         _bl_batch["config_label"] = "Baseline (main config)"
                         _bl_batch["overrides"] = {}
@@ -2118,7 +2086,7 @@ def render_sim_lab(sport: str) -> None:
                         ricky_w_gpp=_ricky_weights["w_gpp"],
                         ricky_w_ceil=_ricky_weights["w_ceil"],
                         ricky_w_own=_ricky_weights["w_own"],
-                        profile_name=selected_profile if selected_profile != _NONE_PROFILE else "",
+                        profile_name=_profile_key or "",
                     )
                     batch["overrides"] = dict(sandbox_overrides)
 

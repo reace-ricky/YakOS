@@ -189,91 +189,46 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
     st.markdown("---")
     st.markdown("#### Build Settings")
 
-    from yak_core.config import CONTEST_PRESETS, NAMED_PROFILES, NAMED_PROFILE_LABELS
+    from yak_core.config import CONTEST_PRESETS, NAMED_PROFILES
+    from utils.constants import (
+        CONTEST_TYPES, PGA_CONTEST_TYPES, DISPLAY_TO_PRESET, CONTEST_PROFILE_MAP,
+    )
 
-    if is_pga:
-        contest_options = ["PGA GPP", "PGA Cash", "PGA Showdown"]
-    else:
-        contest_options = ["GPP Main", "GPP Early", "Showdown", "Cash Main", "Cash Game"]
+    # ── Contest type dropdown (single source — no Profile selector) ──
+    _display_options = PGA_CONTEST_TYPES if is_pga else CONTEST_TYPES
 
-    contest_options = [c for c in contest_options if c in CONTEST_PRESETS]
-
-    # Build merged profile dict: hardcoded NAMED_PROFILES + promoted configs
-    from yak_core.promoted_configs import list_promoted, get_promoted_as_named_profile
-    _all_profiles: dict = dict(NAMED_PROFILES)  # copy
-    for _pc in list_promoted():
-        _pnp = get_promoted_as_named_profile(_pc["key"])
-        if _pnp and _pc["key"] not in _all_profiles:
-            _all_profiles[_pc["key"]] = _pnp
-    _all_profile_labels = list(_all_profiles.keys())
-
-    # Named profile selector — admin only; share optimizer hides it
-    _NONE_PROFILE = "(None)"
-    selected_profile = _NONE_PROFILE
-    _active_profile_overrides: dict = {}
-
-    if is_admin:
-        _sport_presets = (
-            ["PGA GPP", "PGA Cash", "PGA Showdown"] if is_pga
-            else ["GPP Main", "GPP Early", "GPP Late", "Showdown", "Cash Main", "Cash Game"]
-        )
-        _profile_options = [_NONE_PROFILE] + [
-            k for k in _all_profile_labels
-            if _all_profiles[k]["base_preset"] in _sport_presets
-        ]
-        _default_profile_idx = 0
-        if not is_pga and "GPP_MAIN_V1" in _profile_options:
-            _default_profile_idx = _profile_options.index("GPP_MAIN_V1")
-
-        col_profile, col_contest, col_count, col_exp = st.columns([2, 2, 1, 1])
-        with col_profile:
-            selected_profile = st.selectbox(
-                "Profile",
-                options=_profile_options,
-                index=_default_profile_idx,
-                format_func=lambda k: (
-                    _all_profiles[k]["display_name"] if k != _NONE_PROFILE
-                    else "None (use preset defaults)"
-                ),
-                key=f"opt_profile_{sport}",
-                help="Select a named or promoted profile to apply its frozen config overrides and Ricky ranking weights.",
-            )
-    else:
-        col_contest, col_count, col_exp = st.columns([3, 1, 1])
-
+    col_contest, col_count, col_exp = st.columns([3, 1, 1])
     with col_contest:
-        # If profile selected, auto-set contest type to match
-        if selected_profile != _NONE_PROFILE:
-            _prof_base = _all_profiles[selected_profile]["base_preset"]
-            if _prof_base in contest_options:
-                _contest_idx = contest_options.index(_prof_base)
-            else:
-                _contest_idx = 0
-        else:
-            _contest_idx = 0
-        contest_label = st.selectbox(
-            "Contest type", contest_options, index=_contest_idx,
-            format_func=lambda k: CONTEST_PRESETS.get(k, {}).get("display_name", k),
+        _contest_display = st.selectbox(
+            "Contest type", _display_options,
             key=f"opt_contest_{sport}",
         )
+
+    # Resolve display name → internal preset key + profile
+    contest_label = DISPLAY_TO_PRESET.get(_contest_display, _contest_display)
+    preset = dict(CONTEST_PRESETS.get(contest_label, {}))
+
+    # Auto-wire the profile (hidden from UI)
+    _profile_key = CONTEST_PROFILE_MAP.get(_contest_display)
+    _active_profile_overrides: dict = {}
+    _active_profile: dict | None = None
+    if _profile_key and _profile_key in NAMED_PROFILES:
+        _active_profile = NAMED_PROFILES[_profile_key]
+        _active_profile_overrides = dict(_active_profile.get("overrides", {}))
+        preset.update(_active_profile_overrides)
+
     with col_count:
-        preset = CONTEST_PRESETS.get(contest_label, {})
         num_lineups = st.number_input("Lineups", min_value=1, max_value=150, value=1, key=f"opt_nlu_{sport}")
     with col_exp:
         default_exp = preset.get("default_max_exposure", 0.35)
         max_exposure = st.slider("Max exposure", 0.1, 1.0, default_exp, 0.05, key=f"opt_exp_{sport}")
 
-    # Apply profile overrides to preset
-    if selected_profile != _NONE_PROFILE:
-        _prof = _all_profiles[selected_profile]
-        _active_profile_overrides = dict(_prof["overrides"])
-        if contest_label != _prof["base_preset"]:
-            st.info(
-                f"Profile **{_prof['display_name']}** is based on "
-                f"**{_prof['base_preset']}**. Switch contest type to match."
-            )
-        st.caption(f"\u2705 Profile: **{_prof['display_name']}** ({_prof['version']}) — {_prof['description']}")
-        preset = {**preset, **_active_profile_overrides}
+    # Power-user config expander (collapsed by default)
+    if is_admin:
+        with st.expander("\u2139\ufe0f Build config", expanded=False):
+            _prof_label = _profile_key or "(preset defaults)"
+            _prof_desc = _active_profile["description"] if _active_profile else "No profile overrides"
+            st.caption(f"Profile: {_prof_label} — {_prof_desc}")
 
     # ── Showdown game picker (NBA only) — powered by DK lobby API ──
     showdown_teams: list[str] = []
@@ -465,10 +420,10 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
         _lu_ranked_df = None
         try:
             from yak_core.ricky_rank import rank_lineups_for_se, RICKY_W_GPP, RICKY_W_CEIL, RICKY_W_OWN
-            # Get Ricky weights from active profile, or use defaults
+            # Get Ricky weights from auto-wired profile, or use defaults
             _ricky_w = {"w_gpp": RICKY_W_GPP, "w_ceil": RICKY_W_CEIL, "w_own": RICKY_W_OWN}
-            if selected_profile != _NONE_PROFILE:
-                _prof_rw = _all_profiles[selected_profile].get("ricky_weights", {})
+            if _active_profile:
+                _prof_rw = _active_profile.get("ricky_weights", {})
                 if _prof_rw:
                     _ricky_w = _prof_rw
 
@@ -504,7 +459,7 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
             st.warning(f"Ricky ranking failed: {_rank_err}")
 
         # Determine active profile_name for logging
-        _profile_name = selected_profile if selected_profile != _NONE_PROFILE else ""
+        _profile_name = _profile_key or ""
 
         # ── Archive ALL ranked lineups for calibration ──
         # Saves the full set (e.g. 40) so Historical Replay can score

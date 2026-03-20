@@ -372,78 +372,36 @@ def render_lab_tab(sport: str) -> None:
     st.markdown("---")
     st.markdown("### Build & Publish")
 
-    from yak_core.config import CONTEST_PRESETS, NAMED_PROFILES, NAMED_PROFILE_LABELS
-    from yak_core.promoted_configs import list_promoted, get_promoted_as_named_profile
-
-    # Build merged profile dict: hardcoded NAMED_PROFILES + promoted configs
-    _all_profiles: dict = dict(NAMED_PROFILES)  # copy
-    for _pc in list_promoted():
-        _pnp = get_promoted_as_named_profile(_pc["key"])
-        if _pnp and _pc["key"] not in _all_profiles:
-            _all_profiles[_pc["key"]] = _pnp
-    _all_profile_labels = list(_all_profiles.keys())
-
-    if is_pga:
-        try:
-            _parsed_date = datetime.strptime(slate_date, "%Y-%m-%d")
-            is_thursday = _parsed_date.weekday() == 3
-        except (ValueError, TypeError):
-            is_thursday = False
-        if is_thursday:
-            contest_options = ["PGA GPP", "PGA Cash", "PGA Showdown"]
-        else:
-            contest_options = ["PGA Cash", "PGA Showdown"]
-    else:
-        contest_options = ["GPP Main", "GPP Early", "Showdown", "Cash Main", "Cash Game"]
-    contest_options = [c for c in contest_options if c in CONTEST_PRESETS]
-
-    # Named profile selector — overrides contest preset config when active
-    _NONE_PROFILE_BUILD = "(None)"
-    _build_sport_presets = (
-        ["PGA GPP", "PGA Cash", "PGA Showdown"] if is_pga
-        else ["GPP Main", "GPP Early", "GPP Late", "Showdown", "Cash Main", "Cash Game"]
+    from yak_core.config import CONTEST_PRESETS, NAMED_PROFILES
+    from utils.constants import (
+        CONTEST_TYPES, PGA_CONTEST_TYPES, DISPLAY_TO_PRESET, CONTEST_PROFILE_MAP,
     )
-    _build_profile_options = [_NONE_PROFILE_BUILD] + [
-        k for k in _all_profile_labels
-        if _all_profiles[k]["base_preset"] in _build_sport_presets
-    ]
 
-    col_p, col_c, col_n = st.columns([2, 2, 1])
-    with col_p:
-        _build_profile = st.selectbox(
-            "Profile",
-            options=_build_profile_options,
-            format_func=lambda k: (
-                _all_profiles[k]["display_name"] if k != _NONE_PROFILE_BUILD
-                else "None (use preset defaults)"
-            ),
-            key=f"lab_profile_{sport}",
-            help="Select a named profile to apply its frozen config overrides.",
-        )
+    # ── Contest type dropdown (single source — no Profile selector) ──
+    if is_pga:
+        _display_options = PGA_CONTEST_TYPES
+    else:
+        _display_options = CONTEST_TYPES
+
+    col_c, col_n = st.columns([3, 1])
     with col_c:
-        contest_label = st.selectbox(
-            "Contest type", contest_options,
-            format_func=lambda k: CONTEST_PRESETS.get(k, {}).get("display_name", k),
+        _contest_display = st.selectbox(
+            "Contest type", _display_options,
             key=f"lab_contest_{sport}",
         )
     with col_n:
-        preset = CONTEST_PRESETS.get(contest_label, {})
+        contest_label = DISPLAY_TO_PRESET.get(_contest_display, _contest_display)
+        preset = dict(CONTEST_PRESETS.get(contest_label, {}))
         num_lineups = st.number_input("Lineups", min_value=1, max_value=150, value=1, key=f"lab_nlu_{sport}")
 
-    # If a profile is selected, merge its overrides into the preset dict
+    # Auto-wire profile (hidden from UI)
+    _profile_key = CONTEST_PROFILE_MAP.get(_contest_display)
     _active_profile_overrides: dict = {}
-    if _build_profile != _NONE_PROFILE_BUILD:
-        _prof = _all_profiles[_build_profile]
-        _active_profile_overrides = dict(_prof["overrides"])
-        # Auto-switch contest type to match profile's base preset
-        if contest_label != _prof["base_preset"]:
-            st.info(
-                f"Profile **{_prof['display_name']}** is based on "
-                f"**{_prof['base_preset']}**. Switch contest type to match."
-            )
-        st.caption(f"\u2705 Profile: **{_prof['display_name']}** ({_prof['version']}) — {_prof['description']}")
-        # Merge overrides into preset so downstream build uses them
-        preset = {**preset, **_active_profile_overrides}
+    _active_profile: dict | None = None
+    if _profile_key and _profile_key in NAMED_PROFILES:
+        _active_profile = NAMED_PROFILES[_profile_key]
+        _active_profile_overrides = dict(_active_profile.get("overrides", {}))
+        preset.update(_active_profile_overrides)
 
     if is_pga and contest_label == "PGA GPP":
         st.info("Full tournament lineup (4 rounds). Projections use multi-day model.")
@@ -611,7 +569,7 @@ def render_lab_tab(sport: str) -> None:
                         showdown_teams=showdown_teams if showdown_teams else None,
                         sd_draft_group_id=_sd_draft_group_id,
                         profile_overrides=_active_profile_overrides if _active_profile_overrides else None,
-                        profile_name=_build_profile if _build_profile != _NONE_PROFILE_BUILD else "",
+                        profile_name=_profile_key or "",
                         sd_force_captain=_sd_force_captain if _sd_force_captain else None,
                     )
                     n_built = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else 0
@@ -622,10 +580,10 @@ def render_lab_tab(sport: str) -> None:
                     # Rank lineups and tag top 3 as SE Core / Spicy / Alt
                     try:
                         from yak_core.ricky_rank import rank_lineups_for_se, RICKY_W_GPP, RICKY_W_CEIL, RICKY_W_OWN
-                        # Get Ricky weights from active profile, or use defaults
+                        # Get Ricky weights from auto-wired profile, or use defaults
                         _ricky_w = {"w_gpp": RICKY_W_GPP, "w_ceil": RICKY_W_CEIL, "w_own": RICKY_W_OWN}
-                        if _build_profile != _NONE_PROFILE_BUILD:
-                            _prof_rw = _all_profiles[_build_profile].get("ricky_weights", {})
+                        if _active_profile:
+                            _prof_rw = _active_profile.get("ricky_weights", {})
                             if _prof_rw:
                                 _ricky_w = _prof_rw
 
@@ -767,6 +725,71 @@ def render_lab_tab(sport: str) -> None:
                     avail = [c for c in show_cols if c in lineups_df.columns]
                     with st.expander("All Lineups (raw)"):
                         st.dataframe(lineups_df[avail], use_container_width=True, hide_index=True)
+
+                    # ── Send to Archive ───────────────────────────────────────
+                    # Shows all lineups with checkbox column; top 3 by
+                    # ricky_score pre-checked.  "Send to Archive" stores the
+                    # full population with ricky_selected flags.
+                    st.markdown("---")
+                    st.markdown("#### Send to Archive")
+                    try:
+                        # Build a per-lineup summary for the data_editor
+                        _all_lu = _lu_ranked.sort_values("ricky_score", ascending=False).reset_index(drop=True).copy()
+                        # Pre-check top 3
+                        _all_lu.insert(
+                            0, "\u2713 Send",
+                            [True] * min(3, len(_all_lu)) + [False] * max(0, len(_all_lu) - 3),
+                        )
+                        _editor_cols = [
+                            "\u2713 Send", "lineup_index", "ricky_rank", "ricky_tag",
+                            "ricky_score", "total_gpp_score", "total_ceil",
+                            "total_proj", "avg_own_pct", "total_salary",
+                        ]
+                        _editor_avail = [c for c in _editor_cols if c in _all_lu.columns]
+                        _edited = st.data_editor(
+                            _all_lu[_editor_avail],
+                            column_config={
+                                "\u2713 Send": st.column_config.CheckboxColumn(
+                                    "\u2713 Send", default=False,
+                                ),
+                            },
+                            hide_index=True,
+                            use_container_width=True,
+                            key=f"lab_archive_editor_{sport}",
+                        )
+
+                        _n_checked = int(_edited["\u2713 Send"].sum())
+                        st.caption(f"{_n_checked} of {len(_edited)} lineups selected as Ricky picks")
+
+                        if st.button(
+                            f"\U0001f4e5 Send {len(_all_lu)} lineups to Archive",
+                            type="primary",
+                            key=f"lab_send_archive_{sport}",
+                        ):
+                            from utils.archive import append_to_archive
+                            # Expand player-level rows for the full population
+                            _full_lineups = st.session_state.get(
+                                f"lab_full_lineups_{sport}", lineups_df
+                            )
+                            # Map ricky_selected from the checkbox editor
+                            _selected_idxs = set(
+                                _edited.loc[_edited["\u2713 Send"], "lineup_index"].tolist()
+                            )
+                            _archive_rows = _full_lineups.copy()
+                            _archive_rows["ricky_selected"] = _archive_rows["lineup_index"].isin(_selected_idxs)
+                            _archive_rows["archived_at"] = pd.Timestamp.now().isoformat()
+                            _archive_rows["contest_type"] = _contest_display
+                            _archive_rows["slate_date"] = slate_date
+                            _archive_rows["profile_name"] = _profile_key or ""
+
+                            _archive_path = append_to_archive(_archive_rows)
+                            st.success(
+                                f"{len(_archive_rows)} lineup rows archived — "
+                                f"{_n_checked} flagged as Ricky picks."
+                            )
+                    except Exception as _archive_err:
+                        st.warning(f"Archive UI error: {_archive_err}")
+
                 except Exception as e:
                     st.error(f"Build lineups error: {e}")
 
