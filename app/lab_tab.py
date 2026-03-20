@@ -2622,37 +2622,87 @@ def _fetch_pga_actuals(api_key: str, slate_date: str = "") -> pd.DataFrame:
 
 def _render_historical_replay(sport: str) -> None:
     from app.data_loader import published_dir as _pub_dir
+    from pathlib import Path as _Path
+
     out_dir = _pub_dir(sport)
-    lineup_files = sorted(out_dir.glob("*_lineups.parquet"))
-    if not lineup_files:
+
+    # ── Collect lineup sources: published (SE picks) + full archive (all 40) ──
+    _sources: dict = {}  # display_label -> parquet path
+
+    # 1. Published SE picks (3 lineups)
+    for lf in sorted(out_dir.glob("*_lineups.parquet")):
+        _slug = lf.stem.replace("_lineups", "")
+        _display = _slug.replace("_", " ").title()
+        _sources[f"{_display} (published)"] = lf
+
+    # 2. Full archive (all ranked lineups for calibration)
+    _archive_dir = _Path(__file__).resolve().parent.parent / "data" / "lineup_archive"
+    if _archive_dir.is_dir():
+        for af in sorted(_archive_dir.glob("*_all_lineups.parquet")):
+            # Filename: {date}_{contest_slug}_all_lineups.parquet
+            _stem = af.stem.replace("_all_lineups", "")
+            # Extract date + contest from stem
+            _parts = _stem.split("_", 3)  # e.g. ["2026", "03", "20", "gpp_main"]
+            if len(_parts) >= 4:
+                _date_str = "-".join(_parts[:3])
+                _contest_slug = "_".join(_parts[3:])
+                _contest_display = _contest_slug.replace("_", " ").title()
+                _label = f"{_contest_display} — {_date_str} (full archive)"
+            else:
+                _label = f"{_stem} (full archive)"
+            _sources[_label] = af
+
+    if not _sources:
         st.caption("No lineup files available for replay.")
         return
 
-    slug_options = [lf.stem.replace("_lineups", "") for lf in lineup_files]
-    selected_slug = st.selectbox("Select lineup set", slug_options, key=f"replay_slug_{sport}")
-    if not selected_slug:
+    _labels = list(_sources.keys())
+    selected_label = st.selectbox("Select lineup set", _labels, key=f"replay_slug_{sport}")
+    if not selected_label:
         return
 
-    selected_full_slug = selected_slug
-    replay_lineups_path = out_dir / f"{selected_full_slug}_lineups.parquet"
+    replay_lineups_path = _sources[selected_label]
     if not replay_lineups_path.exists():
         st.warning("Selected lineup file not found.")
         return
 
     replay_lineups = pd.read_parquet(replay_lineups_path)
-    st.markdown(f"**{selected_full_slug}** \u2014 {replay_lineups['lineup_index'].nunique() if 'lineup_index' in replay_lineups.columns else 0} lineups")
+    _n_lu = replay_lineups['lineup_index'].nunique() if 'lineup_index' in replay_lineups.columns else 0
+    _is_archive = "(full archive)" in selected_label
+    _src_tag = "full archive" if _is_archive else "published"
+    st.markdown(f"**{selected_label}** \u2014 {_n_lu} lineups ({_src_tag})")
+
+    # Show ricky_rank / ricky_tag columns if present (from archive)
+    if _is_archive and "ricky_rank" in replay_lineups.columns:
+        with st.expander("Ricky Ranking (archived)"):
+            _rank_cols = ["lineup_index", "ricky_rank", "ricky_tag", "ricky_score"]
+            _rank_avail = [c for c in _rank_cols if c in replay_lineups.columns]
+            _rank_summary = replay_lineups.groupby("lineup_index")[_rank_avail[1:]].first().reset_index()
+            _rank_summary = _rank_summary.sort_values("ricky_rank")
+            st.dataframe(_rank_summary, use_container_width=True, hide_index=True)
 
     # ── Load or fetch actuals ──
     actuals_path = out_dir / "actuals.parquet"
-    # ── Read slate date from meta for date validation ──
-    _slate_meta_path = out_dir / "slate_meta.json"
+
+    # ── Read slate date: from archive filename or from slate_meta.json ──
     _slate_date_from_meta = ""
-    if _slate_meta_path.exists():
-        try:
-            _slate_meta = json.loads(_slate_meta_path.read_text())
-            _slate_date_from_meta = _slate_meta.get("date", "")
-        except Exception:
-            pass
+    if _is_archive:
+        # Archive filename: {YYYY}_{MM}_{DD}_{contest}_all_lineups.parquet
+        _ar_stem = replay_lineups_path.stem.replace("_all_lineups", "")
+        _ar_parts = _ar_stem.split("_", 3)
+        if len(_ar_parts) >= 3:
+            _slate_date_from_meta = "-".join(_ar_parts[:3])
+        # For archive replay, derive the date from the column if present
+        if not _slate_date_from_meta and "slate_date" in replay_lineups.columns:
+            _slate_date_from_meta = str(replay_lineups["slate_date"].iloc[0])
+    else:
+        _slate_meta_path = out_dir / "slate_meta.json"
+        if _slate_meta_path.exists():
+            try:
+                _slate_meta = json.loads(_slate_meta_path.read_text())
+                _slate_date_from_meta = _slate_meta.get("date", "")
+            except Exception:
+                pass
 
     # ── Auto-clear stale actuals if date doesn't match current slate ──
     if actuals_path.exists() and _slate_date_from_meta:

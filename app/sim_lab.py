@@ -2044,19 +2044,30 @@ def render_sim_lab(sport: str) -> None:
                 horizontal=True,
                 key="sim_lab_date_mode",
             )
+            # Date guard: today's games may still be in progress, so
+            # actuals will be incomplete.  Auto-exclude from batch runs.
+            _today_date = date.today()
+            _safe_dates = [d for d in rg_dates if d != _today_date]
+            _excluded_today = len(_safe_dates) < len(rg_dates)
+            if _excluded_today:
+                st.caption(
+                    f"\u26a0\ufe0f Today ({_today_date.strftime('%Y-%m-%d')}) excluded from batch "
+                    "(games may be in progress). Use the Optimizer for today's lineups."
+                )
+
             if _date_mode == "Select Dates":
                 _selected_dates = st.multiselect(
                     "Dates",
-                    options=[d.strftime("%Y-%m-%d") for d in rg_dates],
-                    default=[d.strftime("%Y-%m-%d") for d in rg_dates],
+                    options=[d.strftime("%Y-%m-%d") for d in _safe_dates],
+                    default=[d.strftime("%Y-%m-%d") for d in _safe_dates],
                     key="sim_lab_selected_dates",
                 )
                 _run_dates = [
-                    d for d in rg_dates
+                    d for d in _safe_dates
                     if d.strftime("%Y-%m-%d") in _selected_dates
                 ]
             else:
-                _run_dates = rg_dates
+                _run_dates = _safe_dates
 
             if st.button(
                 "\U0001f504 Run Batch", use_container_width=True,

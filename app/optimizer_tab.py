@@ -506,6 +506,59 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
         # Determine active profile_name for logging
         _profile_name = selected_profile if selected_profile != _NONE_PROFILE else ""
 
+        # ── Archive ALL ranked lineups for calibration ──
+        # Saves the full set (e.g. 40) so Historical Replay can score
+        # every lineup against actuals, not just the 3 SE picks.
+        try:
+            from pathlib import Path
+            from datetime import date as _date_mod, datetime as _dt_mod
+            import json as _json_mod
+            _archive_dir = Path(__file__).resolve().parent.parent / "data" / "lineup_archive"
+            _archive_dir.mkdir(parents=True, exist_ok=True)
+            _cs_slug = contest_label.lower().replace(" ", "_")
+            _today = _date_mod.today().isoformat()
+            _archive_df = lineups_df.copy()
+            # Merge ricky_rank + ricky_tag onto each player row
+            if _lu_ranked_df is not None and not _lu_ranked_df.empty:
+                _rank_map_arch = dict(zip(_lu_ranked_df["lineup_index"], _lu_ranked_df["ricky_rank"]))
+                _tag_map_arch = dict(zip(_lu_ranked_df["lineup_index"], _lu_ranked_df["ricky_tag"]))
+                _score_map_arch = dict(zip(_lu_ranked_df["lineup_index"], _lu_ranked_df["ricky_score"]))
+                _archive_df["ricky_rank"] = _archive_df["lineup_index"].map(_rank_map_arch)
+                _archive_df["ricky_tag"] = _archive_df["lineup_index"].map(_tag_map_arch)
+                _archive_df["ricky_score"] = _archive_df["lineup_index"].map(_score_map_arch)
+            _archive_df["slate_date"] = _today
+            _archive_df["contest_type"] = contest_label
+            if _profile_name:
+                _archive_df["profile_name"] = _profile_name
+            _archive_path = _archive_dir / f"{_today}_{_cs_slug}_all_lineups.parquet"
+            _archive_df.to_parquet(str(_archive_path), index=False)
+            # Also write archive meta
+            _archive_meta = {
+                "slate_date": _today,
+                "contest_type": contest_label,
+                "profile_name": _profile_name,
+                "n_lineups": lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else 0,
+                "archived_at": _dt_mod.now().isoformat(timespec="seconds"),
+            }
+            (_archive_dir / f"{_today}_{_cs_slug}_all_meta.json").write_text(
+                _json_mod.dumps(_archive_meta, indent=2)
+            )
+            # Persist archive files to GitHub so they survive Streamlit Cloud restarts
+            try:
+                from yak_core.github_persistence import sync_feedback_async
+                _archive_files = [
+                    f"data/lineup_archive/{_today}_{_cs_slug}_all_lineups.parquet",
+                    f"data/lineup_archive/{_today}_{_cs_slug}_all_meta.json",
+                ]
+                sync_feedback_async(
+                    files=_archive_files,
+                    commit_message=f"Archive {_archive_meta['n_lineups']} lineups for {_today} {contest_label}",
+                )
+            except Exception as _sync_err:
+                print(f"[optimizer_tab] archive sync failed: {_sync_err}")
+        except Exception as _arch_err:
+            print(f"[optimizer_tab] lineup archive failed: {_arch_err}")
+
         # Store results in session state
         st.session_state[f"opt_lineups_{sport}"] = lineups_df
         st.session_state[f"opt_exposure_{sport}"] = exposure_df
@@ -525,6 +578,7 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
         st.markdown("---")
 
         # ── Ricky SE Picks (tagged lineups at top) ──
+        _publish_idxs: list = []  # lineup indices selected for publishing
         if _lu_ranked_df is not None and not _lu_ranked_df.empty:
             _tagged = _lu_ranked_df[_lu_ranked_df["ricky_tag"] != ""].copy()
             if not _tagged.empty:
@@ -548,7 +602,7 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
                         use_container_width=True, hide_index=True,
                     )
 
-                # Show players in each tagged lineup
+                # Show players in each tagged lineup with publish checkbox
                 for _, _tag_row in _tagged.iterrows():
                     _li = _tag_row["lineup_index"]
                     _tag = _tag_row["ricky_tag"]
@@ -556,12 +610,30 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
                     _p_cols = ["player_name", "pos", "team", "salary", "proj", "ceil", "gpp_score", "own_pct"]
                     _p_avail = [c for c in _p_cols if c in _lu_players.columns]
                     _exp_label = f"{_tag} \u2014 Lineup #{int(_li)}" if is_admin else f"Lineup #{int(_li)}"
-                    with st.expander(_exp_label):
-                        _tagged_disp = _lu_players[_p_avail].copy()
-                        for _rc in ["proj", "ceil", "floor", "gpp_score", "own_pct"]:
-                            if _rc in _tagged_disp.columns:
-                                _tagged_disp[_rc] = pd.to_numeric(_tagged_disp[_rc], errors="coerce").round(2)
-                        st.dataframe(_tagged_disp, use_container_width=True, hide_index=True)
+                    if is_admin:
+                        _cb_col, _exp_col = st.columns([0.08, 0.92])
+                        with _cb_col:
+                            _checked = st.checkbox(
+                                "\u2714", value=True,
+                                key=f"pub_cb_{sport}_{int(_li)}",
+                                label_visibility="collapsed",
+                            )
+                            if _checked:
+                                _publish_idxs.append(_li)
+                        with _exp_col:
+                            with st.expander(_exp_label):
+                                _tagged_disp = _lu_players[_p_avail].copy()
+                                for _rc in ["proj", "ceil", "floor", "gpp_score", "own_pct"]:
+                                    if _rc in _tagged_disp.columns:
+                                        _tagged_disp[_rc] = pd.to_numeric(_tagged_disp[_rc], errors="coerce").round(2)
+                                st.dataframe(_tagged_disp, use_container_width=True, hide_index=True)
+                    else:
+                        with st.expander(_exp_label):
+                            _tagged_disp = _lu_players[_p_avail].copy()
+                            for _rc in ["proj", "ceil", "floor", "gpp_score", "own_pct"]:
+                                if _rc in _tagged_disp.columns:
+                                    _tagged_disp[_rc] = pd.to_numeric(_tagged_disp[_rc], errors="coerce").round(2)
+                            st.dataframe(_tagged_disp, use_container_width=True, hide_index=True)
 
             if is_admin:  # Full ranking table (admin only)
                 with st.expander("Full Ricky Ranking"):
@@ -682,16 +754,18 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
             st.warning(f"Could not format DK upload CSV: {e}")
 
         # ── Publish SE Lineups button ──
-        # Pushes ONLY the 3 SE-tagged lineups to data/published/{sport}/
-        # so they appear on the Edge Share page.
-        if is_admin and _has_tags:
+        # Pushes ONLY the checkbox-selected lineups to data/published/{sport}/
+        # so they appear on the Edge Share page.  Defaults to the 3 SE-tagged
+        # lineups but the user can deselect / reselect via the checkboxes above.
+        if is_admin and _publish_idxs:
             st.markdown("---")
             st.markdown("#### Publish SE Lineups")
+            st.caption(f"{len(_publish_idxs)} lineup(s) selected for publishing")
             if st.button(
-                "Publish SE Lineups",
+                f"Publish {len(_publish_idxs)} Selected Lineup(s)",
                 type="primary",
                 key=f"opt_publish_se_{sport}",
-                help="Save the 3 SE-tagged lineups to the published folder and push to GitHub.",
+                help="Save the selected lineups to the published folder and push to GitHub.",
             ):
                 with st.spinner("Publishing SE lineups..."):
                     try:
@@ -699,15 +773,12 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
                         from app.data_loader import published_dir, invalidate_published_cache
 
                         pub_dir = published_dir(sport)
-                        _tagged_idxs = _lu_ranked_df[
-                            _lu_ranked_df["ricky_tag"] != ""
-                        ]["lineup_index"].tolist()
                         _se_only = lineups_df[
-                            lineups_df["lineup_index"].isin(_tagged_idxs)
+                            lineups_df["lineup_index"].isin(_publish_idxs)
                         ].copy()
 
                         # Re-index lineup_index 0..N-1
-                        _idx_map = {old: new for new, old in enumerate(_tagged_idxs)}
+                        _idx_map = {old: new for new, old in enumerate(_publish_idxs)}
                         _se_only["lineup_index"] = _se_only["lineup_index"].map(_idx_map)
 
                         # Add ricky_tag to each player row
@@ -716,7 +787,7 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
                             _lu_ranked_df["ricky_tag"],
                         ))
                         _se_only["ricky_tag"] = _se_only["lineup_index"].map(
-                            {_idx_map[old]: _tag_map[old] for old in _tagged_idxs}
+                            {_idx_map[old]: _tag_map[old] for old in _publish_idxs if old in _tag_map}
                         )
 
                         # Add profile_name
@@ -736,7 +807,7 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
                         from datetime import datetime as _dt
                         _meta = {
                             "contest_type": result_contest,
-                            "n_lineups": len(_tagged_idxs),
+                            "n_lineups": len(_publish_idxs),
                             "profile_name": _profile_name,
                             "built_at": _dt.now().isoformat(timespec="seconds"),
                             "source": "optimizer_tab",
@@ -750,7 +821,7 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
                         if result.get("status") == "ok":
                             invalidate_published_cache()
                             st.success(
-                                f"Published {len(_tagged_idxs)} SE lineups! "
+                                f"Published {len(_publish_idxs)} SE lineups! "
                                 f"SHA: {result.get('sha', 'N/A')}"
                             )
                         else:
