@@ -563,9 +563,6 @@ def render_lab_tab(sport: str) -> None:
                     )
                     n_built = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else 0
 
-                    from app.data_loader import invalidate_published_cache
-                    invalidate_published_cache()
-
                     st.success(f"Built {n_built} lineups for {contest_label}")
 
                     # ── Ricky SE Ranking ─────────────────────────────────────
@@ -711,6 +708,12 @@ def render_lab_tab(sport: str) -> None:
                             )
                     except Exception as _rank_err:
                         st.warning(f"Ricky ranking failed: {_rank_err}")
+
+                    # Invalidate cache AFTER Ricky overwrite so Edge tab
+                    # always sees the trimmed (SE-only) parquet, not the
+                    # full 40-lineup file written by _build_lineups().
+                    from app.data_loader import invalidate_published_cache
+                    invalidate_published_cache()
 
                     show_cols = ["lineup_index", "player_name", "pos", "salary", "proj"]
                     if "slot" in lineups_df.columns:
