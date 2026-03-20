@@ -2,7 +2,7 @@
   "configs": {
     "GPP Main": {
       "overrides": {
-        "GPP_PROJ_WEIGHT": 0.25,
+        "GPP_PROJ_WEIGHT": 0.2,
         "GPP_BOOM_WEIGHT": 0.55,
         "GPP_OWN_PENALTY_STRENGTH": 0.7,
         "GPP_PACE_ENV_WEIGHT": 0.12,
