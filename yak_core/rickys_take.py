@@ -9,7 +9,7 @@ All text is template-based with data slots. No LLM calls.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -35,7 +35,35 @@ def _pick_template_by_key(templates: list, key: str, category: str) -> str:
 # 1. LAST NIGHT -- recap generation
 # ---------------------------------------------------------------------------
 
-# Hit templates: player outperformed projection (target: 10)
+# ── Ricky's Own Picks: SE pick hit templates (smirky, first-person) ──
+_SE_PICK_HIT = [
+    "Called {name} at ${sal}. Dropped {actual:.0f}. You're welcome.",
+    "{name} — {actual:.0f} on a {proj:.0f} line. {tag} pick. Called it.",
+    "Put {name} on the board at ${sal}. Went for {actual:.0f}. That's not luck, that's process.",
+    "{name}: {actual:.0f} actual, {proj:.0f} projected. I said play this. The scoreboard agreed.",
+    "{tag} pick {name} went off — {actual:.0f} on {proj:.0f}. Told you.",
+    "{name} at ${sal} for {actual:.0f}. {tag} lineup cashed. Moving on.",
+]
+
+# SE pick miss templates (honest, quick)
+_SE_PICK_MISS = [
+    "{name} bricked — {actual:.0f} on {proj:.0f}. Bad beat. Process was right, outcome wasn't.",
+    "{name}: {actual:.0f} on a {proj:.0f} line. Didn't hit. Math doesn't bat 1.000.",
+]
+
+# SE lineup summary templates
+_SE_LINEUP_SUMMARY_GOOD = [
+    "SE lineups went {hit_count}-of-{total} on the night. The board delivered.",
+    "{hit_count} of {total} SE lineups cleared. Not bad for a Thursday.",
+    "The picks went {hit_count}-for-{total}. Process works. Results follow.",
+]
+
+_SE_LINEUP_SUMMARY_BAD = [
+    "SE lineups went {hit_count}-of-{total}. Rough night. Back at it.",
+    "{hit_count} of {total} cleared. Not the night. Process doesn't change.",
+]
+
+# ── Generic fallback templates (when no SE archive exists) ──
 _HIT_TEMPLATES = [
     "{name} went off for {actual:.0f} on a {proj:.0f} projection. The model did the work. The scoreboard agreed.",
     "{name} dropped {actual:.0f} against a {proj:.0f} line. That's what happens when you trust the data instead of the narrative.",
@@ -49,7 +77,6 @@ _HIT_TEMPLATES = [
     "{name} hit {actual:.0f} against {proj:.0f}. Clean read, clean result. That's the whole process.",
 ]
 
-# Miss templates: player underperformed projection (target: 10)
 _MISS_TEMPLATES = [
     "{name} owners got cooked. {actual:.0f} actual on a {proj:.0f} line. The field followed each other right off a cliff.",
     "{name} bricked at {actual:.0f} on a {proj:.0f} projection. Consensus pick, consensus loss. Seen this movie before.",
@@ -63,7 +90,6 @@ _MISS_TEMPLATES = [
     "{name} went for {actual:.0f} on {proj:.0f} projected. The field copied each other's homework. Same grade.",
 ]
 
-# Pattern templates: chalk held (target: 6)
 _PATTERN_TEMPLATES_CHALK_HELD = [
     "High-salary chalk went {hit_count}-of-{total}. Sometimes the obvious play is the right play — just don't confuse that with doing the work.",
     "Top salaries went {hit_count}-of-{total}. Chalk held, but that's not the norm. Don't get comfortable.",
@@ -73,7 +99,6 @@ _PATTERN_TEMPLATES_CHALK_HELD = [
     "High-priced chalk: {hit_count}-of-{total}. Credit where it's due. But one night doesn't change the base rates.",
 ]
 
-# Pattern templates: chalk crumbled (target: 6)
 _PATTERN_TEMPLATES_CHALK_CRUMBLED = [
     "Only {hit_count} of the top-{total} salaries cleared projection. The field loves paying up for names. The scoreboard doesn't care about names.",
     "Chalk crumbled — {hit_count}-of-{total} top salaries hit. Everyone nodded along on the same picks. Same result as every bad meeting.",
@@ -84,14 +109,45 @@ _PATTERN_TEMPLATES_CHALK_CRUMBLED = [
 ]
 
 
-def generate_last_night(recap: Optional[Dict[str, Any]]) -> Optional[str]:
-    """Generate a 2-3 sentence recap paragraph in Ricky's voice.
+def _load_previous_se_picks(sport: str) -> Optional[pd.DataFrame]:
+    """Load the most recent SE picks archive (up to 7 days back)."""
+    from pathlib import Path
+    from .config import YAKOS_ROOT
+
+    archive_dir = Path(YAKOS_ROOT) / "data" / "lineup_archive"
+    if not archive_dir.exists():
+        return None
+
+    today = date.today()
+    for days_back in range(1, 8):
+        check = today - timedelta(days=days_back)
+        date_str = check.isoformat()
+        for f in sorted(archive_dir.glob(f"{date_str}_*_se_picks.parquet")):
+            try:
+                df = pd.read_parquet(f)
+                if "player_name" in df.columns:
+                    return df
+            except Exception:
+                continue
+    return None
+
+
+def generate_last_night(
+    recap: Optional[Dict[str, Any]],
+    sport: str = "nba",
+) -> Optional[str]:
+    """Generate a smirky recap in Ricky's voice, highlighting his SE picks.
+
+    If archived SE picks exist, cross-reference them against actuals and
+    lead with how Ricky's own calls performed. Falls back to generic
+    hit/miss recap if no SE archive is available.
 
     Parameters
     ----------
     recap : dict or None
-        Output of slate_recap.get_previous_slate_recap(). Contains players
-        list with player_name, projected, actual, delta, label, salary.
+        Output of slate_recap.get_previous_slate_recap().
+    sport : str
+        Sport code for loading SE pick archives.
 
     Returns
     -------
@@ -105,7 +161,92 @@ def generate_last_night(recap: Optional[Dict[str, Any]]) -> Optional[str]:
     if not players:
         return None
 
-    # Find top hits (biggest positive delta) and top misses (biggest negative delta)
+    actuals_map = {p["player_name"]: p for p in players}
+
+    # ── Try SE-picks-first recap ──
+    se_picks = _load_previous_se_picks(sport)
+    if se_picks is not None and not se_picks.empty and "player_name" in se_picks.columns:
+        sentences = []
+        se_names = se_picks["player_name"].unique().tolist()
+        se_tags = {}
+        if "ricky_tag" in se_picks.columns:
+            for _, row in se_picks.drop_duplicates("player_name").iterrows():
+                se_tags[row["player_name"]] = row["ricky_tag"]
+
+        # Score each SE player against actuals
+        se_hits = []
+        se_misses = []
+        for name in se_names:
+            if name not in actuals_map:
+                continue
+            p = actuals_map[name]
+            tag = se_tags.get(name, "SE")
+            sal = f"{p['salary']:,}" if p.get("salary") else "?"
+            entry = {"name": name, "tag": tag, "sal": sal, **p}
+            if p["delta"] > 0:
+                se_hits.append(entry)
+            else:
+                se_misses.append(entry)
+
+        # Best SE hit gets a brag
+        se_hits.sort(key=lambda x: x["delta"], reverse=True)
+        if se_hits:
+            h = se_hits[0]
+            tmpl = _pick_template(_SE_PICK_HIT, h["name"], "se_hit")
+            sentences.append(tmpl.format(
+                name=h["name"], actual=h["actual"], proj=h["projected"],
+                tag=h["tag"], sal=h["sal"],
+            ))
+
+        # Second SE hit if available
+        if len(se_hits) > 1:
+            h2 = se_hits[1]
+            tmpl = _pick_template(_SE_PICK_HIT, h2["name"], "se_hit2")
+            sentences.append(tmpl.format(
+                name=h2["name"], actual=h2["actual"], proj=h2["projected"],
+                tag=h2["tag"], sal=h2["sal"],
+            ))
+
+        # If there were misses, acknowledge briefly
+        if se_misses and not se_hits:
+            m = se_misses[0]
+            tmpl = _pick_template(_SE_PICK_MISS, m["name"], "se_miss")
+            sentences.append(tmpl.format(
+                name=m["name"], actual=m["actual"], proj=m["projected"],
+            ))
+
+        # Lineup-level summary
+        if se_picks is not None and "lineup_index" in se_picks.columns:
+            lu_indices = se_picks["lineup_index"].unique()
+            lu_hits = 0
+            for li in lu_indices:
+                lu_names = se_picks[se_picks["lineup_index"] == li]["player_name"].tolist()
+                lu_total = sum(
+                    actuals_map[n]["actual"]
+                    for n in lu_names if n in actuals_map
+                )
+                lu_proj = sum(
+                    actuals_map[n]["projected"]
+                    for n in lu_names if n in actuals_map
+                )
+                if lu_total >= lu_proj:
+                    lu_hits += 1
+            total_lu = len(lu_indices)
+            if lu_hits >= total_lu * 0.5:
+                tmpl = _pick_template_by_key(
+                    _SE_LINEUP_SUMMARY_GOOD, f"{lu_hits}:{total_lu}", "lu_good"
+                )
+            else:
+                tmpl = _pick_template_by_key(
+                    _SE_LINEUP_SUMMARY_BAD, f"{lu_hits}:{total_lu}", "lu_bad"
+                )
+            if len(sentences) < 3:
+                sentences.append(tmpl.format(hit_count=lu_hits, total=total_lu))
+
+        if sentences:
+            return " ".join(sentences)
+
+    # ── Fallback: generic hit/miss recap ──
     hits = sorted(
         [p for p in players if p["delta"] > 0 and p["salary"] >= 4000],
         key=lambda p: p["delta"],
@@ -121,7 +262,6 @@ def generate_last_night(recap: Optional[Dict[str, Any]]) -> Optional[str]:
 
     sentences = []
 
-    # Best hit
     if hits:
         h = hits[0]
         tmpl = _pick_template(_HIT_TEMPLATES, h["player_name"], "hit")
@@ -129,7 +269,6 @@ def generate_last_night(recap: Optional[Dict[str, Any]]) -> Optional[str]:
             tmpl.format(name=h["player_name"], actual=h["actual"], proj=h["projected"])
         )
 
-    # Worst miss
     if misses:
         m = misses[0]
         tmpl = _pick_template(_MISS_TEMPLATES, m["player_name"], "miss")
@@ -137,7 +276,6 @@ def generate_last_night(recap: Optional[Dict[str, Any]]) -> Optional[str]:
             tmpl.format(name=m["player_name"], actual=m["actual"], proj=m["projected"])
         )
 
-    # Optional pattern sentence -- high-salary performance summary
     summary = recap.get("summary", {})
     if summary and len(sentences) < 3:
         top_players = [p for p in players if p["salary"] >= 6000]

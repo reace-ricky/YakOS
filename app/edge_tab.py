@@ -191,7 +191,7 @@ def _render_rickys_take(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str,
     except Exception as exc:
         print(f"[edge_tab] Slate recap error: {exc}")
 
-    last_night = generate_last_night(recap)
+    last_night = generate_last_night(recap, sport=sport)
     edges = generate_tonights_edges(pool)
     # Collect positive-tier player names to exclude from bust candidacy
     _pos_names = set()

@@ -652,6 +652,26 @@ def render_lab_tab(sport: str) -> None:
                             lineups_df = _se_only
                             st.info(f"Saved {len(_tagged_idxs)} SE lineups for publish")
 
+                            # Archive SE picks with date + ricky_tag for recap
+                            try:
+                                from datetime import date as _dt
+                                _archive_dir = out_dir.parent.parent / "lineup_archive"
+                                _archive_dir.mkdir(parents=True, exist_ok=True)
+                                _archive_df = _se_only.copy()
+                                # Merge ricky_tag onto each player row
+                                _tag_map = dict(zip(
+                                    _tagged["lineup_index"].tolist(),
+                                    _tagged["ricky_tag"].tolist(),
+                                ))
+                                _archive_df["ricky_tag"] = _archive_df["lineup_index"].map(
+                                    {_idx_map[old]: _tag_map[old] for old in _tagged_idxs}
+                                )
+                                _archive_df["slate_date"] = _dt.today().isoformat()
+                                _archive_path = _archive_dir / f"{_dt.today().isoformat()}_{_cs}_se_picks.parquet"
+                                _archive_df.to_parquet(str(_archive_path), index=False)
+                            except Exception as _arc_err:
+                                print(f"[lab_tab] SE archive failed: {_arc_err}")
+
                         # Full ranking table (all 40, for reference)
                         with st.expander("Full Ricky Ranking"):
                             _full_display = _lu_ranked.sort_values("ricky_rank")[[
