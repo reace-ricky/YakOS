@@ -563,9 +563,6 @@ def render_lab_tab(sport: str) -> None:
                     )
                     n_built = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else 0
 
-                    from app.data_loader import invalidate_published_cache
-                    invalidate_published_cache()
-
                     st.success(f"Built {n_built} lineups for {contest_label}")
 
                     # ── Ricky SE Ranking ─────────────────────────────────────
@@ -639,44 +636,23 @@ def render_lab_tab(sport: str) -> None:
                                 with st.expander(f"{_tag} — Lineup #{int(_li)}"):
                                     st.dataframe(_lu_players[_p_avail], use_container_width=True, hide_index=True)
 
-                        # DK CSV download for tagged lineups only
+                        # ── Overwrite lineups parquet with ONLY SE picks ──
+                        # Build 40, rank, save only the top 3 tagged lineups
+                        # so Edge Analysis / Publish shows just SE picks.
                         if not _tagged.empty:
                             _tagged_idxs = _tagged["lineup_index"].tolist()
-                            _tagged_lu = lineups_df[lineups_df["lineup_index"].isin(_tagged_idxs)].copy()
-                            # Build DK-upload-style rows
-                            _dk_rows = []
-                            for _tidx in _tagged_idxs:
-                                _tlu = _tagged_lu[_tagged_lu["lineup_index"] == _tidx]
-                                _dk_row = {}
-                                if "slot" in _tlu.columns:
-                                    for _, _tp in _tlu.iterrows():
-                                        _slot = _tp["slot"]
-                                        _col = _slot
-                                        _si = 1
-                                        while _col in _dk_row:
-                                            _si += 1
-                                            _col = f"{_slot}{_si}"
-                                        _dk_row[_col] = _tp.get("player_name", "")
-                                else:
-                                    for _pi, (_, _tp) in enumerate(_tlu.iterrows()):
-                                        _dk_row[f"P{_pi+1}"] = _tp.get("player_name", "")
-                                # Add the SE tag
-                                _tag_val = _tagged.loc[_tagged["lineup_index"] == _tidx, "ricky_tag"].values
-                                _dk_row["ricky_tag"] = _tag_val[0] if len(_tag_val) else ""
-                                if _build_profile != _NONE_PROFILE_BUILD:
-                                    _dk_row["profile_name"] = _build_profile
-                                _dk_rows.append(_dk_row)
-                            _dk_tagged_df = pd.DataFrame(_dk_rows)
-                            _dk_csv = _dk_tagged_df.to_csv(index=False)
-                            st.download_button(
-                                f"Download SE Picks DK CSV ({len(_dk_rows)} lineup{'s' if len(_dk_rows) != 1 else ''})",
-                                data=_dk_csv,
-                                file_name=f"{sport.lower()}_se_picks_lineups.csv",
-                                mime="text/csv",
-                                key=f"lab_dl_tagged_{sport}",
-                            )
+                            _se_only = lineups_df[lineups_df["lineup_index"].isin(_tagged_idxs)].copy()
+                            _idx_map = {old: new for new, old in enumerate(_tagged_idxs)}
+                            _se_only["lineup_index"] = _se_only["lineup_index"].map(_idx_map)
+                            _cs = contest_label.lower().replace(" ", "_")
+                            if showdown_teams:
+                                _cs += "_" + "_".join(sorted(showdown_teams)).lower()
+                            _se_out = out_dir / f"{_cs}_lineups.parquet"
+                            _se_only.to_parquet(str(_se_out), index=False)
+                            lineups_df = _se_only
+                            st.info(f"Saved {len(_tagged_idxs)} SE lineups for publish")
 
-                        # Full ranking table
+                        # Full ranking table (all 40, for reference)
                         with st.expander("Full Ricky Ranking"):
                             _full_display = _lu_ranked.sort_values("ricky_rank")[[
                                 "lineup_index", "ricky_rank", "ricky_tag", "ricky_score",
@@ -697,6 +673,12 @@ def render_lab_tab(sport: str) -> None:
                             )
                     except Exception as _rank_err:
                         st.warning(f"Ricky ranking failed: {_rank_err}")
+
+                    # Invalidate cache AFTER Ricky overwrite so Edge tab
+                    # always sees the trimmed (SE-only) parquet, not the
+                    # full 40-lineup file written by _build_lineups().
+                    from app.data_loader import invalidate_published_cache
+                    invalidate_published_cache()
 
                     show_cols = ["lineup_index", "player_name", "pos", "salary", "proj"]
                     if "slot" in lineups_df.columns:
