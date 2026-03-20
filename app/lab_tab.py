@@ -669,6 +669,14 @@ def render_lab_tab(sport: str) -> None:
                                 _archive_df["slate_date"] = _dt.today().isoformat()
                                 _archive_path = _archive_dir / f"{_dt.today().isoformat()}_{_cs}_se_picks.parquet"
                                 _archive_df.to_parquet(str(_archive_path), index=False)
+                                # Also archive edge_analysis.json (Board calls)
+                                _ea_src = out_dir / "edge_analysis.json"
+                                if _ea_src.exists():
+                                    import shutil
+                                    shutil.copy2(
+                                        str(_ea_src),
+                                        str(_archive_dir / f"{_dt.today().isoformat()}_{sport.lower()}_edge_analysis.json"),
+                                    )
                             except Exception as _arc_err:
                                 print(f"[lab_tab] SE archive failed: {_arc_err}")
 

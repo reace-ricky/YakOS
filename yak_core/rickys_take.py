@@ -35,7 +35,42 @@ def _pick_template_by_key(templates: list, key: str, category: str) -> str:
 # 1. LAST NIGHT -- recap generation
 # ---------------------------------------------------------------------------
 
-# ── Ricky's Own Picks: SE pick hit templates (smirky, first-person) ──
+# ── Board Call hit templates (smirky, first-person) ──
+_BOARD_CORE_HIT = [
+    "Put {name} on the board as a core play. Went for {actual:.0f} on a {proj:.0f} line. That's the whole process.",
+    "{name} was core. {actual:.0f} actual, {proj:.0f} projected. Called it, cashed it.",
+    "Core play {name}: {actual:.0f} on {proj:.0f}. The board doesn't miss on the anchors.",
+]
+
+_BOARD_VALUE_HIT = [
+    "Value play {name} at ${sal} went for {actual:.0f}. That's a {tier} call that printed.",
+    "{name} at ${sal} — called it as a value target. Dropped {actual:.0f}. You're welcome.",
+    "Put {name} on the board at ${sal}. Value play. Went for {actual:.0f}. Math works.",
+]
+
+_BOARD_LOTTO_HIT = [
+    "Lotto pick {name} at ${sal}. Went for {actual:.0f}. Nobody was looking. I was.",
+    "{name} — the lotto play — dropped {actual:.0f} at ${sal}. Cheap, ignored, cashed.",
+    "Called {name} as a lotto ticket at ${sal}. Hit for {actual:.0f}. That's the edge.",
+]
+
+_BOARD_FADE_HIT = [
+    "Called the fade on {name}. Went for {actual:.0f} on a {proj:.0f} line. The field got cooked.",
+    "Faded {name}. {actual:.0f} on {proj:.0f}. Everyone who followed the herd paid for it.",
+    "{name} was the fade call. {actual:.0f} actual. The crowd had it wrong. Again.",
+]
+
+_BOARD_SUMMARY_GOOD = [
+    "The board went {hit_count}-of-{total} on named calls last night.",
+    "{hit_count} of {total} board calls cleared. Process.",
+]
+
+_BOARD_SUMMARY_BAD = [
+    "Board went {hit_count}-of-{total}. Not the night. Back at it.",
+    "{hit_count} of {total} board calls hit. Process doesn't change.",
+]
+
+# ── SE lineup pick templates ──
 _SE_PICK_HIT = [
     "Called {name} at ${sal}. Dropped {actual:.0f}. You're welcome.",
     "{name} — {actual:.0f} on a {proj:.0f} line. {tag} pick. Called it.",
@@ -45,13 +80,11 @@ _SE_PICK_HIT = [
     "{name} at ${sal} for {actual:.0f}. {tag} lineup cashed. Moving on.",
 ]
 
-# SE pick miss templates (honest, quick)
 _SE_PICK_MISS = [
     "{name} bricked — {actual:.0f} on {proj:.0f}. Bad beat. Process was right, outcome wasn't.",
     "{name}: {actual:.0f} on a {proj:.0f} line. Didn't hit. Math doesn't bat 1.000.",
 ]
 
-# SE lineup summary templates
 _SE_LINEUP_SUMMARY_GOOD = [
     "SE lineups went {hit_count}-of-{total} on the night. The board delivered.",
     "{hit_count} of {total} SE lineups cleared. Not bad for a Thursday.",
@@ -109,50 +142,148 @@ _PATTERN_TEMPLATES_CHALK_CRUMBLED = [
 ]
 
 
-def _load_previous_se_picks(sport: str) -> Optional[pd.DataFrame]:
-    """Load the most recent SE picks archive (up to 7 days back)."""
+def _load_previous_archive(sport: str) -> Tuple[Optional[pd.DataFrame], Optional[Dict[str, Any]]]:
+    """Load the most recent SE picks + edge_analysis archive (up to 7 days).
+
+    Returns (se_picks_df, edge_analysis_dict) — either can be None.
+    """
+    import json
     from pathlib import Path
     from .config import YAKOS_ROOT
 
     archive_dir = Path(YAKOS_ROOT) / "data" / "lineup_archive"
     if not archive_dir.exists():
-        return None
+        return None, None
 
+    se_picks: Optional[pd.DataFrame] = None
+    edge_analysis: Optional[Dict[str, Any]] = None
     today = date.today()
+
     for days_back in range(1, 8):
         check = today - timedelta(days=days_back)
         date_str = check.isoformat()
-        for f in sorted(archive_dir.glob(f"{date_str}_*_se_picks.parquet")):
-            try:
-                df = pd.read_parquet(f)
-                if "player_name" in df.columns:
-                    return df
-            except Exception:
+
+        # SE picks
+        if se_picks is None:
+            for f in sorted(archive_dir.glob(f"{date_str}_*_se_picks.parquet")):
+                try:
+                    df = pd.read_parquet(f)
+                    if "player_name" in df.columns:
+                        se_picks = df
+                        break
+                except Exception:
+                    continue
+
+        # Edge analysis (Board calls)
+        if edge_analysis is None:
+            ea_path = archive_dir / f"{date_str}_{sport.lower()}_edge_analysis.json"
+            if ea_path.exists():
+                try:
+                    edge_analysis = json.loads(ea_path.read_text())
+                except Exception:
+                    pass
+
+        if se_picks is not None and edge_analysis is not None:
+            break
+
+    return se_picks, edge_analysis
+
+
+def _build_board_recap(
+    edge_analysis: Dict[str, Any],
+    actuals_map: Dict[str, Dict[str, Any]],
+) -> List[str]:
+    """Score the Board's named calls against actuals. Return 1-3 sentences."""
+    sentences: List[str] = []
+    total_calls = 0
+    hit_calls = 0
+
+    # Collect the best hit across all tiers
+    best_hit: Optional[Dict[str, Any]] = None
+    best_hit_tier: str = ""
+    best_fade: Optional[Dict[str, Any]] = None
+
+    for tier, templates in [
+        ("core_plays", _BOARD_CORE_HIT),
+        ("leverage_plays", _BOARD_VALUE_HIT),
+        ("value_plays", _BOARD_VALUE_HIT),
+    ]:
+        for p in edge_analysis.get(tier, []):
+            name = p.get("player_name", "")
+            if name not in actuals_map:
                 continue
-    return None
+            a = actuals_map[name]
+            total_calls += 1
+            if a["delta"] > 0:
+                hit_calls += 1
+                if best_hit is None or a["delta"] > best_hit["delta"]:
+                    best_hit = {**a, "name": name, "tier": tier, "templates": templates}
+                    best_hit_tier = tier
+
+    # Fade candidates: hit = player UNDERPERFORMED (delta < 0)
+    for p in edge_analysis.get("fade_candidates", []):
+        name = p.get("player_name", "")
+        if name not in actuals_map:
+            continue
+        a = actuals_map[name]
+        total_calls += 1
+        if a["delta"] < 0:  # fade was correct
+            hit_calls += 1
+            if best_fade is None or a["delta"] < best_fade["delta"]:
+                best_fade = {**a, "name": name}
+
+    # Build sentences: best hit callout
+    if best_hit:
+        h = best_hit
+        sal = f"{h['salary']:,}" if h.get("salary") else "?"
+        if best_hit_tier == "core_plays":
+            tmpl = _pick_template(_BOARD_CORE_HIT, h["name"], "board_core")
+            sentences.append(tmpl.format(
+                name=h["name"], actual=h["actual"], proj=h["projected"],
+            ))
+        else:
+            tmpl = _pick_template(_BOARD_VALUE_HIT, h["name"], "board_value")
+            sentences.append(tmpl.format(
+                name=h["name"], actual=h["actual"], proj=h["projected"],
+                sal=sal, tier=best_hit_tier.replace("_plays", ""),
+            ))
+
+    # Fade callout
+    if best_fade and len(sentences) < 2:
+        f = best_fade
+        tmpl = _pick_template(_BOARD_FADE_HIT, f["name"], "board_fade")
+        sentences.append(tmpl.format(
+            name=f["name"], actual=f["actual"], proj=f["projected"],
+        ))
+
+    # Board summary
+    if total_calls > 0 and len(sentences) < 3:
+        if hit_calls >= total_calls * 0.5:
+            tmpl = _pick_template_by_key(_BOARD_SUMMARY_GOOD, f"{hit_calls}:{total_calls}", "board_good")
+        else:
+            tmpl = _pick_template_by_key(_BOARD_SUMMARY_BAD, f"{hit_calls}:{total_calls}", "board_bad")
+        sentences.append(tmpl.format(hit_count=hit_calls, total=total_calls))
+
+    return sentences
 
 
 def generate_last_night(
     recap: Optional[Dict[str, Any]],
     sport: str = "nba",
 ) -> Optional[str]:
-    """Generate a smirky recap in Ricky's voice, highlighting his SE picks.
+    """Generate a smirky recap highlighting Ricky's Board calls and SE picks.
 
-    If archived SE picks exist, cross-reference them against actuals and
-    lead with how Ricky's own calls performed. Falls back to generic
-    hit/miss recap if no SE archive is available.
+    Priority order:
+      1. Board calls (core/leverage/value/lotto/fade) from archived edge_analysis
+      2. SE lineup picks from archived parquets
+      3. Generic hit/miss fallback
 
     Parameters
     ----------
     recap : dict or None
         Output of slate_recap.get_previous_slate_recap().
     sport : str
-        Sport code for loading SE pick archives.
-
-    Returns
-    -------
-    str or None
-        Recap paragraph, or None if no data available.
+        Sport code for loading archives.
     """
     if recap is None:
         return None
@@ -162,89 +293,46 @@ def generate_last_night(
         return None
 
     actuals_map = {p["player_name"]: p for p in players}
+    se_picks, prev_edge = _load_previous_archive(sport)
 
-    # ── Try SE-picks-first recap ──
-    se_picks = _load_previous_se_picks(sport)
+    sentences: List[str] = []
+
+    # ── Board calls recap (highest priority) ──
+    if prev_edge:
+        sentences.extend(_build_board_recap(prev_edge, actuals_map))
+
+    # ── SE lineup picks ──
     if se_picks is not None and not se_picks.empty and "player_name" in se_picks.columns:
-        sentences = []
         se_names = se_picks["player_name"].unique().tolist()
         se_tags = {}
         if "ricky_tag" in se_picks.columns:
             for _, row in se_picks.drop_duplicates("player_name").iterrows():
                 se_tags[row["player_name"]] = row["ricky_tag"]
 
-        # Score each SE player against actuals
         se_hits = []
-        se_misses = []
         for name in se_names:
             if name not in actuals_map:
                 continue
             p = actuals_map[name]
             tag = se_tags.get(name, "SE")
             sal = f"{p['salary']:,}" if p.get("salary") else "?"
-            entry = {"name": name, "tag": tag, "sal": sal, **p}
             if p["delta"] > 0:
-                se_hits.append(entry)
-            else:
-                se_misses.append(entry)
+                se_hits.append({"name": name, "tag": tag, "sal": sal, **p})
 
-        # Best SE hit gets a brag
         se_hits.sort(key=lambda x: x["delta"], reverse=True)
-        if se_hits:
-            h = se_hits[0]
+        # Add best SE hit if not redundant with board recap
+        mentioned = {s.split()[0] for s in sentences}  # rough dedup
+        for h in se_hits[:1]:
+            if len(sentences) >= 3:
+                break
             tmpl = _pick_template(_SE_PICK_HIT, h["name"], "se_hit")
             sentences.append(tmpl.format(
                 name=h["name"], actual=h["actual"], proj=h["projected"],
                 tag=h["tag"], sal=h["sal"],
             ))
 
-        # Second SE hit if available
-        if len(se_hits) > 1:
-            h2 = se_hits[1]
-            tmpl = _pick_template(_SE_PICK_HIT, h2["name"], "se_hit2")
-            sentences.append(tmpl.format(
-                name=h2["name"], actual=h2["actual"], proj=h2["projected"],
-                tag=h2["tag"], sal=h2["sal"],
-            ))
-
-        # If there were misses, acknowledge briefly
-        if se_misses and not se_hits:
-            m = se_misses[0]
-            tmpl = _pick_template(_SE_PICK_MISS, m["name"], "se_miss")
-            sentences.append(tmpl.format(
-                name=m["name"], actual=m["actual"], proj=m["projected"],
-            ))
-
-        # Lineup-level summary
-        if se_picks is not None and "lineup_index" in se_picks.columns:
-            lu_indices = se_picks["lineup_index"].unique()
-            lu_hits = 0
-            for li in lu_indices:
-                lu_names = se_picks[se_picks["lineup_index"] == li]["player_name"].tolist()
-                lu_total = sum(
-                    actuals_map[n]["actual"]
-                    for n in lu_names if n in actuals_map
-                )
-                lu_proj = sum(
-                    actuals_map[n]["projected"]
-                    for n in lu_names if n in actuals_map
-                )
-                if lu_total >= lu_proj:
-                    lu_hits += 1
-            total_lu = len(lu_indices)
-            if lu_hits >= total_lu * 0.5:
-                tmpl = _pick_template_by_key(
-                    _SE_LINEUP_SUMMARY_GOOD, f"{lu_hits}:{total_lu}", "lu_good"
-                )
-            else:
-                tmpl = _pick_template_by_key(
-                    _SE_LINEUP_SUMMARY_BAD, f"{lu_hits}:{total_lu}", "lu_bad"
-                )
-            if len(sentences) < 3:
-                sentences.append(tmpl.format(hit_count=lu_hits, total=total_lu))
-
-        if sentences:
-            return " ".join(sentences)
+    if sentences:
+        return " ".join(sentences[:3])
 
     # ── Fallback: generic hit/miss recap ──
     hits = sorted(
