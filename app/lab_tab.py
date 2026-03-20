@@ -513,6 +513,42 @@ def render_lab_tab(sport: str) -> None:
     if set(exclude_list) != set(_saved_excl_build):
         _excl_file_build.write_text(json.dumps(exclude_list))
 
+    # ── Showdown Captain picker ──
+    _sd_force_captain: str = ""
+    if is_nba_showdown and showdown_teams:
+        from yak_core.config import DK_SHOWDOWN_CAPTAIN_MULTIPLIER
+        _cpt_mult = DK_SHOWDOWN_CAPTAIN_MULTIPLIER
+        _matchup_pool = pd.DataFrame()
+        if pool_path.exists():
+            try:
+                _mp = pd.read_parquet(pool_path)
+                _matchup_pool = _mp[_mp["team"].isin(showdown_teams)].sort_values("salary", ascending=False)
+            except Exception:
+                pass
+        if not _matchup_pool.empty:
+            _NONE_CPT = "(Let optimizer choose)"
+            _cpt_options = [_NONE_CPT] + _matchup_pool["player_name"].tolist()
+
+            def _cpt_label(name: str) -> str:
+                if name == _NONE_CPT:
+                    return name
+                row = _matchup_pool[_matchup_pool["player_name"] == name]
+                if row.empty:
+                    return name
+                r = row.iloc[0]
+                sal = int(r.get("salary", 0) * _cpt_mult)
+                proj = float(r.get("proj", 0)) * _cpt_mult
+                return f"{name} \u2014 ${sal:,} sal \u00b7 {proj:.1f} proj (1.5\u00d7)"
+
+            _cpt_pick = st.selectbox(
+                "Captain", options=_cpt_options,
+                format_func=_cpt_label,
+                key=f"lab_sd_captain_{sport}",
+                help="Pick a Captain (1.5\u00d7 salary, 1.5\u00d7 fantasy points). Optimizer fills the 5 FLEX spots.",
+            )
+            if _cpt_pick != _NONE_CPT:
+                _sd_force_captain = _cpt_pick
+
     if st.button("Build Lineups", key=f"lab_build_{sport}"):
         if is_nba_showdown and len(showdown_teams) != 2:
             st.warning("Pick exactly 2 teams for Showdown.")
@@ -567,6 +603,7 @@ def render_lab_tab(sport: str) -> None:
                         sd_draft_group_id=_sd_draft_group_id,
                         profile_overrides=_active_profile_overrides if _active_profile_overrides else None,
                         profile_name=_build_profile if _build_profile != _NONE_PROFILE_BUILD else "",
+                        sd_force_captain=_sd_force_captain if _sd_force_captain else None,
                     )
                     n_built = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else 0
 
@@ -2228,7 +2265,7 @@ def _apply_dk_showdown_salaries(pool: pd.DataFrame, dk_sd_file) -> None:
     st.info(f"Showdown salaries applied: {_updated}/{len(pool)} players matched from DK CSV")
 
 
-def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None, sd_draft_group_id=None, profile_overrides=None, profile_name=""):
+def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None, sd_draft_group_id=None, profile_overrides=None, profile_name="", sd_force_captain=None):
     from yak_core.config import CONTEST_PRESETS, merge_config
     from yak_core.lineups import build_multiple_lineups_with_exposure, build_player_pool, build_showdown_lineups
     import re as _re
@@ -2255,6 +2292,9 @@ def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, o
         # Without this, prepare_pool's _add_projections overwrites with salary_implied.
         "PROJ_SOURCE": "parquet",
     })
+    # Showdown: force a specific Captain if user picked one
+    if sd_force_captain:
+        cfg["SD_FORCE_CAPTAIN"] = sd_force_captain
     if showdown_teams:
         pool = pool[pool["team"].isin(showdown_teams)].reset_index(drop=True)
 

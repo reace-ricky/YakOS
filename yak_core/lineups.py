@@ -1945,6 +1945,7 @@ def build_showdown_lineups(
     max_exposure = float(cfg.get("MAX_EXPOSURE", 0.35))
     solver_time_limit = int(cfg.get("SOLVER_TIME_LIMIT", 30))
     lock_names = [n.strip() for n in cfg.get("LOCK", [])]
+    force_captain: str = cfg.get("SD_FORCE_CAPTAIN", "").strip()
     max_appearances = max(1, int(num_lineups * max_exposure))
     max_pair_appearances = int(cfg.get("MAX_PAIR_APPEARANCES", 0))
 
@@ -2121,6 +2122,10 @@ def build_showdown_lineups(
                     cpt_i  = name_to_cpt[nm]
                     prob += y[flex_i] + y[cpt_i] >= 1
 
+        # FORCE CAPTAIN: pin a specific player into the CPT slot
+        if force_captain and force_captain in name_to_cpt:
+            prob += y[name_to_cpt[force_captain]] == 1
+
         # Exposure: each base player can appear at most base_remaining[base_i] more times
         for base_i in range(m):
             budget = base_remaining[base_i]
@@ -2160,6 +2165,8 @@ def build_showdown_lineups(
                     "position": p.get("position", ""),
                     "salary": p["salary"],  # already 1.5x
                     "proj": p.get("proj", 0) * cpt_mult,
+                    "ceil": p.get("ceil", 0) * cpt_mult,
+                    "floor": p.get("floor", 0) * cpt_mult,
                     "own_pct": p.get("own_pct", 0),
                     "cpt_own_pct": p.get("cpt_own_pct", 0),
                     "gpp_score": p.get("gpp_score", 0),
@@ -2181,6 +2188,8 @@ def build_showdown_lineups(
                     "position": p.get("position", ""),
                     "salary": p["salary"],
                     "proj": p.get("proj", 0),
+                    "ceil": p.get("ceil", 0),
+                    "floor": p.get("floor", 0),
                     "own_pct": p.get("own_pct", 0),
                     "cpt_own_pct": p.get("cpt_own_pct", 0),
                     "gpp_score": p.get("gpp_score", 0),

@@ -105,7 +105,7 @@ def _build_dk_csv(lineups_df: pd.DataFrame, *, is_pga: bool = False) -> pd.DataF
     return pd.DataFrame(rows)
 
 
-def render_optimizer_tab(sport: str) -> None:
+def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
     """Render the Optimizer tab."""
     from app.data_loader import load_published_data
 
@@ -198,35 +198,40 @@ def render_optimizer_tab(sport: str) -> None:
 
     contest_options = [c for c in contest_options if c in CONTEST_PRESETS]
 
-    # Named profile selector — overrides contest preset config when active
+    # Named profile selector — admin only; share optimizer hides it
     _NONE_PROFILE = "(None)"
-    _sport_presets = (
-        ["PGA GPP", "PGA Cash", "PGA Showdown"] if is_pga
-        else ["GPP Main", "GPP Early", "GPP Late", "Showdown", "Cash Main", "Cash Game"]
-    )
-    _profile_options = [_NONE_PROFILE] + [
-        k for k in NAMED_PROFILE_LABELS
-        if NAMED_PROFILES[k]["base_preset"] in _sport_presets
-    ]
+    selected_profile = _NONE_PROFILE
+    _active_profile_overrides: dict = {}
 
-    # Default to GPP_MAIN_V1 for NBA (first real profile) if available
-    _default_profile_idx = 0
-    if not is_pga and "GPP_MAIN_V1" in _profile_options:
-        _default_profile_idx = _profile_options.index("GPP_MAIN_V1")
-
-    col_profile, col_contest, col_count, col_exp = st.columns([2, 2, 1, 1])
-    with col_profile:
-        selected_profile = st.selectbox(
-            "Profile",
-            options=_profile_options,
-            index=_default_profile_idx,
-            format_func=lambda k: (
-                NAMED_PROFILES[k]["display_name"] if k != _NONE_PROFILE
-                else "None (use preset defaults)"
-            ),
-            key=f"opt_profile_{sport}",
-            help="Select a named profile to apply its frozen config overrides and Ricky ranking weights.",
+    if is_admin:
+        _sport_presets = (
+            ["PGA GPP", "PGA Cash", "PGA Showdown"] if is_pga
+            else ["GPP Main", "GPP Early", "GPP Late", "Showdown", "Cash Main", "Cash Game"]
         )
+        _profile_options = [_NONE_PROFILE] + [
+            k for k in NAMED_PROFILE_LABELS
+            if NAMED_PROFILES[k]["base_preset"] in _sport_presets
+        ]
+        _default_profile_idx = 0
+        if not is_pga and "GPP_MAIN_V1" in _profile_options:
+            _default_profile_idx = _profile_options.index("GPP_MAIN_V1")
+
+        col_profile, col_contest, col_count, col_exp = st.columns([2, 2, 1, 1])
+        with col_profile:
+            selected_profile = st.selectbox(
+                "Profile",
+                options=_profile_options,
+                index=_default_profile_idx,
+                format_func=lambda k: (
+                    NAMED_PROFILES[k]["display_name"] if k != _NONE_PROFILE
+                    else "None (use preset defaults)"
+                ),
+                key=f"opt_profile_{sport}",
+                help="Select a named profile to apply its frozen config overrides and Ricky ranking weights.",
+            )
+    else:
+        col_contest, col_count, col_exp = st.columns([3, 1, 1])
+
     with col_contest:
         # If profile selected, auto-set contest type to match
         if selected_profile != _NONE_PROFILE:
@@ -250,7 +255,6 @@ def render_optimizer_tab(sport: str) -> None:
         max_exposure = st.slider("Max exposure", 0.1, 1.0, default_exp, 0.05, key=f"opt_exp_{sport}")
 
     # Apply profile overrides to preset
-    _active_profile_overrides: dict = {}
     if selected_profile != _NONE_PROFILE:
         _prof = NAMED_PROFILES[selected_profile]
         _active_profile_overrides = dict(_prof["overrides"])
@@ -294,6 +298,36 @@ def render_optimizer_tab(sport: str) -> None:
                 _sd_draft_group_id = sel["draft_group_id"]
         else:
             st.warning("No Showdown matchups available on DK right now.")
+
+    # ── Showdown Captain picker ──
+    _sd_force_captain: str = ""
+    if is_nba_showdown and showdown_teams:
+        from yak_core.config import DK_SHOWDOWN_CAPTAIN_MULTIPLIER
+        _cpt_mult = DK_SHOWDOWN_CAPTAIN_MULTIPLIER
+        _matchup_pool = pool[pool["team"].isin(showdown_teams)].copy()
+        _matchup_pool = _matchup_pool.sort_values("salary", ascending=False)
+        _NONE_CPT = "(Let optimizer choose)"
+        _cpt_options = [_NONE_CPT] + _matchup_pool["player_name"].tolist()
+
+        def _cpt_label(name: str) -> str:
+            if name == _NONE_CPT:
+                return name
+            row = _matchup_pool[_matchup_pool["player_name"] == name]
+            if row.empty:
+                return name
+            r = row.iloc[0]
+            sal = int(r.get("salary", 0) * _cpt_mult)
+            proj = float(r.get("proj", 0)) * _cpt_mult
+            return f"{name} — ${sal:,} sal · {proj:.1f} proj (1.5×)"
+
+        _cpt_pick = st.selectbox(
+            "Captain", options=_cpt_options,
+            format_func=_cpt_label,
+            key=f"opt_sd_captain_{sport}",
+            help="Pick a Captain (1.5× salary, 1.5× fantasy points). Optimizer fills the 5 FLEX spots.",
+        )
+        if _cpt_pick != _NONE_CPT:
+            _sd_force_captain = _cpt_pick
 
     # ── Build button ──
     if st.button("Build Lineups", type="primary", key=f"opt_build_{sport}"):
@@ -369,6 +403,9 @@ def render_optimizer_tab(sport: str) -> None:
             cfg.update(_active_profile_overrides)
         # Preserve projections already in the published pool (don't overwrite with salary_implied)
         cfg["PROJ_SOURCE"] = "parquet"
+        # Showdown: force a specific Captain if user picked one
+        if _sd_force_captain:
+            cfg["SD_FORCE_CAPTAIN"] = _sd_force_captain
 
         # Load edge state for tier constraints (same as Lab _build_lineups)
         try:
@@ -509,7 +546,11 @@ def render_optimizer_tab(sport: str) -> None:
                     _p_cols = ["player_name", "pos", "team", "salary", "proj", "ceil", "gpp_score", "own_pct"]
                     _p_avail = [c for c in _p_cols if c in _lu_players.columns]
                     with st.expander(f"{_tag} — Lineup #{int(_li)}"):
-                        st.dataframe(_lu_players[_p_avail], use_container_width=True, hide_index=True)
+                        _tagged_disp = _lu_players[_p_avail].copy()
+                        for _rc in ["proj", "ceil", "floor", "gpp_score", "own_pct"]:
+                            if _rc in _tagged_disp.columns:
+                                _tagged_disp[_rc] = pd.to_numeric(_tagged_disp[_rc], errors="coerce").round(2)
+                        st.dataframe(_tagged_disp, use_container_width=True, hide_index=True)
 
             # Full ranking table in expander
             with st.expander("Full Ricky Ranking"):
@@ -560,6 +601,10 @@ def render_optimizer_tab(sport: str) -> None:
                     show_cols.append("cpt_own_pct")
                 avail = [c for c in show_cols if c in lu.columns]
                 _lu_display = lu[avail].reset_index(drop=True)
+                # Round numeric columns to 2 decimals
+                for _rc in ["proj", "ceil", "floor", "gpp_score", "own_pct", "ownership"]:
+                    if _rc in _lu_display.columns:
+                        _lu_display[_rc] = pd.to_numeric(_lu_display[_rc], errors="coerce").round(2)
                 if "cpt_own_pct" in _lu_display.columns:
                     _lu_display["cpt_own_pct"] = _lu_display["cpt_own_pct"].apply(
                         lambda x: f"{float(x) * 100:.1f}%" if pd.notna(x) else ""

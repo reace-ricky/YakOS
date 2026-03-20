@@ -54,7 +54,7 @@ with tab_edge:
     render_edge_tab(sport)
 
 with tab_optimizer:
-    render_optimizer_tab(sport)
+    render_optimizer_tab(sport, is_admin=is_admin)
 
 if is_admin and tab_lab is not None:
     from app.lab_tab import render_lab_tab
