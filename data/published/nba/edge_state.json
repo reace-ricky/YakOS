@@ -2,11 +2,11 @@
   "sport": "NBA",
   "date": "2026-03-19",
   "core_names": [
-    "Victor Wembanyama",
     "Luka Doncic",
+    "Victor Wembanyama",
     "Evan Mobley",
     "James Harden",
-    "Devin Booker"
+    "Bam Adebayo"
   ],
   "leverage_names": [
     "Duncan Robinson",
@@ -26,8 +26,8 @@
     "MarJon Beauchamp",
     "Rasheer Fleming",
     "Khaman Maluach",
-    "Jett Howard",
-    "Cameron Payne"
+    "Luke Kornet",
+    "Jett Howard"
   ],
   "calibration_slates": 15
 }
