@@ -1779,6 +1779,254 @@ def _render_download_button() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Calibration Nudge Guidance
+# ---------------------------------------------------------------------------
+
+# Path constants for calibration data files
+_CALIB_FEEDBACK_DIR = Path(__file__).resolve().parent.parent / "data" / "calibration_feedback"
+_SLATE_ERRORS_PATH = _CALIB_FEEDBACK_DIR / "nba" / "slate_errors.json"
+_RECALIB_BACKTEST_PATH = _CALIB_FEEDBACK_DIR / "recalibrated_backtest.json"
+
+# Map profile_key → contest field value in recalibrated_backtest.json
+_PROFILE_TO_BACKTEST_CONTEST: dict[str, str] = {
+    "classic_gpp_main":  "gpp_main",
+    "classic_gpp_20max": "gpp_main",
+    "classic_gpp_se":    "gpp_main",
+    "classic_cash":      "cash_main",
+    "showdown_gpp":      "showdown",
+    "showdown_cash":     "showdown",
+}
+
+# Players per lineup for each profile (used for ownership_sum calculation)
+_PROFILE_PLAYERS_PER_LINEUP: dict[str, int] = {
+    "classic_gpp_main":  8,
+    "classic_gpp_20max": 8,
+    "classic_gpp_se":    8,
+    "classic_cash":      8,
+    "showdown_gpp":      6,
+    "showdown_cash":     6,
+}
+
+
+def _load_slate_errors() -> dict:
+    """Load slate_errors.json; return {} on any error."""
+    try:
+        if _SLATE_ERRORS_PATH.is_file():
+            return json.loads(_SLATE_ERRORS_PATH.read_text())
+    except Exception:
+        pass
+    return {}
+
+
+def _load_recalib_backtest() -> list:
+    """Load recalibrated_backtest.json slates list; return [] on any error."""
+    try:
+        if _RECALIB_BACKTEST_PATH.is_file():
+            data = json.loads(_RECALIB_BACKTEST_PATH.read_text())
+            return data.get("slates", [])
+    except Exception:
+        pass
+    return []
+
+
+def _compute_nudge_metrics(
+    batch: Dict[str, Any],
+    profile_key: str,
+) -> Dict[str, Optional[float]]:
+    """Compute the nudge metric values for a completed batch.
+
+    Returns a dict of metric_name → float | None (None = no data available).
+    """
+    runs = batch.get("runs", [])
+    batch_dates = {r["date"] for r in runs}
+
+    # ── 1. MAE and Correlation (slate_errors.json) ────────────────────────
+    slate_errors = _load_slate_errors()
+    mae_vals: list = []
+    corr_vals: list = []
+    for date_key, entry in slate_errors.items():
+        if date_key in batch_dates:
+            overall = entry.get("overall", {})
+            if "mae" in overall:
+                mae_vals.append(float(overall["mae"]))
+            if "correlation" in overall:
+                corr_vals.append(float(overall["correlation"]))
+
+    metrics: Dict[str, Optional[float]] = {
+        "mae": round(float(mean(mae_vals)), 3) if mae_vals else None,
+        "correlation": round(float(mean(corr_vals)), 4) if corr_vals else None,
+    }
+
+    # ── 2. Bias (recalibrated_backtest.json) ─────────────────────────────
+    backtest_slates = _load_recalib_backtest()
+    contest_filter = _PROFILE_TO_BACKTEST_CONTEST.get(profile_key, "")
+    bias_vals: list = []
+    for entry in backtest_slates:
+        if entry.get("date") in batch_dates and entry.get("contest") == contest_filter:
+            if "corrected_bias" in entry:
+                bias_vals.append(float(entry["corrected_bias"]))
+    metrics["bias"] = round(float(mean(bias_vals)), 3) if bias_vals else None
+
+    # ── 3. Avg Score (from batch run avg_actual) ──────────────────────────
+    actuals = [r["avg_actual"] for r in runs if "avg_actual" in r]
+    metrics["avg_score"] = round(float(mean(actuals)), 2) if actuals else None
+
+    # ── 4. Ownership Sum ─────────────────────────────────────────────────
+    players_per_lu = _PROFILE_PLAYERS_PER_LINEUP.get(profile_key, 8)
+    own_sum_vals: list = []
+    for run in runs:
+        sdf = run.get("summary_df")
+        if sdf is not None and not sdf.empty and "avg_own_pct" in sdf.columns:
+            # avg_own_pct is per-player mean; multiply by roster size to get sum
+            lu_own_sums = sdf["avg_own_pct"].dropna() * players_per_lu
+            if not lu_own_sums.empty:
+                own_sum_vals.append(float(lu_own_sums.mean()))
+    metrics["ownership_sum"] = round(float(mean(own_sum_vals)), 2) if own_sum_vals else None
+
+    # ── 5. Top-1% Hit Rate — requires contest results (not available yet) ─
+    metrics["top_1pct_rate"] = None
+
+    # ── 6. Cash Rate — requires contest results (cash configs only) ────────
+    metrics["cash_rate"] = None
+
+    # ── 7. Lineup Diversity (20-max only) — unique top-3 salary cores ─────
+    if profile_key == "classic_gpp_20max":
+        unique_cores: set = set()
+        for run in runs:
+            player_df = run.get("player_df")
+            if player_df is None or player_df.empty:
+                continue
+            if "lineup_index" not in player_df.columns:
+                continue
+            for lu_idx, group in player_df.groupby("lineup_index"):
+                if "salary" in group.columns:
+                    top3 = (
+                        group.nlargest(3, "salary")["player_name"].tolist()
+                        if "player_name" in group.columns
+                        else []
+                    )
+                    if top3:
+                        unique_cores.add(frozenset(top3))
+        metrics["lineup_diversity_min_cores"] = float(len(unique_cores)) if unique_cores else None
+    else:
+        metrics["lineup_diversity_min_cores"] = None
+
+    return metrics
+
+
+def _render_nudge_guidance(
+    batch: Dict[str, Any],
+    sport: str,
+    run_dates: List[date],
+    preset_name: str,
+    sandbox_overrides: Dict[str, Any],
+    ricky_weights: Dict[str, float],
+    archetype_name: str = "Default",
+) -> None:
+    """Render the Calibration Nudge Guidance expander for a completed batch.
+
+    Shows a metrics vs targets table with status indicators and directional
+    nudge text.  Includes a Re-run batch button.
+    """
+    from utils.calibration_targets import (
+        CALIBRATION_TARGETS,
+        METRIC_LABELS,
+        evaluate_metric,
+        get_target_display,
+    )
+
+    batches = st.session_state.get("sim_lab_batches", [])
+    if not batches:
+        return
+
+    profile_key = batch.get("profile_name", "") or ""
+    if not profile_key or profile_key not in CALIBRATION_TARGETS:
+        return
+
+    with st.expander("🎯 Calibration Nudge Guidance", expanded=False):
+        st.caption(
+            f"Metrics vs. target ranges for **{profile_key}** — "
+            "Green = on target · Yellow = near boundary · Red = outside range"
+        )
+
+        metrics = _compute_nudge_metrics(batch, profile_key)
+        targets = CALIBRATION_TARGETS[profile_key]
+
+        # Build table rows
+        table_rows = []
+        for metric_name, (lo, hi) in targets.items():
+            label = METRIC_LABELS.get(metric_name, metric_name)
+            value = metrics.get(metric_name)
+            target_str = get_target_display(metric_name, profile_key)
+
+            if value is None:
+                table_rows.append({
+                    "Metric": label,
+                    "Your Batch": "No data",
+                    "Target Range": target_str,
+                    "Status": "⚪",
+                    "Nudge": "No data available",
+                })
+                continue
+
+            _status, dot, nudge = evaluate_metric(metric_name, value, profile_key)
+
+            # Format value display
+            if metric_name in ("top_1pct_rate", "cash_rate"):
+                value_str = f"{value:.1%}"
+            elif metric_name in ("mae", "bias", "correlation"):
+                value_str = f"{value:.3f}"
+            elif metric_name == "lineup_diversity_min_cores":
+                value_str = f"{int(value)} unique cores"
+            else:
+                value_str = f"{value:.1f}"
+
+            table_rows.append({
+                "Metric": label,
+                "Your Batch": value_str,
+                "Target Range": target_str,
+                "Status": dot,
+                "Nudge": nudge,
+            })
+
+        if table_rows:
+            nudge_df = pd.DataFrame(table_rows)
+            st.dataframe(nudge_df, use_container_width=True, hide_index=True)
+        else:
+            st.caption("No metrics defined for this profile.")
+
+        # ── Re-run batch button ──────────────────────────────────────────
+        st.divider()
+        if st.button(
+            "🔄 Re-run batch with current settings",
+            key="nudge_rerun_batch",
+            use_container_width=True,
+        ):
+            with st.spinner("Re-running batch..."):
+                new_batch = _run_batch(
+                    sport,
+                    preset_name,
+                    sandbox_overrides,
+                    run_dates,
+                    archetype=archetype_name,
+                    ricky_w_gpp=ricky_weights.get("w_gpp"),
+                    ricky_w_ceil=ricky_weights.get("w_ceil"),
+                    ricky_w_own=ricky_weights.get("w_own"),
+                    profile_name=profile_key,
+                )
+                new_batch["overrides"] = dict(sandbox_overrides)
+                if "sim_lab_batches" not in st.session_state:
+                    st.session_state["sim_lab_batches"] = []
+                st.session_state["sim_lab_batches"].append(new_batch)
+                _append_batch_history(new_batch)
+                st.success(
+                    f"Re-run complete: {len(new_batch['runs'])} slates | "
+                    f"Avg Actual: {new_batch['avg_actual']:.1f} FP"
+                )
+                st.rerun()
+
+
+# ---------------------------------------------------------------------------
 # Sim Lab Report (read-only analysis of CSV exports)
 # ---------------------------------------------------------------------------
 
@@ -2043,6 +2291,7 @@ def render_sim_lab(sport: str) -> None:
     if sport == "NBA":
         # --- NBA: Batch run across RG dates ---
         rg_dates = _scan_rg_dates()
+        _run_dates: List[date] = []
 
         if rg_dates:
             st.caption(f"{len(rg_dates)} RG archive dates available")
@@ -2171,6 +2420,19 @@ def render_sim_lab(sport: str) -> None:
 
         # Download CSV of all ranked lineups
         _render_download_button()
+
+        # Calibration Nudge Guidance (after batch results)
+        _batches_now = st.session_state.get("sim_lab_batches", [])
+        if _batches_now:
+            _render_nudge_guidance(
+                _batches_now[-1],
+                sport,
+                _run_dates,
+                preset_name,
+                sandbox_overrides,
+                _ricky_weights,
+                archetype_name,
+            )
 
         # Promote Config button
         _render_promote_config(preset_name, sandbox_overrides, _ricky_weights, archetype_name)
