@@ -3,7 +3,8 @@
     "GPP Main": {
       "overrides": {
         "GPP_BOOM_WEIGHT": 0.45,
-        "GPP_PACE_ENV_WEIGHT": 0.12
+        "GPP_PACE_ENV_WEIGHT": 0.12,
+        "GPP_PROJ_WEIGHT": 0.35
       },
       "ricky_weights": {
         "w_gpp": 1.0,
