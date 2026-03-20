@@ -676,6 +676,20 @@ def render_lab_tab(sport: str) -> None:
                                 key=f"lab_dl_tagged_{sport}",
                             )
 
+                            # ── Overwrite lineups parquet with ONLY SE picks ──
+                            # So "Publish to GitHub" sends just the 3 tagged
+                            # lineups to Edge Analysis (re-indexed 0, 1, 2).
+                            _se_only = lineups_df[lineups_df["lineup_index"].isin(_tagged_idxs)].copy()
+                            _idx_map = {old: new for new, old in enumerate(_tagged_idxs)}
+                            _se_only["lineup_index"] = _se_only["lineup_index"].map(_idx_map)
+                            _cs = contest_label.lower().replace(" ", "_")
+                            if showdown_teams:
+                                _cs += "_" + "_".join(sorted(showdown_teams)).lower()
+                            _se_out = out_dir / f"{_cs}_lineups.parquet"
+                            _se_only.to_parquet(str(_se_out), index=False)
+                            lineups_df = _se_only  # update for downstream display
+                            st.info(f"Saved {len(_tagged_idxs)} SE lineups for publish")
+
                         # Full ranking table
                         with st.expander("Full Ricky Ranking"):
                             _full_display = _lu_ranked.sort_values("ricky_rank")[[
