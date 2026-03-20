@@ -2629,10 +2629,37 @@ def _render_historical_replay(sport: str) -> None:
     # ── Collect lineup sources: published (SE picks) + full archive (all 40) ──
     _sources: dict = {}  # display_label -> parquet path
 
+    # Build slug -> display-name map from CONTEST_PRESETS + meta files
+    try:
+        from yak_core.config import CONTEST_PRESETS as _CP
+        _slug_to_name: dict = {
+            k.lower().replace(" ", "_"): k for k in _CP
+        }  # e.g. "gpp_main" -> "GPP Main", "showdown" -> "Showdown"
+    except Exception:
+        _slug_to_name = {}
+
+    def _display_from_slug(slug: str, meta_path=None) -> str:
+        """Convert a file slug to a human-readable contest name."""
+        # Try meta JSON first
+        if meta_path and meta_path.exists():
+            try:
+                _m = json.loads(meta_path.read_text())
+                for _key in ("contest_type", "contest"):
+                    if _m.get(_key):
+                        return str(_m[_key])
+            except Exception:
+                pass
+        # Try CONTEST_PRESETS mapping
+        if slug in _slug_to_name:
+            return _slug_to_name[slug]
+        # Fallback: uppercase common abbreviations
+        return slug.replace("_", " ").upper()
+
     # 1. Published SE picks (3 lineups)
     for lf in sorted(out_dir.glob("*_lineups.parquet")):
         _slug = lf.stem.replace("_lineups", "")
-        _display = _slug.replace("_", " ").title()
+        _meta_p = lf.parent / f"{_slug}_meta.json"
+        _display = _display_from_slug(_slug, _meta_p)
         _sources[f"{_display} (published)"] = lf
 
     # 2. Full archive (all ranked lineups for calibration)
@@ -2646,7 +2673,8 @@ def _render_historical_replay(sport: str) -> None:
             if len(_parts) >= 4:
                 _date_str = "-".join(_parts[:3])
                 _contest_slug = "_".join(_parts[3:])
-                _contest_display = _contest_slug.replace("_", " ").title()
+                _meta_a = af.parent / f"{_stem}_all_meta.json"
+                _contest_display = _display_from_slug(_contest_slug, _meta_a)
                 _label = f"{_contest_display} — {_date_str} (full archive)"
             else:
                 _label = f"{_stem} (full archive)"
