@@ -61,6 +61,29 @@ CALIBRATION_TARGETS: dict[str, dict[str, tuple[float, float]]] = {
     },
 }
 
+# ── Ricky Ranking Weight targets ─────────────────────────────────────────────
+# Applied to ALL GPP profiles.  These calibrate the lineup *selection* layer
+# (which 3 out of N lineups get the SE Core / Spicy / Alt tags).
+# Metrics are computed per-slate then averaged across the batch.
+#
+#   ricky_top3_lift  — % by which Ricky top-3 avg actual beats pool avg actual
+#                      (positive = good).  Range: want +3 % to +20 %.
+#   ricky_top3_hit   — fraction of slates where ≥1 Ricky pick is in the actual
+#                      top-5 of the pool.  Range: want ≥ 0.30.
+_RICKY_WEIGHT_TARGETS: dict[str, tuple[float, float]] = {
+    "ricky_top3_lift": (3.0, 20.0),
+    "ricky_top3_hit":  (0.30, 1.0),
+}
+
+# Inject into every GPP profile (not cash profiles)
+_GPP_PROFILES = [
+    "classic_gpp_main", "classic_gpp_20max", "classic_gpp_se",
+    "showdown_gpp",
+]
+for _pk in _GPP_PROFILES:
+    if _pk in CALIBRATION_TARGETS:
+        CALIBRATION_TARGETS[_pk].update(_RICKY_WEIGHT_TARGETS)
+
 # ── Human-readable display labels ────────────────────────────────────────────
 METRIC_LABELS: dict[str, str] = {
     "mae": "Projection MAE",
@@ -71,6 +94,8 @@ METRIC_LABELS: dict[str, str] = {
     "top_1pct_rate": "Top-1% Hit Rate",
     "cash_rate": "Cash Rate",
     "lineup_diversity_min_cores": "Lineup Diversity (unique cores)",
+    "ricky_top3_lift": "Ricky Top-3 Lift %",
+    "ricky_top3_hit": "Ricky Top-3 Hit Rate",
 }
 
 # ── Nudge text: (metric, direction) → recommendation ─────────────────────────
@@ -123,6 +148,16 @@ NUDGE_TEXT: dict[tuple[str, str], str] = {
         "Lower max exposure, increase diversity penalty."
     ),
     ("lineup_diversity_min_cores", "high"): "",  # n/a
+    ("ricky_top3_lift", "low"): (
+        "Ricky picks not outperforming the pool. "
+        "Increase ceiling weight or reduce ownership penalty."
+    ),
+    ("ricky_top3_lift", "high"): "",  # higher lift is always good
+    ("ricky_top3_hit", "low"): (
+        "Ricky picks rarely land in the actual top 5. "
+        "Increase GPP score weight to lean on projection quality."
+    ),
+    ("ricky_top3_hit", "high"): "",  # higher hit rate is always good
 }
 
 
@@ -196,7 +231,7 @@ def get_target_display(metric_name: str, profile_key: str) -> str:
     lo, hi = targets[metric_name]
     # For metrics where hi=1.0 represents the natural maximum (rates, correlation),
     # show as ">= lo" instead of "lo – 1.0".
-    _unbounded_hi_metrics = {"top_1pct_rate", "cash_rate", "correlation"}
+    _unbounded_hi_metrics = {"top_1pct_rate", "cash_rate", "correlation", "ricky_top3_hit"}
     if metric_name in _unbounded_hi_metrics and hi == 1.0 and lo < 1.0:
         if metric_name in ("top_1pct_rate", "cash_rate"):
             return f"≥ {lo:.0%}"

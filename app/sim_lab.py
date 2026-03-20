@@ -1889,7 +1889,35 @@ def _compute_nudge_metrics(
     # ── 6. Cash Rate — requires contest results (cash configs only) ────────
     metrics["cash_rate"] = None
 
-    # ── 7. Lineup Diversity (20-max only) — unique top-3 salary cores ─────
+    # ── 7. Ricky Top-3 Lift % ──────────────────────────────────────────────
+    # How much the Ricky-tagged top-3 lineups outperform the pool average.
+    lift_vals: list = []
+    hit_vals: list = []  # for ricky_top3_hit (metric 8)
+    for run in runs:
+        sdf = run.get("summary_df")
+        if sdf is None or sdf.empty or "ricky_tag" not in sdf.columns:
+            continue
+        if "total_actual" not in sdf.columns:
+            continue
+        tagged = sdf[sdf["ricky_tag"] != ""]
+        if tagged.empty:
+            continue
+        pool_avg = float(sdf["total_actual"].mean())
+        top3_avg = float(tagged["total_actual"].mean())
+        if pool_avg > 0:
+            lift_vals.append(((top3_avg - pool_avg) / pool_avg) * 100.0)
+        # Hit: did any Ricky pick land in the actual top 5?
+        actual_top5_indices = set(sdf.nlargest(5, "total_actual")["lineup_index"].tolist())
+        tagged_indices = set(tagged["lineup_index"].tolist())
+        hit_vals.append(1.0 if tagged_indices & actual_top5_indices else 0.0)
+
+    metrics["ricky_top3_lift"] = round(float(mean(lift_vals)), 2) if lift_vals else None
+
+    # ── 8. Ricky Top-3 Hit Rate ────────────────────────────────────────────
+    # Fraction of slates where ≥1 Ricky pick is in the actual top 5.
+    metrics["ricky_top3_hit"] = round(float(mean(hit_vals)), 4) if hit_vals else None
+
+    # ── 9. Lineup Diversity (20-max only) — unique top-3 salary cores ─────
     if profile_key == "classic_gpp_20max":
         unique_cores: set = set()
         for run in runs:
@@ -1916,12 +1944,14 @@ def _compute_nudge_metrics(
 
 def _fmt_nudge_value(metric_name: str, value: float) -> str:
     """Format a metric value for display in the nudge table."""
-    if metric_name in ("top_1pct_rate", "cash_rate"):
+    if metric_name in ("top_1pct_rate", "cash_rate", "ricky_top3_hit"):
         return f"{value:.1%}"
     if metric_name in ("mae", "bias", "correlation"):
         return f"{value:.3f}"
     if metric_name == "lineup_diversity_min_cores":
         return f"{int(value)} cores"
+    if metric_name == "ricky_top3_lift":
+        return f"{value:+.1f}%"
     return f"{value:.1f}"
 
 
@@ -2015,6 +2045,7 @@ def _render_nudge_guidance(
                 hi=hi,
                 current_overrides=sandbox_overrides,
                 preset_defaults=preset_defaults,
+                ricky_weights=ricky_weights,
             )
 
             if not suggestions:
@@ -2061,20 +2092,27 @@ def _render_nudge_guidance(
                         f"**{sug_val}**",
                         help=f"Delta: {delta_str}",
                     )
+                    storage = sug.get("storage", "sandbox")
                     apply_key = f"nudge_apply_{preset_name}_{metric_name}_{param}_{i}"
                     if row[7].button("Apply", key=apply_key, type="primary"):
-                        sk = _sandbox_config_key(preset_name)
-                        if sk not in st.session_state:
-                            st.session_state[sk] = {}
-                        st.session_state[sk][param] = sug_val
-                        # Clear the slider widget's cached value so it
-                        # re-initialises from the overrides dict on rerun.
-                        # Directly setting st.session_state[widget_key] after
-                        # the slider has rendered raises StreamlitAPIException
-                        # in Streamlit ≥1.41.
-                        if has_slider:
-                            slider_key = f"sl_{preset_name}_{param}"
-                            st.session_state.pop(slider_key, None)
+                        if storage == "ricky_weights":
+                            # Write to Ricky Ranking weights dict
+                            _rk = f"sim_lab_ricky_weights_{preset_name}"
+                            if _rk not in st.session_state:
+                                st.session_state[_rk] = {}
+                            st.session_state[_rk][param] = sug_val
+                            if has_slider:
+                                slider_key = f"sl_ricky_{param.replace('w_', '')}_{preset_name}"
+                                st.session_state.pop(slider_key, None)
+                        else:
+                            # Write to sandbox config dict
+                            sk = _sandbox_config_key(preset_name)
+                            if sk not in st.session_state:
+                                st.session_state[sk] = {}
+                            st.session_state[sk][param] = sug_val
+                            if has_slider:
+                                slider_key = f"sl_{preset_name}_{param}"
+                                st.session_state.pop(slider_key, None)
                         st.toast(f"✅ {param} → {sug_val}")
                         st.rerun()
                 else:

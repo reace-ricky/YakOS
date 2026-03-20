@@ -238,6 +238,60 @@ NUDGE_PARAM_RULES: dict[tuple[str, str], list[dict[str, Any]]] = {
             "compute": lambda cur, val, lo, hi: round(min(cur + 0.05, 1.0), 2),
         },
     ],
+
+    # ── Ricky Ranking Weight nudges ──────────────────────────────────────────
+    # These target the Ricky weight sliders (w_gpp, w_ceil, w_own), which
+    # live in session_state under sim_lab_ricky_weights_{preset}.  The
+    # "storage" key tells the Apply handler to write there instead of the
+    # sandbox config dict.
+    ("ricky_top3_lift", "low"): [
+        {
+            "param": "w_ceil",
+            "label": "Ceiling Weight",
+            "has_slider": True,
+            "slider_min": 0.0,
+            "slider_max": 2.0,
+            "step": 0.05,
+            "storage": "ricky_weights",
+            "description": "Increase ceiling emphasis to pick higher-upside lineups",
+            "compute": lambda cur, val, lo, hi: round(min(cur + 0.10, 2.0), 2),
+        },
+        {
+            "param": "w_own",
+            "label": "Own Penalty",
+            "has_slider": True,
+            "slider_min": 0.0,
+            "slider_max": 2.0,
+            "step": 0.05,
+            "storage": "ricky_weights",
+            "description": "Reduce ownership penalty so ranking favors quality over contrarian",
+            "compute": lambda cur, val, lo, hi: round(max(cur - 0.10, 0.0), 2),
+        },
+    ],
+    ("ricky_top3_hit", "low"): [
+        {
+            "param": "w_gpp",
+            "label": "GPP Score Weight",
+            "has_slider": True,
+            "slider_min": 0.0,
+            "slider_max": 2.0,
+            "step": 0.05,
+            "storage": "ricky_weights",
+            "description": "Increase GPP score weight to lean on projection quality",
+            "compute": lambda cur, val, lo, hi: round(min(cur + 0.10, 2.0), 2),
+        },
+        {
+            "param": "w_ceil",
+            "label": "Ceiling Weight",
+            "has_slider": True,
+            "slider_min": 0.0,
+            "slider_max": 2.0,
+            "step": 0.05,
+            "storage": "ricky_weights",
+            "description": "Increase ceiling to favor boom lineups in top-5 contention",
+            "compute": lambda cur, val, lo, hi: round(min(cur + 0.05, 2.0), 2),
+        },
+    ],
 }
 
 
@@ -252,6 +306,7 @@ def get_nudge_suggestions(
     hi: float,
     current_overrides: dict[str, Any],
     preset_defaults: dict[str, Any],
+    ricky_weights: dict[str, float] | None = None,
 ) -> list[dict[str, Any]]:
     """Return a list of prescriptive nudge suggestions for an off-target metric.
 
@@ -267,6 +322,9 @@ def get_nudge_suggestions(
         The current sandbox override dict (from session state).
     preset_defaults:
         The merged config dict for the active preset (from ``merge_config``).
+    ricky_weights:
+        Current Ricky Ranking weights dict ({"w_gpp": ..., "w_ceil": ..., "w_own": ...}).
+        Used to resolve current values for rules with ``storage='ricky_weights'``.
 
     Returns
     -------
@@ -310,17 +368,25 @@ def get_nudge_suggestions(
             "CASH_FLOOR_WEIGHT": 0.6,
         }
 
+    _ricky_w = ricky_weights or {}
+
     results = []
     for rule in rules:
         param = rule["param"]
-        # Resolve current value: overrides → merged preset → DEFAULT_CONFIG → slider_min
-        current_val = current_overrides.get(
-            param,
-            preset_defaults.get(
+        storage = rule.get("storage", "sandbox")
+
+        # Resolve current value based on storage target
+        if storage == "ricky_weights":
+            current_val = _ricky_w.get(param, rule["slider_min"])
+        else:
+            # overrides → merged preset → DEFAULT_CONFIG → slider_min
+            current_val = current_overrides.get(
                 param,
-                _DEFAULT_CFG.get(param, rule["slider_min"]),
-            ),
-        )
+                preset_defaults.get(
+                    param,
+                    _DEFAULT_CFG.get(param, rule["slider_min"]),
+                ),
+            )
         try:
             suggested_val = rule["compute"](current_val, batch_value, lo, hi)
         except Exception:
@@ -333,6 +399,7 @@ def get_nudge_suggestions(
             "param": param,
             "label": rule["label"],
             "has_slider": rule["has_slider"],
+            "storage": storage,
             "description": rule["description"],
             "current_value": current_val,
             "suggested_value": suggested_val,
