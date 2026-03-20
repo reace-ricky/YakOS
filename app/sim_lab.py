@@ -748,10 +748,31 @@ def _run_pipeline(
     else:
         actuals_df = _fetch_pga_actuals(api_key, date_dash)
 
+    # Step 5b: Overlay showdown salaries from archive (if showdown preset)
+    is_showdown = "showdown" in preset_name.lower()
+    if is_showdown and sport == "NBA":
+        try:
+            from yak_core.slate_archive import load_all_showdown_salaries
+            sd_sal_map = load_all_showdown_salaries(date_dash)
+            if sd_sal_map:
+                _overlaid = 0
+                for idx, row in edge_df.iterrows():
+                    pname = str(row.get("player_name", "")).strip()
+                    if pname in sd_sal_map:
+                        edge_df.at[idx, "salary"] = sd_sal_map[pname]
+                        _overlaid += 1
+                _logger.info(
+                    "Showdown salary overlay: %d/%d players matched from archive",
+                    _overlaid, len(sd_sal_map),
+                )
+            else:
+                _logger.warning("No showdown salary archive for %s — using classic salaries", date_dash)
+        except Exception as _sd_err:
+            _logger.warning("Showdown salary overlay failed (%s) — using classic salaries", _sd_err)
+
     # Step 6: Build lineups
     prepped = prepare_pool(edge_df, cfg)
 
-    is_showdown = "showdown" in preset_name.lower()
     if is_showdown:
         lineups_df, _ = build_showdown_lineups(prepped, cfg)
     else:

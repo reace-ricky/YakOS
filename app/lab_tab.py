@@ -2212,6 +2212,31 @@ def _fetch_dk_showdown_salaries(away: str, home: str) -> dict:
     sals = [info["salary"] for info in player_data.values()]
     print(f"[_fetch_dk_showdown_salaries] DG {matched_dg}: {len(player_data)} players (FLEX salaries), "
           f"range ${min(sals):.0f}-${max(sals):.0f}")
+
+    # ── Auto-archive showdown salaries ──────────────────────────────────
+    try:
+        from datetime import date as _date
+        from yak_core.slate_archive import archive_showdown_salaries
+        _archive_players = [
+            {
+                "name": info["name"],
+                "team": info["team"],
+                "position": "",
+                "salary": info["salary"],
+                "dk_player_id": pid,
+            }
+            for pid, info in player_data.items()
+        ]
+        archive_showdown_salaries(
+            players=_archive_players,
+            draft_group_id=int(matched_dg),
+            away=away,
+            home=home,
+            slate_date=_date.today().isoformat(),
+        )
+    except Exception as _arc_err:
+        print(f"[_fetch_dk_showdown_salaries] archive failed (non-fatal): {_arc_err}")
+
     return salary_map
 
 

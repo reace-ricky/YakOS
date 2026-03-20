@@ -339,3 +339,148 @@ def archive_summary() -> dict:
         "n_players": n_players,
         "dates": sorted(dates, reverse=True),
     }
+
+
+# ── Showdown salary archiver ────────────────────────────────────────
+
+def archive_showdown_salaries(
+    players: list[dict],
+    draft_group_id: int,
+    away: str,
+    home: str,
+    slate_date: str,
+) -> str:
+    """Persist DK Showdown salary data as a parquet for later use.
+
+    Called automatically whenever ``fetch_dk_showdown_salaries`` succeeds.
+    Stores **FLEX (UTIL) salaries only** — the optimizer applies the CPT
+    multiplier itself.
+
+    Parameters
+    ----------
+    players : list[dict]
+        Player dicts from ``fetch_dk_showdown_salaries`` with keys:
+        name, team, position, salary, dk_player_id.
+    draft_group_id : int
+        DK draft group ID.
+    away, home : str
+        Team abbreviations (e.g. "PHI", "DEN").
+    slate_date : str
+        ISO date (e.g. "2026-03-19").
+
+    Returns
+    -------
+    str
+        Path to the saved parquet file.
+    """
+    if not players:
+        return ""
+
+    rows = []
+    for p in players:
+        team = str(p.get("team", "")).upper()
+        opp = home if team == away else away
+        rows.append({
+            "player_name": str(p["name"]).strip(),
+            "team": team,
+            "opp": opp,
+            "pos": str(p.get("position", "")).strip(),
+            "salary": int(p["salary"]),
+            "dk_player_id": str(p.get("dk_player_id", "")),
+            "roster_position": "UTIL",
+            "slate_date": slate_date,
+            "contest_type": "Showdown",
+            "matchup": f"{away}@{home}",
+            "draft_group_id": draft_group_id,
+            "archived_at": datetime.utcnow().isoformat(),
+        })
+
+    df = pd.DataFrame(rows)
+    os.makedirs(_ARCHIVE_DIR, exist_ok=True)
+    fname = f"{slate_date}_showdown_{away}-{home}.parquet"
+    path = os.path.join(_ARCHIVE_DIR, fname)
+    df.to_parquet(path, index=False)
+    print(f"[slate_archive] Showdown salaries archived → {fname} ({len(df)} players)")
+
+    rel_path = os.path.relpath(path, YAKOS_ROOT)
+    sync_feedback_async(
+        files=[rel_path],
+        commit_message=f"Showdown salaries: {slate_date} {away}@{home} ({len(df)} players)",
+    )
+    return path
+
+
+def load_showdown_salaries(
+    slate_date: str,
+    away: str = "",
+    home: str = "",
+) -> dict[str, float]:
+    """Load archived Showdown FLEX salaries as a {player_name: salary} map.
+
+    Tries exact matchup first (``<date>_showdown_<away>-<home>.parquet``),
+    then falls back to any showdown archive for that date.
+
+    Returns an empty dict if no archive is found.
+    """
+    if not os.path.isdir(_ARCHIVE_DIR):
+        return {}
+
+    # Try exact matchup file first
+    if away and home:
+        exact = os.path.join(_ARCHIVE_DIR, f"{slate_date}_showdown_{away}-{home}.parquet")
+        if os.path.isfile(exact):
+            return _salary_map_from_parquet(exact)
+
+    # Fall back to any showdown parquet for that date
+    for fname in sorted(os.listdir(_ARCHIVE_DIR)):
+        if fname.startswith(slate_date) and "showdown" in fname.lower() and fname.endswith(".parquet"):
+            path = os.path.join(_ARCHIVE_DIR, fname)
+            return _salary_map_from_parquet(path)
+
+    return {}
+
+
+def load_all_showdown_salaries(slate_date: str) -> dict[str, float]:
+    """Load ALL archived Showdown FLEX salaries for a date as {player_name: salary}.
+
+    Unlike ``load_showdown_salaries`` (which returns one matchup), this merges
+    every showdown archive for the given date.  Used by Sim Lab's pipeline
+    overlay so that any showdown preset—regardless of which specific matchup—
+    gets correct showdown salaries.
+    """
+    if not os.path.isdir(_ARCHIVE_DIR):
+        return {}
+    merged: dict[str, float] = {}
+    for fname in sorted(os.listdir(_ARCHIVE_DIR)):
+        if fname.startswith(slate_date) and "showdown" in fname.lower() and fname.endswith(".parquet"):
+            partial = _salary_map_from_parquet(os.path.join(_ARCHIVE_DIR, fname))
+            merged.update(partial)
+    return merged
+
+
+def _salary_map_from_parquet(path: str) -> dict[str, float]:
+    """Read a showdown archive parquet and return {player_name: FLEX salary}."""
+    try:
+        df = pd.read_parquet(path)
+    except Exception:
+        return {}
+
+    # If roster_position exists, keep only UTIL/FLEX rows
+    if "roster_position" in df.columns:
+        flex = df[df["roster_position"].str.upper().isin({"UTIL", "FLEX"})]
+        if not flex.empty:
+            df = flex
+        else:
+            # Old format: two rows per player, keep the lower salary (FLEX)
+            df = df.loc[df.groupby("player_name")["salary"].idxmin()]
+    elif df["player_name"].duplicated().any():
+        # Old format without roster_position: keep lower salary per player
+        df = df.loc[df.groupby("player_name")["salary"].idxmin()]
+
+    sal_map: dict[str, float] = {}
+    for _, row in df.iterrows():
+        name = str(row.get("player_name", "")).strip()
+        sal = float(row.get("salary", 0))
+        if name and sal > 0:
+            sal_map[name] = sal
+    return sal_map
