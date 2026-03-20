@@ -8,7 +8,7 @@
         "GPP_CATALYST_WEIGHT": 0.1,
         "GPP_LOW_OWN_THRESHOLD": 0.3,
         "NUM_LINEUPS": 50,
-        "GPP_PROJ_WEIGHT": 0.25,
+        "GPP_PROJ_WEIGHT": 0.3,
         "GPP_OWN_PENALTY_STRENGTH": 0.9,
         "GPP_LEVERAGE_WEIGHT": 0.1
       },
