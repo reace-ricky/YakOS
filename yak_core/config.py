@@ -452,8 +452,8 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
     },
     "Cash Game": {
         "display_name": "Cash Showdown",
-        "description": "Cash / 50-50 / Double-Up for single-game slates — high-floor, small pool",
-        "slate_type": "Classic",
+        "description": "Cash / 50-50 / Double-Up for single-game Showdown slates — high-floor, CPT+FLEX",
+        "slate_type": "Showdown Captain",
         "archetype": "Floor Lock",
         "internal_contest": "50/50",
         "CONTEST_TYPE": "cash",
@@ -462,7 +462,7 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "correlation_mode": "none",
         "default_lineups": 1,
         "default_max_exposure": 0.8,
-        "min_salary": 49000,
+        "min_salary": 0,  # Showdown has no salary floor — DK only enforces a $50K cap
         # Pool sizing — game slates have fewer players
         "pool_size_min": 10,
         "pool_size_max": 16,
@@ -479,6 +479,8 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "max_per_team": None,
         # Exposure
         "exposure_rules": False,
+        # Showdown-specific
+        "captain_aware": True,
         # Ownership sim contest type
         "ownership_contest_type": "cash",
     },
