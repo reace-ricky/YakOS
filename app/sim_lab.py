@@ -1035,11 +1035,14 @@ def _render_promote_config(
     preset_name: str,
     sandbox_overrides: Dict[str, Any],
     ricky_weights: Dict[str, float],
+    archetype_name: str = "Default",
 ) -> None:
     """Render the Promote Config panel after a validated batch run.
 
     Snapshots the current config + Ricky weights + validation stats from
     the latest batch and saves it as a selectable promoted profile.
+    Uses the archetype name (not the preset key) for the default config
+    key and display name.
     """
     batches: List[Dict[str, Any]] = st.session_state.get("sim_lab_batches", [])
     if not batches:
@@ -1071,16 +1074,25 @@ def _render_promote_config(
         st.metric("Sample Size", f"{len(runs)} slates")
         st.metric("Dates Tested", f"{len(dates_tested)}")
 
-    # Config key input
-    _default_key = f"{preset_name.upper().replace(' ', '_')}_V1"
+    # Config key + display name default to archetype name when one is active,
+    # otherwise fall back to preset name.  This gives promoted configs
+    # human-readable names like "Stars & Scrubs Ceiling" instead of
+    # "GPP_MAIN_V1".
+    if archetype_name and archetype_name != "Default":
+        _base_label = archetype_name  # e.g. "Stars & Scrubs Ceiling"
+    else:
+        _base_label = preset_name     # e.g. "GPP Main"
+    _default_key = _base_label.upper().replace(" ", "_").replace("&", "AND") + "_V1"
+    _default_display = _base_label
+
     config_key = st.text_input(
-        "Config Key (e.g. 20MAX_V1, SHOWDOWN_V2)",
+        "Config Key",
         value=_default_key,
         key="promote_config_key",
     )
     config_display = st.text_input(
         "Display Name",
-        value=config_key.replace("_", " ").title(),
+        value=_default_display,
         key="promote_config_display",
     )
     config_desc = st.text_input(
@@ -2163,7 +2175,7 @@ def render_sim_lab(sport: str) -> None:
         _render_download_button()
 
         # Promote Config button
-        _render_promote_config(preset_name, sandbox_overrides, _ricky_weights)
+        _render_promote_config(preset_name, sandbox_overrides, _ricky_weights, archetype_name)
 
         # Trend chart — session per-date detail (when batches exist in memory)
         _render_trend_chart()
