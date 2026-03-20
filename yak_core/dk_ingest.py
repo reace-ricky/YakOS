@@ -800,3 +800,154 @@ def build_contest_scoped_pool(
         out["_unmapped"].sum(),
     )
     return out
+
+
+# ---------------------------------------------------------------------------
+# 5.7 — DK Showdown lobby helpers
+# ---------------------------------------------------------------------------
+
+def fetch_dk_showdown_matchups(sport: str = "NBA") -> List[Dict[str, Any]]:
+    """Fetch live Showdown matchups from the DK lobby.
+
+    Returns a list of dicts, each with:
+      draft_group_id, away, home, label ("PHI @ SAC"),
+      start_time, start_time_est.
+
+    Only returns matchups that DK is actively offering Showdown
+    contests for today.  Returns [] on any failure.
+    """
+    try:
+        resp = _rate_limited_get(_DK_LOBBY_URL, params={"sport": sport.upper()})
+        data = resp.json()
+    except Exception as exc:
+        log.warning("[dk_ingest] Showdown lobby fetch failed: %s", exc)
+        return []
+
+    dg_info = data.get("DraftGroups") or data.get("draftGroups") or []
+
+    # game_type 81 = NBA Showdown Captain Mode
+    _SD_GAME_TYPES = {81}
+    matchups: List[Dict[str, Any]] = []
+    seen_dgs: set = set()
+
+    for dg in dg_info:
+        gt = dg.get("GameTypeId") or dg.get("gameTypeId") or 0
+        if gt not in _SD_GAME_TYPES:
+            continue
+        dg_id = dg.get("DraftGroupId") or dg.get("draftGroupId") or 0
+        if not dg_id or dg_id in seen_dgs:
+            continue
+        seen_dgs.add(dg_id)
+
+        # Extract matchup from ContestStartTimeSuffix: " (PHI @ SAC)"
+        suffix = str(
+            dg.get("ContestStartTimeSuffix")
+            or dg.get("contestStartTimeSuffix")
+            or ""
+        ).strip()
+        away, home = "", ""
+        if "@" in suffix:
+            import re as _re
+            m = _re.search(r"\(([A-Z]+)\s*@\s*([A-Z]+)\)", suffix.upper())
+            if m:
+                away, home = m.group(1), m.group(2)
+        if not away or not home:
+            continue
+
+        matchups.append({
+            "draft_group_id": int(dg_id),
+            "away": away,
+            "home": home,
+            "label": f"{away} @ {home}",
+            "start_time": str(dg.get("StartDate") or dg.get("startDate") or ""),
+            "start_time_est": str(dg.get("StartDateEst") or dg.get("startDateEst") or ""),
+        })
+
+    log.info("[dk_ingest] Found %d Showdown matchups for %s", len(matchups), sport)
+    return matchups
+
+
+def fetch_dk_showdown_salaries(draft_group_id: int) -> Dict[str, Any]:
+    """Fetch Showdown FLEX salaries for a single draft group.
+
+    Returns a dict with:
+      players: list of {name, team, position, salary, dk_player_id}
+      salary_map: {normalised_name: salary}  (FLEX / base salary only)
+      draft_group_id: int
+
+    DK Showdown returns two rows per player: CPT (rosterSlotId 476,
+    salary = 1.5×) and FLEX (rosterSlotId 475, base salary).  We keep
+    the FLEX salary since the optimizer applies the CPT multiplier.
+    """
+    try:
+        url = _DK_DRAFTABLES_URL.format(draft_group_id=draft_group_id)
+        resp = _rate_limited_get(url)
+        raw = resp.json().get("draftables") or []
+    except Exception as exc:
+        log.warning("[dk_ingest] Showdown draftables fetch failed for DG %s: %s", draft_group_id, exc)
+        return {"players": [], "salary_map": {}, "draft_group_id": draft_group_id}
+
+    if not raw:
+        return {"players": [], "salary_map": {}, "draft_group_id": draft_group_id}
+
+    # Group by playerId — keep the FLEX (lower) salary for each player.
+    _FLEX_SLOT = 475  # rosterSlotId for FLEX
+    player_data: Dict[str, Dict] = {}  # playerId -> best record
+    for p in raw:
+        pid = str(p.get("playerId", ""))
+        slot_id = p.get("rosterSlotId", 0)
+        sal = float(p.get("salary", 0))
+        name = str(p.get("displayName", "")).strip()
+        team = str(p.get("teamAbbreviation", "")).upper()
+        pos = str(p.get("position", "")).strip()
+
+        if not pid or not name:
+            continue
+
+        if pid not in player_data:
+            player_data[pid] = {
+                "name": name, "team": team, "position": pos,
+                "salary": sal, "dk_player_id": pid, "slot_id": slot_id,
+            }
+        else:
+            # Prefer FLEX slot (lower salary = base); if both are FLEX keep lower
+            existing = player_data[pid]
+            if slot_id == _FLEX_SLOT and existing["slot_id"] != _FLEX_SLOT:
+                existing.update(salary=sal, slot_id=slot_id)
+            elif slot_id == _FLEX_SLOT and sal < existing["salary"]:
+                existing["salary"] = sal
+            elif existing["slot_id"] != _FLEX_SLOT and sal < existing["salary"]:
+                existing.update(salary=sal, slot_id=slot_id)
+
+    # Build normalised salary map for matching
+    salary_map: Dict[str, float] = {}
+    players: List[Dict] = []
+    for info in player_data.values():
+        sal = info["salary"]
+        name = info["name"]
+        team = info["team"]
+        players.append({
+            "name": name, "team": team, "position": info["position"],
+            "salary": sal, "dk_player_id": info["dk_player_id"],
+        })
+        # Exact name
+        salary_map[name] = sal
+        # Normalised name
+        norm = _normalize_name(name)
+        salary_map[norm] = sal
+        # Last-name + team fallback key
+        parts = norm.split()
+        if len(parts) >= 2:
+            salary_map[f"_LN_{parts[-1]}_{team}"] = sal
+
+    sals = [info["salary"] for info in player_data.values()]
+    log.info(
+        "[dk_ingest] Showdown DG %s: %d players (FLEX), salary range $%.0f-$%.0f",
+        draft_group_id, len(player_data),
+        min(sals) if sals else 0, max(sals) if sals else 0,
+    )
+    return {
+        "players": players,
+        "salary_map": salary_map,
+        "draft_group_id": draft_group_id,
+    }

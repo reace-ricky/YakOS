@@ -260,26 +260,38 @@ def render_optimizer_tab(sport: str) -> None:
         st.caption(f"\u2705 Profile: **{_prof['display_name']}** ({_prof['version']}) — {_prof['description']}")
         preset = {**preset, **_active_profile_overrides}
 
-    # ── Showdown game picker (NBA only) ──
+    # ── Showdown game picker (NBA only) — powered by DK lobby API ──
     showdown_teams: list[str] = []
+    _sd_draft_group_id: int | None = None
     is_nba_showdown = (
         not is_pga
         and (preset.get("slate_type") == "Showdown Captain" or "showdown" in contest_label.lower())
     )
+    # DK ↔ Pool team abbreviation mapping
+    _POOL_TO_DK = {"SA": "SAS", "GS": "GSW", "PHO": "PHX", "NO": "NOP"}
+    _DK_TO_POOL = {v: k for k, v in _POOL_TO_DK.items()}
     if is_nba_showdown:
-        from app.data_loader import load_fresh_meta
-        _sd_meta = load_fresh_meta(sport)
-        matchups = _sd_meta.get("matchups", [])
-        if matchups:
-            matchup_labels = [m["label"] for m in matchups]
+        try:
+            from yak_core.dk_ingest import fetch_dk_showdown_matchups
+            _dk_matchups = fetch_dk_showdown_matchups(sport)
+        except Exception as _sd_err:
+            _dk_matchups = []
+            print(f"[optimizer] DK Showdown lobby fetch failed: {_sd_err}")
+        if _dk_matchups:
+            matchup_labels = [m["label"] for m in _dk_matchups]
             selected_matchup = st.selectbox(
                 "Showdown matchup", options=matchup_labels, key=f"opt_sd_matchup_{sport}"
             )
-            sel = next((m for m in matchups if m["label"] == selected_matchup), None)
+            sel = next((m for m in _dk_matchups if m["label"] == selected_matchup), None)
             if sel:
-                showdown_teams = [sel["away"], sel["home"]]
+                # Convert DK team abbrevs to pool abbrevs for filtering
+                showdown_teams = [
+                    _DK_TO_POOL.get(sel["away"], sel["away"]),
+                    _DK_TO_POOL.get(sel["home"], sel["home"]),
+                ]
+                _sd_draft_group_id = sel["draft_group_id"]
         else:
-            st.warning("No matchup data found. Re-run Load Pool to fetch the schedule.")
+            st.warning("No Showdown matchups available on DK right now.")
 
     # ── Build button ──
     if st.button("Build Lineups", type="primary", key=f"opt_build_{sport}"):
@@ -316,6 +328,38 @@ def render_optimizer_tab(sport: str) -> None:
         # NBA Showdown: filter pool to the selected 2-team matchup BEFORE prepare_pool
         if is_nba_showdown and showdown_teams:
             build_pool = build_pool[build_pool["team"].isin(showdown_teams)].reset_index(drop=True)
+
+            # Apply DK Showdown salaries from lobby API
+            if _sd_draft_group_id:
+                try:
+                    from yak_core.dk_ingest import fetch_dk_showdown_salaries
+                    import re as _re_sd
+                    _sd_result = fetch_dk_showdown_salaries(_sd_draft_group_id)
+                    _sd_salary_map = _sd_result.get("salary_map", {})
+                    if _sd_salary_map:
+                        _sd_updated = 0
+                        for _idx, _row in build_pool.iterrows():
+                            _pname = str(_row.get("player_name", "")).strip()
+                            _sd_sal = _sd_salary_map.get(_pname)
+                            if _sd_sal is None:
+                                _norm = _re_sd.sub(r"[.'`\-]", "", _pname.lower()).strip()
+                                _norm = _re_sd.sub(r"\s+(jr|sr|ii|iii|iv|v)$", "", _norm)
+                                _norm = _re_sd.sub(r"\s+", " ", _norm).strip()
+                                _sd_sal = _sd_salary_map.get(_norm)
+                            if _sd_sal is None:
+                                _parts = _re_sd.sub(r"[.'`\-]", "", _pname.lower()).strip().split()
+                                _team_dk = _POOL_TO_DK.get(str(_row.get("team", "")), str(_row.get("team", "")))
+                                if len(_parts) >= 2:
+                                    _sd_sal = _sd_salary_map.get(f"_LN_{_parts[-1]}_{_team_dk}")
+                            if _sd_sal is not None:
+                                build_pool.at[_idx, "salary"] = _sd_sal
+                                _sd_updated += 1
+                        st.success(f"DK Showdown salaries applied: {_sd_updated}/{len(build_pool)} players")
+                    else:
+                        st.warning("Could not fetch Showdown salaries from DK — using main slate salaries")
+                except Exception as _sd_err:
+                    print(f"[optimizer] DK Showdown salary fetch failed: {_sd_err}")
+                    st.warning(f"DK Showdown salary fetch failed: {_sd_err}")
 
         cfg = _build_optimizer_cfg(preset, sport, num_lineups, max_exposure, locked, excluded)
         # Apply profile overrides into the optimizer config

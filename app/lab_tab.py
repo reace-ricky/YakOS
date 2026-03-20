@@ -444,6 +444,7 @@ def render_lab_tab(sport: str) -> None:
         st.info("Full tournament lineup (4 rounds). Projections use multi-day model.")
 
     showdown_teams: list[str] = []
+    _sd_draft_group_id: int | None = None
     is_nba_showdown = (
         not is_pga
         and (preset.get("slate_type") == "Showdown Captain" or "showdown" in contest_label.lower())
@@ -453,34 +454,44 @@ def render_lab_tab(sport: str) -> None:
         and (is_nba_showdown or "cash" in contest_label.lower())
     )
     if is_nba_matchup_contest:
-        _meta_path = out_dir / "slate_meta.json"
-        _sd_meta = json.loads(_meta_path.read_text()) if _meta_path.exists() else {}
-        matchups = _sd_meta.get("matchups", [])
-        if matchups:
-            matchup_options = [m["label"] for m in matchups]
-            if not is_nba_showdown:
-                matchup_options = ["Full Slate"] + matchup_options
-            selected_matchup = st.selectbox(
-                "Matchup", options=matchup_options, key=f"lab_sd_matchup_{sport}"
-            )
-            if selected_matchup != "Full Slate":
-                sel = next((m for m in matchups if m["label"] == selected_matchup), None)
+        if is_nba_showdown:
+            # Showdown: pull live matchups from DK lobby API
+            try:
+                from yak_core.dk_ingest import fetch_dk_showdown_matchups
+                _dk_matchups = fetch_dk_showdown_matchups(sport)
+            except Exception as _sd_err:
+                _dk_matchups = []
+                print(f"[lab] DK Showdown lobby fetch failed: {_sd_err}")
+            if _dk_matchups:
+                matchup_options = [m["label"] for m in _dk_matchups]
+                selected_matchup = st.selectbox(
+                    "Showdown matchup", options=matchup_options, key=f"lab_sd_matchup_{sport}"
+                )
+                sel = next((m for m in _dk_matchups if m["label"] == selected_matchup), None)
                 if sel:
-                    showdown_teams = [sel["away"], sel["home"]]
+                    showdown_teams = [
+                        _DK_TO_POOL_TEAM.get(sel["away"], sel["away"]),
+                        _DK_TO_POOL_TEAM.get(sel["home"], sel["home"]),
+                    ]
+                    _sd_draft_group_id = sel["draft_group_id"]
+            else:
+                st.warning("No Showdown matchups available on DK right now.")
         else:
-            st.warning("No matchup data found. Re-run Load Pool to fetch the schedule.")
-
-    # ── DK Showdown salary CSV upload ────────────────────────────────────
-    # Showdown uses different salaries than the main slate.  The user can
-    # export the DKSalaries.csv from the DK Showdown lobby and upload it
-    # here so lineups respect the real $50K cap.
-    dk_sd_file = None
-    if is_nba_showdown and showdown_teams:
-        dk_sd_file = st.file_uploader(
-            "DK Showdown Salaries CSV (from lobby)",
-            type=["csv"],
-            key=f"lab_dk_sd_{sport}",
-        )
+            # Cash / non-showdown: use schedule matchups from slate_meta
+            _meta_path = out_dir / "slate_meta.json"
+            _sd_meta = json.loads(_meta_path.read_text()) if _meta_path.exists() else {}
+            matchups = _sd_meta.get("matchups", [])
+            if matchups:
+                matchup_options = ["Full Slate"] + [m["label"] for m in matchups]
+                selected_matchup = st.selectbox(
+                    "Matchup", options=matchup_options, key=f"lab_sd_matchup_{sport}"
+                )
+                if selected_matchup != "Full Slate":
+                    sel = next((m for m in matchups if m["label"] == selected_matchup), None)
+                    if sel:
+                        showdown_teams = [sel["away"], sel["home"]]
+            else:
+                st.warning("No matchup data found. Re-run Load Pool to fetch the schedule.")
 
     _pool_names_sorted: list[str] = []
     if pool_path.exists():
@@ -557,7 +568,7 @@ def render_lab_tab(sport: str) -> None:
                     lineups_df = _build_lineups(
                         sport, contest_label, num_lineups, lock_list, exclude_list, out_dir,
                         showdown_teams=showdown_teams if showdown_teams else None,
-                        dk_sd_file=dk_sd_file,
+                        sd_draft_group_id=_sd_draft_group_id,
                         profile_overrides=_active_profile_overrides if _active_profile_overrides else None,
                         profile_name=_build_profile if _build_profile != _NONE_PROFILE_BUILD else "",
                     )
@@ -2221,7 +2232,7 @@ def _apply_dk_showdown_salaries(pool: pd.DataFrame, dk_sd_file) -> None:
     st.info(f"Showdown salaries applied: {_updated}/{len(pool)} players matched from DK CSV")
 
 
-def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None, dk_sd_file=None, profile_overrides=None, profile_name=""):
+def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None, sd_draft_group_id=None, profile_overrides=None, profile_name=""):
     from yak_core.config import CONTEST_PRESETS, merge_config
     from yak_core.lineups import build_multiple_lineups_with_exposure, build_player_pool, build_showdown_lineups
     import re as _re
@@ -2251,46 +2262,38 @@ def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, o
     if showdown_teams:
         pool = pool[pool["team"].isin(showdown_teams)].reset_index(drop=True)
 
-        # ── Apply DK Showdown salaries ──
-        # DK Showdown uses completely different salaries than the main slate.
-        # Priority: uploaded CSV > DK API auto-fetch.
-        if dk_sd_file is not None:
+        # ── Apply DK Showdown salaries from lobby API ──
+        if sd_draft_group_id:
             try:
-                _apply_dk_showdown_salaries(pool, dk_sd_file)
-            except Exception as _sd_err:
-                print(f"[_build_lineups] DK Showdown salary apply failed: {_sd_err}")
-        else:
-            # Auto-fetch from DK API
-            try:
-                import re as _re
-                _dk_teams = [_POOL_TO_DK_TEAM.get(t, t) for t in showdown_teams]
-                _away, _home = _dk_teams[0], _dk_teams[1]
-                sd_salary_map = _fetch_dk_showdown_salaries(_away, _home)
-                if sd_salary_map:
+                from yak_core.dk_ingest import fetch_dk_showdown_salaries
+                import re as _re_sd
+                _sd_result = fetch_dk_showdown_salaries(sd_draft_group_id)
+                _sd_salary_map = _sd_result.get("salary_map", {})
+                if _sd_salary_map:
                     _updated = 0
                     for idx, row in pool.iterrows():
                         pname = str(row.get("player_name", "")).strip()
-                        sd_sal = sd_salary_map.get(pname)
+                        sd_sal = _sd_salary_map.get(pname)
                         if sd_sal is None:
-                            norm = _re.sub(r"[.'`\-]", "", pname.lower()).strip()
-                            norm = _re.sub(r"\s+(jr|sr|ii|iii|iv|v)$", "", norm)
-                            norm = _re.sub(r"\s+", " ", norm).strip()
-                            sd_sal = sd_salary_map.get(norm)
+                            norm = _re_sd.sub(r"[.'`\-]", "", pname.lower()).strip()
+                            norm = _re_sd.sub(r"\s+(jr|sr|ii|iii|iv|v)$", "", norm)
+                            norm = _re_sd.sub(r"\s+", " ", norm).strip()
+                            sd_sal = _sd_salary_map.get(norm)
                         if sd_sal is None:
-                            parts = _re.sub(r"[.'`\-]", "", pname.lower()).strip().split()
+                            parts = _re_sd.sub(r"[.'`\-]", "", pname.lower()).strip().split()
                             team_dk = _POOL_TO_DK_TEAM.get(str(row.get("team", "")), str(row.get("team", "")))
                             if len(parts) >= 2:
-                                sd_sal = sd_salary_map.get(f"_LN_{parts[-1]}_{team_dk}")
+                                sd_sal = _sd_salary_map.get(f"_LN_{parts[-1]}_{team_dk}")
                         if sd_sal is not None:
                             pool.at[idx, "salary"] = sd_sal
                             _updated += 1
-                    print(f"[_build_lineups] DK Showdown API salaries applied: {_updated}/{len(pool)}")
-                    st.success(f"Showdown salaries auto-fetched from DK: {_updated}/{len(pool)} players matched")
+                    print(f"[_build_lineups] DK Showdown salaries applied: {_updated}/{len(pool)}")
+                    st.success(f"DK Showdown salaries applied: {_updated}/{len(pool)} players")
                 else:
-                    st.warning("Could not fetch Showdown salaries from DK API — using main slate salaries")
-            except Exception as _api_err:
-                print(f"[_build_lineups] DK Showdown API fetch failed: {_api_err}")
-                st.warning(f"DK Showdown salary fetch failed: {_api_err}")
+                    st.warning("Could not fetch Showdown salaries from DK — using main slate salaries")
+            except Exception as _sd_err:
+                print(f"[_build_lineups] DK Showdown salary fetch failed: {_sd_err}")
+                st.warning(f"DK Showdown salary fetch failed: {_sd_err}")
 
     _excl_path = out_dir / "excluded_players.json"
     if _excl_path.exists():
