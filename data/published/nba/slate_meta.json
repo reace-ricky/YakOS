@@ -1,7 +1,7 @@
 {
   "sport": "NBA",
   "site": "DK",
-  "date": "2026-03-18",
+  "date": "2026-03-19",
   "salary_cap": 50000,
   "roster_slots": [
     "PG",
@@ -14,62 +14,56 @@
     "UTIL"
   ],
   "lineup_size": 8,
-  "pool_size": 314,
-  "proj_source": "rotogrinders+tank01",
+  "pool_size": 281,
+  "proj_source": "rotogrinders (archive)",
   "matchups": [
     {
-      "away": "ATL",
-      "home": "DAL",
-      "game_id": "20260318_ATL@DAL",
-      "label": "ATL @ DAL"
+      "away": "ORL",
+      "home": "CHA",
+      "game_id": "20260319_ORL@CHA",
+      "label": "ORL @ CHA"
     },
     {
-      "away": "POR",
-      "home": "IND",
-      "game_id": "20260318_POR@IND",
-      "label": "POR @ IND"
-    },
-    {
-      "away": "GS",
-      "home": "BOS",
-      "game_id": "20260318_GS@BOS",
-      "label": "GS @ BOS"
+      "away": "CLE",
+      "home": "CHI",
+      "game_id": "20260319_CLE@CHI",
+      "label": "CLE @ CHI"
     },
     {
       "away": "LAC",
       "home": "NO",
-      "game_id": "20260318_LAC@NO",
+      "game_id": "20260319_LAC@NO",
       "label": "LAC @ NO"
     },
     {
-      "away": "DEN",
-      "home": "MEM",
-      "game_id": "20260318_DEN@MEM",
-      "label": "DEN @ MEM"
+      "away": "PHI",
+      "home": "SAC",
+      "game_id": "20260319_PHI@SAC",
+      "label": "PHI @ SAC"
     },
     {
-      "away": "UTA",
-      "home": "MIN",
-      "game_id": "20260318_UTA@MIN",
-      "label": "UTA @ MIN"
+      "away": "PHO",
+      "home": "SA",
+      "game_id": "20260319_PHO@SA",
+      "label": "PHO @ SA"
     },
     {
-      "away": "OKC",
-      "home": "BKN",
-      "game_id": "20260318_OKC@BKN",
-      "label": "OKC @ BKN"
+      "away": "DET",
+      "home": "WAS",
+      "game_id": "20260319_DET@WAS",
+      "label": "DET @ WAS"
     },
     {
       "away": "LAL",
-      "home": "HOU",
-      "game_id": "20260318_LAL@HOU",
-      "label": "LAL @ HOU"
+      "home": "MIA",
+      "game_id": "20260319_LAL@MIA",
+      "label": "LAL @ MIA"
     },
     {
-      "away": "TOR",
-      "home": "CHI",
-      "game_id": "20260318_TOR@CHI",
-      "label": "TOR @ CHI"
+      "away": "MIL",
+      "home": "UTA",
+      "game_id": "20260319_MIL@UTA",
+      "label": "MIL @ UTA"
     }
   ]
 }
