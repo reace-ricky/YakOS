@@ -529,7 +529,7 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
             _tagged = _lu_ranked_df[_lu_ranked_df["ricky_tag"] != ""].copy()
             if not _tagged.empty:
                 st.markdown("#### \U0001f3af Ricky's Picks")
-                                if is_admin:
+                if is_admin:
                     _tag_display = _tagged[[
                         "lineup_index", "ricky_tag", "ricky_score",
                         "total_gpp_score", "total_ceil", "total_proj",
@@ -556,14 +556,14 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
                     _p_cols = ["player_name", "pos", "team", "salary", "proj", "ceil", "gpp_score", "own_pct"]
                     _p_avail = [c for c in _p_cols if c in _lu_players.columns]
                     _exp_label = f"{_tag} \u2014 Lineup #{int(_li)}" if is_admin else f"Lineup #{int(_li)}"
-                                        with st.expander(_exp_label):
+                    with st.expander(_exp_label):
                         _tagged_disp = _lu_players[_p_avail].copy()
                         for _rc in ["proj", "ceil", "floor", "gpp_score", "own_pct"]:
                             if _rc in _tagged_disp.columns:
                                 _tagged_disp[_rc] = pd.to_numeric(_tagged_disp[_rc], errors="coerce").round(2)
                         st.dataframe(_tagged_disp, use_container_width=True, hide_index=True)
 
-                        if is_admin:  # Full ranking table (admin only)
+            if is_admin:  # Full ranking table (admin only)
                 with st.expander("Full Ricky Ranking"):
                     _full_display = _lu_ranked_df.sort_values("ricky_rank")[[
                         "lineup_index", "ricky_rank", "ricky_tag", "ricky_score",
