@@ -374,34 +374,59 @@ def render_lab_tab(sport: str) -> None:
 
     from yak_core.config import CONTEST_PRESETS, NAMED_PROFILES
     from utils.constants import (
-        CONTEST_TYPES, PGA_CONTEST_TYPES, DISPLAY_TO_PRESET, CONTEST_PROFILE_MAP,
+        NBA_GAME_STYLES, NBA_CONTEST_TYPES_BY_STYLE, CONTEST_PROFILE_KEY_MAP,
+        PROFILE_KEY_TO_PRESET, PROFILE_KEY_TO_NAMED,
+        PGA_CONTEST_TYPES, PGA_DISPLAY_TO_PRESET,
     )
 
-    # ── Contest type dropdown (single source — no Profile selector) ──
     if is_pga:
-        _display_options = PGA_CONTEST_TYPES
-    else:
-        _display_options = CONTEST_TYPES
-
-    col_c, col_n = st.columns([3, 1])
-    with col_c:
-        _contest_display = st.selectbox(
-            "Contest type", _display_options,
-            key=f"lab_contest_{sport}",
-        )
-    with col_n:
-        contest_label = DISPLAY_TO_PRESET.get(_contest_display, _contest_display)
+        # PGA: single contest-type dropdown
+        col_c, col_n = st.columns([3, 1])
+        with col_c:
+            _pga_display = st.selectbox(
+                "Contest type", PGA_CONTEST_TYPES,
+                key=f"lab_pga_contest_{sport}",
+            )
+        contest_label = PGA_DISPLAY_TO_PRESET.get(_pga_display, _pga_display)
         preset = dict(CONTEST_PRESETS.get(contest_label, {}))
-        num_lineups = st.number_input("Lineups", min_value=1, max_value=150, value=1, key=f"lab_nlu_{sport}")
+        _profile_key_internal: str | None = None
+        _active_profile_overrides: dict = {}
+        _active_profile: dict | None = None
+        with col_n:
+            num_lineups = st.number_input("Lineups", min_value=1, max_value=150, value=1, key=f"lab_nlu_{sport}")
+    else:
+        # NBA: two-level dropdown — Game Style → Contest Type
+        col_style, col_c, col_n = st.columns([2, 3, 1])
+        with col_style:
+            _game_style = st.selectbox(
+                "Game Style", NBA_GAME_STYLES,
+                key=f"lab_game_style_{sport}",
+            )
+        # Reset contest type when game style changes
+        _prev_style = st.session_state.get(f"_lab_prev_style_{sport}", "")
+        if _game_style != _prev_style:
+            st.session_state[f"_lab_prev_style_{sport}"] = _game_style
+            st.session_state.pop(f"lab_contest_{sport}", None)
+        _ct_options = NBA_CONTEST_TYPES_BY_STYLE[_game_style]
+        with col_c:
+            _contest_display = st.selectbox(
+                "Contest Type", _ct_options,
+                key=f"lab_contest_{sport}",
+            )
+        with col_n:
+            _profile_key_internal = CONTEST_PROFILE_KEY_MAP[(_game_style, _contest_display)]
+            contest_label = PROFILE_KEY_TO_PRESET[_profile_key_internal]
+            preset = dict(CONTEST_PRESETS.get(contest_label, {}))
+            num_lineups = st.number_input("Lineups", min_value=1, max_value=150, value=1, key=f"lab_nlu_{sport}")
 
-    # Auto-wire profile (hidden from UI)
-    _profile_key = CONTEST_PROFILE_MAP.get(_contest_display)
-    _active_profile_overrides: dict = {}
-    _active_profile: dict | None = None
-    if _profile_key and _profile_key in NAMED_PROFILES:
-        _active_profile = NAMED_PROFILES[_profile_key]
-        _active_profile_overrides = dict(_active_profile.get("overrides", {}))
-        preset.update(_active_profile_overrides)
+        # Auto-wire named profile (hidden from UI)
+        _named_key = PROFILE_KEY_TO_NAMED.get(_profile_key_internal)
+        _active_profile_overrides = {}
+        _active_profile = None
+        if _named_key and _named_key in NAMED_PROFILES:
+            _active_profile = NAMED_PROFILES[_named_key]
+            _active_profile_overrides = dict(_active_profile.get("overrides", {}))
+            preset.update(_active_profile_overrides)
 
     if is_pga and contest_label == "PGA GPP":
         st.info("Full tournament lineup (4 rounds). Projections use multi-day model.")
@@ -569,7 +594,7 @@ def render_lab_tab(sport: str) -> None:
                         showdown_teams=showdown_teams if showdown_teams else None,
                         sd_draft_group_id=_sd_draft_group_id,
                         profile_overrides=_active_profile_overrides if _active_profile_overrides else None,
-                        profile_name=_profile_key or "",
+                        profile_name=(_profile_key_internal or ""),
                         sd_force_captain=_sd_force_captain if _sd_force_captain else None,
                     )
                     n_built = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else 0
@@ -780,7 +805,7 @@ def render_lab_tab(sport: str) -> None:
                             _archive_rows["archived_at"] = pd.Timestamp.now().isoformat()
                             _archive_rows["contest_type"] = _contest_display
                             _archive_rows["slate_date"] = slate_date
-                            _archive_rows["profile_name"] = _profile_key or ""
+                            _archive_rows["profile_name"] = (_profile_key_internal or "")
 
                             _archive_path = append_to_archive(_archive_rows)
                             st.success(

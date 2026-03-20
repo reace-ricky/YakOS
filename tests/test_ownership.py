@@ -150,9 +150,16 @@ class TestFieldSimOwnership:
         assert cash_result["own_proj"].max() > mme_result["own_proj"].max() * 0.8
 
     def test_all_contest_types_exist(self):
-        expected = {"mme_large", "gpp_main", "gpp_early", "gpp_late",
-                    "single_entry", "cash", "showdown"}
-        assert expected == set(CONTEST_VARIANCE.keys())
+        # New canonical profile_key values must be present
+        canonical = {
+            "classic_gpp_main", "classic_gpp_20max", "classic_gpp_se",
+            "classic_cash", "showdown_gpp", "showdown_cash",
+        }
+        assert canonical.issubset(set(CONTEST_VARIANCE.keys()))
+        # Legacy keys preserved for backward compat
+        legacy = {"mme_large", "gpp_main", "gpp_early", "gpp_late",
+                  "single_entry", "cash", "showdown"}
+        assert legacy.issubset(set(CONTEST_VARIANCE.keys()))
 
     def test_small_pool_falls_back_to_salary_rank(self):
         """Pool too small for optimizer should gracefully fall back."""

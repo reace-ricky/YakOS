@@ -28,7 +28,9 @@ from yak_core.config import (
     merge_config,
 )
 from utils.constants import (
-    CONTEST_TYPES, PGA_CONTEST_TYPES, DISPLAY_TO_PRESET, CONTEST_PROFILE_MAP,
+    NBA_GAME_STYLES, NBA_CONTEST_TYPES_BY_STYLE, CONTEST_PROFILE_KEY_MAP,
+    PROFILE_KEY_TO_PRESET, PROFILE_KEY_TO_NAMED,
+    PGA_CONTEST_TYPES, PGA_DISPLAY_TO_PRESET,
 )
 from yak_core.edge import compute_edge_metrics
 from yak_core.lineups import (
@@ -1930,27 +1932,55 @@ def render_sim_lab(sport: str) -> None:
     """Render the Sim Lab tab."""
     st.header("\U0001f52c Sim Lab")
 
-    # ── Contest type dropdown (single source — no Profile selector) ──
-    _display_options = PGA_CONTEST_TYPES if sport != "NBA" else CONTEST_TYPES
-    _contest_display = st.selectbox(
-        "Contest type", _display_options,
-        key="sim_lab_contest_type",
-    )
+    is_pga = sport != "NBA"
 
-    # Resolve display name → internal preset key + profile
-    preset_name = DISPLAY_TO_PRESET.get(_contest_display, _contest_display)
+    if is_pga:
+        # PGA: single contest-type dropdown
+        _pga_display = st.selectbox(
+            "Contest type", PGA_CONTEST_TYPES,
+            key="sim_lab_pga_contest_type",
+        )
+        preset_name = PGA_DISPLAY_TO_PRESET.get(_pga_display, _pga_display)
+        _profile_key_internal: str | None = None
+        _active_profile = None
+        # Detect change → reset archetype
+        _prev_ct = st.session_state.get("_sim_lab_prev_contest_type", "")
+        _cur_ct = _pga_display
+    else:
+        # NBA: two-level dropdown — Game Style → Contest Type
+        col_style, col_ct = st.columns([2, 3])
+        with col_style:
+            _game_style = st.selectbox(
+                "Game Style", NBA_GAME_STYLES,
+                key="sim_lab_game_style",
+            )
+        # Reset contest type when game style changes
+        _prev_style = st.session_state.get("_sim_lab_prev_game_style", "")
+        if _game_style != _prev_style:
+            st.session_state["_sim_lab_prev_game_style"] = _game_style
+            st.session_state.pop("sim_lab_contest_type", None)
+        _ct_options = NBA_CONTEST_TYPES_BY_STYLE[_game_style]
+        with col_ct:
+            _contest_display = st.selectbox(
+                "Contest Type", _ct_options,
+                key="sim_lab_contest_type",
+            )
+        _profile_key_internal = CONTEST_PROFILE_KEY_MAP[(_game_style, _contest_display)]
+        preset_name = PROFILE_KEY_TO_PRESET[_profile_key_internal]
 
-    # Auto-wire the profile (hidden from UI)
-    _profile_key = CONTEST_PROFILE_MAP.get(_contest_display)
-    _active_profile: dict | None = None
-    if _profile_key and _profile_key in NAMED_PROFILES:
-        _active_profile = NAMED_PROFILES[_profile_key]
-        _apply_named_profile(_profile_key)
+        # Auto-wire the named profile (hidden from UI)
+        _named_key = PROFILE_KEY_TO_NAMED.get(_profile_key_internal)
+        _active_profile = None
+        if _named_key and _named_key in NAMED_PROFILES:
+            _active_profile = NAMED_PROFILES[_named_key]
+            _apply_named_profile(_named_key)
+
+        _cur_ct = _contest_display
+        _prev_ct = st.session_state.get("_sim_lab_prev_contest_type", "")
 
     # Detect contest type change → reset archetype, seed sliders
-    _prev_ct = st.session_state.get("_sim_lab_prev_contest_type", "")
-    if _contest_display != _prev_ct:
-        st.session_state["_sim_lab_prev_contest_type"] = _contest_display
+    if _cur_ct != _prev_ct:
+        st.session_state["_sim_lab_prev_contest_type"] = _cur_ct
         st.session_state["sim_lab_archetype"] = "Default"
         if _prev_ct:  # skip initial render
             st.rerun()
@@ -2065,7 +2095,7 @@ def render_sim_lab(sport: str) -> None:
                             ricky_w_gpp=_ricky_weights["w_gpp"],
                             ricky_w_ceil=_ricky_weights["w_ceil"],
                             ricky_w_own=_ricky_weights["w_own"],
-                            profile_name=_profile_key or "",
+                            profile_name=_profile_key_internal or "",
                         )
                         _bl_batch["config_label"] = "Baseline (main config)"
                         _bl_batch["overrides"] = {}
@@ -2086,7 +2116,7 @@ def render_sim_lab(sport: str) -> None:
                         ricky_w_gpp=_ricky_weights["w_gpp"],
                         ricky_w_ceil=_ricky_weights["w_ceil"],
                         ricky_w_own=_ricky_weights["w_own"],
-                        profile_name=_profile_key or "",
+                        profile_name=_profile_key_internal or "",
                     )
                     batch["overrides"] = dict(sandbox_overrides)
 

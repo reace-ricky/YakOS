@@ -32,6 +32,8 @@ from app.calibration_persistence import (
 
 # ── Constants ────────────────────────────────────────────────────────────
 
+from utils.constants import NBA_PROFILE_KEYS, PROFILE_KEY_TO_PRESET
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SLATE_ARCHIVE_DIR = REPO_ROOT / "data" / "slate_archive"
 CONTEST_RESULTS_PATH = REPO_ROOT / "data" / "contest_results" / "history.json"
@@ -1361,21 +1363,31 @@ def _save_config(name: str, config: Dict[str, Any]) -> None:
 
 
 def _filter_entries_by_contest_type(entries: list, contest_type_key: str) -> list:
-    """Filter archived slate entries by the selected contest type key."""
+    """Filter archived slate entries by the selected contest type key.
+
+    Accepts both new profile_key values (e.g. ``classic_gpp_main``) and legacy
+    keys (``gpp``, ``showdown``, ``cash_main``, ``cash_game``) for backward
+    compatibility with existing archive files.
+    """
+    _CLASSIC_GPP = {"classic_gpp_main", "classic_gpp_20max", "classic_gpp_se", "gpp"}
+    _SHOWDOWN_GPP = {"showdown_gpp", "showdown"}
+    _SHOWDOWN_CASH = {"showdown_cash", "cash_game"}
+    _CASH_CLASSIC = {"classic_cash", "cash_main"}
+
     matching = []
     for e in entries:
         ct = e["contest_type"].lower()
-        if contest_type_key == "gpp":
+        if contest_type_key in _CLASSIC_GPP:
             if "gpp" not in ct or "pga" in ct:
                 continue
-        elif contest_type_key == "showdown":
+        elif contest_type_key in _SHOWDOWN_GPP:
             if "showdown" not in ct:
                 continue
-        elif contest_type_key == "cash_main":
-            if ct != "cash_main":
+        elif contest_type_key in _SHOWDOWN_CASH:
+            if ct not in ("showdown_cash", "cash_game"):
                 continue
-        elif contest_type_key == "cash_game":
-            if ct != "cash_game":
+        elif contest_type_key in _CASH_CLASSIC:
+            if ct not in ("classic_cash", "cash_main"):
                 continue
         else:
             continue
@@ -2215,16 +2227,15 @@ def render_calibration_lab(sport: str) -> None:
             key="cal_lab_slate",
         )
     with col_contest:
-        contest_types = ["GPP", "Showdown", "Cash Main", "Cash Game"]
-        _cal_display = {"GPP": "Single-Entry GPP", "Showdown": "Showdown GPP",
-                        "Cash Main": "Cash (H2H / 50-50)", "Cash Game": "Cash Showdown"}
+        # Display label for each profile key (e.g. "classic_gpp_main" → "GPP Main")
+        _key_to_label = {k: PROFILE_KEY_TO_PRESET.get(k, k) for k in NBA_PROFILE_KEYS}
         contest_mode = st.radio(
-            "Contest Type", contest_types,
-            format_func=lambda k: _cal_display.get(k, k),
+            "Contest Type", NBA_PROFILE_KEYS,
+            format_func=lambda k: _key_to_label.get(k, k),
             key="cal_lab_contest_type", horizontal=True,
         )
 
-    contest_type_key = contest_mode.lower().replace(" ", "_")  # "gpp", "showdown", "cash_main", "cash_game"
+    contest_type_key = contest_mode  # already a profile_key (e.g. "classic_gpp_main")
 
     # ── Config Status Bar ────────────────────────────────────────────────
     active_cfg = load_active_config()

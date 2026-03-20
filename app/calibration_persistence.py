@@ -11,13 +11,27 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from utils.constants import NBA_PROFILE_KEYS
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CALIBRATION_DIR = REPO_ROOT / "data" / "calibration"
 ACTIVE_CONFIG_PATH = CALIBRATION_DIR / "active_config.json"
 CONFIG_HISTORY_PATH = CALIBRATION_DIR / "config_history.json"
 OPTIMIZER_OVERRIDES_PATH = REPO_ROOT / "data" / "calibration" / "optimizer_overrides.json"
 
-CONTEST_TYPES = ("gpp", "cash", "cash_main", "cash_game", "showdown")
+# Canonical contest-type keys for persistence, derived from the taxonomy in
+# utils/constants.py.  Old keys ("gpp", "cash", "cash_main", "cash_game",
+# "showdown") are remapped via _LEGACY_KEY_MAP for backward compatibility.
+CONTEST_TYPES = tuple(NBA_PROFILE_KEYS)
+
+# Backward-compat mapping: old keys → new profile_key values
+_LEGACY_KEY_MAP: dict[str, str] = {
+    "gpp":       "classic_gpp_main",
+    "cash":      "classic_cash",
+    "cash_main": "classic_cash",
+    "cash_game": "showdown_cash",
+    "showdown":  "showdown_gpp",
+}
 
 
 def _sync_to_github(files: list, commit_message: str = "Auto-sync calibration config") -> None:
@@ -56,28 +70,79 @@ def _now_iso() -> str:
 
 
 def _normalize_contest_type(contest_type: str) -> str:
-    """Normalize a contest type string to a canonical key."""
+    """Normalize a contest type string to a canonical profile_key.
+
+    Accepts new profile_key values (e.g. ``classic_gpp_main``) directly, and
+    maps legacy keys (``gpp``, ``cash``, ``showdown``, etc.) to their
+    canonical equivalents for backward compatibility.
+    """
     ct = contest_type.strip().lower()
+    # Already a valid new profile_key?
     if ct in CONTEST_TYPES:
         return ct
-    return "gpp"
+    # Legacy key → new profile_key
+    if ct in _LEGACY_KEY_MAP:
+        return _LEGACY_KEY_MAP[ct]
+    return "classic_gpp_main"
 
 
 def _migrate_legacy_config(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Migrate a flat (legacy) active_config.json to per-contest-type format.
+    """Migrate active_config.json to the current per-contest-type format.
 
-    If the file already has contest-type keys, return as-is.
+    Handles three cases:
+    1. Already uses canonical profile_key values → return as-is.
+    2. Uses old legacy keys ("gpp", "cash", etc.) → remap to new profile_keys.
+    3. Flat (pre-per-contest-type) format → expand to all profile_key slots.
     """
+    # Case 1: already has at least one canonical profile_key
     if any(k in data for k in CONTEST_TYPES):
-        return data
+        # Still remap any lingering legacy keys that coexist
+        remapped: Dict[str, Any] = {}
+        for k, v in data.items():
+            canonical = _LEGACY_KEY_MAP.get(k, k)
+            if canonical in CONTEST_TYPES and canonical not in remapped:
+                remapped[canonical] = v
+            elif k in CONTEST_TYPES:
+                remapped[k] = v
+        # Ensure all canonical keys present
+        now = _now_iso()
+        for ct in CONTEST_TYPES:
+            if ct not in remapped:
+                remapped[ct] = {
+                    "name": f"{ct} Working Config",
+                    "created": now,
+                    "updated": now,
+                    "slates_trained": [],
+                    "values": {},
+                }
+        return remapped
 
-    # Legacy format: a single config dict with name/values/slates_trained
-    migrated: Dict[str, Any] = {}
+    # Case 2: old legacy keys present (e.g. "gpp", "cash", "showdown")
+    if any(k in data for k in _LEGACY_KEY_MAP):
+        now = _now_iso()
+        migrated: Dict[str, Any] = {}
+        for old_key, new_key in _LEGACY_KEY_MAP.items():
+            if old_key in data and new_key not in migrated:
+                migrated[new_key] = data[old_key]
+        for ct in CONTEST_TYPES:
+            if ct not in migrated:
+                migrated[ct] = {
+                    "name": f"{ct} Working Config",
+                    "created": now,
+                    "updated": now,
+                    "slates_trained": [],
+                    "values": {},
+                }
+        return migrated
+
+    # Case 3: flat legacy format — a single config dict
+    now = _now_iso()
+    migrated = {}
     for ct in CONTEST_TYPES:
         migrated[ct] = {
-            "name": f"{ct.upper()} Working Config",
-            "created": data.get("created", _now_iso()),
-            "updated": data.get("updated", _now_iso()),
+            "name": f"{ct} Working Config",
+            "created": data.get("created", now),
+            "updated": data.get("updated", now),
             "slates_trained": list(data.get("slates_trained", [])),
             "values": dict(data.get("values", {})),
         }
@@ -103,7 +168,7 @@ def save_active_config(
     values: Dict[str, Any],
     slate_date: Optional[str] = None,
     name: str = "Working Config",
-    contest_type: str = "gpp",
+    contest_type: str = "classic_gpp_main",
 ) -> Dict[str, Any]:
     """Save slider values as the active config for a specific contest type.
 
@@ -158,7 +223,7 @@ def save_active_config(
     return existing_all
 
 
-def get_active_slider_values(contest_type: str = "gpp") -> Optional[Dict[str, Any]]:
+def get_active_slider_values(contest_type: str = "classic_gpp_main") -> Optional[Dict[str, Any]]:
     """Return just the slider values for a contest type, or None."""
     config = load_active_config()
     if not config:
@@ -186,7 +251,7 @@ def append_config_history(
     values: Dict[str, Any],
     slate_date: Optional[str] = None,
     old_values: Optional[Dict[str, Any]] = None,
-    contest_type: str = "gpp",
+    contest_type: str = "classic_gpp_main",
 ) -> None:
     """Append a snapshot to the config history log, tagged with contest type."""
     history = load_config_history()
@@ -219,7 +284,7 @@ def append_config_history(
 
 def reset_active_config(
     default_values: Dict[str, Any],
-    contest_type: str = "gpp",
+    contest_type: str = "classic_gpp_main",
 ) -> Dict[str, Any]:
     """Reset active config for a contest type to defaults. Keeps history intact."""
     ct = _normalize_contest_type(contest_type)
@@ -313,7 +378,7 @@ def _convert_slider_values_to_optimizer(values: Dict[str, Any]) -> Dict[str, Any
 
 def apply_config_to_optimizer(
     values: Dict[str, Any],
-    contest_type: str = "gpp",
+    contest_type: str = "classic_gpp_main",
 ) -> None:
     """Write the working config values to optimizer_overrides.json.
 
@@ -333,10 +398,14 @@ def apply_config_to_optimizer(
         except (json.JSONDecodeError, OSError):
             pass
 
-    # Migrate flat legacy format to per-contest-type
+    # Migrate flat legacy format to per-contest-type (old keys → new profile_keys)
     if "values" in existing_overrides and not any(k in existing_overrides for k in CONTEST_TYPES):
         legacy_values = existing_overrides.get("values", {})
-        existing_overrides = {"gpp": legacy_values, "cash": dict(legacy_values), "showdown": dict(legacy_values)}
+        existing_overrides = {
+            "classic_gpp_main": legacy_values,
+            "classic_cash": dict(legacy_values),
+            "showdown_gpp": dict(legacy_values),
+        }
 
     existing_overrides[ct] = _convert_slider_values_to_optimizer(values)
     existing_overrides["applied_at"] = _now_iso()
@@ -375,7 +444,7 @@ def load_optimizer_overrides(contest_type: Optional[str] = None) -> Optional[Dic
         return None
 
     # New per-contest-type format
-    ct = _normalize_contest_type(contest_type) if contest_type else "gpp"
+    ct = _normalize_contest_type(contest_type) if contest_type else "classic_gpp_main"
     if ct in data and isinstance(data[ct], dict):
         return data[ct]
 

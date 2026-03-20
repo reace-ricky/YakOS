@@ -144,6 +144,9 @@ DFS_ARCHETYPES: Dict[str, Dict[str, Any]] = {
     },
 }
 
+# DK_CONTEST_TYPES: raw DK lobby labels for contest-result ingestion.
+# These are NOT the same as the internal profile_key taxonomy in utils/constants.py.
+# Use utils.constants.CONTEST_PROFILE_KEY_MAP for profile-key-based logic.
 DK_CONTEST_TYPES: List[str] = [
     "Tournament (GPP)",
     "Double Up (50/50)",
