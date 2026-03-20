@@ -373,6 +373,15 @@ def render_lab_tab(sport: str) -> None:
     st.markdown("### Build & Publish")
 
     from yak_core.config import CONTEST_PRESETS, NAMED_PROFILES, NAMED_PROFILE_LABELS
+    from yak_core.promoted_configs import list_promoted, get_promoted_as_named_profile
+
+    # Build merged profile dict: hardcoded NAMED_PROFILES + promoted configs
+    _all_profiles: dict = dict(NAMED_PROFILES)  # copy
+    for _pc in list_promoted():
+        _pnp = get_promoted_as_named_profile(_pc["key"])
+        if _pnp and _pc["key"] not in _all_profiles:
+            _all_profiles[_pc["key"]] = _pnp
+    _all_profile_labels = list(_all_profiles.keys())
 
     if is_pga:
         try:
@@ -395,8 +404,8 @@ def render_lab_tab(sport: str) -> None:
         else ["GPP Main", "GPP Early", "GPP Late", "Showdown", "Cash Main", "Cash Game"]
     )
     _build_profile_options = [_NONE_PROFILE_BUILD] + [
-        k for k in NAMED_PROFILE_LABELS
-        if NAMED_PROFILES[k]["base_preset"] in _build_sport_presets
+        k for k in _all_profile_labels
+        if _all_profiles[k]["base_preset"] in _build_sport_presets
     ]
 
     col_p, col_c, col_n = st.columns([2, 2, 1])
@@ -405,7 +414,7 @@ def render_lab_tab(sport: str) -> None:
             "Profile",
             options=_build_profile_options,
             format_func=lambda k: (
-                NAMED_PROFILES[k]["display_name"] if k != _NONE_PROFILE_BUILD
+                _all_profiles[k]["display_name"] if k != _NONE_PROFILE_BUILD
                 else "None (use preset defaults)"
             ),
             key=f"lab_profile_{sport}",
@@ -424,7 +433,7 @@ def render_lab_tab(sport: str) -> None:
     # If a profile is selected, merge its overrides into the preset dict
     _active_profile_overrides: dict = {}
     if _build_profile != _NONE_PROFILE_BUILD:
-        _prof = NAMED_PROFILES[_build_profile]
+        _prof = _all_profiles[_build_profile]
         _active_profile_overrides = dict(_prof["overrides"])
         # Auto-switch contest type to match profile's base preset
         if contest_label != _prof["base_preset"]:
@@ -616,7 +625,7 @@ def render_lab_tab(sport: str) -> None:
                         # Get Ricky weights from active profile, or use defaults
                         _ricky_w = {"w_gpp": RICKY_W_GPP, "w_ceil": RICKY_W_CEIL, "w_own": RICKY_W_OWN}
                         if _build_profile != _NONE_PROFILE_BUILD:
-                            _prof_rw = NAMED_PROFILES[_build_profile].get("ricky_weights", {})
+                            _prof_rw = _all_profiles[_build_profile].get("ricky_weights", {})
                             if _prof_rw:
                                 _ricky_w = _prof_rw
 

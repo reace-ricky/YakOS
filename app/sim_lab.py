@@ -1028,6 +1028,107 @@ def _run_batch(
 
 
 # ---------------------------------------------------------------------------
+# Promote Config
+# ---------------------------------------------------------------------------
+
+def _render_promote_config(
+    preset_name: str,
+    sandbox_overrides: Dict[str, Any],
+    ricky_weights: Dict[str, float],
+) -> None:
+    """Render the Promote Config panel after a validated batch run.
+
+    Snapshots the current config + Ricky weights + validation stats from
+    the latest batch and saves it as a selectable promoted profile.
+    """
+    batches: List[Dict[str, Any]] = st.session_state.get("sim_lab_batches", [])
+    if not batches:
+        return
+
+    latest = batches[-1]
+    runs = latest.get("runs", [])
+    if not runs:
+        return
+
+    st.markdown("---")
+    st.markdown("#### Promote Config")
+    st.caption(
+        "Save this config as a selectable profile on the Optimizer and Lab pages. "
+        "Existing profiles with the same key will be replaced."
+    )
+
+    # Compute validation stats from the latest batch
+    avg_diffs = [r["avg_actual"] - r["avg_proj"] for r in runs]
+    avg_diff = round(sum(avg_diffs) / len(avg_diffs), 2) if avg_diffs else 0
+    beat_pct = round(sum(r["beat_proj_pct"] for r in runs) / len(runs), 1) if runs else 0
+    dates_tested = sorted(set(r["date"] for r in runs))
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.metric("Avg Diff (Actual − Proj)", f"{avg_diff:+.2f} FP")
+        st.metric("Beat Proj %", f"{beat_pct:.1f}%")
+    with c2:
+        st.metric("Sample Size", f"{len(runs)} slates")
+        st.metric("Dates Tested", f"{len(dates_tested)}")
+
+    # Config key input
+    _default_key = f"{preset_name.upper().replace(' ', '_')}_V1"
+    config_key = st.text_input(
+        "Config Key (e.g. 20MAX_V1, SHOWDOWN_V2)",
+        value=_default_key,
+        key="promote_config_key",
+    )
+    config_display = st.text_input(
+        "Display Name",
+        value=config_key.replace("_", " ").title(),
+        key="promote_config_display",
+    )
+    config_desc = st.text_input(
+        "Description (optional)",
+        value="",
+        key="promote_config_desc",
+    )
+
+    if st.button("Promote Config", type="primary", key="promote_config_btn"):
+        from yak_core.promoted_configs import promote_config
+        entry = promote_config(
+            key=config_key.strip(),
+            display_name=config_display.strip(),
+            base_preset=preset_name,
+            overrides=dict(sandbox_overrides),
+            ricky_weights=dict(ricky_weights),
+            validation_stats={
+                "avg_diff": avg_diff,
+                "beat_proj_pct": beat_pct,
+                "sample_size": len(runs),
+                "dates_tested": dates_tested,
+            },
+            description=config_desc.strip(),
+        )
+        st.success(f"Config promoted as **{entry['key']}** — available in Optimizer and Lab dropdowns.")
+
+    # Show existing promoted configs
+    from yak_core.promoted_configs import list_promoted
+    promoted = list_promoted()
+    if promoted:
+        with st.expander(f"Promoted Configs ({len(promoted)})"):
+            for pc in promoted:
+                vs = pc.get("validation_stats", {})
+                _stats = (
+                    f"Avg Diff: {vs.get('avg_diff', '?'):+.2f} FP | "
+                    f"Beat%: {vs.get('beat_proj_pct', '?')}% | "
+                    f"N={vs.get('sample_size', '?')} slates"
+                ) if vs else "No validation stats"
+                st.markdown(
+                    f"**{pc['key']}** — {pc.get('display_name', '')}  \n"
+                    f"{pc.get('description', '')}  \n"
+                    f"_{_stats}_  \n"
+                    f"Base: {pc['base_preset']} | Promoted: {pc.get('promoted_at', '?')[:10]}"
+                )
+                st.markdown("---")
+
+
+# ---------------------------------------------------------------------------
 # Trend Chart (Chart.js — dark mode)
 # ---------------------------------------------------------------------------
 
@@ -1368,6 +1469,11 @@ def _render_comparison_table(preset_name: str) -> None:
         profile_lbl = row.get("profile_name", "") or ""
         if profile_lbl and profile_lbl in NAMED_PROFILES:
             profile_lbl = NAMED_PROFILES[profile_lbl].get("display_name", profile_lbl)
+        elif profile_lbl:
+            from yak_core.promoted_configs import get_promoted
+            _pc_meta = get_promoted(profile_lbl)
+            if _pc_meta:
+                profile_lbl = _pc_meta.get("display_name", profile_lbl)
 
         display_rows.append({
             "_ts": row["timestamp"],  # hidden key for actions
@@ -1792,6 +1898,10 @@ def _apply_named_profile(profile_key: str) -> None:
     """
     profile = NAMED_PROFILES.get(profile_key)
     if not profile:
+        # Check promoted configs
+        from yak_core.promoted_configs import get_promoted_as_named_profile
+        profile = get_promoted_as_named_profile(profile_key)
+    if not profile:
         return
     preset_name = profile["base_preset"]
     sk = _sandbox_config_key(preset_name)
@@ -1806,27 +1916,35 @@ def render_sim_lab(sport: str) -> None:
     """Render the Sim Lab tab."""
     st.header("\U0001f52c Sim Lab")
 
-    # --- Named Profile selector (V1 profiles) ---
+    # --- Named Profile selector (V1 profiles + promoted configs) ---
+    from yak_core.promoted_configs import list_promoted, get_promoted_as_named_profile
+    _all_profiles: dict = dict(NAMED_PROFILES)  # copy
+    for _pc in list_promoted():
+        _pnp = get_promoted_as_named_profile(_pc["key"])
+        if _pnp and _pc["key"] not in _all_profiles:
+            _all_profiles[_pc["key"]] = _pnp
+    _all_profile_labels = list(_all_profiles.keys())
+
     # Build profile options filtered by sport
     _NONE_PROFILE = "(Manual)"
     if sport == "NBA":
         _profile_options = [_NONE_PROFILE] + [
-            k for k in NAMED_PROFILE_LABELS
-            if NAMED_PROFILES[k]["base_preset"] in _NBA_PRESETS
+            k for k in _all_profile_labels
+            if _all_profiles[k]["base_preset"] in _NBA_PRESETS
         ]
     else:
         _profile_options = [_NONE_PROFILE] + [
-            k for k in NAMED_PROFILE_LABELS
-            if NAMED_PROFILES[k]["base_preset"] in _PGA_PRESETS
+            k for k in _all_profile_labels
+            if _all_profiles[k]["base_preset"] in _PGA_PRESETS
         ]
 
     selected_profile = st.selectbox(
         "Named Profile",
         options=_profile_options,
-        format_func=lambda k: NAMED_PROFILES[k]["display_name"] if k != _NONE_PROFILE else "Manual (custom sliders)",
+        format_func=lambda k: _all_profiles[k]["display_name"] if k != _NONE_PROFILE else "Manual (custom sliders)",
         key="sim_lab_profile",
         help=(
-            NAMED_PROFILES.get(
+            _all_profiles.get(
                 st.session_state.get("sim_lab_profile", _NONE_PROFILE), {}
             ).get("description", "Pick a frozen profile or use manual sliders.")
         ),
@@ -1839,7 +1957,7 @@ def render_sim_lab(sport: str) -> None:
         if selected_profile != _NONE_PROFILE:
             _apply_named_profile(selected_profile)
             # Force the contest preset selector to the profile's base preset
-            st.session_state["sim_lab_preset"] = NAMED_PROFILES[selected_profile]["base_preset"]
+            st.session_state["sim_lab_preset"] = _all_profiles[selected_profile]["base_preset"]
             st.session_state["sim_lab_archetype"] = "Default"  # reset archetype
             st.rerun()
 
@@ -1854,7 +1972,7 @@ def render_sim_lab(sport: str) -> None:
 
     # Show active profile badge if using a named profile
     if selected_profile != _NONE_PROFILE:
-        _p = NAMED_PROFILES[selected_profile]
+        _p = _all_profiles[selected_profile]
         st.caption(f"\u2705 Profile: **{_p['display_name']}** ({_p['version']}) — {_p['description']}")
 
     # --- Archetype selector (NBA GPP presets only) ---
@@ -2032,6 +2150,9 @@ def render_sim_lab(sport: str) -> None:
 
         # Download CSV of all ranked lineups
         _render_download_button()
+
+        # Promote Config button
+        _render_promote_config(preset_name, sandbox_overrides, _ricky_weights)
 
         # Trend chart — session per-date detail (when batches exist in memory)
         _render_trend_chart()

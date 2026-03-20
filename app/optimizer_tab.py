@@ -198,6 +198,15 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
 
     contest_options = [c for c in contest_options if c in CONTEST_PRESETS]
 
+    # Build merged profile dict: hardcoded NAMED_PROFILES + promoted configs
+    from yak_core.promoted_configs import list_promoted, get_promoted_as_named_profile
+    _all_profiles: dict = dict(NAMED_PROFILES)  # copy
+    for _pc in list_promoted():
+        _pnp = get_promoted_as_named_profile(_pc["key"])
+        if _pnp and _pc["key"] not in _all_profiles:
+            _all_profiles[_pc["key"]] = _pnp
+    _all_profile_labels = list(_all_profiles.keys())
+
     # Named profile selector — admin only; share optimizer hides it
     _NONE_PROFILE = "(None)"
     selected_profile = _NONE_PROFILE
@@ -209,8 +218,8 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
             else ["GPP Main", "GPP Early", "GPP Late", "Showdown", "Cash Main", "Cash Game"]
         )
         _profile_options = [_NONE_PROFILE] + [
-            k for k in NAMED_PROFILE_LABELS
-            if NAMED_PROFILES[k]["base_preset"] in _sport_presets
+            k for k in _all_profile_labels
+            if _all_profiles[k]["base_preset"] in _sport_presets
         ]
         _default_profile_idx = 0
         if not is_pga and "GPP_MAIN_V1" in _profile_options:
@@ -223,11 +232,11 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
                 options=_profile_options,
                 index=_default_profile_idx,
                 format_func=lambda k: (
-                    NAMED_PROFILES[k]["display_name"] if k != _NONE_PROFILE
+                    _all_profiles[k]["display_name"] if k != _NONE_PROFILE
                     else "None (use preset defaults)"
                 ),
                 key=f"opt_profile_{sport}",
-                help="Select a named profile to apply its frozen config overrides and Ricky ranking weights.",
+                help="Select a named or promoted profile to apply its frozen config overrides and Ricky ranking weights.",
             )
     else:
         col_contest, col_count, col_exp = st.columns([3, 1, 1])
@@ -235,7 +244,7 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
     with col_contest:
         # If profile selected, auto-set contest type to match
         if selected_profile != _NONE_PROFILE:
-            _prof_base = NAMED_PROFILES[selected_profile]["base_preset"]
+            _prof_base = _all_profiles[selected_profile]["base_preset"]
             if _prof_base in contest_options:
                 _contest_idx = contest_options.index(_prof_base)
             else:
@@ -256,7 +265,7 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
 
     # Apply profile overrides to preset
     if selected_profile != _NONE_PROFILE:
-        _prof = NAMED_PROFILES[selected_profile]
+        _prof = _all_profiles[selected_profile]
         _active_profile_overrides = dict(_prof["overrides"])
         if contest_label != _prof["base_preset"]:
             st.info(
@@ -459,7 +468,7 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
             # Get Ricky weights from active profile, or use defaults
             _ricky_w = {"w_gpp": RICKY_W_GPP, "w_ceil": RICKY_W_CEIL, "w_own": RICKY_W_OWN}
             if selected_profile != _NONE_PROFILE:
-                _prof_rw = NAMED_PROFILES[selected_profile].get("ricky_weights", {})
+                _prof_rw = _all_profiles[selected_profile].get("ricky_weights", {})
                 if _prof_rw:
                     _ricky_w = _prof_rw
 
@@ -669,3 +678,82 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
             )
         except Exception as e:
             st.warning(f"Could not format DK upload CSV: {e}")
+
+        # ── Publish SE Lineups button ──
+        # Pushes ONLY the 3 SE-tagged lineups to data/published/{sport}/
+        # so they appear on the Edge Share page.
+        if _has_tags:
+            st.markdown("---")
+            st.markdown("#### Publish SE Lineups")
+            if st.button(
+                "Publish SE Lineups",
+                type="primary",
+                key=f"opt_publish_se_{sport}",
+                help="Save the 3 SE-tagged lineups to the published folder and push to GitHub.",
+            ):
+                with st.spinner("Publishing SE lineups..."):
+                    try:
+                        from pathlib import Path
+                        from app.data_loader import published_dir, invalidate_published_cache
+
+                        pub_dir = published_dir(sport)
+                        _tagged_idxs = _lu_ranked_df[
+                            _lu_ranked_df["ricky_tag"] != ""
+                        ]["lineup_index"].tolist()
+                        _se_only = lineups_df[
+                            lineups_df["lineup_index"].isin(_tagged_idxs)
+                        ].copy()
+
+                        # Re-index lineup_index 0..N-1
+                        _idx_map = {old: new for new, old in enumerate(_tagged_idxs)}
+                        _se_only["lineup_index"] = _se_only["lineup_index"].map(_idx_map)
+
+                        # Add ricky_tag to each player row
+                        _tag_map = dict(zip(
+                            _lu_ranked_df["lineup_index"],
+                            _lu_ranked_df["ricky_tag"],
+                        ))
+                        _se_only["ricky_tag"] = _se_only["lineup_index"].map(
+                            {_idx_map[old]: _tag_map[old] for old in _tagged_idxs}
+                        )
+
+                        # Add profile_name
+                        if _profile_name:
+                            _se_only["profile_name"] = _profile_name
+
+                        # Determine file slug
+                        result_contest = st.session_state.get(
+                            f"opt_contest_{sport}_result", contest_label
+                        )
+                        _cs = result_contest.lower().replace(" ", "_")
+                        _se_out = pub_dir / f"{_cs}_lineups.parquet"
+                        _se_only.to_parquet(str(_se_out), index=False)
+
+                        # Write meta JSON
+                        import json
+                        from datetime import datetime as _dt
+                        _meta = {
+                            "contest_type": result_contest,
+                            "n_lineups": len(_tagged_idxs),
+                            "profile_name": _profile_name,
+                            "built_at": _dt.now().isoformat(timespec="seconds"),
+                            "source": "optimizer_tab",
+                        }
+                        _meta_out = pub_dir / f"{_cs}_meta.json"
+                        _meta_out.write_text(json.dumps(_meta, indent=2))
+
+                        # Push to GitHub
+                        from app.lab_tab import _publish_to_github
+                        result = _publish_to_github(sport, pub_dir)
+                        if result.get("status") == "ok":
+                            invalidate_published_cache()
+                            st.success(
+                                f"Published {len(_tagged_idxs)} SE lineups! "
+                                f"SHA: {result.get('sha', 'N/A')}"
+                            )
+                        else:
+                            st.error(
+                                f"Publish failed: {result.get('reason', 'unknown')}"
+                            )
+                    except Exception as _pub_err:
+                        st.error(f"Publish error: {_pub_err}")
