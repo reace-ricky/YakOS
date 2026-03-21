@@ -168,3 +168,15 @@ scripts/
 - All external data through `yak_core/` client modules.
 - NEVER call an API directly from a page file.
 - DK slates always use real DK contest / draftGroup data for player pools and roster rules.
+
+## Signal & Calibration Integrity Rules
+
+- **Read YAKOS_BUILD_RULES.md and copilot-instructions.md BEFORE writing any code.** No exceptions.
+- When you change scoring logic, ranking weights, signal direction, or calibration targets, you MUST update every downstream system that makes recommendations based on those values **in the same PR**. This includes:
+  - Nudge suggestion logic (`utils/nudge_params.py`)
+  - Calibration targets (`utils/calibration_targets.py`)
+  - Auto-calibrate search bounds and objectives (`yak_core/auto_calibrate.py`)
+  - Any UI that displays "suggested" or "recommended" values
+  - Named profiles and preset configs (`yak_core/config.py`)
+- A calibration tool must never recommend values that contradict validated signal data. If the data says w_gpp=0.0 is optimal, the nudge system cannot suggest w_gpp=1.1.
+- Every recommendation the system makes to the user must be grounded in measured correlations or backtest results, not hardcoded assumptions.
