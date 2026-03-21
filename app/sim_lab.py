@@ -113,6 +113,10 @@ _HISTORY_REL_PATH = "data/sim_lab/batch_history.parquet"
 # Baselines are tracked inside batch_history.parquet via is_baseline flag.
 # No separate baselines file needed — single source of truth.
 
+_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+_RICKY_WEIGHTS_FILE = _DATA_DIR / "ricky_ranking_weights.json"
+_RICKY_WEIGHTS_REL = "data/ricky_ranking_weights.json"
+
 _logger = logging.getLogger(__name__)
 
 
@@ -200,6 +204,42 @@ def _load_slider_state(preset_name: str) -> tuple[Dict[str, Any], Dict[str, floa
     except Exception:
         pass
     return {}, {}
+
+
+def _save_ricky_weights(preset_name: str, weights: Dict[str, float]) -> None:
+    """Write Ricky ranking weights for *preset_name* to data/ricky_ranking_weights.json
+    and kick off an async GitHub sync so values survive cold starts."""
+    try:
+        _DATA_DIR.mkdir(parents=True, exist_ok=True)
+        data: dict = {}
+        if _RICKY_WEIGHTS_FILE.is_file():
+            try:
+                data = json.loads(_RICKY_WEIGHTS_FILE.read_text())
+            except Exception:
+                data = {}
+        data[preset_name] = {k: float(v) for k, v in weights.items()}
+        _RICKY_WEIGHTS_FILE.write_text(json.dumps(data, indent=2))
+        try:
+            from yak_core.github_persistence import sync_feedback_async
+            sync_feedback_async(
+                files=[_RICKY_WEIGHTS_REL],
+                commit_message="Auto-sync Ricky ranking weights",
+            )
+        except Exception:
+            pass
+    except Exception as exc:
+        _logger.warning("Failed to save Ricky weights: %s", exc)
+
+
+def _load_ricky_weights(preset_name: str) -> Dict[str, float]:
+    """Return saved Ricky ranking weights for *preset_name*, or {} on miss."""
+    try:
+        if _RICKY_WEIGHTS_FILE.is_file():
+            data = json.loads(_RICKY_WEIGHTS_FILE.read_text())
+            return data.get(preset_name, {})
+    except Exception:
+        pass
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -3054,10 +3094,14 @@ def render_sim_lab(sport: str) -> None:
     # --- Ricky Ranking Weights (local to Sim Lab, per-contest-type) ---
     _ricky_key = f"sim_lab_ricky_weights_{preset_name}"
     if _ricky_key not in st.session_state:
-        st.session_state[_ricky_key] = {
-            "w_gpp": RICKY_W_GPP, "w_ceil": RICKY_W_CEIL, "w_own": RICKY_W_OWN,
-        }
+        _disk_rw = _load_ricky_weights(preset_name)
+        st.session_state[_ricky_key] = (
+            _disk_rw
+            if all(k in _disk_rw for k in ("w_gpp", "w_ceil", "w_own"))
+            else {"w_gpp": RICKY_W_GPP, "w_ceil": RICKY_W_CEIL, "w_own": RICKY_W_OWN}
+        )
     with st.expander("Ricky Ranking Weights"):
+        _prev_rw = dict(st.session_state[_ricky_key])  # snapshot before sliders
         _rw = st.session_state[_ricky_key]
         rc1, rc2, rc3 = st.columns(3)
         with rc1:
@@ -3076,6 +3120,8 @@ def render_sim_lab(sport: str) -> None:
                 key=f"sl_ricky_own_{preset_name}", format="%.2f",
             )
         st.session_state[_ricky_key] = _rw
+        if _rw != _prev_rw:
+            _save_ricky_weights(preset_name, _rw)
 
         _rerank_clicked = st.button(
             "\U0001f504 Re-rank Lineups", key="sim_lab_rerank",
