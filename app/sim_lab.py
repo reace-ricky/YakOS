@@ -2426,6 +2426,171 @@ def _apply_named_profile(profile_key: str) -> None:
     st.session_state[ricky_key] = dict(profile["ricky_weights"])
 
 
+def _render_auto_calibrate(
+    preset_name: str,
+    sandbox_overrides: Dict[str, Any],
+    ricky_weights: Dict[str, float],
+) -> None:
+    """Render the Auto-Calibrate section in Sim Lab.
+
+    Uses Optuna TPE to optimize all build + Ricky ranking parameters
+    simultaneously, maximizing SE Core actual FP across RG archive slates.
+    """
+    st.markdown("---")
+    st.subheader("Auto-Calibrate")
+    st.caption(
+        "Optimize ALL parameters simultaneously to maximize SE Core actual FP "
+        "across historical slates. Replaces the manual nudge-apply loop."
+    )
+
+    # Settings in expander
+    with st.expander("Settings"):
+        n_trials = st.slider(
+            "Optimization trials", 30, 120, 60, step=10,
+            key="autocal_trials",
+        )
+        dates_per = st.slider(
+            "Dates per trial (subsample)", 3, 8, 5,
+            key="autocal_dates_per",
+        )
+
+    # Discover available dates from RG archive
+    from yak_core.auto_calibrate import scan_rg_dates
+
+    available_dates = scan_rg_dates()
+
+    # Exclude today (games may be in progress)
+    _today = date.today()
+    available_dates = [d for d in available_dates if d != _today]
+
+    if len(available_dates) < 3:
+        st.warning(
+            f"Need at least 3 historical slates in data/rg_archive/nba/. "
+            f"Found {len(available_dates)}."
+        )
+        return
+
+    st.caption(
+        f"{len(available_dates)} historical slates available "
+        f"({available_dates[-1]} to {available_dates[0]})"
+    )
+
+    # Run button
+    if st.button("Auto-Calibrate", type="primary", key="auto_calibrate_btn"):
+        progress = st.progress(0, text="Starting auto-calibration...")
+
+        def _on_progress(trial_num: int, total: int, best_fp: float) -> None:
+            progress.progress(
+                trial_num / total,
+                text=f"Trial {trial_num}/{total} — best SE Core: {best_fp:.1f} FP",
+            )
+
+        from yak_core.auto_calibrate import run_auto_calibration
+
+        try:
+            result = run_auto_calibration(
+                preset_name=preset_name,
+                dates=available_dates,
+                current_ricky_weights=ricky_weights,
+                current_overrides=sandbox_overrides,
+                n_trials=n_trials,
+                dates_per_trial=dates_per,
+                progress_callback=_on_progress,
+            )
+            progress.empty()
+            st.session_state["autocal_result"] = result
+        except Exception as exc:
+            progress.empty()
+            st.error(f"Auto-calibration failed: {exc}")
+            return
+
+    # Display results
+    result = st.session_state.get("autocal_result")
+    if result is None:
+        return
+
+    # ── Summary metrics ──────────────────────────────────────────────
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("Baseline SE Core", f"{result.baseline_score:.1f} FP")
+    with c2:
+        st.metric(
+            "Optimized SE Core",
+            f"{result.best_score:.1f} FP",
+            delta=f"{result.improvement_fp:+.1f} FP",
+        )
+    with c3:
+        st.metric("Improvement", f"{result.improvement_pct:+.1f}%")
+
+    # ── Parameter comparison table ───────────────────────────────────
+    st.markdown("#### Parameter Changes")
+    rows = []
+    all_new = {**result.best_params, **result.best_ricky_weights}
+    for key, new_val in all_new.items():
+        if key in result.best_ricky_weights:
+            old_val = ricky_weights.get(key, "—")
+        else:
+            old_val = sandbox_overrides.get(
+                key, _slider_default(preset_name, key, "—"),
+            )
+        delta = ""
+        if isinstance(old_val, (int, float)):
+            delta = f"{new_val - float(old_val):+.2f}"
+        rows.append({
+            "Parameter": key,
+            "Current": old_val,
+            "Optimized": new_val,
+            "Delta": delta or "—",
+        })
+    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+    # ── Per-date breakdown ───────────────────────────────────────────
+    with st.expander("Per-Date Breakdown"):
+        date_rows = []
+        for base, opt in zip(result.baseline_per_date, result.per_date_results):
+            b_fp = base["se_core_actual"]
+            o_fp = opt["se_core_actual"]
+            date_rows.append({
+                "Date": base["date"],
+                "Baseline FP": f"{b_fp:.1f}" if b_fp else "—",
+                "Optimized FP": f"{o_fp:.1f}" if o_fp else "—",
+                "Delta": f"{o_fp - b_fp:+.1f}" if (b_fp and o_fp) else "—",
+            })
+        st.dataframe(
+            pd.DataFrame(date_rows), hide_index=True, use_container_width=True,
+        )
+
+    # ── Accept / Reject ──────────────────────────────────────────────
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button(
+            "Accept — Apply to Config", type="primary", key="autocal_accept",
+        ):
+            # Write optimized params into sandbox overrides
+            sk = _sandbox_config_key(preset_name)
+            if sk not in st.session_state:
+                st.session_state[sk] = {}
+            for key, val in result.best_params.items():
+                st.session_state[sk][key] = val
+            # Write Ricky weights
+            ricky_key = f"sim_lab_ricky_weights_{preset_name}"
+            st.session_state[ricky_key] = dict(result.best_ricky_weights)
+            # Persist to disk
+            _save_slider_state(
+                preset_name,
+                st.session_state[sk],
+                result.best_ricky_weights,
+            )
+            st.success(
+                "Optimized parameters applied to config sliders and Ricky weights."
+            )
+            st.rerun()
+    with c2:
+        if st.button("Reject — Keep Current", key="autocal_reject"):
+            del st.session_state["autocal_result"]
+            st.rerun()
+
+
 def render_sim_lab(sport: str) -> None:
     """Render the Sim Lab tab."""
     st.header("\U0001f52c Sim Lab")
@@ -2699,6 +2864,9 @@ def render_sim_lab(sport: str) -> None:
                 _ricky_weights,
                 archetype_name,
             )
+
+        # Auto-Calibrate (Optuna optimization — below nudge guidance)
+        _render_auto_calibrate(preset_name, sandbox_overrides, _ricky_weights)
 
         # Promote Config button
         _render_promote_config(preset_name, sandbox_overrides, _ricky_weights, archetype_name)
