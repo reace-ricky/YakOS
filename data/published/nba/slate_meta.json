@@ -1,7 +1,7 @@
 {
   "sport": "NBA",
   "site": "DK",
-  "date": "2026-03-19",
+  "date": "2026-03-20",
   "salary_cap": 50000,
   "roster_slots": [
     "PG",
@@ -14,56 +14,44 @@
     "UTIL"
   ],
   "lineup_size": 8,
-  "pool_size": 281,
+  "pool_size": 211,
   "proj_source": "rotogrinders (archive)",
   "matchups": [
     {
-      "away": "ORL",
-      "home": "CHA",
-      "game_id": "20260319_ORL@CHA",
-      "label": "ORL @ CHA"
+      "away": "ATL",
+      "home": "HOU",
+      "game_id": "20260320_ATL@HOU",
+      "label": "ATL @ HOU"
     },
     {
-      "away": "CLE",
-      "home": "CHI",
-      "game_id": "20260319_CLE@CHI",
-      "label": "CLE @ CHI"
+      "away": "GS",
+      "home": "DET",
+      "game_id": "20260320_GS@DET",
+      "label": "GS @ DET"
     },
     {
-      "away": "LAC",
-      "home": "NO",
-      "game_id": "20260319_LAC@NO",
-      "label": "LAC @ NO"
+      "away": "BOS",
+      "home": "MEM",
+      "game_id": "20260320_BOS@MEM",
+      "label": "BOS @ MEM"
     },
     {
-      "away": "PHI",
-      "home": "SAC",
-      "game_id": "20260319_PHI@SAC",
-      "label": "PHI @ SAC"
+      "away": "NY",
+      "home": "BKN",
+      "game_id": "20260320_NY@BKN",
+      "label": "NY @ BKN"
     },
     {
-      "away": "PHO",
-      "home": "SA",
-      "game_id": "20260319_PHO@SA",
-      "label": "PHO @ SA"
+      "away": "TOR",
+      "home": "DEN",
+      "game_id": "20260320_TOR@DEN",
+      "label": "TOR @ DEN"
     },
     {
-      "away": "DET",
-      "home": "WAS",
-      "game_id": "20260319_DET@WAS",
-      "label": "DET @ WAS"
-    },
-    {
-      "away": "LAL",
-      "home": "MIA",
-      "game_id": "20260319_LAL@MIA",
-      "label": "LAL @ MIA"
-    },
-    {
-      "away": "MIL",
-      "home": "UTA",
-      "game_id": "20260319_MIL@UTA",
-      "label": "MIL @ UTA"
+      "away": "POR",
+      "home": "MIN",
+      "game_id": "20260320_POR@MIN",
+      "label": "POR @ MIN"
     }
   ]
 }
