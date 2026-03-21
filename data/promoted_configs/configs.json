@@ -26,5 +26,39 @@
     },
     "promoted_at": "2026-03-21T00:43:37.510145",
     "description": ""
+  },
+  {
+    "key": "CASH_MAIN_V1",
+    "display_name": "Cash Main",
+    "base_preset": "Cash Main",
+    "overrides": {
+      "CASH_FLOOR_WEIGHT": 0.65,
+      "CASH_PROJ_WEIGHT": 0.35,
+      "MAX_EXPOSURE": 0.8,
+      "MIN_SALARY_USED": 49500,
+      "MIN_PLAYER_MINUTES": 20,
+      "GPP_MIN_PROJ_FLOOR": 15,
+      "GPP_UPSIDE_WEIGHT": 1.0
+    },
+    "ricky_weights": {
+      "w_gpp": 0.3,
+      "w_ceil": 0.2,
+      "w_own": 0.0
+    },
+    "validation_stats": {
+      "avg_diff": 53.43,
+      "beat_proj_pct": 85.0,
+      "sample_size": 6,
+      "dates_tested": [
+        "2026-03-09",
+        "2026-03-12",
+        "2026-03-15",
+        "2026-03-17",
+        "2026-03-18",
+        "2026-03-19"
+      ]
+    },
+    "promoted_at": "2026-03-21T05:49:24.320418",
+    "description": ""
   }
 ]
