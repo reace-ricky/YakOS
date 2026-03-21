@@ -1,6 +1,6 @@
 {
   "bullets": [
-    "Core anchors: Victor Wembanyama, Jalen Johnson, Luka Doncic",
+    "Core anchors: Victor Wembanyama, Luka Doncic, Evan Mobley",
     "Leverage plays: Devin Booker, PJ Washington",
     "Value targets: Obi Toppin, Dylan Harper",
     "Fade candidates: Jalen Slawson, Nicolas Batum"
@@ -19,19 +19,6 @@
       "sim90th": 76.06,
       "ceil": 73.01,
       "sim_leverage": 13.09
-    },
-    {
-      "player_name": "Jalen Johnson",
-      "salary": 10700,
-      "proj": 51.25,
-      "ownership": 13.67,
-      "edge": 0.589584442717406,
-      "value": 4.789719626168225,
-      "risk_score": 30.8,
-      "proj_minutes": 33.20100000000001,
-      "sim90th": 69.72,
-      "ceil": 67.24,
-      "sim_leverage": 10.47
     },
     {
       "player_name": "Luka Doncic",
@@ -71,6 +58,19 @@
       "sim90th": 60.34,
       "ceil": 56.09,
       "sim_leverage": 21.99
+    },
+    {
+      "player_name": "James Harden",
+      "salary": 9400,
+      "proj": 39.73,
+      "ownership": 2.97,
+      "edge": 0.5038969209148677,
+      "value": 4.226595744680851,
+      "risk_score": 30.8,
+      "proj_minutes": 33.1,
+      "sim90th": 56.47,
+      "ceil": 54.29,
+      "sim_leverage": 23.04
     }
   ],
   "leverage_plays": [
@@ -191,7 +191,7 @@
       "proj_minutes": 23.436,
       "sim90th": 42.900000000000006,
       "ceil": 30.91,
-      "sim_leverage": -10.21
+      "sim_leverage": -9.69
     },
     {
       "player_name": "Jordan Goodwin",
