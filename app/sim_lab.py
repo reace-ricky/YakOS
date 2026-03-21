@@ -2497,15 +2497,30 @@ def _render_auto_calibrate(
             "Dates per trial (subsample)", 3, 8, 5,
             key="autocal_dates_per",
         )
+        skip_incomplete = st.checkbox(
+            "Skip incomplete dates",
+            value=True,
+            key="autocal_skip_incomplete",
+            help=(
+                "Automatically detect and skip dates with incomplete results "
+                "(e.g., games not yet played, partial data). Recommended."
+            ),
+        )
+        completeness_threshold = st.slider(
+            "Completeness threshold (%)",
+            10, 90, 40, step=5,
+            key="autocal_completeness_threshold",
+            help=(
+                "Minimum % of players that must have non-zero actual FP for "
+                "a date to be considered complete. Lower = more lenient."
+            ),
+            disabled=not skip_incomplete,
+        )
 
     # Discover available dates from RG archive
     from yak_core.auto_calibrate import scan_rg_dates
 
     available_dates = scan_rg_dates()
-
-    # Exclude today (games may be in progress)
-    _today = date.today()
-    available_dates = [d for d in available_dates if d != _today]
 
     if len(available_dates) < 3:
         st.warning(
@@ -2541,6 +2556,8 @@ def _render_auto_calibrate(
                 n_trials=n_trials,
                 dates_per_trial=dates_per,
                 progress_callback=_on_progress,
+                skip_incomplete=skip_incomplete,
+                completeness_threshold=float(completeness_threshold),
             )
             progress.empty()
             st.session_state["autocal_result"] = result
@@ -2566,6 +2583,32 @@ def _render_auto_calibrate(
         )
     with c3:
         st.metric("Improvement", f"{result.improvement_pct:+.1f}%")
+
+    # ── Skipped dates info ───────────────────────────────────────────
+    if result.skipped_dates:
+        with st.expander(
+            f"Skipped dates ({len(result.skipped_dates)})", expanded=False
+        ):
+            st.caption(
+                "These dates were excluded from calibration due to "
+                "incomplete or missing results."
+            )
+            skip_rows = []
+            for sd in result.skipped_dates:
+                skip_rows.append({
+                    "Date": sd["date"],
+                    "Reason": sd["reason"],
+                    "Completeness": (
+                        f"{sd['completeness_pct']:.0f}%"
+                        if sd.get("completeness_pct", 0) > 0
+                        else "—"
+                    ),
+                })
+            st.dataframe(
+                pd.DataFrame(skip_rows),
+                hide_index=True,
+                use_container_width=True,
+            )
 
     # ── Parameter comparison table ───────────────────────────────────
     st.markdown("#### Parameter Changes")

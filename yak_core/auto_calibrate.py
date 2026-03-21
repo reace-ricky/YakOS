@@ -29,6 +29,11 @@ logger = logging.getLogger(__name__)
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 
+class IncompleteSlateError(ValueError):
+    """Raised when a slate date has insufficient actual results for calibration."""
+    pass
+
+
 # ---------------------------------------------------------------------------
 # Parameter search space definition
 # ---------------------------------------------------------------------------
@@ -57,6 +62,24 @@ _RG_DATE_RE = re.compile(r"^rg_(\d{4}-\d{2}-\d{2})\.csv$")
 
 
 @dataclass
+class SlateCompleteness:
+    """Result of checking whether a slate date has complete results."""
+    slate_date: date
+    is_complete: bool
+    reason: str                     # human-readable reason if incomplete
+    completeness_pct: float         # 0-100, percentage of players with actual FP
+    total_players: int              # players in pool
+    players_with_actuals: int       # players with non-zero actual FP
+    is_future: bool                 # date is today or in the future
+
+
+# Minimum percentage of players that must have non-zero actual FP for a slate
+# to be considered "complete".  Typical completed NBA slates have 85-95%+ of
+# the pool with actuals; anything below this threshold is likely partial.
+_DEFAULT_COMPLETENESS_THRESHOLD = 40.0  # percent
+
+
+@dataclass
 class AutoCalibrationResult:
     """Result of an auto-calibration run."""
     best_params: Dict[str, float]
@@ -70,6 +93,7 @@ class AutoCalibrationResult:
     improvement_fp: float          # best_score - baseline_score
     improvement_pct: float         # (improvement_fp / baseline_score) * 100
     contest_type: str = "SE GPP"   # contest type used for optimization
+    skipped_dates: List[Dict[str, Any]] | None = None  # dates skipped due to incompleteness
 
 
 # ── Contest-type-specific search space bounds ────────────────────────────────
@@ -141,6 +165,232 @@ def scan_rg_dates() -> List[date]:
                 continue
     dates.sort(reverse=True)
     return dates
+
+
+def check_slate_completeness(
+    selected_date: date,
+    *,
+    completeness_threshold: float = _DEFAULT_COMPLETENESS_THRESHOLD,
+) -> SlateCompleteness:
+    """Check whether a slate date has complete actual results.
+
+    Determines completeness by:
+    1. Rejecting future/today dates outright (games haven't been played).
+    2. Fetching the player pool and actuals for the date.
+    3. Comparing how many players in the pool have non-zero actual FP.
+
+    Parameters
+    ----------
+    selected_date : date
+        The slate date to check.
+    completeness_threshold : float
+        Minimum % of players with actuals to consider the slate complete.
+
+    Returns
+    -------
+    SlateCompleteness
+        Detailed completeness information for the date.
+    """
+    from yak_core.config import CONTEST_PRESETS, merge_config
+    from yak_core.live import fetch_actuals_from_api, fetch_live_dfs
+
+    today = date.today()
+
+    # Future or today → automatically incomplete
+    if selected_date >= today:
+        return SlateCompleteness(
+            slate_date=selected_date,
+            is_complete=False,
+            reason=(
+                "Date is today or in the future — games not yet completed"
+                if selected_date == today
+                else "Date is in the future — no games played"
+            ),
+            completeness_pct=0.0,
+            total_players=0,
+            players_with_actuals=0,
+            is_future=True,
+        )
+
+    # Try to fetch pool + actuals
+    date_key = selected_date.strftime("%Y%m%d")
+    api_key = _get_nba_api_key()
+    if not api_key:
+        return SlateCompleteness(
+            slate_date=selected_date,
+            is_complete=False,
+            reason="NBA API key not available — cannot verify actuals",
+            completeness_pct=0.0,
+            total_players=0,
+            players_with_actuals=0,
+            is_future=False,
+        )
+
+    preset = CONTEST_PRESETS.get("GPP Main", {})
+    cfg = merge_config(preset)
+    cfg["RAPIDAPI_KEY"] = api_key
+
+    try:
+        pool_df = fetch_live_dfs(date_key, cfg)
+    except Exception as exc:
+        return SlateCompleteness(
+            slate_date=selected_date,
+            is_complete=False,
+            reason=f"Failed to fetch player pool: {exc}",
+            completeness_pct=0.0,
+            total_players=0,
+            players_with_actuals=0,
+            is_future=False,
+        )
+
+    if pool_df is None or pool_df.empty:
+        return SlateCompleteness(
+            slate_date=selected_date,
+            is_complete=False,
+            reason="No player pool returned for this date",
+            completeness_pct=0.0,
+            total_players=0,
+            players_with_actuals=0,
+            is_future=False,
+        )
+
+    try:
+        actuals_df = fetch_actuals_from_api(date_key, cfg)
+    except Exception as exc:
+        return SlateCompleteness(
+            slate_date=selected_date,
+            is_complete=False,
+            reason=f"Failed to fetch actuals: {exc}",
+            completeness_pct=0.0,
+            total_players=len(pool_df),
+            players_with_actuals=0,
+            is_future=False,
+        )
+
+    # Normalize player name column
+    if "player_name" not in actuals_df.columns:
+        for c in ("name", "dg_name", "player"):
+            if c in actuals_df.columns:
+                actuals_df = actuals_df.rename(columns={c: "player_name"})
+                break
+
+    if "player_name" not in actuals_df.columns or actuals_df.empty:
+        return SlateCompleteness(
+            slate_date=selected_date,
+            is_complete=False,
+            reason="Actuals data missing or has no player_name column",
+            completeness_pct=0.0,
+            total_players=len(pool_df),
+            players_with_actuals=0,
+            is_future=False,
+        )
+
+    # Count players with meaningful actuals (actual_fp > 0)
+    actuals_df["actual_fp"] = pd.to_numeric(
+        actuals_df.get("actual_fp", 0), errors="coerce"
+    ).fillna(0.0)
+    players_with_actuals = int((actuals_df["actual_fp"] > 0).sum())
+    total_players = len(pool_df)
+    completeness_pct = (
+        (players_with_actuals / total_players * 100) if total_players > 0 else 0.0
+    )
+
+    is_complete = completeness_pct >= completeness_threshold
+    reason = ""
+    if not is_complete:
+        reason = (
+            f"Only {players_with_actuals}/{total_players} players "
+            f"({completeness_pct:.1f}%) have actual FP — "
+            f"below {completeness_threshold:.0f}% threshold"
+        )
+
+    return SlateCompleteness(
+        slate_date=selected_date,
+        is_complete=is_complete,
+        reason=reason,
+        completeness_pct=round(completeness_pct, 1),
+        total_players=total_players,
+        players_with_actuals=players_with_actuals,
+        is_future=False,
+    )
+
+
+def filter_incomplete_dates(
+    dates: List[date],
+    *,
+    completeness_threshold: float = _DEFAULT_COMPLETENESS_THRESHOLD,
+    progress_callback: Callable[[int, int, str], None] | None = None,
+) -> tuple[List[date], List[Dict[str, Any]]]:
+    """Pre-filter a list of dates, removing those with incomplete results.
+
+    Uses a fast heuristic first (future/today check) then only calls the API
+    for dates that pass the initial filter.
+
+    Parameters
+    ----------
+    dates : list[date]
+        Candidate dates to check.
+    completeness_threshold : float
+        Minimum % of players with actuals required.
+    progress_callback : callable, optional
+        Called with (current_index, total, date_str) for UI progress.
+
+    Returns
+    -------
+    (complete_dates, skipped_info)
+        complete_dates: dates that passed the completeness check.
+        skipped_info: list of dicts with date, reason, completeness_pct for
+                      each skipped date.
+    """
+    today = date.today()
+    complete: List[date] = []
+    skipped: List[Dict[str, Any]] = []
+
+    for i, d in enumerate(dates):
+        if progress_callback:
+            progress_callback(i + 1, len(dates), str(d))
+
+        # Fast path: skip future/today without API call
+        if d >= today:
+            reason = (
+                "today — games may be in progress"
+                if d == today
+                else "future date — no games played"
+            )
+            skipped.append({
+                "date": str(d),
+                "reason": reason,
+                "completeness_pct": 0.0,
+            })
+            logger.info("Skipping %s: %s", d, reason)
+            continue
+
+        # Full check via API
+        try:
+            result = check_slate_completeness(
+                d, completeness_threshold=completeness_threshold,
+            )
+        except Exception as exc:
+            reason = f"completeness check failed: {exc}"
+            skipped.append({
+                "date": str(d),
+                "reason": reason,
+                "completeness_pct": 0.0,
+            })
+            logger.warning("Skipping %s: %s", d, reason)
+            continue
+
+        if result.is_complete:
+            complete.append(d)
+        else:
+            skipped.append({
+                "date": str(d),
+                "reason": result.reason,
+                "completeness_pct": result.completeness_pct,
+            })
+            logger.info("Skipping %s: %s", d, result.reason)
+
+    return complete, skipped
 
 
 def _suggest_params(
@@ -328,6 +578,22 @@ def _run_pipeline_headless(
     # Step 5: Actuals
     actuals_df = fetch_actuals_from_api(date_key, cfg)
 
+    # Step 5b: Inline completeness check — reject dates with mostly-zero actuals
+    if "player_name" not in actuals_df.columns:
+        for _c in ("name", "dg_name", "player"):
+            if _c in actuals_df.columns:
+                actuals_df = actuals_df.rename(columns={_c: "player_name"})
+                break
+    _actual_fp = pd.to_numeric(actuals_df.get("actual_fp", 0), errors="coerce").fillna(0)
+    _n_with_actuals = int((_actual_fp > 0).sum())
+    _n_pool = len(edge_df) if len(edge_df) > 0 else len(pool_df)
+    _pct = (_n_with_actuals / _n_pool * 100) if _n_pool > 0 else 0
+    if _pct < _DEFAULT_COMPLETENESS_THRESHOLD:
+        raise IncompleteSlateError(
+            f"Incomplete results for {date_dash}: {_n_with_actuals}/{_n_pool} "
+            f"players ({_pct:.1f}%) have actual FP"
+        )
+
     # Step 6: Build lineups
     prepped = prepare_pool(edge_df, cfg)
     lineups_df, _ = build_multiple_lineups_with_exposure(prepped, cfg)
@@ -437,6 +703,9 @@ def run_auto_calibration(
     lineups_per_trial: int = 10,
     lineups_validation: int = 20,
     progress_callback: Callable[[int, int, float], None] | None = None,
+    skip_incomplete: bool = True,
+    completeness_threshold: float = _DEFAULT_COMPLETENESS_THRESHOLD,
+    completeness_callback: Callable[[int, int, str], None] | None = None,
 ) -> AutoCalibrationResult:
     """Run the full auto-calibration optimization.
 
@@ -463,14 +732,67 @@ def run_auto_calibration(
         NUM_LINEUPS for final validation on all dates (default 20).
     progress_callback : callable, optional
         Called with (trial_number, n_trials, best_score_so_far) for UI updates.
+    skip_incomplete : bool
+        If True (default), pre-filter dates with incomplete results before
+        calibrating.  If False, pass all dates through (failures will still
+        be caught per-date).
+    completeness_threshold : float
+        Minimum % of players with non-zero actual FP required for a date to
+        be considered complete.  Default 40%.
+    completeness_callback : callable, optional
+        Called with (current_index, total, date_str) during completeness
+        checking, for UI progress updates.
 
     Returns
     -------
     AutoCalibrationResult
-        Contains best params, scores, and comparison data.
+        Contains best params, scores, comparison data, and skipped_dates info.
     """
+    # ── Phase 0: Filter incomplete dates ─────────────────────────────────
+    skipped_dates_info: List[Dict[str, Any]] = []
+
+    if skip_incomplete:
+        logger.info(
+            "Checking %d dates for completeness (threshold=%.0f%%)...",
+            len(dates), completeness_threshold,
+        )
+
+        # Fast pre-filter: remove future/today dates without API calls
+        today = date.today()
+        fast_ok: List[date] = []
+        for d in dates:
+            if d >= today:
+                reason = (
+                    "today — games may be in progress"
+                    if d == today
+                    else "future date — no games played"
+                )
+                skipped_dates_info.append({
+                    "date": str(d), "reason": reason, "completeness_pct": 0.0,
+                })
+                logger.info("Skipping %s: %s", d, reason)
+            else:
+                fast_ok.append(d)
+
+        dates = fast_ok
+
+        if skipped_dates_info:
+            logger.info(
+                "Pre-filtered %d future/today dates; %d remaining for "
+                "completeness check",
+                len(skipped_dates_info), len(dates),
+            )
+
     if len(dates) < 3:
-        raise ValueError(f"Need at least 3 historical dates, got {len(dates)}")
+        raise ValueError(
+            f"Need at least 3 historical dates with complete results, "
+            f"got {len(dates)}.  "
+            + (
+                f"{len(skipped_dates_info)} date(s) were skipped as incomplete."
+                if skipped_dates_info
+                else ""
+            )
+        )
 
     # ── Phase 1: Baseline run with current settings ──────────────────────
     logger.info("Running baseline evaluation on %d dates (contest_type=%s)...",
@@ -479,6 +801,7 @@ def run_auto_calibration(
     baseline_overrides["NUM_LINEUPS"] = lineups_validation
 
     baseline_results: List[Dict[str, Any]] = []
+    _runtime_skipped: List[date] = []  # dates discovered incomplete at runtime
     for d in dates:
         try:
             run = _run_pipeline_headless(
@@ -490,9 +813,32 @@ def run_auto_calibration(
             )
             obj_val = _get_objective_value(run, contest_type)
             baseline_results.append({"date": str(d), "se_core_actual": obj_val})
+        except IncompleteSlateError as e:
+            logger.warning("Skipping incomplete date %s during baseline: %s", d, e)
+            skipped_dates_info.append({
+                "date": str(d),
+                "reason": str(e),
+                "completeness_pct": 0.0,
+            })
+            _runtime_skipped.append(d)
+            baseline_results.append({"date": str(d), "se_core_actual": None})
         except Exception as e:
             logger.warning("Baseline failed for %s: %s", d, e)
             baseline_results.append({"date": str(d), "se_core_actual": None})
+
+    # Remove runtime-discovered incomplete dates from the working set
+    if _runtime_skipped:
+        dates = [d for d in dates if d not in _runtime_skipped]
+        logger.info(
+            "Removed %d incomplete date(s) discovered during baseline; "
+            "%d dates remain",
+            len(_runtime_skipped), len(dates),
+        )
+        if len(dates) < 3:
+            raise ValueError(
+                f"After filtering incomplete dates, only {len(dates)} remain "
+                f"(need at least 3). {len(skipped_dates_info)} date(s) skipped."
+            )
 
     baseline_actuals = [
         r["se_core_actual"] for r in baseline_results if r["se_core_actual"] is not None
@@ -619,4 +965,5 @@ def run_auto_calibration(
         improvement_fp=round(improvement_fp, 2),
         improvement_pct=round(improvement_pct, 1),
         contest_type=contest_type,
+        skipped_dates=skipped_dates_info if skipped_dates_info else None,
     )
