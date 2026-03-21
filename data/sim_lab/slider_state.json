@@ -3,8 +3,8 @@
     "GPP Main": {
       "overrides": {
         "GPP_BOOM_WEIGHT": 0.4,
-        "GPP_PROJ_WEIGHT": 0.3,
-        "MIN_PLAYER_MINUTES": 2
+        "MIN_PLAYER_MINUTES": 2,
+        "GPP_PROJ_WEIGHT": 0.25
       },
       "ricky_weights": {
         "w_gpp": 1.0,
