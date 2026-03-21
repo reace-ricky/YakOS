@@ -393,6 +393,100 @@ def test_sniper_metric_labels() -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Test 14: SE GPP search bounds respect DS recommendations
+# ═══════════════════════════════════════════════════════════════════════════
+def test_se_gpp_search_bounds_respect_ds() -> None:
+    print("\n── Test 14: SE GPP search bounds include DS values ──")
+    from yak_core.auto_calibrate import DS_RECOMMENDATIONS, _SE_GPP_SEARCH_OVERRIDES
+
+    ds = DS_RECOMMENDATIONS["SE GPP"]
+    for key, val in ds.items():
+        if key in _SE_GPP_SEARCH_OVERRIDES:
+            spec = _SE_GPP_SEARCH_OVERRIDES[key]
+            _check(
+                f"DS {key}={val} in SE GPP bounds [{spec['low']}, {spec['high']}]",
+                spec["low"] <= val <= spec["high"],
+                f"DS value {val} outside SE GPP bounds [{spec['low']}, {spec['high']}]",
+            )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Test 15: SE GPP bounds prevent known anti-DS drift values
+# ═══════════════════════════════════════════════════════════════════════════
+def test_se_gpp_bounds_prevent_anti_ds_drift() -> None:
+    print("\n── Test 15: SE GPP bounds block anti-DS values ──")
+    from yak_core.auto_calibrate import _SE_GPP_SEARCH_OVERRIDES
+
+    anti_ds = {
+        "GPP_PROJ_WEIGHT": 0.55,         # Optuna wanted this, DS says 0.15
+        "GPP_OWN_PENALTY_STRENGTH": 1.3,  # Optuna wanted this, DS says 0.30
+        "GPP_SMASH_WEIGHT": 0.3,          # Optuna wanted this, DS says 0.0
+        "w_gpp": 1.4,                     # Optuna wanted this, DS says 0.0
+        "GPP_UPSIDE_WEIGHT": 0.15,        # Optuna pushed here, DS says 0.45
+    }
+    for key, bad_val in anti_ds.items():
+        if key in _SE_GPP_SEARCH_OVERRIDES:
+            spec = _SE_GPP_SEARCH_OVERRIDES[key]
+            _check(
+                f"Anti-DS {key}={bad_val} outside SE GPP bounds [{spec['low']}, {spec['high']}]",
+                not (spec["low"] <= bad_val <= spec["high"]),
+                f"anti-DS value {bad_val} is INSIDE SE GPP bounds "
+                f"[{spec['low']}, {spec['high']}] — bounds too wide",
+            )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Test 16: _get_effective_space applies overrides per contest type
+# ═══════════════════════════════════════════════════════════════════════════
+def test_get_effective_space() -> None:
+    print("\n── Test 16: _get_effective_space applies contest-type overrides ──")
+    from yak_core.auto_calibrate import (
+        SEARCH_SPACE,
+        _SE_GPP_SEARCH_OVERRIDES,
+        _MME_GPP_SEARCH_OVERRIDES,
+        _SHOWDOWN_GPP_SEARCH_OVERRIDES,
+        _get_effective_space,
+    )
+
+    # SE GPP should have tighter w_gpp bounds than the global space
+    se_space = _get_effective_space("SE GPP")
+    _check(
+        "SE GPP w_gpp high=0.3 (not global 2.0)",
+        se_space["w_gpp"]["high"] == 0.3,
+        f"Got {se_space['w_gpp']['high']}",
+    )
+    _check(
+        "SE GPP GPP_PROJ_WEIGHT high=0.25 (not global 0.60)",
+        se_space["GPP_PROJ_WEIGHT"]["high"] == 0.25,
+        f"Got {se_space['GPP_PROJ_WEIGHT']['high']}",
+    )
+
+    # MME GPP should have MAX_EXPOSURE tightened
+    mme_space = _get_effective_space("MME GPP")
+    _check(
+        "MME GPP MAX_EXPOSURE high=0.50",
+        mme_space["MAX_EXPOSURE"]["high"] == 0.50,
+        f"Got {mme_space['MAX_EXPOSURE']['high']}",
+    )
+
+    # Showdown GPP should have GPP_OWN_PENALTY_STRENGTH capped at 0.60
+    sd_space = _get_effective_space("Showdown GPP")
+    _check(
+        "Showdown GPP GPP_OWN_PENALTY_STRENGTH high=0.60",
+        sd_space["GPP_OWN_PENALTY_STRENGTH"]["high"] == 0.60,
+        f"Got {sd_space['GPP_OWN_PENALTY_STRENGTH']['high']}",
+    )
+
+    # Cash should still use _CASH_SEARCH_OVERRIDES (no regression)
+    cash_space = _get_effective_space("Cash")
+    _check(
+        "Cash GPP_UPSIDE_WEIGHT high=0.15",
+        cash_space["GPP_UPSIDE_WEIGHT"]["high"] == 0.15,
+        f"Got {cash_space['GPP_UPSIDE_WEIGHT']['high']}",
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Main
 # ═══════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
@@ -414,6 +508,9 @@ if __name__ == "__main__":
         test_constants_mappings,
         test_min_player_minutes,
         test_sniper_metric_labels,
+        test_se_gpp_search_bounds_respect_ds,
+        test_se_gpp_bounds_prevent_anti_ds_drift,
+        test_get_effective_space,
     ]
 
     for test_fn in tests:
