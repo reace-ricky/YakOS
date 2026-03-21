@@ -1,32 +1,33 @@
 {
   "sport": "NBA",
-  "date": "2026-03-20",
+  "date": "2026-03-21",
   "core_names": [
-    "Nikola Jokic",
+    "Victor Wembanyama",
     "Jalen Johnson",
-    "Jayson Tatum",
-    "Jaylen Brown",
-    "Jamal Murray"
+    "Luka Doncic",
+    "Evan Mobley",
+    "Donovan Mitchell"
   ],
   "leverage_names": [
-    "Scottie Barnes",
-    "Brandon Ingram",
-    "Immanuel Quickley",
-    "Tobias Harris",
-    "Ziaire Williams"
+    "Devin Booker",
+    "PJ Washington",
+    "VJ Edgecombe",
+    "Ryan Rollins",
+    "Marcus Smart"
   ],
   "value_names": [
-    "Sandro Mamukelashvili",
-    "Jamal Shead",
-    "Ja'Kobe Walter",
-    "Christian Braun"
+    "Obi Toppin",
+    "Dylan Harper",
+    "Tyler Burton",
+    "Olivier-Maxence Prosper",
+    "Jordan Goodwin"
   ],
   "fade_names": [
-    "Pacome Dadiet",
+    "Jalen Slawson",
+    "Nicolas Batum",
+    "Jordan McLaughlin",
     "Malevy Leons",
-    "E.J. Liddell",
-    "Ochai Agbaji",
-    "Drake Powell"
+    "Josh Green"
   ],
   "calibration_slates": 15
 }
