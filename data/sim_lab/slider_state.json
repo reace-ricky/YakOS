@@ -18,16 +18,24 @@
     },
     "Cash Main": {
       "overrides": {
-        "MIN_PLAYER_MINUTES": 20,
-        "NUM_LINEUPS": 26,
+        "CASH_FLOOR_WEIGHT": 0.65,
+        "CASH_PROJ_WEIGHT": 0.35,
+        "NUM_LINEUPS": 1,
+        "MAX_EXPOSURE": 0.5,
         "MIN_SALARY_USED": 49500,
-        "MAX_EXPOSURE": 0.8,
-        "GPP_SMASH_WEIGHT": 0.05
+        "MIN_PLAYER_MINUTES": 20,
+        "GPP_MIN_PROJ_FLOOR": 15,
+        "GPP_PROJ_WEIGHT": 0.55,
+        "GPP_UPSIDE_WEIGHT": 0.55,
+        "GPP_BOOM_WEIGHT": 0.1,
+        "GPP_OWN_PENALTY_STRENGTH": 0.9,
+        "GPP_BUST_PENALTY": 0.2,
+        "GPP_SMASH_WEIGHT": 0.0
       },
       "ricky_weights": {
-        "w_gpp": 0.3,
-        "w_ceil": 0.2,
-        "w_own": 0.0
+        "w_gpp": 1.5,
+        "w_ceil": 0.8,
+        "w_own": 0.1
       }
     }
   }
