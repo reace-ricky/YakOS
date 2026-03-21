@@ -20,7 +20,7 @@
         "MIN_PLAYER_MINUTES": 20,
         "GPP_MIN_PROJ_FLOOR": 15,
         "GPP_UPSIDE_WEIGHT": 1.0,
-        "GPP_PROJ_WEIGHT": 0.36
+        "NUM_LINEUPS": 40
       },
       "ricky_weights": {
         "w_gpp": 0.3,
