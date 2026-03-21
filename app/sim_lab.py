@@ -253,6 +253,9 @@ def _append_batch_history(
         "errors": len(batch.get("errors", [])),
         "is_baseline": is_baseline,
         "removed": False,
+        "min_completeness_pct": batch.get("min_completeness_pct", 100.0),
+        "has_incomplete_dates": batch.get("has_incomplete_dates", False),
+        "incomplete_date_count": len(batch.get("incomplete_dates", [])),
     }
 
     new_df = pd.DataFrame([row])
@@ -265,7 +268,10 @@ def _append_batch_history(
             # Ensure new columns exist on legacy data
             for col, default in [("is_baseline", False), ("removed", False),
                                   ("config_label", ""), ("overrides_json", "{}"),
-                                  ("profile_name", "")]:
+                                  ("profile_name", ""),
+                                  ("min_completeness_pct", -1.0),
+                                  ("has_incomplete_dates", False),
+                                  ("incomplete_date_count", 0)]:
                 if col not in existing.columns:
                     existing[col] = default
             # If promoting a new baseline, demote the old one for same preset
@@ -322,7 +328,10 @@ def _promote_baseline(row_timestamp: str, preset_name: str) -> None:
         df = pd.read_parquet(_HISTORY_FILE)
         for col, default in [("is_baseline", False), ("removed", False),
                               ("config_label", ""), ("overrides_json", "{}"),
-                              ("profile_name", "")]:
+                              ("profile_name", ""),
+                              ("min_completeness_pct", -1.0),
+                              ("has_incomplete_dates", False),
+                              ("incomplete_date_count", 0)]:
             if col not in df.columns:
                 df[col] = default
 
@@ -395,7 +404,9 @@ def _render_history_table() -> None:
 
     # Ensure new columns on legacy data
     for col, default in [("is_baseline", False), ("removed", False),
-                          ("config_label", ""), ("profile_name", "")]:
+                          ("config_label", ""), ("profile_name", ""),
+                          ("min_completeness_pct", -1.0),
+                          ("has_incomplete_dates", False)]:
         if col not in history.columns:
             history[col] = default
 
@@ -422,6 +433,18 @@ def _render_history_table() -> None:
     else:
         display["role"] = ""
 
+    # Add data quality column
+    def _data_quality_label(row: pd.Series) -> str:
+        cpct = row.get("min_completeness_pct", -1.0)
+        incomplete = row.get("has_incomplete_dates", False)
+        if cpct == -1:
+            return "\u2753"
+        if incomplete:
+            return f"\u26a0\ufe0f {cpct:.0f}%"
+        return f"\u2705 {cpct:.0f}%"
+
+    display["data_quality"] = display.apply(_data_quality_label, axis=1)
+
     col_rename = {
         "timestamp": "When",
         "preset": "Preset",
@@ -436,6 +459,7 @@ def _render_history_table() -> None:
         "worst_slate": "Worst Slate",
         "beat_proj_pct": "Beat Proj %",
         "errors": "Errors",
+        "data_quality": "Data",
     }
     show_cols = [c for c in col_rename if c in display.columns]
     display = display[show_cols].rename(columns=col_rename)
@@ -857,6 +881,16 @@ def _run_pipeline(
         scored.drop(columns=["actual_fp_actual"], inplace=True)
     scored["actual_fp"] = pd.to_numeric(scored["actual_fp"], errors="coerce").fillna(0.0)
 
+    # ── Completeness check: what % of pool players have actuals? ─────────
+    _pool_size = len(edge_df) if len(edge_df) > 0 else len(pool_df)
+    _actual_fp_col = pd.to_numeric(
+        actuals_df.get("actual_fp", 0), errors="coerce"
+    ).fillna(0.0)
+    _n_with_actuals = int((_actual_fp_col > 0).sum())
+    _completeness_pct = round(
+        (_n_with_actuals / _pool_size * 100) if _pool_size > 0 else 0.0, 1
+    )
+
     if "lineup_index" not in scored.columns:
         if "lineup_id" in scored.columns:
             scored["lineup_index"] = scored["lineup_id"]
@@ -909,6 +943,7 @@ def _run_pipeline(
         "config_hash": chash,
         "summary_df": summary,
         "player_df": scored,
+        "completeness_pct": _completeness_pct,
     }
 
 
@@ -1009,6 +1044,9 @@ def _render_config_panel(preset_name: str) -> Dict[str, Any]:
 # Batch Run
 # ---------------------------------------------------------------------------
 
+_DEFAULT_BATCH_COMPLETENESS_THRESHOLD = 40.0  # same as auto_calibrate
+
+
 def _run_batch(
     sport: str,
     preset_name: str,
@@ -1020,10 +1058,23 @@ def _run_batch(
     ricky_w_ceil: Optional[float] = None,
     ricky_w_own: Optional[float] = None,
     profile_name: str = "",
+    skip_incomplete: bool = False,
+    completeness_threshold: float = _DEFAULT_BATCH_COMPLETENESS_THRESHOLD,
 ) -> Dict[str, Any]:
-    """Run the pipeline for every date. Returns a batch record."""
+    """Run the pipeline for every date. Returns a batch record.
+
+    Parameters
+    ----------
+    skip_incomplete : bool
+        If True, dates whose completeness_pct is below *completeness_threshold*
+        are excluded from the aggregate metrics (but still tracked in errors).
+    completeness_threshold : float
+        Minimum % of players with non-zero actual FP for a date to count as
+        complete.  Default 40%.
+    """
     runs: List[Dict[str, Any]] = []
     errors: List[Dict[str, str]] = []
+    incomplete_dates: List[Dict[str, Any]] = []
     progress = st.progress(0, text="Starting batch run...")
 
     for i, d in enumerate(dates):
@@ -1038,6 +1089,21 @@ def _run_batch(
                     ricky_w_gpp=ricky_w_gpp, ricky_w_ceil=ricky_w_ceil,
                     ricky_w_own=ricky_w_own,
                 )
+            cpct = run.get("completeness_pct", 100.0)
+            if skip_incomplete and cpct < completeness_threshold:
+                incomplete_dates.append({
+                    "date": str(d),
+                    "completeness_pct": cpct,
+                    "reason": (
+                        f"Only {cpct:.0f}% of players have actuals "
+                        f"(threshold {completeness_threshold:.0f}%)"
+                    ),
+                })
+                _logger.info(
+                    "Skipping incomplete date %s (%.1f%% < %.0f%%)",
+                    d, cpct, completeness_threshold,
+                )
+                continue
             runs.append(run)
             # Also store in the flat run log
             if "sim_lab_runs" not in st.session_state:
@@ -1059,6 +1125,11 @@ def _run_batch(
     avg_proj = round(mean(r["avg_proj"] for r in runs), 2) if runs else 0
     beat_proj_pct = round(mean(r["beat_proj_pct"] for r in runs), 1) if runs else 0
 
+    # Aggregate completeness: min completeness across included runs
+    _run_completeness = [r.get("completeness_pct", 100.0) for r in runs]
+    min_completeness = round(min(_run_completeness), 1) if _run_completeness else 0.0
+    has_incomplete = any(c < completeness_threshold for c in _run_completeness)
+
     # Config label includes archetype for non-Default
     label = f"Run {batch_number}"
     if archetype != "Default":
@@ -1077,6 +1148,9 @@ def _run_batch(
         "avg_actual": avg_actual,
         "avg_proj": avg_proj,
         "beat_proj_pct": beat_proj_pct,
+        "incomplete_dates": incomplete_dates,
+        "min_completeness_pct": min_completeness,
+        "has_incomplete_dates": has_incomplete,
     }
 
 
@@ -1476,16 +1550,21 @@ def _render_comparison_table(preset_name: str) -> None:
     Active baseline is pinned at the top.  Δ Actual and Δ Beat% columns show
     each row's difference vs the baseline.  Checkboxes let the user soft-delete
     rows (they stay in the file for trend tracking but are hidden from view).
-    A "Promote as Baseline" button lets the user promote any row.
+
+    Rows from batches that contain incomplete slate data are flagged with ⚠️
+    and can be hidden via the "Hide incomplete" toggle.
     """
     history = _load_batch_history()
     if history.empty:
         return
 
-    # Ensure new columns on legacy data
+    # Ensure new columns on legacy data (including completeness columns)
     for col, default in [("is_baseline", False), ("removed", False),
                           ("config_label", ""), ("overrides_json", "{}"),
-                          ("profile_name", "")]:
+                          ("profile_name", ""),
+                          ("min_completeness_pct", -1.0),
+                          ("has_incomplete_dates", False),
+                          ("incomplete_date_count", 0)]:
         if col not in history.columns:
             history[col] = default
 
@@ -1496,6 +1575,35 @@ def _render_comparison_table(preset_name: str) -> None:
         return
 
     st.subheader("Batch Comparison")
+
+    # ── Completeness filter toggle ────────────────────────────────────────
+    # Legacy rows without completeness data get min_completeness_pct == -1;
+    # they are treated as "unknown" and shown with a ? indicator.
+    _has_any_incomplete = (
+        df["has_incomplete_dates"].any()
+        or (df["min_completeness_pct"] == -1).any()
+    )
+
+    hide_incomplete = False
+    if _has_any_incomplete:
+        hide_incomplete = st.checkbox(
+            "Hide runs with incomplete slate data",
+            value=False,
+            key="sim_lab_hide_incomplete",
+            help=(
+                "Hide batch runs that included dates with partial actual "
+                "results (e.g., games still in progress). These runs may "
+                "show misleadingly low Avg Actual and Beat%."
+            ),
+        )
+
+    if hide_incomplete:
+        df = df[~df["has_incomplete_dates"]].copy()
+        # Also hide legacy rows with unknown completeness
+        df = df[df["min_completeness_pct"] != -1].copy()
+        if df.empty:
+            st.info("All runs for this preset have incomplete data. Uncheck the filter to view them.")
+            return
 
     # Sort: baseline first, then newest-first
     df["_sort_key"] = df["is_baseline"].astype(int) * -1  # baseline = -1 → top
@@ -1514,6 +1622,15 @@ def _render_comparison_table(preset_name: str) -> None:
         label = row.get("config_label", "") or row.get("config_hash", "")
         if row.get("is_baseline"):
             label = f"\u2693 {label}" if label else "\u2693 Baseline"
+
+        # Completeness indicator
+        min_cpct = row.get("min_completeness_pct", -1.0)
+        is_incomplete = bool(row.get("has_incomplete_dates", False))
+        if min_cpct == -1:
+            # Legacy row — unknown completeness
+            label = f"\u2753 {label}"
+        elif is_incomplete:
+            label = f"\u26a0\ufe0f {label}"
 
         ts = ""
         if "timestamp" in row.index and pd.notna(row["timestamp"]):
@@ -1540,6 +1657,14 @@ def _render_comparison_table(preset_name: str) -> None:
             if _pc_meta:
                 profile_lbl = _pc_meta.get("display_name", profile_lbl)
 
+        # Completeness column for display
+        if min_cpct == -1:
+            cpct_display = "?"
+        elif is_incomplete:
+            cpct_display = f"\u26a0\ufe0f {min_cpct:.0f}%"
+        else:
+            cpct_display = f"\u2705 {min_cpct:.0f}%"
+
         display_rows.append({
             "_ts": row["timestamp"],  # hidden key for actions
             "Run": label,
@@ -1552,6 +1677,7 @@ def _render_comparison_table(preset_name: str) -> None:
             "\u0394 Actual": d_actual,
             "Beat %": f"{row['beat_proj_pct']:.0f}%",
             "\u0394 Beat%": d_beat,
+            "Data": cpct_display,
             "Baseline": bool(row.get("is_baseline")),
         })
 
@@ -1613,6 +1739,18 @@ def _render_comparison_table(preset_name: str) -> None:
 
         if changed:
             st.rerun()
+
+    # ── Re-evaluate data quality for legacy rows ──────────────────────────
+    # Legacy rows in batch_history.parquet that were saved before
+    # completeness tracking was added have min_completeness_pct == -1.
+    # This button lets users retroactively tag them.
+    _n_legacy = int((df["min_completeness_pct"] == -1).sum()) if "min_completeness_pct" in df.columns else 0
+    if _n_legacy > 0:
+        st.caption(
+            f"{_n_legacy} older run(s) have unknown data quality "
+            f"(\u2753 icon). These were saved before completeness "
+            f"tracking was added."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -2293,6 +2431,9 @@ def _render_nudge_guidance(
                         ricky_w_ceil=ricky_weights.get("w_ceil"),
                         ricky_w_own=ricky_weights.get("w_own"),
                         profile_name=profile_key,
+                        skip_incomplete=st.session_state.get(
+                            "sim_lab_batch_skip_incomplete", True
+                        ),
                     )
                     new_batch["overrides"] = dict(sandbox_overrides)
                     if "sim_lab_batches" not in st.session_state:
@@ -2883,6 +3024,19 @@ def render_sim_lab(sport: str) -> None:
             else:
                 _run_dates = _safe_dates
 
+            # ── Skip incomplete dates toggle ─────────────────────────────
+            _batch_skip_incomplete = st.checkbox(
+                "Skip incomplete dates",
+                value=True,
+                key="sim_lab_batch_skip_incomplete",
+                help=(
+                    "Automatically detect and exclude dates where actual "
+                    "results are incomplete (e.g., games still in progress, "
+                    "partial data). Prevents misleading Avg Actual and Beat% "
+                    "numbers in batch results."
+                ),
+            )
+
             if st.button(
                 "\U0001f504 Run Batch", use_container_width=True,
                 key="sim_lab_batch_run",
@@ -2900,6 +3054,7 @@ def render_sim_lab(sport: str) -> None:
                             ricky_w_ceil=_ricky_weights["w_ceil"],
                             ricky_w_own=_ricky_weights["w_own"],
                             profile_name=_profile_key_internal or "",
+                            skip_incomplete=_batch_skip_incomplete,
                         )
                         _bl_batch["config_label"] = "Baseline (main config)"
                         _bl_batch["overrides"] = {}
@@ -2921,6 +3076,7 @@ def render_sim_lab(sport: str) -> None:
                         ricky_w_ceil=_ricky_weights["w_ceil"],
                         ricky_w_own=_ricky_weights["w_own"],
                         profile_name=_profile_key_internal or "",
+                        skip_incomplete=_batch_skip_incomplete,
                     )
                     batch["overrides"] = dict(sandbox_overrides)
 
@@ -2934,10 +3090,24 @@ def render_sim_lab(sport: str) -> None:
 
                     n_ok = len(batch["runs"])
                     n_err = len(batch["errors"])
+                    n_incomplete = len(batch.get("incomplete_dates", []))
+                    _status_parts = [
+                        f"{n_ok} slates processed",
+                        f"{n_err} errors" if n_err else "",
+                        f"{n_incomplete} incomplete skipped" if n_incomplete else "",
+                    ]
                     st.success(
-                        f"Batch complete: {n_ok} slates processed, "
-                        f"{n_err} errors | Avg Actual: {batch['avg_actual']:.1f} FP"
+                        f"Batch complete: {', '.join(p for p in _status_parts if p)} "
+                        f"| Avg Actual: {batch['avg_actual']:.1f} FP"
                     )
+                    if batch.get("incomplete_dates"):
+                        with st.expander(
+                            f"Skipped incomplete dates ({n_incomplete})"
+                        ):
+                            for sd in batch["incomplete_dates"]:
+                                st.caption(
+                                    f"{sd['date']}: {sd['reason']}"
+                                )
                     if batch["errors"]:
                         with st.expander("Batch Errors"):
                             for err in batch["errors"]:
