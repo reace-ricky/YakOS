@@ -12,11 +12,17 @@
       }
     },
     "Cash Main": {
-      "overrides": {},
+      "overrides": {
+        "MIN_PLAYER_MINUTES": 20,
+        "NUM_LINEUPS": 26,
+        "MIN_SALARY_USED": 49500,
+        "MAX_EXPOSURE": 0.8,
+        "GPP_SMASH_WEIGHT": 0.05
+      },
       "ricky_weights": {
-        "w_gpp": 1.0,
-        "w_ceil": 0.8,
-        "w_own": 0.3
+        "w_gpp": 0.3,
+        "w_ceil": 0.2,
+        "w_own": 0.0
       }
     }
   }
