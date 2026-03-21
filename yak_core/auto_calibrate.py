@@ -824,6 +824,102 @@ def _get_objective_value(
         return _get_se_core_actual(run)
 
 
+def compute_sniper_metrics(per_date_results: List[Dict[str, Any]]) -> Dict[str, float | None]:
+    """Compute sniper metrics across all dates from pipeline results.
+
+    Each entry in *per_date_results* should contain a ``summary_df`` key with
+    the scored/ranked lineup DataFrame produced by ``_run_pipeline_headless``.
+    """
+    from statistics import mean as _mean
+
+    all_300_counts: list[float] = []
+    all_350_counts: list[float] = []
+    all_cash_rates: list[float] = []
+    all_top1pct_rates: list[float] = []
+    all_top5_avgs: list[float] = []
+    all_best_scores: list[float] = []
+    all_avg_ceils: list[float] = []
+    all_avg_owns: list[float] = []
+    all_300_in_top3: list[float] = []
+    all_300_in_top5: list[float] = []
+    all_best_ranks: list[float] = []
+    all_se_core: list[float] = []
+
+    for run in per_date_results:
+        summary = run.get("summary_df")
+        if summary is None or not hasattr(summary, "empty") or summary.empty:
+            continue
+
+        actuals = summary["total_actual"].dropna()
+        if actuals.empty:
+            continue
+
+        # SE Core actual
+        if "ricky_tag" in summary.columns:
+            se_core = summary.loc[summary["ricky_tag"] == "SE Core", "total_actual"]
+            if not se_core.empty:
+                all_se_core.append(float(se_core.iloc[0]))
+
+        # 300+ and 350+ counts
+        all_300_counts.append(float((actuals >= 300.0).sum()))
+        all_350_counts.append(float((actuals >= 350.0).sum()))
+
+        # Cash rate (% above 287)
+        cash_rate = float((actuals >= 287.0).sum()) / len(actuals)
+        all_cash_rates.append(cash_rate)
+
+        # Top-1% hit rate
+        top_1pct_threshold = actuals.quantile(0.99)
+        top_1pct_count = float((actuals >= top_1pct_threshold).sum())
+        all_top1pct_rates.append(top_1pct_count / len(actuals) * 100)
+
+        # Top-5 avg score
+        top5 = actuals.nlargest(min(5, len(actuals)))
+        all_top5_avgs.append(float(top5.mean()))
+
+        # Best lineup score
+        all_best_scores.append(float(actuals.max()))
+
+        # Avg ceiling
+        if "total_ceil" in summary.columns:
+            all_avg_ceils.append(float(summary["total_ceil"].mean()))
+
+        # Avg ownership
+        if "avg_own_pct" in summary.columns:
+            all_avg_owns.append(float(summary["avg_own_pct"].mean()))
+
+        # Sorter metrics: did 300+ lineups land in Ricky top 3/5?
+        if "ricky_rank" in summary.columns:
+            top3_mask = summary["ricky_rank"] <= 3
+            top5_mask = summary["ricky_rank"] <= 5
+            above_300 = summary["total_actual"] >= 300.0
+
+            has_300_in_top3 = float((top3_mask & above_300).any())
+            has_300_in_top5 = float((top5_mask & above_300).any())
+            all_300_in_top3.append(has_300_in_top3)
+            all_300_in_top5.append(has_300_in_top5)
+
+            # What rank did the actual best lineup get?
+            best_idx = actuals.idxmax()
+            best_rank = float(summary.loc[best_idx, "ricky_rank"])
+            all_best_ranks.append(best_rank)
+
+    return {
+        "avg_se_core": round(_mean(all_se_core), 1) if all_se_core else None,
+        "count_300_avg": round(_mean(all_300_counts), 1) if all_300_counts else None,
+        "count_350_avg": round(_mean(all_350_counts), 2) if all_350_counts else None,
+        "top1pct_rate": round(_mean(all_top1pct_rates), 1) if all_top1pct_rates else None,
+        "cash_rate_pct": round(_mean(all_cash_rates) * 100, 1) if all_cash_rates else None,
+        "top5_avg": round(_mean(all_top5_avgs), 1) if all_top5_avgs else None,
+        "best_lineup_avg": round(_mean(all_best_scores), 1) if all_best_scores else None,
+        "avg_ceiling": round(_mean(all_avg_ceils), 1) if all_avg_ceils else None,
+        "avg_ownership": round(_mean(all_avg_owns), 4) if all_avg_owns else None,
+        "pct_300_in_top3": round(_mean(all_300_in_top3) * 100, 1) if all_300_in_top3 else None,
+        "pct_300_in_top5": round(_mean(all_300_in_top5) * 100, 1) if all_300_in_top5 else None,
+        "best_lineup_avg_rank": round(_mean(all_best_ranks), 1) if all_best_ranks else None,
+    }
+
+
 def run_auto_calibration(
     preset_name: str,
     dates: List[date],
@@ -945,7 +1041,11 @@ def run_auto_calibration(
                 ricky_w_own=current_ricky_weights.get("w_own", 0.3),
             )
             obj_val = _get_objective_value(run, contest_type)
-            baseline_results.append({"date": str(d), "se_core_actual": obj_val})
+            baseline_results.append({
+                "date": str(d),
+                "se_core_actual": obj_val,
+                "summary_df": run.get("summary_df"),
+            })
         except IncompleteSlateError as e:
             logger.warning("Skipping incomplete date %s during baseline: %s", d, e)
             skipped_dates_info.append({
@@ -954,10 +1054,10 @@ def run_auto_calibration(
                 "completeness_pct": 0.0,
             })
             _runtime_skipped.append(d)
-            baseline_results.append({"date": str(d), "se_core_actual": None})
+            baseline_results.append({"date": str(d), "se_core_actual": None, "summary_df": None})
         except Exception as e:
             logger.warning("Baseline failed for %s: %s", d, e)
-            baseline_results.append({"date": str(d), "se_core_actual": None})
+            baseline_results.append({"date": str(d), "se_core_actual": None, "summary_df": None})
 
     # Remove runtime-discovered incomplete dates from the working set
     if _runtime_skipped:
@@ -1093,10 +1193,11 @@ def run_auto_calibration(
                 "date": str(d),
                 "se_core_actual": obj_val,
                 "avg_lineup_actual": run.get("avg_actual", 0),
+                "summary_df": run.get("summary_df"),
             })
         except Exception as e:
             logger.warning("Validation failed for %s: %s", d, e)
-            validation_results.append({"date": str(d), "se_core_actual": None})
+            validation_results.append({"date": str(d), "se_core_actual": None, "summary_df": None})
 
     valid_actuals = [
         r["se_core_actual"] for r in validation_results if r["se_core_actual"] is not None

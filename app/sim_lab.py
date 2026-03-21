@@ -2802,6 +2802,88 @@ def _render_auto_calibrate(
             })
         st.dataframe(pd.DataFrame(ds_rows), hide_index=True, use_container_width=True)
 
+    # ── Sniper Metrics — Baseline vs Optimized ─────────────────────
+    from yak_core.auto_calibrate import compute_sniper_metrics
+
+    baseline_sniper = compute_sniper_metrics(result.baseline_per_date)
+    optimized_sniper = compute_sniper_metrics(result.per_date_results)
+
+    _SNIPER_LABELS = {
+        "avg_se_core": ("Avg SE Core", "{:.1f}", True),
+        "count_300_avg": ("300+ Lineups (avg/batch)", "{:.1f}", True),
+        "count_350_avg": ("350+ Lineups (avg/batch)", "{:.2f}", True),
+        "top1pct_rate": ("Top-1% Hit Rate", "{:.1f}%", True),
+        "cash_rate_pct": ("Cash Rate (% ≥ 287 FP)", "{:.1f}%", True),
+        "top5_avg": ("Top-5 Avg Score", "{:.1f}", True),
+        "best_lineup_avg": ("Best Lineup (avg)", "{:.1f}", True),
+        "avg_ceiling": ("Avg Lineup Ceiling", "{:.1f}", True),
+        "avg_ownership": ("Avg Lineup Ownership", "{:.4f}", True),
+        "pct_300_in_top3": ("300+ in Ricky Top 3", "{:.1f}%", True),
+        "pct_300_in_top5": ("300+ in Ricky Top 5", "{:.1f}%", True),
+        "best_lineup_avg_rank": ("Best Lineup Avg Rank", "{:.1f}", False),  # lower is better
+    }
+
+    sniper_rows = []
+    for key, (label, fmt, higher_is_better) in _SNIPER_LABELS.items():
+        b_val = baseline_sniper.get(key)
+        o_val = optimized_sniper.get(key)
+        if b_val is None and o_val is None:
+            continue
+
+        b_str = fmt.format(b_val) if b_val is not None else "—"
+        o_str = fmt.format(o_val) if o_val is not None else "—"
+
+        if b_val is not None and o_val is not None:
+            delta = o_val - b_val
+            is_better = (delta > 0) if higher_is_better else (delta < 0)
+            is_worse = (delta < 0) if higher_is_better else (delta > 0)
+            arrow = "↑" if delta > 0 else ("↓" if delta < 0 else "—")
+            color = "green" if is_better else ("red" if is_worse else "grey")
+
+            # Format delta with same precision as the metric
+            if "%" in fmt:
+                d_str = f"{delta:+.1f}%"
+            elif "{:.4f}" in fmt:
+                d_str = f"{delta:+.4f}"
+            elif "{:.2f}" in fmt:
+                d_str = f"{delta:+.2f}"
+            else:
+                d_str = f"{delta:+.1f}"
+            delta_display = f":{color}[{arrow} {d_str}]"
+        else:
+            delta_display = "—"
+
+        sniper_rows.append({
+            "Metric": label,
+            "Baseline": b_str,
+            "Optimized": o_str,
+            "_delta_display": delta_display,
+            "_is_sorter": key in ("pct_300_in_top3", "pct_300_in_top5", "best_lineup_avg_rank"),
+        })
+
+    if sniper_rows:
+        st.markdown("#### Sniper Metrics — Baseline vs Optimized")
+
+        # Render as markdown table for colored deltas
+        header = "| Metric | Baseline | Optimized | Delta |"
+        sep = "|--------|----------|-----------|-------|"
+        lines = [header, sep]
+        for row in sniper_rows:
+            prefix = "**" if row["_is_sorter"] else ""
+            suffix = "**" if row["_is_sorter"] else ""
+            lines.append(
+                f"| {prefix}{row['Metric']}{suffix} "
+                f"| {row['Baseline']} "
+                f"| {row['Optimized']} "
+                f"| {row['_delta_display']} |"
+            )
+        st.markdown("\n".join(lines))
+
+        st.caption(
+            "**Bold** metrics are sorter quality indicators — they show whether "
+            "Ricky is surfacing the right lineups to the top."
+        )
+
     # ── Per-date breakdown ───────────────────────────────────────────
     with st.expander("Per-Date Breakdown"):
         date_rows = []
