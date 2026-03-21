@@ -12,7 +12,7 @@
         "GPP_OWN_PENALTY_STRENGTH": 0.6,
         "GPP_BUST_PENALTY": 0.15,
         "NUM_LINEUPS": 40,
-        "GPP_PROJ_WEIGHT": 0.41,
+        "GPP_PROJ_WEIGHT": 0.35,
         "GPP_UPSIDE_WEIGHT": 0.25
       },
       "ricky_weights": {
