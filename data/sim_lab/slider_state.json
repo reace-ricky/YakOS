@@ -6,7 +6,7 @@
         "GPP_PACE_ENV_WEIGHT": 0.11,
         "MIN_PLAYER_MINUTES": 2,
         "NUM_LINEUPS": 40,
-        "GPP_LOW_OWN_THRESHOLD": 0.35
+        "GPP_BUST_PENALTY": 0.15
       },
       "ricky_weights": {
         "w_gpp": 1.0,
