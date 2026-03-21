@@ -124,42 +124,75 @@ def _fetch_actuals_from_tank01(game_date: str) -> Dict[str, float]:
 def _find_previous_slate(sport: str, today: date) -> Optional[pd.DataFrame]:
     """Find the most recent slate archive for a sport before today.
 
-    Looks for archived slate data (parquet files in data/slate_archive/)
-    going back up to 7 days.
+    Checks two sources and returns whichever is more recent:
+      1. data/slate_archive/ — dedicated archive parquets (up to 7 days back)
+      2. data/published/{sport}/ — the most-recently published slate pool
+         (only used when its date is strictly before *today*)
 
     Returns DataFrame with player_name, proj, actual_fp, salary columns,
     or None if no archive found.
     """
-    if not _ARCHIVE_DIR.exists():
-        return None
+    best_df: Optional[pd.DataFrame] = None
+    best_date: Optional[date] = None
 
-    # Search backward from yesterday for up to 7 days
-    for days_back in range(1, 8):
-        check_date = today - timedelta(days=days_back)
-        date_str = check_date.strftime("%Y-%m-%d")
+    # --- Source 1: slate_archive directory ---
+    if _ARCHIVE_DIR.exists():
+        for days_back in range(1, 8):
+            check_date = today - timedelta(days=days_back)
+            date_str = check_date.strftime("%Y-%m-%d")
 
-        # Sport-aware archive patterns
-        if sport.upper() == "PGA":
-            patterns = [
-                f"{date_str}_pga_gpp.parquet",
-                f"{date_str}_pga_showdown.parquet",
-            ]
-        else:
-            patterns = [
-                f"{date_str}_gpp_main.parquet",
-                f"{date_str}_cash_main.parquet",
-            ]
-        for pattern in patterns:
-            path = _ARCHIVE_DIR / pattern
-            if path.exists():
-                try:
-                    df = pd.read_parquet(path)
+            if sport.upper() == "PGA":
+                patterns = [
+                    f"{date_str}_pga_gpp.parquet",
+                    f"{date_str}_pga_showdown.parquet",
+                ]
+            else:
+                patterns = [
+                    f"{date_str}_gpp_main.parquet",
+                    f"{date_str}_cash_main.parquet",
+                ]
+            for pattern in patterns:
+                path = _ARCHIVE_DIR / pattern
+                if path.exists():
+                    try:
+                        df = pd.read_parquet(path)
+                        if "player_name" in df.columns and "proj" in df.columns:
+                            # This source walks backwards, so the first hit is
+                            # the most recent archive date — record and stop.
+                            best_df = df
+                            best_date = check_date
+                            break
+                    except Exception:
+                        continue
+            if best_df is not None:
+                break  # found the most recent archive file
+
+    # --- Source 2: published slate pool ---
+    # The published pool is the *current* working slate. It is only a valid
+    # "previous slate" when its date is strictly before today (i.e. today's
+    # slate hasn't been published yet, so the published data is yesterday's).
+    import json
+
+    pub_dir = _PUBLISHED_DIR / sport.lower()
+    meta_path = pub_dir / "slate_meta.json"
+    pool_path = pub_dir / "slate_pool.parquet"
+    if meta_path.exists() and pool_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text())
+            pub_date_str = meta.get("date", "")
+            pub_date = date.fromisoformat(pub_date_str) if pub_date_str else None
+            if pub_date and pub_date < today:
+                # Use published data if it's more recent than what the archive had
+                if best_date is None or pub_date > best_date:
+                    df = pd.read_parquet(pool_path)
                     if "player_name" in df.columns and "proj" in df.columns:
-                        return df
-                except Exception:
-                    continue
+                        if "slate_date" not in df.columns:
+                            df["slate_date"] = pub_date_str
+                        best_df = df
+        except Exception:
+            pass
 
-    return None
+    return best_df
 
 
 def _classify_result(projected: float, actual: float) -> Tuple[str, str]:

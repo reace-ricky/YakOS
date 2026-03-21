@@ -173,7 +173,7 @@ def _render_edge_box(key: str, players: List[Dict], is_pga: bool, cleared_player
     st.markdown(box_html, unsafe_allow_html=True)
 
 
-def _render_rickys_take(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, Any]) -> None:
+def _render_rickys_take(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, Any], slate_date: str = "") -> None:
     """Render the Ricky's Take section.
 
     Three parts:
@@ -181,7 +181,11 @@ def _render_rickys_take(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str,
       2. The Board -- data-driven callouts about current slate
       3. Bust Call -- one bold prediction
     """
-    from yak_core.rickys_take import generate_bust_call, generate_last_night, generate_tonights_edges
+    from yak_core.rickys_take import generate_bust_call, generate_last_night, generate_tonights_edges, reset_rotator
+
+    # Reset the template rotator so intra-post dedup starts fresh and the
+    # seed is pinned to the current slate date (deterministic output).
+    reset_rotator(slate_date=slate_date or None)
 
     # -- Get previous slate recap data --
     recap = None
@@ -362,7 +366,7 @@ def render_edge_tab(sport: str) -> None:
     _render_late_swap_alerts(_late_swap, sport, lineups)
 
     # ── Ricky's Take ─────────────────────────────────────────────────────
-    _render_rickys_take(sport, pool, edge_analysis)
+    _render_rickys_take(sport, pool, edge_analysis, slate_date=slate_date)
 
     st.markdown("")  # spacer
 

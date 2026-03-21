@@ -6,29 +6,90 @@ Generates three sections for the Edge Analysis tab:
   3. Bust Call -- one bold prediction for the biggest underperformer
 
 All text is template-based with data slots. No LLM calls.
+
+Rotation system
+~~~~~~~~~~~~~~~
+Templates are selected deterministically via a seeded hash so that:
+  - The same slate+player always produces the same output (reproducible).
+  - No two callouts in the same post use the same template from a given
+    category (intra-post dedup via ``_TemplateRotator``).
+  - Across consecutive days the seed shifts so phrasing feels fresh. With
+    pool sizes of 20-30 per category, the same exact phrase won't repeat
+    for 3-4+ days even for the same player.
 """
 from __future__ import annotations
 
+import hashlib
 from datetime import date, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 
 
 # ---------------------------------------------------------------------------
-# Template selection helpers -- date-rotated deterministic pick
+# Template rotation engine -- deterministic, dedup-aware, multi-day spread
 # ---------------------------------------------------------------------------
 
+class _TemplateRotator:
+    """Tracks templates used within a single post to guarantee no repeats.
+
+    Seed formula: hash(slate_date + player_name + category + day_ordinal)
+    where day_ordinal shifts the pick daily so phrases rotate across days.
+    """
+
+    def __init__(self, slate_date: Optional[str] = None) -> None:
+        self._used: Dict[str, Set[int]] = {}  # category -> set of used indices
+        self._slate_date = slate_date or date.today().isoformat()
+
+    def _seed(self, key: str, category: str) -> int:
+        """Deterministic seed from key + category + slate date."""
+        raw = f"{key}:{category}:{self._slate_date}"
+        return int(hashlib.sha256(raw.encode()).hexdigest(), 16)
+
+    def pick(self, templates: list, key: str, category: str) -> str:
+        """Pick a template that hasn't been used in this post for *category*."""
+        n = len(templates)
+        if n == 0:
+            return ""
+        used = self._used.setdefault(category, set())
+        seed = self._seed(key, category)
+
+        # Walk through candidates in deterministic order until we find one
+        # that hasn't been used yet in this post.
+        for offset in range(n):
+            idx = (seed + offset) % n
+            if idx not in used:
+                used.add(idx)
+                return templates[idx]
+
+        # All used — reset and return the first pick (shouldn't happen with
+        # pool sizes >> callouts per post).
+        used.clear()
+        idx = seed % n
+        used.add(idx)
+        return templates[idx]
+
+
+# Module-level rotator instance. Re-created per Streamlit page render because
+# the module is re-imported each time via the edge_tab lazy import.  For safety
+# we expose a reset helper that edge_tab can call.
+_rotator = _TemplateRotator()
+
+
+def reset_rotator(slate_date: Optional[str] = None) -> None:
+    """Reset the post-level rotator (call once per render cycle)."""
+    global _rotator
+    _rotator = _TemplateRotator(slate_date)
+
+
 def _pick_template(templates: list, player_name: str, category: str) -> str:
-    """Deterministic, date-rotated template selection keyed by player name."""
-    key = f"{player_name}:{category}:{date.today().toordinal()}"
-    return templates[hash(key) % len(templates)]
+    """Deterministic, dedup-aware template selection keyed by player name."""
+    return _rotator.pick(templates, player_name, category)
 
 
 def _pick_template_by_key(templates: list, key: str, category: str) -> str:
-    """Deterministic, date-rotated template selection keyed by an arbitrary string."""
-    composite = f"{key}:{category}:{date.today().toordinal()}"
-    return templates[hash(composite) % len(templates)]
+    """Deterministic, dedup-aware template selection keyed by an arbitrary string."""
+    return _rotator.pick(templates, key, category)
 
 
 # ---------------------------------------------------------------------------
@@ -40,34 +101,74 @@ _BOARD_CORE_HIT = [
     "Put {name} on the board as a core play. Went for {actual:.0f} on a {proj:.0f} line. That's the whole process.",
     "{name} was core. {actual:.0f} actual, {proj:.0f} projected. Called it, cashed it.",
     "Core play {name}: {actual:.0f} on {proj:.0f}. The board doesn't miss on the anchors.",
+    "{name}: core lock. {actual:.0f} on a {proj:.0f} line. The model did the heavy lifting. I just pressed publish.",
+    "Called {name} core. {actual:.0f} actual, {proj:.0f} projected. Not a debate — a data point.",
+    "{name} was the anchor. {actual:.0f} on {proj:.0f}. Sometimes the obvious call is the right one. This was one of those times.",
+    "Core: {name}. {actual:.0f} on {proj:.0f}. Anchors hold or they don't. This one held.",
+    "{name} — core, {actual:.0f} actual, {proj:.0f} projected. I don't celebrate singles. But I log them.",
+    "Put {name} in the core bucket. {actual:.0f} on a {proj:.0f} line. That's what conviction looks like.",
+    "{name} anchored the board. {actual:.0f} on {proj:.0f}. The field debated. I didn't.",
 ]
 
 _BOARD_VALUE_HIT = [
     "Value play {name} at ${sal} went for {actual:.0f}. That's a {tier} call that printed.",
     "{name} at ${sal} — called it as a value target. Dropped {actual:.0f}. You're welcome.",
     "Put {name} on the board at ${sal}. Value play. Went for {actual:.0f}. Math works.",
+    "{name} at ${sal}: value tier. {actual:.0f} actual. The cheap plays only look cheap in hindsight.",
+    "Value call: {name} at ${sal}. Went for {actual:.0f}. The price was wrong. I noticed.",
+    "{name}, ${sal}, {actual:.0f} FP. Value play. The field spent up. I spent smart.",
+    "Called {name} as value at ${sal}. Dropped {actual:.0f}. Salary inefficiency, exploited.",
+    "{name}: ${sal}, {actual:.0f} actual. Value play that cashed. The scoreboard validates, not the salary tag.",
+    "Value target {name} at ${sal} delivered {actual:.0f}. That's the kind of edge the field ignores until it costs them.",
+    "${sal} for {name}. Went for {actual:.0f}. The board said value. The box score confirmed.",
 ]
 
 _BOARD_LOTTO_HIT = [
     "Lotto pick {name} at ${sal}. Went for {actual:.0f}. Nobody was looking. I was.",
     "{name} — the lotto play — dropped {actual:.0f} at ${sal}. Cheap, ignored, cashed.",
     "Called {name} as a lotto ticket at ${sal}. Hit for {actual:.0f}. That's the edge.",
+    "{name} at ${sal}. Lotto tier. {actual:.0f} actual. The field didn't bother scrolling down.",
+    "Lotto play {name} at ${sal}: {actual:.0f}. The kind of pick that separates lineups. Quietly.",
+    "{name}, ${sal}, {actual:.0f}. Lotto. The field spent the salary elsewhere. Their loss.",
+    "Called {name} as a deep-roster lotto. ${sal}. Went for {actual:.0f}. Asymmetric outcomes — that's the whole game.",
+    "Lotto ticket: {name} at ${sal}. {actual:.0f} actual. The field priced this out of conversation. The scoreboard priced it back in.",
+    "{name} at ${sal} — lotto tier. Dropped {actual:.0f}. Nobody talks about these picks until they win.",
+    "${sal}. {name}. Lotto play. {actual:.0f} FP. The field walked right past it.",
 ]
 
 _BOARD_FADE_HIT = [
     "Called the fade on {name}. Went for {actual:.0f} on a {proj:.0f} line. The field got cooked.",
     "Faded {name}. {actual:.0f} on {proj:.0f}. Everyone who followed the herd paid for it.",
     "{name} was the fade call. {actual:.0f} actual. The crowd had it wrong. Again.",
+    "Fade: {name}. {actual:.0f} on a {proj:.0f} line. Said don't. They didn't listen. They never do.",
+    "Called {name} as a fade. {actual:.0f} actual, {proj:.0f} projected. The consensus had the wrong read.",
+    "{name} — faded. {actual:.0f} on {proj:.0f}. The crowd loaded up. The scoreboard unloaded them.",
+    "Faded {name}. {actual:.0f} actual. The field chased the name. I read the numbers.",
+    "{name}: fade call. {actual:.0f} on {proj:.0f}. The crowd went in. I stepped aside. Math wins.",
+    "Called the fade. {name}: {actual:.0f} on {proj:.0f}. Popular and wrong. The two go together more than people admit.",
+    "{name} was the fade. {actual:.0f} actual. Everyone else saw the name. I saw the context.",
 ]
 
 _BOARD_SUMMARY_GOOD = [
     "The board went {hit_count}-of-{total} on named calls last night.",
     "{hit_count} of {total} board calls cleared. Process.",
+    "Board: {hit_count} for {total}. Not perfect. Not supposed to be. But the edge is there.",
+    "{hit_count}-of-{total} on the board. Good night. Same process tomorrow.",
+    "The board cleared {hit_count} of {total}. Math works. Moving on.",
+    "Board hit rate: {hit_count}/{total}. Results follow process. They did last night.",
+    "{hit_count} out of {total} board calls landed. The model earns its keep.",
+    "The board went {hit_count}-of-{total}. Clean slate. Clean results.",
 ]
 
 _BOARD_SUMMARY_BAD = [
     "Board went {hit_count}-of-{total}. Not the night. Back at it.",
     "{hit_count} of {total} board calls hit. Process doesn't change.",
+    "Board: {hit_count} for {total}. Bad night. Process still right. Outcomes are noisy.",
+    "{hit_count}-of-{total}. Rough one. Math doesn't bat 1.000. But it bats better than instinct.",
+    "The board went {hit_count} of {total}. Variance collected. Process doesn't flinch.",
+    "{hit_count} of {total}. Not the night. The process doesn't care about one bad sample.",
+    "Board took an L — {hit_count} of {total}. Variance happens. The model adjusts. So do I.",
+    "{hit_count}-of-{total} on board calls. Off night. Same approach tomorrow.",
 ]
 
 # ── SE lineup pick templates ──
@@ -78,22 +179,48 @@ _SE_PICK_HIT = [
     "{name}: {actual:.0f} actual, {proj:.0f} projected. I said play this. The scoreboard agreed.",
     "{tag} pick {name} went off — {actual:.0f} on {proj:.0f}. Told you.",
     "{name} at ${sal} for {actual:.0f}. {tag} lineup cashed. Moving on.",
+    "{name}: ${sal}. {actual:.0f} actual. {tag} pick. The model said go. I went.",
+    "SE pick {name} delivered — {actual:.0f} on {proj:.0f}. The number was right. The field was elsewhere.",
+    "{name} at ${sal}, {actual:.0f} FP. {tag} tier. Locked and loaded. Results followed.",
+    "Called {name} in the {tag} slot. ${sal}. {actual:.0f} actual. That's the process at work.",
+    "{tag}: {name} at ${sal}. {actual:.0f} on a {proj:.0f} line. Clean read.",
+    "{name} — {tag} pick. {actual:.0f} on {proj:.0f}. I don't guess. I calculate.",
+    "SE: {name}, ${sal}, {actual:.0f} FP. {tag} play. The model called it. I published it.",
+    "{name} at ${sal}. {tag} pick. {actual:.0f} actual on {proj:.0f} projected. That's edge.",
+    "Locked {name} in the {tag} slot at ${sal}. {actual:.0f}. The data was clear. The result was clearer.",
 ]
 
 _SE_PICK_MISS = [
     "{name} bricked — {actual:.0f} on {proj:.0f}. Bad beat. Process was right, outcome wasn't.",
     "{name}: {actual:.0f} on a {proj:.0f} line. Didn't hit. Math doesn't bat 1.000.",
+    "{name} went for {actual:.0f} on {proj:.0f}. Miss. The model was right about the spot. The player wasn't.",
+    "{name}: {actual:.0f} actual, {proj:.0f} projected. Variance. Not changing the approach over one data point.",
+    "Miss on {name} — {actual:.0f} on a {proj:.0f} line. Bad outcome. Right process. I've made peace with that math.",
+    "{name} at {actual:.0f} on {proj:.0f}. Bricked. The spot was right. The result wasn't. That's variance.",
+    "{name}: {actual:.0f} on {proj:.0f}. Didn't cash. Same call tomorrow in the same spot. The math doesn't change.",
+    "Took an L on {name} — {actual:.0f} on a {proj:.0f} line. Process was sound. Outcome was noise.",
 ]
 
 _SE_LINEUP_SUMMARY_GOOD = [
     "SE lineups went {hit_count}-of-{total} on the night. The board delivered.",
     "{hit_count} of {total} SE lineups cleared. Not bad for a Thursday.",
     "The picks went {hit_count}-for-{total}. Process works. Results follow.",
+    "SE results: {hit_count} of {total}. Clean night. Same process tomorrow.",
+    "{hit_count}-of-{total} SE picks hit. The model keeps earning its keep.",
+    "SE went {hit_count} for {total}. Good night at the board.",
+    "{hit_count} of {total} SE picks landed. Process. Patience. Results.",
+    "SE board: {hit_count}/{total}. The data did the work. I just followed it.",
 ]
 
 _SE_LINEUP_SUMMARY_BAD = [
     "SE lineups went {hit_count}-of-{total}. Rough night. Back at it.",
     "{hit_count} of {total} cleared. Not the night. Process doesn't change.",
+    "SE went {hit_count} for {total}. Off night. The model recalibrates. So do I.",
+    "{hit_count}-of-{total} on SE picks. Variance night. Same approach tomorrow.",
+    "SE picks: {hit_count} of {total}. Not the results. Still the process. Moving on.",
+    "{hit_count} of {total} SE lineups hit. Bad sample. The math doesn't panic over one night.",
+    "SE board: {hit_count}/{total}. Rough slate. Process stays the same.",
+    "{hit_count}-of-{total}. SE took an L. One night doesn't rewrite the system.",
 ]
 
 # ── Generic fallback templates (when no SE archive exists) ──
@@ -108,6 +235,16 @@ _HIT_TEMPLATES = [
     "{name} at {actual:.0f} on a {proj:.0f} line. The data was clear. The field was busy arguing about something else.",
     "{name}: {actual:.0f} actual vs {proj:.0f} projected. Edges don't announce themselves. You have to do the work.",
     "{name} hit {actual:.0f} against {proj:.0f}. Clean read, clean result. That's the whole process.",
+    "{name}: {actual:.0f} on a {proj:.0f} line. The model saw it. The field didn't. That's the gap.",
+    "{name} went for {actual:.0f}. Projected {proj:.0f}. Straightforward edge. Straightforward result.",
+    "{name} delivered {actual:.0f} on a {proj:.0f} projection. Not flashy. Just correct.",
+    "{name}: {actual:.0f} actual, {proj:.0f} projected. The number was right there for anyone willing to look.",
+    "{name} hit for {actual:.0f} on a {proj:.0f} line. The field ignored it. The scoreboard didn't.",
+    "{name} dropped {actual:.0f} against {proj:.0f}. The kind of pick that looks obvious in hindsight. It wasn't.",
+    "{name} for {actual:.0f} on {proj:.0f}. I followed the data. The data was right. End of story.",
+    "{name}: {actual:.0f} on {proj:.0f}. No debate. Just the number.",
+    "{name} went for {actual:.0f} against a {proj:.0f} line. The model doesn't get nervous. Neither do I.",
+    "{name}: {actual:.0f} actual. {proj:.0f} projected. Edge identified, edge exploited. That's how this works.",
 ]
 
 _MISS_TEMPLATES = [
@@ -121,6 +258,16 @@ _MISS_TEMPLATES = [
     "{name}: {actual:.0f} on a {proj:.0f} line. The popular answer is rarely the profitable one.",
     "{name} at {actual:.0f} against {proj:.0f}. Ownership was high. Output was not. Correlation isn't always your friend.",
     "{name} went for {actual:.0f} on {proj:.0f} projected. The field copied each other's homework. Same grade.",
+    "{name}: {actual:.0f} on {proj:.0f}. The crowd's pick. The crowd's result. Nobody learned anything.",
+    "{name} at {actual:.0f} vs {proj:.0f}. When everyone's on the same side, the other side is usually right.",
+    "{name} bricked — {actual:.0f} on {proj:.0f}. The narrative sold it. The box score told the truth.",
+    "{name}: {actual:.0f} actual, {proj:.0f} projected. The field followed the name. The name didn't deliver.",
+    "{name} went for {actual:.0f} on a {proj:.0f} line. Group-think premium: paid in full.",
+    "{name} at {actual:.0f}. Projected {proj:.0f}. Popular. Confident. Wrong.",
+    "{name}: {actual:.0f} on {proj:.0f}. The crowd was loud about this one. Loud doesn't mean right.",
+    "{name} laid down {actual:.0f} against a {proj:.0f} line. The consensus case sounded great. The scoreboard disagreed.",
+    "{name}: {actual:.0f} vs {proj:.0f}. The field went all-in. The results went the other way.",
+    "{name} at {actual:.0f} on a {proj:.0f} projection. The most popular pick on the board. The least productive too.",
 ]
 
 _PATTERN_TEMPLATES_CHALK_HELD = [
@@ -130,6 +277,12 @@ _PATTERN_TEMPLATES_CHALK_HELD = [
     "Top salaries cleared at {hit_count}-of-{total}. The field got lucky. Luck doesn't compound.",
     "{hit_count}-of-{total} top salaries hit. Chalk held this slate. Regression is patient — it'll collect eventually.",
     "High-priced chalk: {hit_count}-of-{total}. Credit where it's due. But one night doesn't change the base rates.",
+    "Chalk cleared {hit_count} of {total}. Good for them. The question is whether it changes your approach. It shouldn't.",
+    "Top salaries: {hit_count}-of-{total}. Chalk night. Happens. Don't confuse correlation with causation.",
+    "{hit_count} of {total} expensive plays hit. Chalk works until it doesn't. The base rates haven't changed.",
+    "Chalk went {hit_count}-of-{total}. One good night doesn't make paying up a system. But the results were real.",
+    "High-salary plays: {hit_count}/{total}. Chalk held. File it. Don't build a strategy around one sample.",
+    "Top-tier chalk: {hit_count} of {total} cleared. Nice night for the lazy process. It won't last.",
 ]
 
 _PATTERN_TEMPLATES_CHALK_CRUMBLED = [
@@ -139,11 +292,22 @@ _PATTERN_TEMPLATES_CHALK_CRUMBLED = [
     "{hit_count}-of-{total} chalk plays hit. Expensive and wrong. The field's favorite combination.",
     "Chalk at {hit_count}-of-{total}. Paying up for comfort is still paying up. The scoreboard doesn't offer refunds.",
     "Only {hit_count} of {total} top salaries delivered. The field paid retail for names and got wholesale results.",
+    "Top salaries: {hit_count} of {total}. Chalk crumbled. The field paid up for familiarity and got burned for it.",
+    "{hit_count}-of-{total} chalk plays cleared. The expensive names cost exactly what they're worth — too much.",
+    "Chalk went {hit_count} of {total}. The field's instinct was to pay up. The scoreboard's instinct was to humble them.",
+    "Only {hit_count} of {total} high-priced plays hit. The field confused expensive with good. Different things.",
+    "Top-{total} salaries: {hit_count} cleared. Chalk failed. The field's most confident picks were its worst.",
+    "{hit_count} of {total} chalk plays delivered. The premium names collected the salary. They didn't return the value.",
 ]
 
 
 def _load_previous_archive(sport: str) -> Tuple[Optional[pd.DataFrame], Optional[Dict[str, Any]]]:
     """Load the most recent SE picks + edge_analysis archive (up to 7 days).
+
+    Searches two locations in priority order:
+      1. data/lineup_archive/ — dedicated archive files
+      2. data/published/{sport}/ — the most-recently published edge analysis
+         (only used when its slate date is strictly before today)
 
     Returns (se_picks_df, edge_analysis_dict) — either can be None.
     """
@@ -152,39 +316,59 @@ def _load_previous_archive(sport: str) -> Tuple[Optional[pd.DataFrame], Optional
     from .config import YAKOS_ROOT
 
     archive_dir = Path(YAKOS_ROOT) / "data" / "lineup_archive"
-    if not archive_dir.exists():
-        return None, None
+    published_dir = Path(YAKOS_ROOT) / "data" / "published" / sport.lower()
 
     se_picks: Optional[pd.DataFrame] = None
     edge_analysis: Optional[Dict[str, Any]] = None
+    archive_ea_date: Optional[date] = None
     today = date.today()
 
-    for days_back in range(1, 8):
-        check = today - timedelta(days=days_back)
-        date_str = check.isoformat()
+    # --- Source 1: lineup_archive directory ---
+    if archive_dir.exists():
+        for days_back in range(1, 8):
+            check = today - timedelta(days=days_back)
+            date_str = check.isoformat()
 
-        # SE picks
-        if se_picks is None:
-            for f in sorted(archive_dir.glob(f"{date_str}_*_se_picks.parquet")):
-                try:
-                    df = pd.read_parquet(f)
-                    if "player_name" in df.columns:
-                        se_picks = df
-                        break
-                except Exception:
-                    continue
+            # SE picks
+            if se_picks is None:
+                for f in sorted(archive_dir.glob(f"{date_str}_*_se_picks.parquet")):
+                    try:
+                        df = pd.read_parquet(f)
+                        if "player_name" in df.columns:
+                            se_picks = df
+                            break
+                    except Exception:
+                        continue
 
-        # Edge analysis (Board calls)
-        if edge_analysis is None:
-            ea_path = archive_dir / f"{date_str}_{sport.lower()}_edge_analysis.json"
-            if ea_path.exists():
-                try:
-                    edge_analysis = json.loads(ea_path.read_text())
-                except Exception:
-                    pass
+            # Edge analysis (Board calls)
+            if edge_analysis is None:
+                ea_path = archive_dir / f"{date_str}_{sport.lower()}_edge_analysis.json"
+                if ea_path.exists():
+                    try:
+                        edge_analysis = json.loads(ea_path.read_text())
+                        archive_ea_date = check
+                    except Exception:
+                        pass
 
-        if se_picks is not None and edge_analysis is not None:
-            break
+            if se_picks is not None and edge_analysis is not None:
+                break
+
+    # --- Source 2: published edge analysis ---
+    # Use the published edge analysis when its slate date is strictly before
+    # today AND more recent than any archive edge analysis found above.
+    if published_dir.exists():
+        meta_path = published_dir / "slate_meta.json"
+        ea_path = published_dir / "edge_analysis.json"
+        if meta_path.exists() and ea_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text())
+                pub_date_str = meta.get("date", "")
+                pub_date = date.fromisoformat(pub_date_str) if pub_date_str else None
+                if pub_date and pub_date < today:
+                    if archive_ea_date is None or pub_date > archive_ea_date:
+                        edge_analysis = json.loads(ea_path.read_text())
+            except Exception:
+                pass
 
     return se_picks, edge_analysis
 
@@ -410,7 +594,7 @@ def _find_salary_mismatches(pool: pd.DataFrame, mentioned: set) -> List[str]:
     candidates = df[(df["underpriced_pct"] > 0.15) & (~df["player_name"].isin(mentioned))]
     mispriced = candidates.nlargest(3, "underpriced_pct")
 
-    # Salary Mismatch templates (target: 10)
+    # Salary Mismatch templates (25)
     _MISMATCH_TEMPLATES = [
         "{name} at ${sal} is mispriced. {proj:.0f} projected, {pts_1k:.1f} pts/$1K. The kind of inefficiency that doesn't survive lock.",
         "{name} at ${sal} with {proj:.0f} projected. {pts_1k:.1f} pts/$1K. The market is wrong on this one and the market doesn't self-correct before lock.",
@@ -422,6 +606,21 @@ def _find_salary_mismatches(pool: pd.DataFrame, mentioned: set) -> List[str]:
         "${sal} for {name} with {proj:.0f} projected. {pts_1k:.1f} pts/$1K. Mispriced. The math is straightforward.",
         "{name}: ${sal}, {proj:.0f} projected, {pts_1k:.1f} pts/$1K. Price is wrong. That's the whole thesis.",
         "{name} at ${sal} projecting {proj:.0f}. {pts_1k:.1f} per $1K. This is the kind of gap that wins slates. Quietly.",
+        "{name}, ${sal}. {proj:.0f} projected at {pts_1k:.1f} pts/$1K. The salary doesn't match the projection. I trust the projection.",
+        "${sal} for {name}. {proj:.0f} projected. {pts_1k:.1f} per $1K. The field priced this by name. The model priced it by output.",
+        "{name} at ${sal}. {proj:.0f} projected, {pts_1k:.1f} pts/$1K. Salary is a sticker price. Projection is the appraisal. They disagree.",
+        "{name}: {proj:.0f} projected at ${sal}. {pts_1k:.1f} per $1K. Pricing inefficiency. The field doesn't run this math.",
+        "${sal}. {name}. {proj:.0f} projected. {pts_1k:.1f} pts/$1K. The salary says one thing. The data says another. I'll take the data.",
+        "{name} at ${sal}, {proj:.0f} projected. {pts_1k:.1f} per $1K. Underpriced relative to output. That's the definition of value.",
+        "{name}: ${sal}, {proj:.0f} projected, {pts_1k:.1f} pts/$1K. The gap between price and production is the edge. This one has a gap.",
+        "${sal} for {name} projecting {proj:.0f}. {pts_1k:.1f} pts/$1K. The market mispriced this. Markets do that.",
+        "{name} at ${sal}. {proj:.0f} projected. {pts_1k:.1f} per $1K. This is the salary equivalent of finding money on the sidewalk.",
+        "{name}: ${sal}. {proj:.0f} projected. {pts_1k:.1f} pts/$1K. Mismatch. The model sees it. The pricing doesn't reflect it.",
+        "${sal} for {name}. {proj:.0f} FP. {pts_1k:.1f} per $1K. The price is lagging the projection. That's an edge.",
+        "{name} at ${sal} with {proj:.0f} projected. {pts_1k:.1f} per $1K. When the price and the production diverge, bet on production.",
+        "{name}, ${sal}, {pts_1k:.1f} pts/$1K. {proj:.0f} projected. The salary was set before the situation was clear. The situation is clear now.",
+        "{name} at ${sal}. {proj:.0f} projected. {pts_1k:.1f} per $1K. The pricing algorithm missed this. The model didn't.",
+        "{name}: ${sal}, {proj:.0f} projected. {pts_1k:.1f} pts per $1K. Below market rate. That's the whole play.",
     ]
 
     callouts = []
@@ -453,7 +652,7 @@ def _find_ownership_traps(pool: pd.DataFrame, mentioned: set) -> List[str]:
     # Top 5 by ownership, skip already-mentioned
     top_owned = df[~df["player_name"].isin(mentioned)].nlargest(5, own_col)
 
-    # Ownership Trap templates (target: 10)
+    # Ownership Trap templates (25)
     _TRAP_TEMPLATES = [
         "{own:.0f}% of the field is on {name} this slate. {flags}. The scoreboard doesn't care how popular the pick was.",
         "{own:.0f}% of the field lined up behind {name}. {flags}. That's not conviction, that's a crowded trade.",
@@ -465,6 +664,21 @@ def _find_ownership_traps(pool: pd.DataFrame, mentioned: set) -> List[str]:
         "{own:.0f}% of the field lined up for {name}. {flags}. The consensus loved this one. Consensus has a losing record.",
         "{name}, {own:.0f}% owned. {flags}. Everyone's on the same side of this. That's not an edge — it's exposure.",
         "{own:.0f}% on {name}. {flags}. This is what a crowded trade looks like. Same mechanics every time.",
+        "{name}: {own:.0f}% owned. {flags}. High traffic, low edge. The field is selling each other the same ticket.",
+        "{own:.0f}% ownership. {name}. {flags}. The crowd is confident. The data is not. I know which I trust.",
+        "{name} at {own:.0f}% owned. {flags}. This isn't conviction — it's a popularity contest. GPPs don't reward popular.",
+        "{own:.0f}% on {name}. {flags}. The field loves certainty. The scoreboard loves variance. Pick a side.",
+        "{name}: {own:.0f}%. {flags}. The consensus case sounds great until the flags start waving.",
+        "{own:.0f}% of the field piled into {name}. {flags}. The risk isn't in the player. It's in the crowd.",
+        "{name}, {own:.0f}% owned. {flags}. Same pick, same lineup, same result. The field never learns.",
+        "{own:.0f}% ownership on {name}. {flags}. High ownership + red flags = negative expected leverage.",
+        "{name} at {own:.0f}%. {flags}. The field went with the comfortable pick. Comfort has a cost.",
+        "{own:.0f}% on {name} with flags. {flags}. The crowd sees the upside. The model sees the context.",
+        "{name}: {own:.0f}% owned. {flags}. Crowded trade with structural risk. The math doesn't support the hype.",
+        "{own:.0f}% on {name}. {flags}. Everyone's on this for the same reason. That reason doesn't account for the risk.",
+        "{name} at {own:.0f}% owned. {flags}. The field followed the narrative. The data wrote a different one.",
+        "{own:.0f}% ownership. {name}. {flags}. When the whole field is in, the downside is all yours.",
+        "{name}: {own:.0f}%. {flags}. Popular and flagged. The field sees one. The model sees both.",
     ]
 
     callouts = []
@@ -524,7 +738,7 @@ def _find_contrarian_windows(pool: pd.DataFrame, mentioned: set) -> List[str]:
     # Score contrarian value: good DvP + high projection relative to salary
     low_owned["pts_per_1k"] = low_owned["proj"] / (low_owned["salary"] / 1000)
 
-    # Contrarian Main templates (target: 10)
+    # Contrarian Main templates (25)
     _CONTRARIAN_TEMPLATES = [
         "{name} at {own:.0f}% owned. The field didn't do the work — {reason}. This is the kind of edge that doesn't show up in a group chat.",
         "{name} sitting at {own:.0f}% owned. {reason}. Nobody bothered to look. That's the whole edge.",
@@ -536,9 +750,24 @@ def _find_contrarian_windows(pool: pd.DataFrame, mentioned: set) -> List[str]:
         "{name} at {own:.0f}% ownership. {reason}. The field went with the popular name. This is the unpopular math.",
         "{own:.0f}% owned. {name}. {reason}. The crowd went left. The data says right.",
         "{name}: {own:.0f}%. {reason}. Sometimes the best play is the one nobody's making.",
+        "{name} at {own:.0f}% owned. {reason}. Low traffic means high upside when it hits. The setup is there.",
+        "{own:.0f}% on {name}. {reason}. The field scrolled past this. That's the opportunity.",
+        "{name}: {own:.0f}% owned. {reason}. The quiet side of the board. Where the money actually is.",
+        "{name} at {own:.0f}%. {reason}. Nobody's arguing about this name. That's exactly why I like it.",
+        "{own:.0f}% ownership on {name}. {reason}. The field is loud about the wrong names. This is the right one.",
+        "{name}, {own:.0f}% owned. {reason}. When the field ignores a good spot, that's not a mistake — it's a gift.",
+        "{name}: {own:.0f}%. {reason}. The popular picks get the attention. The profitable ones get the results.",
+        "{own:.0f}% on {name}. {reason}. The data supports it. The field hasn't noticed. Both can be true.",
+        "{name} at {own:.0f}% owned. {reason}. Underowned with a structural edge. That's the sweet spot.",
+        "{name}: {own:.0f}%. {reason}. The field didn't scroll this far down. Their loss.",
+        "{own:.0f}% ownership. {name}. {reason}. The gap between what the field thinks and what the data says — that's leverage.",
+        "{name} at {own:.0f}% owned. {reason}. Low owned for the wrong reasons. The right reasons say play.",
+        "{name}, {own:.0f}% owned. {reason}. The model flagged this. The field didn't. I trust the model.",
+        "{own:.0f}% on {name}. {reason}. Edge plus anonymity. The field can't fade what it doesn't see.",
+        "{name}: {own:.0f}%. {reason}. The unpopular math. The profitable math. Same thing.",
     ]
 
-    # Contrarian Fallback templates (target: 8)
+    # Contrarian Fallback templates (20)
     _CONTRARIAN_FALLBACK = [
         "{name} at ${sal} with {proj:.0f} projected and only {own:.0f}% owned. The field is asleep.",
         "{name} at ${sal}, {proj:.0f} projected, {own:.0f}% owned. When nobody's looking, that's when you look harder.",
@@ -548,9 +777,21 @@ def _find_contrarian_windows(pool: pd.DataFrame, mentioned: set) -> List[str]:
         "{name}, ${sal}, {proj:.0f} projected. {own:.0f}% owned. Overlooked and underpriced. That's the sweet spot.",
         "{name}: {proj:.0f} projected, ${sal}, {own:.0f}% owned. The numbers work. The field didn't bother to check.",
         "{name} at ${sal}, {proj:.0f} projected, {own:.0f}% owned. Low traffic, good odds. I'll take it.",
+        "${sal}. {name}. {proj:.0f} projected. {own:.0f}% owned. The field is busy elsewhere. I'm busy here.",
+        "{name}: ${sal}, {proj:.0f} FP, {own:.0f}% owned. Cheap, productive, ignored. The trifecta.",
+        "{name} at ${sal}. {proj:.0f} projected at {own:.0f}% owned. The field missed this. The model didn't.",
+        "${sal} for {name}. {proj:.0f} projected. {own:.0f}% ownership. Below the radar. Above the line.",
+        "{name}, ${sal}. {proj:.0f} projected, {own:.0f}% owned. Not the popular pick. That's the point.",
+        "{name} at ${sal}, {proj:.0f} projected, {own:.0f}% owned. The quiet plays are often the loudest scorers.",
+        "${sal}. {name}. {proj:.0f} FP. {own:.0f}% owned. The field spent their attention elsewhere.",
+        "{name}: ${sal}. {proj:.0f} projected. {own:.0f}% owned. Underowned by negligence, not by design.",
+        "{name} at ${sal} with {proj:.0f} projected. {own:.0f}% owned. The gap between price and attention is the edge.",
+        "${sal} for {name}. {proj:.0f} projected. {own:.0f}% owned. Nobody's talking about this. That's not an accident.",
+        "{name}: ${sal}, {proj:.0f} projected, {own:.0f}% owned. Ignored doesn't mean bad. Sometimes it means opportunity.",
+        "{name} at ${sal}. {proj:.0f} projected, {own:.0f}% owned. The field doesn't do the math on this tier. I do.",
     ]
 
-    # Lotto templates (target: 8)
+    # Lotto templates (20)
     _LOTTO_TEMPLATES = [
         "GPP lotto tickets: {names}. Low owned, high environment, mispriced. One of these hits and your lineup separates.",
         "GPP lotto shelf: {names}. The field walked right past them. One hit changes the whole slate.",
@@ -560,6 +801,18 @@ def _find_contrarian_windows(pool: pd.DataFrame, mentioned: set) -> List[str]:
         "GPP lotto: {names}. Ignored by the field. Supported by the numbers. Pick your side.",
         "Lotto window: {names}. Low owned, high ceiling environment. These are the asymmetric plays.",
         "Lotto candidates: {names}. The field priced them out of conversation. The scoreboard might price them back in.",
+        "GPP lotto shelf: {names}. Cheap names, right spots. The kind of plays that turn lineups into winners.",
+        "Lotto picks: {names}. Low salary, low ownership, high upside. The field didn't bother. I did.",
+        "Lotto tier: {names}. Nobody's rostering these for the right reasons. The math says they should.",
+        "GPP lotto: {names}. The bottom of the salary sheet. The top of the value chart. That's the play.",
+        "Deep roster: {names}. Low owned, right situation. The field doesn't win slates with popular names.",
+        "Lotto plays: {names}. Cheap, overlooked, and in the right game. That's asymmetric risk.",
+        "Lotto shelf: {names}. The field is busy fighting over the expensive names. These are the quiet winners.",
+        "GPP lotto candidates: {names}. The field ignored the bottom of the board. The bottom of the board didn't ignore the math.",
+        "Lotto window: {names}. Low ownership, high environment. The kind of names that don't show up in articles. They show up in winning lineups.",
+        "Lotto tier: {names}. The field scrolled past these. The model flagged them. I published them.",
+        "GPP lotto: {names}. Cheap shots at ceiling games. One connects and the slate flips.",
+        "Deep-roster lotto picks: {names}. Under the radar, inside the right spots. That's the formula.",
     ]
 
     # Collect qualified contrarian picks
@@ -626,7 +879,7 @@ def _find_game_environment_edges(pool: pd.DataFrame, mentioned: set = None) -> L
     if df.empty:
         return []
 
-    # Game Environment templates (target: 6)
+    # Game Environment templates (20)
     _GAME_ENV_TEMPLATES = [
         "{t1}-{t2} has a {ou:.0f} total. Pace and points. This is where the math lives this slate.",
         "{t1}-{t2}: {ou:.0f} total. High-volume environment. Stack here or explain why not.",
@@ -634,6 +887,20 @@ def _find_game_environment_edges(pool: pd.DataFrame, mentioned: set = None) -> L
         "{t1}-{t2} at {ou:.0f}. Pace means possessions. Possessions mean opportunity. Simple math.",
         "{t1}-{t2} game sits at {ou:.0f}. High totals correlate with high ceilings. The data is clear.",
         "{ou:.0f} total in {t1}-{t2}. Volume is the best predictor of upside. This game has it.",
+        "{t1}-{t2}: {ou:.0f} total. When the pace is there, the points follow. The pace is there.",
+        "{ou:.0f} on {t1}-{t2}. High game total. High opportunity. The math is uncomplicated.",
+        "{t1}-{t2} at a {ou:.0f} total. This is the game to stack. The environment does the work.",
+        "{ou:.0f} total. {t1}-{t2}. Pace, possessions, points. The correlation holds.",
+        "{t1}-{t2}: {ou:.0f}. The highest total on the board. That's not a coincidence — it's an opportunity.",
+        "{ou:.0f} total in {t1}-{t2}. More possessions, more fantasy points. The relationship hasn't changed.",
+        "{t1}-{t2} game at {ou:.0f}. High-volume spot. The field stacks the popular game. This is the right one.",
+        "{ou:.0f} on {t1}-{t2}. The game environment is doing the heavy lifting. Let it.",
+        "{t1}-{t2}: {ou:.0f} total. Ceiling games start with ceiling environments. This one qualifies.",
+        "{ou:.0f} total for {t1}-{t2}. The math says pace. The pace says points. Follow the chain.",
+        "{t1}-{t2} at {ou:.0f}. Fast game, high total. The model loves this environment. So do I.",
+        "{ou:.0f} on {t1}-{t2}. Game environment edge. The field may stack elsewhere. The data says here.",
+        "{t1}-{t2}: {ou:.0f}. When the total is this high, you don't need to overthink the exposure.",
+        "{ou:.0f} total. {t1}-{t2}. The highest-ceiling environment on the slate. Act accordingly.",
     ]
 
     # Find games with highest over/under
@@ -718,7 +985,7 @@ def generate_tonights_edges(pool: pd.DataFrame) -> List[str]:
 # 3. BUST CALL -- one player, named, bold prediction
 # ---------------------------------------------------------------------------
 
-# Bust: high ownership + specific reasons (target: 10)
+# Bust: high ownership + specific reasons (25)
 _BUST_EXPLANATIONS_HIGH_OWN = [
     "{own:.0f}% of the field lined up for this. {reasons}. When everyone agrees, I get nervous. I've learned to trust that instinct.",
     "{own:.0f}% owned. {reasons}. Everyone agreed on this pick — and that's exactly the problem.",
@@ -730,9 +997,24 @@ _BUST_EXPLANATIONS_HIGH_OWN = [
     "{name}: {own:.0f}% owned. {reasons}. When the whole room leans one direction, check what they're not seeing.",
     "{own:.0f}% ownership on {name}. {reasons}. The consensus pick with consensus blind spots.",
     "{own:.0f}% of the field likes {name}. {reasons}. I've seen this setup before. Different venue, same outcome.",
+    "{name} at {own:.0f}% owned. {reasons}. The field's favorite pick with the field's blind spot.",
+    "{own:.0f}% ownership. {reasons}. The crowd is in. The flags are up. I'm out.",
+    "{name}: {own:.0f}%. {reasons}. Popular + problematic = the fade of the night.",
+    "{own:.0f}% on {name}. {reasons}. The field rushed to consensus. Consensus rushed to the wrong answer.",
+    "{name} at {own:.0f}% owned. {reasons}. The whole room agreed. The data didn't get a vote.",
+    "{own:.0f}% ownership on {name}. {reasons}. High conviction from the crowd, low support from the model. I'll take the model.",
+    "{name}: {own:.0f}%. {reasons}. The popular pick with the unpopular matchup. The scoreboard doesn't care about popularity.",
+    "{own:.0f}% of the field is on {name}. {reasons}. The louder the consensus, the quieter the edge.",
+    "{name} at {own:.0f}% owned. {reasons}. When this many people agree, somebody missed something.",
+    "{own:.0f}% ownership. {reasons}. The field is all-in. The context says fold.",
+    "{name}: {own:.0f}% owned. {reasons}. Crowded + flagged. The field will learn this lesson again tonight.",
+    "{own:.0f}% on {name}. {reasons}. The consensus tax is about to collect.",
+    "{name} at {own:.0f}% owned. {reasons}. Popular and exposed. The field's worst combination.",
+    "{own:.0f}% ownership on {name}. {reasons}. I've faded this setup a hundred times. The results haven't changed.",
+    "{name}: {own:.0f}%. {reasons}. The crowd went all-in. The red flags went unread.",
 ]
 
-# Bust: low ownership + specific reasons (target: 8)
+# Bust: low ownership + specific reasons (20)
 _BUST_EXPLANATIONS_LOW_OWN = [
     "{own:.0f}% owned, but the price tag is a trap. {reasons}. The salary says star, the situation says sit.",
     "{own:.0f}% owned — doesn't matter. {reasons}. Projections don't match reality here and the scoreboard won't either.",
@@ -742,9 +1024,21 @@ _BUST_EXPLANATIONS_LOW_OWN = [
     "{name}: {own:.0f}% owned. {reasons}. Not many people are on this. The few who are have the wrong read.",
     "Only {own:.0f}% on {name}. {reasons}. Low owned for a reason, but the reason isn't what the field thinks.",
     "{own:.0f}% owned. {reasons}. The salary looks right until you check the context. Then it doesn't.",
+    "{name} at {own:.0f}% owned. {reasons}. Low traffic doesn't mean safe. The situation is the risk.",
+    "{own:.0f}% ownership on {name}. {reasons}. The field mostly passed. The ones who didn't will wish they had.",
+    "Only {own:.0f}% on {name}. {reasons}. Low ownership doesn't fix a broken situation.",
+    "{name}: {own:.0f}%. {reasons}. Not popular. Not good. Two separate problems, same player.",
+    "{own:.0f}% on {name}. {reasons}. The salary attracted the brave few. The context should have scared them off.",
+    "{name} at {own:.0f}% owned. {reasons}. The field mostly avoided this. Credit where it's due. Now avoid it too.",
+    "{own:.0f}% owned. {reasons}. Low ownership is a feature when the spot is bad. This spot is bad.",
+    "Only {own:.0f}% on {name}. {reasons}. The crowd didn't bite. The crowd is right this time.",
+    "{name}: {own:.0f}% owned. {reasons}. Cheap ownership doesn't make a bad matchup good.",
+    "{own:.0f}% ownership. {reasons}. The price drew some interest. The situation should have killed it.",
+    "{name} at {own:.0f}%. {reasons}. Not many are in. The ones who are should get out.",
+    "Only {own:.0f}% ownership on {name}. {reasons}. The low ownership is correct. The context confirms it.",
 ]
 
-# Bust: high ownership fallback — no specific reasons (target: 6)
+# Bust: high ownership fallback — no specific reasons (15)
 _BUST_FALLBACK_HIGH_OWN = [
     "{own:.0f}% owned and the numbers don't support it. Popularity isn't an edge. Never was.",
     "The field loves {name} at {own:.0f}% this slate. The data doesn't. I'll take the data.",
@@ -752,9 +1046,18 @@ _BUST_FALLBACK_HIGH_OWN = [
     "{own:.0f}% ownership on {name}. High conviction from the field, low conviction from the model. Mismatch.",
     "{name}: {own:.0f}% owned. The crowd says yes. The math says no. This isn't a close call.",
     "The field piled into {name} at {own:.0f}%. The data doesn't agree. I've seen enough to trust the data.",
+    "{own:.0f}% on {name}. The field went all-in. The model didn't. I follow the model.",
+    "{name} at {own:.0f}% owned. Popular and overpriced. The field's favorite combination.",
+    "{own:.0f}% ownership. The field loves this. The model doesn't. Different methodologies, different conclusions.",
+    "{name}: {own:.0f}%. The crowd consensus isn't backed by model consensus. That's the mismatch.",
+    "The field loaded up on {name} at {own:.0f}%. The model says pass. The math is clear.",
+    "{own:.0f}% on {name}. High traffic. Low conviction from the model. I'll take the quiet side.",
+    "{name} at {own:.0f}% owned. The field's confidence exceeds the model's. When that happens, I trust the model.",
+    "{own:.0f}% ownership on {name}. The crowd's conviction is strong. The data's conviction is stronger — in the other direction.",
+    "{name}: {own:.0f}%. Popular pick. Unpopular model score. The model doesn't have feelings.",
 ]
 
-# Bust: low ownership fallback — no specific reasons (target: 6)
+# Bust: low ownership fallback — no specific reasons (15)
 _BUST_FALLBACK_LOW_OWN = [
     "{own:.0f}% owned — low exposure, but still a bad bet. The salary is doing the selling, not the data.",
     "Only {own:.0f}% of the field bit on {name}, but the price tag still doesn't add up. Pass.",
@@ -762,9 +1065,18 @@ _BUST_FALLBACK_LOW_OWN = [
     "{own:.0f}% on {name}. The field mostly avoided this. They got it right.",
     "{name}: {own:.0f}% owned. Low ownership for a reason. The math confirmed it.",
     "Only {own:.0f}% on {name}. Even the field got this one right. The situation doesn't add up.",
+    "{name} at {own:.0f}% owned. The field passed. The model agrees. Pass.",
+    "{own:.0f}% ownership on {name}. Not popular. Not a good play either. Both things are true.",
+    "Only {own:.0f}% on {name}. The field saw through it. So did the model.",
+    "{name}: {own:.0f}% owned. Low ownership. Low model score. Both signals align.",
+    "{own:.0f}% on {name}. The field didn't want it. The data doesn't either.",
+    "{name} at {own:.0f}% owned. Quiet ownership, quiet projection. Nothing to chase here.",
+    "Only {own:.0f}% on {name}. The field was right to pass. The model confirms it.",
+    "{own:.0f}% ownership. {name}. Not enough field support, not enough model support. Easy pass.",
+    "{name}: {own:.0f}%. The field and the model agree: pass. When both agree, listen.",
 ]
 
-# Bust: fade fallback — from pre-classified fade candidates (target: 6)
+# Bust: fade fallback — from pre-classified fade candidates (15)
 _BUST_FADE_FALLBACK = [
     "The model doesn't like it at {own:.0f}% owned. The field followed each other into this one. Don't follow them.",
     "{own:.0f}% owned and the model is fading it. The data says pass. I agree.",
@@ -772,6 +1084,15 @@ _BUST_FADE_FALLBACK = [
     "{own:.0f}% ownership. The model flagged this as a fade. Not every popular pick is a good pick.",
     "The model says fade at {own:.0f}% owned. When the crowd and the model disagree, I side with the model.",
     "{own:.0f}% owned. Model fade. The field can have this one.",
+    "Faded at {own:.0f}% owned. The model saw something the field didn't. I trust the model.",
+    "{own:.0f}% ownership. Fade flag from the model. The data doesn't support the play.",
+    "Model fade at {own:.0f}% owned. The field went in. I'm stepping aside.",
+    "{own:.0f}% owned. The model flagged it. The model has a better track record than the crowd.",
+    "Fade at {own:.0f}% ownership. The model's conviction is clear. So is mine.",
+    "{own:.0f}% owned. Model says fade. I don't argue with the model.",
+    "The model faded this at {own:.0f}% owned. When the data speaks, I listen.",
+    "{own:.0f}% ownership. Fade. The model and I agree. The field can disagree all they want.",
+    "Model fade. {own:.0f}% owned. The crowd went one way. The data went the other. I follow the data.",
 ]
 
 
