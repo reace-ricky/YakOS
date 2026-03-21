@@ -39,18 +39,25 @@ class IncompleteSlateError(ValueError):
 # ---------------------------------------------------------------------------
 
 SEARCH_SPACE: Dict[str, Dict[str, Any]] = {
-    # Build scoring weights
-    "GPP_PROJ_WEIGHT":          {"low": 0.10, "high": 0.60, "step": 0.05},
-    "GPP_UPSIDE_WEIGHT":        {"low": 0.10, "high": 0.60, "step": 0.05},
-    "GPP_BOOM_WEIGHT":          {"low": 0.10, "high": 0.50, "step": 0.05},
-    "GPP_OWN_PENALTY_STRENGTH": {"low": 0.3,  "high": 2.5,  "step": 0.1},
-    "GPP_BUST_PENALTY":         {"low": 0.0,  "high": 0.25, "step": 0.05},
-    "MAX_EXPOSURE":             {"low": 0.20, "high": 0.60, "step": 0.05},
+    # Build scoring weights (bounds match PARAM_GUARDRAILS in nudge_params.py)
+    "GPP_PROJ_WEIGHT":          {"low": 0.05, "high": 0.60, "step": 0.05},
+    "GPP_UPSIDE_WEIGHT":        {"low": 0.0,  "high": 0.70, "step": 0.05},
+    "GPP_BOOM_WEIGHT":          {"low": 0.0,  "high": 0.50, "step": 0.05},
+    "GPP_OWN_PENALTY_STRENGTH": {"low": 0.0,  "high": 2.5,  "step": 0.1},
+    "GPP_BUST_PENALTY":         {"low": 0.0,  "high": 0.30, "step": 0.05},
+    "MAX_EXPOSURE":             {"low": 0.20, "high": 1.0,  "step": 0.05},
     "GPP_SMASH_WEIGHT":         {"low": 0.0,  "high": 0.30, "step": 0.05},
+    "GPP_LEVERAGE_WEIGHT":      {"low": 0.0,  "high": 0.30, "step": 0.05},
+    "OWN_WEIGHT":               {"low": 0.0,  "high": 0.30, "step": 0.05},
+    # Sniper signals
+    "GPP_BOOM_SPREAD_WEIGHT":   {"low": 0.0,  "high": 0.50, "step": 0.05},
+    "GPP_SNIPER_WEIGHT":        {"low": 0.0,  "high": 0.50, "step": 0.05},
+    "GPP_EFFICIENCY_WEIGHT":    {"low": 0.0,  "high": 0.30, "step": 0.05},
+    "CASH_FLOOR_WEIGHT":        {"low": 0.0,  "high": 1.0,  "step": 0.05},
     # Ricky ranking weights
     "w_gpp":                    {"low": 0.0,  "high": 2.0,  "step": 0.1},
     "w_ceil":                   {"low": 0.0,  "high": 2.0,  "step": 0.1},
-    "w_own":                    {"low": 0.0,  "high": 1.0,  "step": 0.1},
+    "w_own":                    {"low": 0.0,  "high": 2.0,  "step": 0.1},
 }
 
 # Keys that go into the Ricky ranker vs the optimizer config
@@ -102,6 +109,14 @@ _CASH_SEARCH_OVERRIDES: Dict[str, Dict[str, Any]] = {
     "GPP_UPSIDE_WEIGHT": {"low": 0.0, "high": 0.15, "step": 0.05},
     "GPP_BOOM_WEIGHT":   {"low": 0.0, "high": 0.10, "step": 0.05},
     "GPP_OWN_PENALTY_STRENGTH": {"low": 0.0, "high": 0.5, "step": 0.1},
+    "CASH_FLOOR_WEIGHT": {"low": 0.0, "high": 1.0, "step": 0.05},
+    "GPP_EFFICIENCY_WEIGHT": {"low": 0.0, "high": 0.20, "step": 0.05},
+}
+
+# Showdown — smaller pool, wider own penalty range is acceptable
+_SHOWDOWN_SEARCH_OVERRIDES: Dict[str, Dict[str, Any]] = {
+    "GPP_OWN_PENALTY_STRENGTH": {"low": 0.0, "high": 1.0, "step": 0.1},
+    "GPP_UPSIDE_WEIGHT": {"low": 0.10, "high": 0.70, "step": 0.05},
 }
 
 # DS-recommended starting points per contest type
@@ -143,9 +158,38 @@ DS_RECOMMENDATIONS: Dict[str, Dict[str, Any]] = {
         "GPP_BUST_PENALTY": 0.25,
         "GPP_LEVERAGE_WEIGHT": 0.0,
         "OWN_WEIGHT": 0.0,
+        "CASH_FLOOR_WEIGHT": 0.50,
+        "GPP_EFFICIENCY_WEIGHT": 0.05,
         "MAX_EXPOSURE": 0.60,
-        "w_gpp": 0.5,
+        "w_gpp": 0.3,
         "w_ceil": 0.3,
+        "w_own": 0.0,
+    },
+    "Showdown GPP": {
+        "GPP_PROJ_WEIGHT": 0.20,
+        "GPP_UPSIDE_WEIGHT": 0.50,
+        "GPP_BOOM_WEIGHT": 0.30,
+        "GPP_OWN_PENALTY_STRENGTH": 0.40,
+        "GPP_SMASH_WEIGHT": 0.0,
+        "GPP_BUST_PENALTY": 0.10,
+        "GPP_LEVERAGE_WEIGHT": 0.0,
+        "OWN_WEIGHT": 0.0,
+        "MAX_EXPOSURE": 0.50,
+        "w_gpp": 0.0,
+        "w_ceil": 1.0,
+        "w_own": 0.10,
+    },
+    "Showdown Cash": {
+        "GPP_PROJ_WEIGHT": 0.35,
+        "GPP_UPSIDE_WEIGHT": 0.15,
+        "GPP_BOOM_WEIGHT": 0.0,
+        "GPP_OWN_PENALTY_STRENGTH": 0.0,
+        "GPP_SMASH_WEIGHT": 0.0,
+        "GPP_LEVERAGE_WEIGHT": 0.0,
+        "OWN_WEIGHT": 0.0,
+        "MAX_EXPOSURE": 0.60,
+        "w_gpp": 0.3,
+        "w_ceil": 0.5,
         "w_own": 0.0,
     },
 }
@@ -407,10 +451,12 @@ def _suggest_params(
 
     # Apply contest-type-specific search space overrides
     effective_space = dict(SEARCH_SPACE)
-    if contest_type == "Cash":
+    if contest_type in ("Cash", "Showdown Cash"):
         for k, v in _CASH_SEARCH_OVERRIDES.items():
-            if k in effective_space:
-                effective_space[k] = v
+            effective_space[k] = v
+    if contest_type in ("Showdown GPP", "Showdown Cash"):
+        for k, v in _SHOWDOWN_SEARCH_OVERRIDES.items():
+            effective_space[k] = v
 
     for key, spec in effective_space.items():
         val = trial.suggest_float(key, spec["low"], spec["high"], step=spec["step"])
@@ -667,9 +713,11 @@ def _get_objective_value(
 ) -> Optional[float]:
     """Extract contest-type-specific objective value from a pipeline run.
 
-    SE GPP:  Maximize SE Core actual FP (current behavior).
-    MME GPP: Maximize best-of-N actual FP (best lineup in batch).
-    Cash:    Maximize % of lineups above estimated cash line (260 FP).
+    SE GPP:        Maximize SE Core actual + 300+ count bonus.
+    MME GPP:       Maximize best-of-N actual FP + top-5 avg bonus.
+    Cash:          Maximize % of lineups above estimated cash line (260 FP).
+    Showdown GPP:  Maximize SE Core actual (adapted for 6-player lineups).
+    Showdown Cash: Maximize % above showdown cash line (180 FP).
     """
     summary = run.get("summary_df")
     if summary is None or summary.empty:
@@ -680,13 +728,28 @@ def _get_objective_value(
         return None
 
     if contest_type == "SE GPP":
-        return _get_se_core_actual(run)
+        se_core = _get_se_core_actual(run)
+        if se_core is None:
+            return None
+        # Bonus for 300+ lineups (sniper metric)
+        count_300 = float((actuals >= 300.0).sum())
+        return se_core + count_300 * 2.0
     elif contest_type == "MME GPP":
-        return float(actuals.max())
+        best = float(actuals.max())
+        # Bonus for top-5 avg (sniper metric)
+        top5 = actuals.nlargest(min(5, len(actuals)))
+        top5_avg = float(top5.mean())
+        return best * 0.6 + top5_avg * 0.4
     elif contest_type == "Cash":
         cash_line = 260.0
         n_above = (actuals >= cash_line).sum()
         return float(n_above / len(actuals)) * 100  # percentage
+    elif contest_type == "Showdown GPP":
+        return _get_se_core_actual(run)
+    elif contest_type == "Showdown Cash":
+        cash_line = 180.0
+        n_above = (actuals >= cash_line).sum()
+        return float(n_above / len(actuals)) * 100
     else:
         return _get_se_core_actual(run)
 

@@ -1205,6 +1205,7 @@ def _render_promote_config(
     # otherwise fall back to preset name.  This gives promoted configs
     # human-readable names like "Stars & Scrubs Ceiling" instead of
     # "GPP_MAIN_V1".
+    # Widget keys are preset-scoped so switching contest type resets defaults.
     if archetype_name and archetype_name != "Default":
         _base_label = archetype_name  # e.g. "Stars & Scrubs Ceiling"
     else:
@@ -1212,20 +1213,22 @@ def _render_promote_config(
     _default_key = _base_label.upper().replace(" ", "_").replace("&", "AND") + "_V1"
     _default_display = _base_label
 
+    # Use preset-scoped widget keys so switching contest type resets the fields
+    _promote_key_suffix = preset_name.replace(" ", "_").lower()
     config_key = st.text_input(
         "Config Key",
         value=_default_key,
-        key="promote_config_key",
+        key=f"promote_config_key_{_promote_key_suffix}",
     )
     config_display = st.text_input(
         "Display Name",
         value=_default_display,
-        key="promote_config_display",
+        key=f"promote_config_display_{_promote_key_suffix}",
     )
     config_desc = st.text_input(
         "Description (optional)",
         value="",
-        key="promote_config_desc",
+        key=f"promote_config_desc_{_promote_key_suffix}",
     )
 
     if st.button("Promote Config", type="primary", key="promote_config_btn"):
@@ -2153,12 +2156,55 @@ def _compute_nudge_metrics(
     else:
         metrics["lineup_diversity_min_cores"] = None
 
+    # ── 11. Sniper metrics ─────────────────────────────────────────────────
+    # 300+ Lineup Count: count of lineups scoring >= 300 FP
+    lineup_300_counts: list = []
+    avg_ceil_vals: list = []
+    avg_own_vals: list = []
+    top5_avg_vals: list = []
+    cash_prox_vals: list = []
+    spread_vals: list = []
+    cash_line_ref = 287.0
+
+    for run in runs:
+        sdf = run.get("summary_df")
+        if sdf is None or sdf.empty:
+            continue
+        if "total_actual" in sdf.columns:
+            actuals_s = sdf["total_actual"].dropna()
+            if not actuals_s.empty:
+                lineup_300_counts.append(float((actuals_s >= 300.0).sum()))
+                # Top-5 avg score
+                top5 = actuals_s.nlargest(min(5, len(actuals_s)))
+                top5_avg_vals.append(float(top5.mean()))
+                # Cash proximity: % within 30 FP of cash line
+                cash_prox = ((actuals_s >= cash_line_ref - 30) & (actuals_s <= cash_line_ref + 30)).sum()
+                cash_prox_vals.append(float(cash_prox) / float(len(actuals_s)))
+                # Score spread (std dev)
+                if len(actuals_s) >= 2:
+                    spread_vals.append(float(actuals_s.std()))
+        if "total_ceil" in sdf.columns:
+            ceil_s = sdf["total_ceil"].dropna()
+            if not ceil_s.empty:
+                avg_ceil_vals.append(float(ceil_s.mean()))
+        if "avg_own_pct" in sdf.columns:
+            own_s = sdf["avg_own_pct"].dropna()
+            if not own_s.empty:
+                avg_own_vals.append(float(own_s.mean()))
+
+    metrics["lineup_300_count"] = round(float(mean(lineup_300_counts)), 1) if lineup_300_counts else None
+    metrics["avg_ceiling"] = round(float(mean(avg_ceil_vals)), 1) if avg_ceil_vals else None
+    metrics["avg_ownership"] = round(float(mean(avg_own_vals)), 4) if avg_own_vals else None
+    metrics["top5_avg_score"] = round(float(mean(top5_avg_vals)), 1) if top5_avg_vals else None
+    metrics["cash_proximity_pct"] = round(float(mean(cash_prox_vals)), 4) if cash_prox_vals else None
+    metrics["score_spread"] = round(float(mean(spread_vals)), 1) if spread_vals else None
+
     return metrics
 
 
 def _fmt_nudge_value(metric_name: str, value: float) -> str:
     """Format a metric value for display in the nudge table."""
-    if metric_name in ("top_1pct_rate", "cash_rate", "ricky_top3_hit"):
+    if metric_name in ("top_1pct_rate", "cash_rate", "ricky_top3_hit", "cash_proximity_pct"):
         return f"{value:.1%}"
     if metric_name in ("mae", "bias", "correlation", "ricky_rank_corr"):
         return f"{value:.3f}"
@@ -2166,6 +2212,12 @@ def _fmt_nudge_value(metric_name: str, value: float) -> str:
         return f"{int(value)} cores"
     if metric_name == "ricky_top3_lift":
         return f"{value:+.1f}%"
+    if metric_name == "lineup_300_count":
+        return f"{value:.1f}"
+    if metric_name in ("avg_ceiling", "top5_avg_score", "score_spread"):
+        return f"{value:.1f} FP"
+    if metric_name == "avg_ownership":
+        return f"{value:.1%}"
     return f"{value:.1f}"
 
 
@@ -2211,9 +2263,8 @@ def _render_nudge_guidance(
 
     with st.expander("🎯 Calibration Nudge Guidance", expanded=False):
         st.caption(
-            f"Diagnostic metrics for **{profile_key}** — "
-            "review all recommendations below, then click **Apply All** "
-            "to update all parameters at once (prevents one-at-a-time drift)."
+            f"Calibration Nudge Guidance — diagnostic recommendations for **{profile_key}** "
+            "based on your batch results. Use sliders to adjust manually, or run Auto-Calibrate."
         )
 
         metrics = _compute_nudge_metrics(batch, profile_key)
@@ -2346,50 +2397,6 @@ def _render_nudge_guidance(
                     st.info("Cross-effects: " + " · ".join(cross_warnings))
             except ImportError:
                 pass
-
-        # ── Apply All Recommendations button ──────────────────────────
-        if all_suggestions:
-            st.divider()
-            n_changes = len(all_suggestions)
-            if st.button(
-                f"Apply All Recommendations ({n_changes} changes)",
-                key="nudge_apply_all",
-                type="primary",
-                use_container_width=True,
-            ):
-                sk = _sandbox_config_key(preset_name)
-                if sk not in st.session_state:
-                    st.session_state[sk] = {}
-                _rk = f"sim_lab_ricky_weights_{preset_name}"
-                if _rk not in st.session_state:
-                    st.session_state[_rk] = {}
-
-                applied_params = []
-                for sug in all_suggestions:
-                    param = sug["param"]
-                    sug_val = sug["suggested_value"]
-                    has_slider = sug["has_slider"]
-                    storage = sug.get("storage", "sandbox")
-
-                    if storage == "ricky_weights":
-                        st.session_state[_rk][param] = sug_val
-                        if has_slider:
-                            slider_key = f"sl_ricky_{param.replace('w_', '')}_{preset_name}"
-                            st.session_state.pop(slider_key, None)
-                    else:
-                        st.session_state[sk][param] = sug_val
-                        if has_slider:
-                            slider_key = f"sl_{preset_name}_{param}"
-                            st.session_state.pop(slider_key, None)
-                    applied_params.append(f"{param}→{sug_val}")
-
-                _save_slider_state(
-                    preset_name,
-                    dict(st.session_state.get(sk, {})),
-                    dict(st.session_state.get(_rk, {})),
-                )
-                st.toast(f"Applied {n_changes} changes: {', '.join(applied_params)}")
-                st.rerun()
 
         # ── Reset to Defaults + Re-run batch buttons ─────────────────────
         st.divider()
@@ -2616,7 +2623,7 @@ def _render_auto_calibrate(
     )
 
     # Contest type selector
-    _autocal_contest_types = ["SE GPP", "MME GPP", "Cash"]
+    _autocal_contest_types = ["SE GPP", "MME GPP", "Cash", "Showdown GPP", "Showdown Cash"]
     autocal_contest_type = st.selectbox(
         "Contest type objective",
         _autocal_contest_types,

@@ -425,6 +425,9 @@ def _add_scores(
     gpp_catalyst_w   = float(cfg.get("GPP_CATALYST_WEIGHT", 0.0))
     gpp_bust_pen     = float(cfg.get("GPP_BUST_PENALTY", 0.0))
     gpp_efficiency_w = float(cfg.get("GPP_EFFICIENCY_WEIGHT", 0.0))
+    gpp_boom_spread_w = float(cfg.get("GPP_BOOM_SPREAD_WEIGHT", 0.0))
+    gpp_sniper_w = float(cfg.get("GPP_SNIPER_WEIGHT", 0.0))
+    cash_floor_w_gpp = float(cfg.get("CASH_FLOOR_WEIGHT", 0.0))
 
     edge_bonus = pd.Series(0.0, index=df.index)
 
@@ -518,6 +521,39 @@ def _add_scores(
                 edge_bonus = edge_bonus + _norm01(ec) * gpp_ricky_edge_w
         except Exception:
             pass  # graceful fallback — don't break builds if ricky_signals unavailable
+
+    # 13. Boom spread signal (SIM99TH - SIM50TH, normalized)
+    if gpp_boom_spread_w > 0:
+        boom_spread = boom  # already computed as SIM99TH - SIM50TH
+        edge_bonus = edge_bonus + _norm01(boom_spread) * gpp_boom_spread_w
+
+    # 14. Sniper score composite: norm(floor) + norm(ceil)
+    if gpp_sniper_w > 0:
+        floor_col = None
+        if "floor" in df.columns:
+            floor_col = pd.to_numeric(df["floor"], errors="coerce").fillna(0.0)
+        elif "FLOOR" in df.columns:
+            floor_col = pd.to_numeric(df["FLOOR"], errors="coerce").fillna(0.0)
+        if floor_col is not None:
+            sniper_score = _norm01(floor_col) + _norm01(upside)
+            edge_bonus = edge_bonus + _norm01(sniper_score) * gpp_sniper_w
+
+    # 15. Salary efficiency (FPTS / $1K salary)
+    if gpp_efficiency_w > 0 and "fp_efficiency" not in df.columns:
+        if "salary" in df.columns:
+            sal = pd.to_numeric(df["salary"], errors="coerce").fillna(1.0).clip(lower=1.0)
+            eff_signal = df["proj"] / (sal / 1000.0)
+            edge_bonus = edge_bonus + _norm01(eff_signal) * gpp_efficiency_w
+
+    # 16. Cash floor weight (SIM15TH / floor as additive signal for GPP formula)
+    if cash_floor_w_gpp > 0:
+        floor_for_cash = None
+        if "floor" in df.columns:
+            floor_for_cash = pd.to_numeric(df["floor"], errors="coerce").fillna(0.0)
+        elif "FLOOR" in df.columns:
+            floor_for_cash = pd.to_numeric(df["FLOOR"], errors="coerce").fillna(0.0)
+        if floor_for_cash is not None:
+            edge_bonus = edge_bonus + _norm01(floor_for_cash) * cash_floor_w_gpp
 
     df["gpp_score"] = (
         df["proj"] * gpp_proj_w

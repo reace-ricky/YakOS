@@ -23,6 +23,13 @@ CALIBRATION_TARGETS: dict[str, dict[str, tuple[float, float]]] = {
         "cash_rate": (0.05, 0.15),        # NEW — % of lineups above cash line
         "ownership_sum": (90.0, 130.0),
         "top_1pct_rate": (0.04, 1.0),
+        # Sniper metrics
+        "lineup_300_count": (0.5, 10.0),       # want at least ~1 per batch of 25-40
+        "avg_ceiling": (295.0, 350.0),          # lineup ceiling should be in this range
+        "avg_ownership": (0.06, 0.20),          # on 0-1 scale
+        "top5_avg_score": (240.0, 300.0),       # top 5 should beat the batch avg significantly
+        "cash_proximity_pct": (0.05, 0.25),     # 5-25% of lineups near cash line
+        "score_spread": (30.0, 60.0),           # healthy spread in outcomes
     },
     "classic_gpp_20max": {
         "mae": (5.5, 9.0),
@@ -34,6 +41,13 @@ CALIBRATION_TARGETS: dict[str, dict[str, tuple[float, float]]] = {
         "ownership_sum": (80.0, 120.0),
         "top_1pct_rate": (0.03, 1.0),
         "lineup_diversity_min_cores": (3.0, 20.0),
+        # Sniper metrics
+        "lineup_300_count": (1.0, 15.0),
+        "avg_ceiling": (295.0, 350.0),
+        "avg_ownership": (0.06, 0.20),
+        "top5_avg_score": (240.0, 300.0),
+        "cash_proximity_pct": (0.05, 0.25),
+        "score_spread": (30.0, 60.0),
     },
     "classic_gpp_se": {
         "mae": (5.5, 9.0),
@@ -43,6 +57,13 @@ CALIBRATION_TARGETS: dict[str, dict[str, tuple[float, float]]] = {
         "se_core_target": (250.0, 290.0), # NEW
         "ownership_sum": (60.0, 90.0),
         "top_1pct_rate": (0.03, 1.0),
+        # Sniper metrics
+        "lineup_300_count": (0.5, 10.0),
+        "avg_ceiling": (295.0, 350.0),
+        "avg_ownership": (0.06, 0.20),
+        "top5_avg_score": (240.0, 300.0),
+        "cash_proximity_pct": (0.05, 0.25),
+        "score_spread": (30.0, 60.0),
     },
     "classic_cash": {
         "mae": (5.5, 9.0),
@@ -59,6 +80,13 @@ CALIBRATION_TARGETS: dict[str, dict[str, tuple[float, float]]] = {
         "correlation": (0.70, 1.0),
         "avg_score": (140.0, 200.0),
         "ownership_sum": (70.0, 120.0),
+        # Sniper metrics (showdown: 6 players, lower score scale)
+        "lineup_300_count": (0.0, 5.0),
+        "avg_ceiling": (200.0, 280.0),
+        "avg_ownership": (0.08, 0.25),
+        "top5_avg_score": (160.0, 220.0),
+        "cash_proximity_pct": (0.05, 0.30),
+        "score_spread": (20.0, 50.0),
     },
     "showdown_cash": {
         "mae": (6.0, 9.0),
@@ -85,18 +113,36 @@ CONTEST_TYPE_TARGETS: dict[str, dict[str, tuple[float, float]]] = {
         "ricky_rank_corr": (0.20, 1.0),
         "ricky_top3_hit": (0.30, 1.0),
         "ricky_top3_lift": (3.0, 20.0),
+        "lineup_300_count": (0.5, 10.0),
+        "top5_avg_score": (240.0, 300.0),
     },
     "MME GPP": {
         "avg_lineup_score": (200, 245),
         "best_lineup_target": (280, 330),
         "lineup_diversity": (0.3, 0.6),
         "projection_mae": (5.5, 9.0),
+        "lineup_300_count": (1.0, 15.0),
+        "top5_avg_score": (240.0, 300.0),
     },
     "Cash": {
         "avg_lineup_score": (250, 300),
         "min_lineup_score": (220, 260),
         "bust_rate": (0.0, 0.10),
         "projection_mae": (5.5, 9.0),
+    },
+    "Showdown GPP": {
+        "avg_lineup_score": (140, 200),
+        "se_core_target": (160, 220),
+        "best_lineup_target": (180, 250),
+        "projection_mae": (6.0, 9.0),
+        "lineup_300_count": (0.0, 5.0),
+        "top5_avg_score": (160.0, 220.0),
+    },
+    "Showdown Cash": {
+        "avg_lineup_score": (130, 180),
+        "min_lineup_score": (100, 150),
+        "bust_rate": (0.0, 0.15),
+        "projection_mae": (6.0, 9.0),
     },
 }
 
@@ -144,6 +190,13 @@ METRIC_LABELS: dict[str, str] = {
     "ricky_rank_corr": "Ricky Rank Correlation",
     "projection_mae": "Projection MAE",
     "projection_bias": "Projection Bias",
+    # Sniper metrics
+    "lineup_300_count": "300+ Lineup Count",
+    "avg_ceiling": "Avg Ceiling",
+    "avg_ownership": "Avg Ownership",
+    "top5_avg_score": "Top-5 Avg Score",
+    "cash_proximity_pct": "Cash Line Proximity %",
+    "score_spread": "Score Spread (Std Dev)",
 }
 
 # ── Nudge text: (metric, direction) → recommendation ─────────────────────────
@@ -203,12 +256,12 @@ NUDGE_TEXT: dict[tuple[str, str], str] = {
     ("ricky_top3_lift", "high"): "",  # higher lift is always good
     ("ricky_top3_hit", "low"): (
         "Ricky picks rarely land in the actual top 5. "
-        "Increase GPP score weight to lean on projection quality."
+        "Increase ceiling weight — within-date total_ceil is the strongest signal (r=0.341)."
     ),
     ("ricky_top3_hit", "high"): "",  # higher hit rate is always good
     ("ricky_rank_corr", "low"): (
         "Ricky rank ordering weakly correlated with actual finish. "
-        "Increase GPP score weight or ceiling weight to improve ranking signal."
+        "Increase ceiling weight or ownership weight (positive) to improve ranking signal."
     ),
     ("ricky_rank_corr", "high"): "",  # higher correlation is always good
 }
