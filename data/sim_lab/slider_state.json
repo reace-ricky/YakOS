@@ -2,13 +2,14 @@
   "configs": {
     "GPP Main": {
       "overrides": {
-        "GPP_BOOM_WEIGHT": 0.55,
+        "GPP_BOOM_WEIGHT": 0.5,
         "GPP_LOW_OWN_THRESHOLD": 0.15,
         "MIN_PLAYER_MINUTES": 2,
         "GPP_LEVERAGE_WEIGHT": 0.1,
         "MIN_UNIQUES": 1,
         "GPP_DVP_WEIGHT": 0.11,
-        "GPP_UPSIDE_WEIGHT": 0.25
+        "GPP_PACE_ENV_WEIGHT": 0.12,
+        "GPP_OWN_PENALTY_STRENGTH": 0.7
       },
       "ricky_weights": {
         "w_gpp": 1.0,
