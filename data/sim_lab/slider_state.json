@@ -8,7 +8,7 @@
         "NUM_LINEUPS": 40
       },
       "ricky_weights": {
-        "w_gpp": 1.1,
+        "w_gpp": 1.0,
         "w_ceil": 0.8,
         "w_own": 0.3
       }
