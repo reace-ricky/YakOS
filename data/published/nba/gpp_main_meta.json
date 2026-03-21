@@ -2,8 +2,10 @@
   "contest": "GPP Main",
   "sport": "NBA",
   "num_lineups": 40,
-  "built_at": "2026-03-21 06:31 PM ET",
+  "built_at": "2026-03-21 06:51 PM ET",
   "lock": [],
-  "exclude": [],
+  "exclude": [
+    "John Collins"
+  ],
   "profile_name": "classic_gpp_main"
 }

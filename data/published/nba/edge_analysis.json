@@ -18,7 +18,7 @@
       "proj_minutes": 29.7,
       "sim90th": 76.06,
       "ceil": 73.01,
-      "sim_leverage": 13.09
+      "sim_leverage": 12.63
     },
     {
       "player_name": "Luka Doncic",
@@ -31,7 +31,7 @@
       "proj_minutes": 31.6,
       "sim90th": 79.5,
       "ceil": 77.58,
-      "sim_leverage": 15.18
+      "sim_leverage": 14.74
     },
     {
       "player_name": "Evan Mobley",
@@ -44,7 +44,7 @@
       "proj_minutes": 32.8,
       "sim90th": 62.379999999999995,
       "ceil": 60.9,
-      "sim_leverage": 12.57
+      "sim_leverage": 12.11
     },
     {
       "player_name": "Donovan Mitchell",
@@ -57,7 +57,7 @@
       "proj_minutes": 32.5,
       "sim90th": 60.34,
       "ceil": 56.09,
-      "sim_leverage": 21.99
+      "sim_leverage": 21.58
     },
     {
       "player_name": "James Harden",
@@ -70,7 +70,7 @@
       "proj_minutes": 33.1,
       "sim90th": 56.47,
       "ceil": 54.29,
-      "sim_leverage": 23.04
+      "sim_leverage": 22.63
     }
   ],
   "leverage_plays": [
@@ -85,7 +85,7 @@
       "proj_minutes": 33.5,
       "sim90th": 60.86,
       "ceil": 55.7,
-      "sim_leverage": 83.51
+      "sim_leverage": 83.42
     },
     {
       "player_name": "PJ Washington",
@@ -98,7 +98,7 @@
       "proj_minutes": 29.1,
       "sim90th": 41.26,
       "ceil": 33.14,
-      "sim_leverage": 25.65
+      "sim_leverage": 25.79
     },
     {
       "player_name": "VJ Edgecombe",
@@ -111,7 +111,7 @@
       "proj_minutes": 34.2,
       "sim90th": 54.0,
       "ceil": 48.86,
-      "sim_leverage": 78.8
+      "sim_leverage": 78.68
     },
     {
       "player_name": "Ryan Rollins",
@@ -124,7 +124,7 @@
       "proj_minutes": 34.7,
       "sim90th": 48.51,
       "ceil": 44.25,
-      "sim_leverage": 74.61
+      "sim_leverage": 74.47
     },
     {
       "player_name": "Marcus Smart",
@@ -137,7 +137,7 @@
       "proj_minutes": 27.6,
       "sim90th": 31.689999999999998,
       "ceil": 25.16,
-      "sim_leverage": 7.85
+      "sim_leverage": 7.89
     }
   ],
   "value_plays": [
@@ -152,7 +152,7 @@
       "proj_minutes": 24.2,
       "sim90th": 43.62,
       "ceil": 31.19,
-      "sim_leverage": -37.17
+      "sim_leverage": -36.84
     },
     {
       "player_name": "Dylan Harper",
@@ -165,7 +165,7 @@
       "proj_minutes": 24.1,
       "sim90th": 47.88,
       "ceil": 35.1,
-      "sim_leverage": -23.04
+      "sim_leverage": -23.16
     },
     {
       "player_name": "Tyler Burton",
@@ -178,7 +178,7 @@
       "proj_minutes": 22.692,
       "sim90th": 33.660000000000004,
       "ceil": 24.55,
-      "sim_leverage": 2.88
+      "sim_leverage": 2.89
     },
     {
       "player_name": "Olivier-Maxence Prosper",
@@ -191,7 +191,7 @@
       "proj_minutes": 23.436,
       "sim90th": 42.900000000000006,
       "ceil": 30.91,
-      "sim_leverage": -9.69
+      "sim_leverage": -9.74
     },
     {
       "player_name": "Jordan Goodwin",
@@ -204,7 +204,7 @@
       "proj_minutes": 23.1,
       "sim90th": 38.550000000000004,
       "ceil": 29.53,
-      "sim_leverage": 47.91
+      "sim_leverage": 48.16
     }
   ],
   "fade_candidates": [
@@ -219,7 +219,7 @@
       "proj_minutes": 4.5,
       "sim90th": 1.28,
       "ceil": 1.09,
-      "sim_leverage": -54.45
+      "sim_leverage": -54.74
     },
     {
       "player_name": "Nicolas Batum",
@@ -232,7 +232,7 @@
       "proj_minutes": 16.2,
       "sim90th": 5.96,
       "ceil": 4.64,
-      "sim_leverage": -50.26
+      "sim_leverage": -50.53
     },
     {
       "player_name": "Jordan McLaughlin",
@@ -245,7 +245,7 @@
       "proj_minutes": 5.2,
       "sim90th": 11.67,
       "ceil": 11.39,
-      "sim_leverage": 5.5
+      "sim_leverage": 5.53
     },
     {
       "player_name": "Malevy Leons",
@@ -258,7 +258,7 @@
       "proj_minutes": 3.2550000000000003,
       "sim90th": 13.07,
       "ceil": 12.03,
-      "sim_leverage": -34.03
+      "sim_leverage": -34.21
     },
     {
       "player_name": "Josh Green",
@@ -271,7 +271,7 @@
       "proj_minutes": 17.8,
       "sim90th": 12.360000000000001,
       "ceil": 9.21,
-      "sim_leverage": -46.07
+      "sim_leverage": -46.32
     }
   ],
   "signals_df_path": "signals.parquet"
