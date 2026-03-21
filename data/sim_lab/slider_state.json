@@ -1,25 +1,11 @@
 {
   "configs": {
     "GPP Main": {
-      "overrides": {
-        "GPP_PROJ_WEIGHT": 0.25,
-        "GPP_UPSIDE_WEIGHT": 0.35,
-        "GPP_BOOM_WEIGHT": 0.5,
-        "GPP_OWN_PENALTY_STRENGTH": 0.3,
-        "GPP_BUST_PENALTY": 0.25,
-        "MAX_EXPOSURE": 1.0,
-        "GPP_SMASH_WEIGHT": 0.0,
-        "GPP_LEVERAGE_WEIGHT": 0.0,
-        "OWN_WEIGHT": 0.0,
-        "GPP_BOOM_SPREAD_WEIGHT": 0.2,
-        "GPP_SNIPER_WEIGHT": 0.4,
-        "GPP_EFFICIENCY_WEIGHT": 0.3,
-        "CASH_FLOOR_WEIGHT": 0.0
-      },
+      "overrides": {},
       "ricky_weights": {
-        "w_gpp": 0.2,
-        "w_ceil": 1.0,
-        "w_own": 0.15
+        "w_gpp": 0.1,
+        "w_ceil": 1.3,
+        "w_own": 0.3
       }
     },
     "Cash Main": {
