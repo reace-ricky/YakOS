@@ -2682,6 +2682,17 @@ def _render_auto_calibrate(
         f"({available_dates[-1]} to {available_dates[0]})"
     )
 
+    # Date filter — let user narrow which slates feed the calibration run
+    selected_dates = st.multiselect(
+        "Filter dates (leave blank to use all)",
+        options=available_dates,
+        default=[],
+        format_func=lambda d: str(d),
+        key="autocal_date_filter",
+        help="Select specific slate dates to include. Leave empty to use all available dates.",
+    )
+    calibration_dates = selected_dates if selected_dates else available_dates
+
     # Run button
     if st.button("Auto-Calibrate", type="primary", key="auto_calibrate_btn"):
         progress = st.progress(0, text="Starting auto-calibration...")
@@ -2697,7 +2708,7 @@ def _render_auto_calibrate(
         try:
             result = run_auto_calibration(
                 preset_name=preset_name,
-                dates=available_dates,
+                dates=calibration_dates,
                 current_ricky_weights=ricky_weights,
                 current_overrides=sandbox_overrides,
                 contest_type=autocal_contest_type,
