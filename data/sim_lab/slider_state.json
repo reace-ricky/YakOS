@@ -19,8 +19,7 @@
         "MAX_EXPOSURE": 0.8,
         "MIN_SALARY_USED": 49500,
         "MIN_PLAYER_MINUTES": 20,
-        "GPP_MIN_PROJ_FLOOR": 15,
-        "GPP_PROJ_WEIGHT": 0.41
+        "GPP_MIN_PROJ_FLOOR": 15
       },
       "ricky_weights": {
         "w_gpp": 0.3,
