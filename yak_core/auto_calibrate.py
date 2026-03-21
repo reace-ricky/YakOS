@@ -119,6 +119,51 @@ _SHOWDOWN_SEARCH_OVERRIDES: Dict[str, Dict[str, Any]] = {
     "GPP_UPSIDE_WEIGHT": {"low": 0.10, "high": 0.70, "step": 0.05},
 }
 
+# DS-constrained search bounds for SE GPP.
+# The DS analysis validated these ranges — auto-calibrate should fine-tune
+# within this neighborhood, not explore the entire parameter space.
+# Evidence: ds_expert_analysis.md Section 5.
+_SE_GPP_SEARCH_OVERRIDES: Dict[str, Dict[str, Any]] = {
+    "GPP_PROJ_WEIGHT":          {"low": 0.05, "high": 0.25, "step": 0.05},  # DS: 0.15, range ±0.10
+    "GPP_UPSIDE_WEIGHT":        {"low": 0.30, "high": 0.60, "step": 0.05},  # DS: 0.45, range ±0.15
+    "GPP_BOOM_WEIGHT":          {"low": 0.20, "high": 0.50, "step": 0.05},  # DS: 0.35, range ±0.15
+    "GPP_OWN_PENALTY_STRENGTH": {"low": 0.0,  "high": 0.60, "step": 0.1},   # DS: 0.30, range 0-0.60
+    "GPP_SMASH_WEIGHT":         {"low": 0.0,  "high": 0.10, "step": 0.05},  # DS: 0.0 (sparse binary)
+    "GPP_LEVERAGE_WEIGHT":      {"low": 0.0,  "high": 0.10, "step": 0.05},  # DS: 0.0 (no signal)
+    "OWN_WEIGHT":               {"low": 0.0,  "high": 0.10, "step": 0.05},  # DS: 0.0 (anti-chalk hurts)
+    # Ricky weights — DS is very clear on these
+    "w_gpp":                    {"low": 0.0,  "high": 0.3,  "step": 0.1},   # DS: 0.0, allow small exploration
+    "w_ceil":                   {"low": 0.7,  "high": 1.5,  "step": 0.1},   # DS: 1.0, range ±0.3-0.5
+    "w_own":                    {"low": 0.0,  "high": 0.40, "step": 0.05},  # DS: 0.15 (positive!)
+}
+
+_MME_GPP_SEARCH_OVERRIDES: Dict[str, Dict[str, Any]] = {
+    "GPP_PROJ_WEIGHT":          {"low": 0.05, "high": 0.25, "step": 0.05},
+    "GPP_UPSIDE_WEIGHT":        {"low": 0.30, "high": 0.60, "step": 0.05},
+    "GPP_BOOM_WEIGHT":          {"low": 0.20, "high": 0.50, "step": 0.05},
+    "GPP_OWN_PENALTY_STRENGTH": {"low": 0.0,  "high": 0.60, "step": 0.1},
+    "GPP_SMASH_WEIGHT":         {"low": 0.0,  "high": 0.10, "step": 0.05},
+    "GPP_LEVERAGE_WEIGHT":      {"low": 0.0,  "high": 0.10, "step": 0.05},
+    "OWN_WEIGHT":               {"low": 0.0,  "high": 0.10, "step": 0.05},
+    "MAX_EXPOSURE":             {"low": 0.25, "high": 0.50, "step": 0.05},  # tighter for diversity
+    "w_gpp":                    {"low": 0.0,  "high": 0.3,  "step": 0.1},
+    "w_ceil":                   {"low": 0.7,  "high": 1.5,  "step": 0.1},
+    "w_own":                    {"low": 0.0,  "high": 0.40, "step": 0.05},
+}
+
+_SHOWDOWN_GPP_SEARCH_OVERRIDES: Dict[str, Dict[str, Any]] = {
+    "GPP_PROJ_WEIGHT":          {"low": 0.10, "high": 0.35, "step": 0.05},
+    "GPP_UPSIDE_WEIGHT":        {"low": 0.30, "high": 0.60, "step": 0.05},
+    "GPP_BOOM_WEIGHT":          {"low": 0.15, "high": 0.45, "step": 0.05},
+    "GPP_OWN_PENALTY_STRENGTH": {"low": 0.0,  "high": 0.60, "step": 0.1},   # was 1.5, way too high
+    "GPP_SMASH_WEIGHT":         {"low": 0.0,  "high": 0.10, "step": 0.05},
+    "GPP_LEVERAGE_WEIGHT":      {"low": 0.0,  "high": 0.10, "step": 0.05},
+    "OWN_WEIGHT":               {"low": 0.0,  "high": 0.10, "step": 0.05},
+    "w_gpp":                    {"low": 0.0,  "high": 0.3,  "step": 0.1},
+    "w_ceil":                   {"low": 0.7,  "high": 1.5,  "step": 0.1},
+    "w_own":                    {"low": 0.0,  "high": 0.30, "step": 0.05},
+}
+
 # DS-recommended starting points per contest type
 DS_RECOMMENDATIONS: Dict[str, Dict[str, Any]] = {
     "SE GPP": {
@@ -437,6 +482,38 @@ def filter_incomplete_dates(
     return complete, skipped
 
 
+def _get_effective_space(contest_type: str = "SE GPP") -> Dict[str, Dict[str, Any]]:
+    """Build the effective search space for a contest type.
+
+    Starts from the global SEARCH_SPACE, then applies contest-type-specific
+    overrides that narrow bounds to DS-validated neighborhoods.
+    """
+    effective_space = dict(SEARCH_SPACE)
+    # Apply generic showdown overrides first (wider), then contest-specific
+    # GPP overrides on top (tighter) so the GPP bounds always win.
+    if contest_type in ("Showdown GPP", "Showdown Cash"):
+        for k, v in _SHOWDOWN_SEARCH_OVERRIDES.items():
+            if k in effective_space:
+                effective_space[k] = v
+    if contest_type == "SE GPP":
+        for k, v in _SE_GPP_SEARCH_OVERRIDES.items():
+            if k in effective_space:
+                effective_space[k] = v
+    elif contest_type == "MME GPP":
+        for k, v in _MME_GPP_SEARCH_OVERRIDES.items():
+            if k in effective_space:
+                effective_space[k] = v
+    elif contest_type == "Showdown GPP":
+        for k, v in _SHOWDOWN_GPP_SEARCH_OVERRIDES.items():
+            if k in effective_space:
+                effective_space[k] = v
+    elif contest_type in ("Cash", "Showdown Cash"):
+        for k, v in _CASH_SEARCH_OVERRIDES.items():
+            if k in effective_space:
+                effective_space[k] = v
+    return effective_space
+
+
 def _suggest_params(
     trial: optuna.Trial,
     contest_type: str = "SE GPP",
@@ -444,19 +521,12 @@ def _suggest_params(
     """Have Optuna suggest a full parameter set.
 
     Returns (optimizer_overrides, ricky_weights).
-    Contest-type-specific bounds are applied for Cash contests.
+    Contest-type-specific bounds are applied per contest type.
     """
     overrides: Dict[str, Any] = {}
     ricky: Dict[str, float] = {}
 
-    # Apply contest-type-specific search space overrides
-    effective_space = dict(SEARCH_SPACE)
-    if contest_type in ("Cash", "Showdown Cash"):
-        for k, v in _CASH_SEARCH_OVERRIDES.items():
-            effective_space[k] = v
-    if contest_type in ("Showdown GPP", "Showdown Cash"):
-        for k, v in _SHOWDOWN_SEARCH_OVERRIDES.items():
-            effective_space[k] = v
+    effective_space = _get_effective_space(contest_type)
 
     for key, spec in effective_space.items():
         val = trial.suggest_float(key, spec["low"], spec["high"], step=spec["step"])
@@ -919,6 +989,26 @@ def run_auto_calibration(
         sampler=optuna.samplers.TPESampler(seed=42),
         pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=1),
     )
+
+    # Seed the DS recommendation as the first trial so Optuna always
+    # evaluates the expert-validated starting point before exploring.
+    effective_space = _get_effective_space(contest_type)
+    ds_rec = DS_RECOMMENDATIONS.get(contest_type, DS_RECOMMENDATIONS.get("SE GPP", {}))
+    if ds_rec:
+        seed_params: Dict[str, float] = {}
+        for key in effective_space:
+            if key in ds_rec:
+                val = ds_rec[key]
+                spec = effective_space[key]
+                # Clamp to search bounds
+                val = max(spec["low"], min(spec["high"], val))
+                # Snap to step grid
+                step = spec.get("step", 0.05)
+                val = round(round(val / step) * step, 4)
+                seed_params[key] = val
+        if seed_params:
+            study.enqueue_trial(seed_params)
+            logger.info("Seeded DS recommendation as trial 0: %s", seed_params)
 
     def _objective(trial: optuna.Trial) -> float:
         overrides, ricky = _suggest_params(trial, contest_type=contest_type)
