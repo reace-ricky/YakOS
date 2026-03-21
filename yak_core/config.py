@@ -233,6 +233,7 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "GPP_CATALYST_WEIGHT": 0.05,
         "GPP_LEVERAGE_WEIGHT": 0.0,       # no validated signal
         "OWN_WEIGHT": 0.0,                # contrarian hurts — zeroed
+        "MIN_PLAYER_MINUTES": 18,         # DS: exclude <18 min projected players
         "projection_style": "ceil",
         "volatility": "high",
         "correlation_mode": "stack",
@@ -385,22 +386,28 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
     },
     "Showdown": {
         "display_name": "Showdown GPP",
-        "description": "Showdown — single-game Captain mode, 3 lineups per game",
+        "description": "Showdown — single-game Captain mode, DS-calibrated for single-game pools",
         "slate_type": "Showdown Captain",
         "archetype": "Ceiling Hunter",
         "internal_contest": "Captain",
         "CONTEST_TYPE": "showdown",
-        # Showdown-specific GPP scoring weights (distinct from classic GPP)
-        "GPP_PROJ_WEIGHT": 0.30,
-        "GPP_UPSIDE_WEIGHT": 0.40,
-        "GPP_BOOM_WEIGHT": 0.30,
-        "GPP_OWN_PENALTY_STRENGTH": 1.5,
+        # Showdown GPP scoring weights (DS-calibrated: ownership concentrates naturally)
+        "GPP_PROJ_WEIGHT": 0.20,          # slightly higher than classic — smaller pool
+        "GPP_UPSIDE_WEIGHT": 0.50,        # captain 1.5x makes ceiling even more important
+        "GPP_BOOM_WEIGHT": 0.30,          # boom matters for captain picks
+        "GPP_OWN_PENALTY_STRENGTH": 0.40, # was 1.5! — ownership concentrates naturally in showdown
+        "GPP_SMASH_WEIGHT": 0.0,          # still binary/sparse
+        "GPP_BUST_PENALTY": 0.10,
+        "GPP_LEVERAGE_WEIGHT": 0.0,
+        "OWN_WEIGHT": 0.0,
+        "MIN_PLAYER_MINUTES": 15,         # showdowns use single game, lower threshold
         "projection_style": "ceil",
         "volatility": "high",
         "correlation_mode": "stack",
-        "default_lineups": 3,
-        "default_max_exposure": 0.6,
+        "default_lineups": 20,            # DS-calibrated: 20 lineups for showdown GPP
+        "default_max_exposure": 0.50,     # DS-calibrated: tighter exposure
         "min_salary": 0,  # Showdown has no salary floor — DK only enforces a $50K cap
+        "MIN_UNIQUES": 1,
         # Pool sizing
         "pool_size_min": 10,
         "pool_size_max": 16,
@@ -424,20 +431,23 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
     },
     "Cash Main": {
         "display_name": "Cash (H2H / 50-50)",
-        "description": "Cash / 50-50 / Double-Up — high-floor plays, DS-calibrated for floor optimization",
+        "description": "Cash / 50-50 / Double-Up — floor-first formula, DS-calibrated",
         "slate_type": "Classic",
         "archetype": "Floor Lock",
         "internal_contest": "50/50",
         "CONTEST_TYPE": "cash",
-        # Cash scoring weights (v12 — DS-calibrated: floor optimization)
-        "GPP_PROJ_WEIGHT": 0.35,          # projections more useful for floor
-        "GPP_UPSIDE_WEIGHT": 0.0,         # don't chase ceiling
-        "GPP_BOOM_WEIGHT": 0.0,           # don't chase boom
-        "GPP_OWN_PENALTY_STRENGTH": 0.0,  # go full chalk
+        # Cash scoring weights (DS-calibrated: SIM15TH/floor is primary signal r=0.745)
+        "GPP_PROJ_WEIGHT": 0.35,          # projections useful for cash (cross-player r=0.735)
+        "GPP_UPSIDE_WEIGHT": 0.0,         # no ceiling chasing in cash
+        "GPP_BOOM_WEIGHT": 0.0,           # no boom in cash
+        "GPP_OWN_PENALTY_STRENGTH": 0.0,  # chalk is king
         "GPP_SMASH_WEIGHT": 0.0,
-        "GPP_BUST_PENALTY": 0.25,         # heavily penalize bust risk
+        "GPP_BUST_PENALTY": 0.25,         # penalize bust risk MORE in cash
         "GPP_LEVERAGE_WEIGHT": 0.0,
         "OWN_WEIGHT": 0.0,
+        "CASH_FLOOR_WEIGHT": 0.50,        # primary cash signal — SIM15TH/floor (r=0.745)
+        "GPP_EFFICIENCY_WEIGHT": 0.05,    # salary efficiency matters in cash
+        "MIN_PLAYER_MINUTES": 20,         # strict minutes floor for cash
         "projection_style": "floor",
         "volatility": "low",
         "correlation_mode": "none",
@@ -465,16 +475,25 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
     },
     "Cash Game": {
         "display_name": "Cash Showdown",
-        "description": "Cash / 50-50 / Double-Up for single-game Showdown slates — high-floor, CPT+FLEX",
+        "description": "Cash / 50-50 / Double-Up for single-game Showdown slates — floor-first, CPT+FLEX",
         "slate_type": "Showdown Captain",
         "archetype": "Floor Lock",
         "internal_contest": "50/50",
         "CONTEST_TYPE": "cash",
+        # Showdown Cash scoring weights (DS-calibrated)
+        "GPP_PROJ_WEIGHT": 0.35,          # projections more reliable in single-game
+        "GPP_UPSIDE_WEIGHT": 0.15,
+        "GPP_BOOM_WEIGHT": 0.0,
+        "GPP_OWN_PENALTY_STRENGTH": 0.0,  # chalk is king in cash
+        "GPP_SMASH_WEIGHT": 0.0,
+        "GPP_LEVERAGE_WEIGHT": 0.0,
+        "OWN_WEIGHT": 0.0,
+        "MIN_PLAYER_MINUTES": 18,
         "projection_style": "floor",
         "volatility": "low",
         "correlation_mode": "none",
-        "default_lineups": 1,
-        "default_max_exposure": 0.8,
+        "default_lineups": 10,
+        "default_max_exposure": 0.60,
         "min_salary": 0,  # Showdown has no salary floor — DK only enforces a $50K cap
         # Pool sizing — game slates have fewer players
         "pool_size_min": 10,
@@ -765,6 +784,84 @@ NAMED_PROFILES: Dict[str, Dict[str, Any]] = {
         "description": (
             "Cash for single-game / 3-man slates — slightly more ceiling than Cash Main, "
             "looser constraints for thin player pools"
+        ),
+    },
+    # ── Showdown profiles (new — DS-calibrated) ──────────────────────────
+    "SD_GPP_V1": {
+        "display_name": "Showdown GPP V1 (DS-Calibrated)",
+        "base_preset": "Showdown",
+        "overrides": {
+            "GPP_PROJ_WEIGHT": 0.20,
+            "GPP_UPSIDE_WEIGHT": 0.50,
+            "GPP_BOOM_WEIGHT": 0.30,
+            "GPP_OWN_PENALTY_STRENGTH": 0.40,
+            "GPP_SMASH_WEIGHT": 0.0,
+            "GPP_BUST_PENALTY": 0.10,
+            "GPP_LEVERAGE_WEIGHT": 0.0,
+            "OWN_WEIGHT": 0.0,
+            "MIN_PLAYER_MINUTES": 15,
+            "NUM_LINEUPS": 20,
+            "MAX_EXPOSURE": 0.50,
+            "MIN_UNIQUES": 1,
+        },
+        "ricky_weights": {"w_gpp": 0.0, "w_ceil": 1.0, "w_own": 0.10},
+        "version": "V1",
+        "description": (
+            "DS-calibrated Showdown GPP — reduced own penalty (was 1.5!), "
+            "captain-weighted ceiling, single-game pool sizing."
+        ),
+    },
+    "SD_CASH_V1": {
+        "display_name": "Showdown Cash V1 (DS-Calibrated)",
+        "base_preset": "Cash Game",
+        "overrides": {
+            "GPP_PROJ_WEIGHT": 0.35,
+            "GPP_UPSIDE_WEIGHT": 0.15,
+            "GPP_BOOM_WEIGHT": 0.0,
+            "GPP_OWN_PENALTY_STRENGTH": 0.0,
+            "GPP_SMASH_WEIGHT": 0.0,
+            "GPP_LEVERAGE_WEIGHT": 0.0,
+            "OWN_WEIGHT": 0.0,
+            "MIN_PLAYER_MINUTES": 18,
+            "NUM_LINEUPS": 10,
+            "MAX_EXPOSURE": 0.60,
+        },
+        "ricky_weights": {"w_gpp": 0.3, "w_ceil": 0.5, "w_own": 0.0},
+        "version": "V1",
+        "description": (
+            "DS-calibrated Showdown Cash — floor-first, chalk-friendly, "
+            "single-game pools. For showdown 50/50 and double-ups."
+        ),
+    },
+    # ── SE-specific GPP profile ────────────────────────────────────────────
+    "GPP_SE_V1": {
+        "display_name": "GPP Single Entry V1",
+        "base_preset": "GPP Main",
+        "overrides": {
+            "NUM_LINEUPS": 25,
+            "MAX_EXPOSURE": 0.45,
+            "MIN_UNIQUES": 1,
+        },
+        "ricky_weights": {"w_gpp": 0.0, "w_ceil": 1.0, "w_own": 0.15},
+        "version": "V1",
+        "description": (
+            "Single-entry GPP — same weights as GPP Main V2, fewer lineups, "
+            "Ricky picks the best one."
+        ),
+    },
+    # ── 20-Max profile ─────────────────────────────────────────────────────
+    "GPP_20MAX_V1": {
+        "display_name": "GPP 20-Max V1",
+        "base_preset": "GPP Early",
+        "overrides": {
+            "NUM_LINEUPS": 50,
+            "MAX_EXPOSURE": 0.40,
+            "MIN_UNIQUES": 2,
+        },
+        "ricky_weights": {"w_gpp": 0.0, "w_ceil": 1.0, "w_own": 0.15},
+        "version": "V1",
+        "description": (
+            "20-Max MME GPP — 50 lineups, 2 min uniques, tighter exposure for diversity."
         ),
     },
 }

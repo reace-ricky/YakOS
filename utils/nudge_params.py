@@ -32,14 +32,27 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 PARAM_GUARDRAILS: dict[str, tuple[float, float]] = {
-    "GPP_PROJ_WEIGHT": (0.20, 0.60),
-    "GPP_UPSIDE_WEIGHT": (0.10, 0.60),
-    "GPP_BOOM_WEIGHT": (0.10, 0.50),
-    "GPP_OWN_PENALTY_STRENGTH": (0.5, 2.5),
+    "GPP_PROJ_WEIGHT": (0.05, 0.60),           # was (0.20, 0.60) — DS says 0.15, allow down to 0.05
+    "GPP_UPSIDE_WEIGHT": (0.0, 0.70),            # was (0.10, 0.60) — DS says 0.45 for GPP, 0.0 for Cash
+    "GPP_BOOM_WEIGHT": (0.0, 0.50),             # was (0.10, 0.50) — DS says 0.35, allow 0.0
+    "GPP_OWN_PENALTY_STRENGTH": (0.0, 2.5),     # was (0.5, 2.5) — DS says 0.30, must allow below 0.5
     "GPP_BUST_PENALTY": (0.0, 0.30),
-    "GPP_LOW_OWN_THRESHOLD": (0.05, 0.40),
+    "GPP_LOW_OWN_THRESHOLD": (0.02, 0.40),      # was (0.05, 0.40) — allow tighter threshold
+    "GPP_SMASH_WEIGHT": (0.0, 0.30),            # DS says 0.0 (binary treatment)
+    "GPP_LEVERAGE_WEIGHT": (0.0, 0.30),          # DS says 0.0
+    "OWN_WEIGHT": (0.0, 0.30),                  # DS says 0.0
     "MAX_EXPOSURE": (0.20, 1.0),
     "MIN_UNIQUES": (0, 4),
+    # Sniper signals
+    "GPP_BOOM_SPREAD_WEIGHT": (0.0, 0.50),
+    "GPP_SNIPER_WEIGHT": (0.0, 0.50),
+    "GPP_EFFICIENCY_WEIGHT": (0.0, 0.30),
+    "CASH_FLOOR_WEIGHT": (0.0, 1.0),
+    "MIN_PLAYER_MINUTES": (0, 30),
+    # Ricky weights
+    "w_gpp": (0.0, 2.0),                        # DS says 0.0 is optimal
+    "w_ceil": (0.0, 2.0),
+    "w_own": (0.0, 2.0),                        # DS says +0.15 (positive, not penalty)
 }
 
 
@@ -132,9 +145,9 @@ NUDGE_PARAM_RULES: dict[tuple[str, str], list[dict[str, Any]]] = {
             "slider_min": 0.0,
             "slider_max": 3.0,
             "step": 0.1,
-            "description": "Increase chalk penalty",
+            "description": "Increase chalk penalty (DS: chalk outperforms, keep moderate)",
             "compute": lambda cur, val, lo, hi: round(
-                min(cur + 0.2 * max(0.3, min(_severity(val, lo, hi), 1.5)), 3.0), 1
+                min(cur + 0.1 * max(0.3, min(_severity(val, lo, hi), 1.5)), 0.5), 1
             ),
         },
         {
@@ -361,17 +374,6 @@ NUDGE_PARAM_RULES: dict[tuple[str, str], list[dict[str, Any]]] = {
     # ── Ricky Rank Correlation ────────────────────────────────────────────────
     ("ricky_rank_corr", "low"): [
         {
-            "param": "w_gpp",
-            "label": "GPP Score Weight",
-            "has_slider": True,
-            "slider_min": 0.0,
-            "slider_max": 2.0,
-            "step": 0.05,
-            "storage": "ricky_weights",
-            "description": "Increase GPP score weight to lean ranking on projection quality",
-            "compute": lambda cur, val, lo, hi: round(min(cur + 0.10, 2.0), 2),
-        },
-        {
             "param": "w_ceil",
             "label": "Ceiling Weight",
             "has_slider": True,
@@ -379,22 +381,22 @@ NUDGE_PARAM_RULES: dict[tuple[str, str], list[dict[str, Any]]] = {
             "slider_max": 2.0,
             "step": 0.05,
             "storage": "ricky_weights",
-            "description": "Increase ceiling emphasis to better predict top finishers",
+            "description": "Increase ceiling emphasis — strongest within-date signal (r=0.341)",
             "compute": lambda cur, val, lo, hi: round(min(cur + 0.10, 2.0), 2),
         },
-    ],
-    ("ricky_top3_hit", "low"): [
         {
-            "param": "w_gpp",
-            "label": "GPP Score Weight",
+            "param": "w_own",
+            "label": "Own Weight (positive)",
             "has_slider": True,
             "slider_min": 0.0,
             "slider_max": 2.0,
             "step": 0.05,
             "storage": "ricky_weights",
-            "description": "Increase GPP score weight to lean on projection quality",
-            "compute": lambda cur, val, lo, hi: round(min(cur + 0.10, 2.0), 2),
+            "description": "Increase ownership weight — chalk outperforms (within-date r=+0.256)",
+            "compute": lambda cur, val, lo, hi: round(min(cur + 0.05, 2.0), 2),
         },
+    ],
+    ("ricky_top3_hit", "low"): [
         {
             "param": "w_ceil",
             "label": "Ceiling Weight",
@@ -404,6 +406,17 @@ NUDGE_PARAM_RULES: dict[tuple[str, str], list[dict[str, Any]]] = {
             "step": 0.05,
             "storage": "ricky_weights",
             "description": "Increase ceiling to favor boom lineups in top-5 contention",
+            "compute": lambda cur, val, lo, hi: round(min(cur + 0.10, 2.0), 2),
+        },
+        {
+            "param": "w_own",
+            "label": "Own Weight (positive)",
+            "has_slider": True,
+            "slider_min": 0.0,
+            "slider_max": 2.0,
+            "step": 0.05,
+            "storage": "ricky_weights",
+            "description": "Lean on chalk — higher-owned lineups cash more often (r=+0.256)",
             "compute": lambda cur, val, lo, hi: round(min(cur + 0.05, 2.0), 2),
         },
     ],
