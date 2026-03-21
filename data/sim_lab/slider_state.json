@@ -1,20 +1,7 @@
 {
   "configs": {
     "GPP Main": {
-      "overrides": {
-        "GPP_LOW_OWN_THRESHOLD": 0.1,
-        "GPP_LEVERAGE_WEIGHT": 0.0,
-        "MIN_UNIQUES": 2,
-        "GPP_OWN_PENALTY_STRENGTH": 0.3,
-        "GPP_BUST_PENALTY": 0.15,
-        "NUM_LINEUPS": 25,
-        "GPP_UPSIDE_WEIGHT": 0.45,
-        "GPP_SMASH_WEIGHT": 0.0,
-        "GPP_FORM_WEIGHT": 0.1,
-        "GPP_PROJ_WEIGHT": 0.15,
-        "MIN_PLAYER_MINUTES": 8,
-        "MAX_EXPOSURE": 0.45
-      },
+      "overrides": {},
       "ricky_weights": {
         "w_gpp": 1.0,
         "w_ceil": 0.8,
