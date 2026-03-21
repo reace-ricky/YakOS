@@ -240,6 +240,14 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
             _active_profile = NAMED_PROFILES[_named_key]
             _active_profile_overrides = dict(_active_profile.get("overrides", {}))
             preset.update(_active_profile_overrides)
+        # Also check promoted configs store
+        if not _active_profile and _named_key:
+            from yak_core.promoted_configs import get_promoted_as_named_profile
+            _promoted = get_promoted_as_named_profile(_named_key)
+            if _promoted:
+                _active_profile = _promoted
+                _active_profile_overrides = dict(_promoted.get("overrides", {}))
+                preset.update(_active_profile_overrides)
 
     with col_count:
         num_lineups = st.number_input("Lineups", min_value=1, max_value=150, value=1, key=f"opt_nlu_{sport}")
