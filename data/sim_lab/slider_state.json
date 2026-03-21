@@ -10,7 +10,7 @@
         "GPP_DVP_WEIGHT": 0.1,
         "GPP_PACE_ENV_WEIGHT": 0.11,
         "GPP_OWN_PENALTY_STRENGTH": 0.6,
-        "GPP_BUST_PENALTY": 0.17,
+        "GPP_BUST_PENALTY": 0.15,
         "NUM_LINEUPS": 40
       },
       "ricky_weights": {
