@@ -61,14 +61,70 @@ class AutoCalibrationResult:
     """Result of an auto-calibration run."""
     best_params: Dict[str, float]
     best_ricky_weights: Dict[str, float]
-    best_score: float              # avg SE Core actual FP (positive)
-    baseline_score: float          # avg SE Core actual FP with current defaults
-    per_date_results: List[Dict[str, Any]]  # per-date SE Core actual with best params
-    baseline_per_date: List[Dict[str, Any]]  # per-date SE Core actual with defaults
+    best_score: float              # avg objective value (positive)
+    baseline_score: float          # avg objective value with current defaults
+    per_date_results: List[Dict[str, Any]]  # per-date results with best params
+    baseline_per_date: List[Dict[str, Any]]  # per-date results with defaults
     n_trials: int
     n_dates: int
     improvement_fp: float          # best_score - baseline_score
     improvement_pct: float         # (improvement_fp / baseline_score) * 100
+    contest_type: str = "SE GPP"   # contest type used for optimization
+
+
+# ── Contest-type-specific search space bounds ────────────────────────────────
+# Cash contests should not explore high upside/boom weights.
+_CASH_SEARCH_OVERRIDES: Dict[str, Dict[str, Any]] = {
+    "GPP_UPSIDE_WEIGHT": {"low": 0.0, "high": 0.15, "step": 0.05},
+    "GPP_BOOM_WEIGHT":   {"low": 0.0, "high": 0.10, "step": 0.05},
+    "GPP_OWN_PENALTY_STRENGTH": {"low": 0.0, "high": 0.5, "step": 0.1},
+}
+
+# DS-recommended starting points per contest type
+DS_RECOMMENDATIONS: Dict[str, Dict[str, Any]] = {
+    "SE GPP": {
+        "GPP_PROJ_WEIGHT": 0.15,
+        "GPP_UPSIDE_WEIGHT": 0.45,
+        "GPP_BOOM_WEIGHT": 0.35,
+        "GPP_OWN_PENALTY_STRENGTH": 0.30,
+        "GPP_SMASH_WEIGHT": 0.0,
+        "GPP_BUST_PENALTY": 0.15,
+        "GPP_LEVERAGE_WEIGHT": 0.0,
+        "OWN_WEIGHT": 0.0,
+        "MAX_EXPOSURE": 0.45,
+        "w_gpp": 0.0,
+        "w_ceil": 1.0,
+        "w_own": 0.15,
+    },
+    "MME GPP": {
+        "GPP_PROJ_WEIGHT": 0.15,
+        "GPP_UPSIDE_WEIGHT": 0.45,
+        "GPP_BOOM_WEIGHT": 0.35,
+        "GPP_OWN_PENALTY_STRENGTH": 0.30,
+        "GPP_SMASH_WEIGHT": 0.0,
+        "GPP_BUST_PENALTY": 0.15,
+        "GPP_LEVERAGE_WEIGHT": 0.0,
+        "OWN_WEIGHT": 0.0,
+        "MAX_EXPOSURE": 0.40,
+        "w_gpp": 0.0,
+        "w_ceil": 1.0,
+        "w_own": 0.15,
+    },
+    "Cash": {
+        "GPP_PROJ_WEIGHT": 0.35,
+        "GPP_UPSIDE_WEIGHT": 0.0,
+        "GPP_BOOM_WEIGHT": 0.0,
+        "GPP_OWN_PENALTY_STRENGTH": 0.0,
+        "GPP_SMASH_WEIGHT": 0.0,
+        "GPP_BUST_PENALTY": 0.25,
+        "GPP_LEVERAGE_WEIGHT": 0.0,
+        "OWN_WEIGHT": 0.0,
+        "MAX_EXPOSURE": 0.60,
+        "w_gpp": 0.5,
+        "w_ceil": 0.3,
+        "w_own": 0.0,
+    },
+}
 
 
 def scan_rg_dates() -> List[date]:
@@ -87,15 +143,26 @@ def scan_rg_dates() -> List[date]:
     return dates
 
 
-def _suggest_params(trial: optuna.Trial) -> tuple[Dict[str, Any], Dict[str, float]]:
+def _suggest_params(
+    trial: optuna.Trial,
+    contest_type: str = "SE GPP",
+) -> tuple[Dict[str, Any], Dict[str, float]]:
     """Have Optuna suggest a full parameter set.
 
     Returns (optimizer_overrides, ricky_weights).
+    Contest-type-specific bounds are applied for Cash contests.
     """
     overrides: Dict[str, Any] = {}
     ricky: Dict[str, float] = {}
 
-    for key, spec in SEARCH_SPACE.items():
+    # Apply contest-type-specific search space overrides
+    effective_space = dict(SEARCH_SPACE)
+    if contest_type == "Cash":
+        for k, v in _CASH_SEARCH_OVERRIDES.items():
+            if k in effective_space:
+                effective_space[k] = v
+
+    for key, spec in effective_space.items():
         val = trial.suggest_float(key, spec["low"], spec["high"], step=spec["step"])
         if key in _RICKY_KEYS:
             ricky[key] = val
@@ -328,12 +395,43 @@ def _get_se_core_actual(run: Dict[str, Any]) -> Optional[float]:
     return float(se_core.iloc[0]["total_actual"])
 
 
+def _get_objective_value(
+    run: Dict[str, Any],
+    contest_type: str = "SE GPP",
+) -> Optional[float]:
+    """Extract contest-type-specific objective value from a pipeline run.
+
+    SE GPP:  Maximize SE Core actual FP (current behavior).
+    MME GPP: Maximize best-of-N actual FP (best lineup in batch).
+    Cash:    Maximize % of lineups above estimated cash line (260 FP).
+    """
+    summary = run.get("summary_df")
+    if summary is None or summary.empty:
+        return None
+
+    actuals = summary["total_actual"].dropna()
+    if actuals.empty:
+        return None
+
+    if contest_type == "SE GPP":
+        return _get_se_core_actual(run)
+    elif contest_type == "MME GPP":
+        return float(actuals.max())
+    elif contest_type == "Cash":
+        cash_line = 260.0
+        n_above = (actuals >= cash_line).sum()
+        return float(n_above / len(actuals)) * 100  # percentage
+    else:
+        return _get_se_core_actual(run)
+
+
 def run_auto_calibration(
     preset_name: str,
     dates: List[date],
     current_ricky_weights: Dict[str, float],
     current_overrides: Dict[str, Any] | None = None,
     *,
+    contest_type: str = "SE GPP",
     n_trials: int = 60,
     dates_per_trial: int = 5,
     lineups_per_trial: int = 10,
@@ -352,6 +450,9 @@ def run_auto_calibration(
         Current Ricky ranking weights {"w_gpp": ..., "w_ceil": ..., "w_own": ...}.
     current_overrides : dict, optional
         Current sandbox overrides (used as baseline comparison).
+    contest_type : str
+        "SE GPP" (maximize SE Core actual FP), "MME GPP" (maximize best-of-N),
+        or "Cash" (maximize % above cash line).
     n_trials : int
         Number of Optuna trials (default 60).
     dates_per_trial : int
@@ -372,7 +473,8 @@ def run_auto_calibration(
         raise ValueError(f"Need at least 3 historical dates, got {len(dates)}")
 
     # ── Phase 1: Baseline run with current settings ──────────────────────
-    logger.info("Running baseline evaluation on %d dates...", len(dates))
+    logger.info("Running baseline evaluation on %d dates (contest_type=%s)...",
+                len(dates), contest_type)
     baseline_overrides = dict(current_overrides or {})
     baseline_overrides["NUM_LINEUPS"] = lineups_validation
 
@@ -386,8 +488,8 @@ def run_auto_calibration(
                 ricky_w_ceil=current_ricky_weights.get("w_ceil", 0.8),
                 ricky_w_own=current_ricky_weights.get("w_own", 0.3),
             )
-            se_fp = _get_se_core_actual(run)
-            baseline_results.append({"date": str(d), "se_core_actual": se_fp})
+            obj_val = _get_objective_value(run, contest_type)
+            baseline_results.append({"date": str(d), "se_core_actual": obj_val})
         except Exception as e:
             logger.warning("Baseline failed for %s: %s", d, e)
             baseline_results.append({"date": str(d), "se_core_actual": None})
@@ -399,22 +501,22 @@ def run_auto_calibration(
 
     # ── Phase 2: Optuna optimization ─────────────────────────────────────
     logger.info(
-        "Starting Optuna optimization: %d trials, %d dates/trial",
-        n_trials, dates_per_trial,
+        "Starting Optuna optimization: %d trials, %d dates/trial, contest_type=%s",
+        n_trials, dates_per_trial, contest_type,
     )
 
     study = optuna.create_study(
-        direction="minimize",  # we return negative FP
+        direction="minimize",  # we return negative objective value
         sampler=optuna.samplers.TPESampler(seed=42),
         pruner=optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=1),
     )
 
     def _objective(trial: optuna.Trial) -> float:
-        overrides, ricky = _suggest_params(trial)
+        overrides, ricky = _suggest_params(trial, contest_type=contest_type)
         overrides["NUM_LINEUPS"] = lineups_per_trial
 
         sample = random.sample(dates, min(dates_per_trial, len(dates)))
-        se_actuals: list[float] = []
+        obj_values: list[float] = []
 
         for i, d in enumerate(sample):
             try:
@@ -425,22 +527,22 @@ def run_auto_calibration(
                     ricky_w_ceil=ricky["w_ceil"],
                     ricky_w_own=ricky["w_own"],
                 )
-                se_fp = _get_se_core_actual(run)
-                if se_fp is not None:
-                    se_actuals.append(se_fp)
+                obj_val = _get_objective_value(run, contest_type)
+                if obj_val is not None:
+                    obj_values.append(obj_val)
             except Exception:
                 continue
 
             # Intermediate pruning
-            if se_actuals:
-                trial.report(-mean(se_actuals), i)
+            if obj_values:
+                trial.report(-mean(obj_values), i)
                 if trial.should_prune():
                     raise optuna.TrialPruned()
 
-        if not se_actuals:
+        if not obj_values:
             return 0.0  # worst case
 
-        score = -mean(se_actuals)
+        score = -mean(obj_values)
 
         # Progress callback for UI
         if progress_callback is not None:
@@ -487,10 +589,10 @@ def run_auto_calibration(
                 ricky_w_ceil=best_ricky["w_ceil"],
                 ricky_w_own=best_ricky["w_own"],
             )
-            se_fp = _get_se_core_actual(run)
+            obj_val = _get_objective_value(run, contest_type)
             validation_results.append({
                 "date": str(d),
-                "se_core_actual": se_fp,
+                "se_core_actual": obj_val,
                 "avg_lineup_actual": run.get("avg_actual", 0),
             })
         except Exception as e:
@@ -516,4 +618,5 @@ def run_auto_calibration(
         n_dates=len(dates),
         improvement_fp=round(improvement_fp, 2),
         improvement_pct=round(improvement_pct, 1),
+        contest_type=contest_type,
     )

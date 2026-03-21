@@ -2073,9 +2073,9 @@ def _render_nudge_guidance(
 
     with st.expander("🎯 Calibration Nudge Guidance", expanded=False):
         st.caption(
-            f"Prescriptive nudges for **{profile_key}** — "
-            "click **Apply** to update the slider to the suggested value, "
-            "then re-run the batch to validate."
+            f"Diagnostic metrics for **{profile_key}** — "
+            "review all recommendations below, then click **Apply All** "
+            "to update all parameters at once (prevents one-at-a-time drift)."
         )
 
         metrics = _compute_nudge_metrics(batch, profile_key)
@@ -2092,8 +2092,8 @@ def _render_nudge_guidance(
             elif _m_val > _m_hi:
                 off_target_metrics[_m_name] = "high"
 
-        # ── Column header ────────────────────────────────────────────────
-        _COL_W = [2.2, 1.2, 1.4, 0.6, 2.4, 1.2, 1.2, 0.8]
+        # ── Column header (read-only — no per-row Apply buttons) ──────
+        _COL_W = [2.2, 1.2, 1.4, 0.6, 2.4, 1.2, 1.2]
         hdr = st.columns(_COL_W)
         hdr[0].markdown("**Metric**")
         hdr[1].markdown("**Your Batch**")
@@ -2102,10 +2102,12 @@ def _render_nudge_guidance(
         hdr[4].markdown("**Parameter**")
         hdr[5].markdown("**Current**")
         hdr[6].markdown("**Suggested**")
-        hdr[7].markdown("**Apply**")
         st.divider()
 
         any_rows = False
+        # Collect ALL suggestions for the "Apply All" button
+        all_suggestions: List[Dict[str, Any]] = []
+
         for metric_name, (lo, hi) in targets.items():
             label = METRIC_LABELS.get(metric_name, metric_name)
             value = metrics.get(metric_name)
@@ -2117,7 +2119,6 @@ def _render_nudge_guidance(
                 row[1].write("—")
                 row[2].write(target_str)
                 row[3].write("⚪")
-                # No suggestion possible without data
                 any_rows = True
                 continue
 
@@ -2137,7 +2138,6 @@ def _render_nudge_guidance(
             )
 
             if not suggestions:
-                # On target or no mapping — simple status row
                 row = st.columns(_COL_W)
                 row[0].write(label)
                 row[1].write(value_str)
@@ -2146,7 +2146,7 @@ def _render_nudge_guidance(
                 any_rows = True
                 continue
 
-            # One sub-row per suggestion; metric info only on the first sub-row
+            # One sub-row per suggestion (read-only display — no Apply button)
             for i, sug in enumerate(suggestions):
                 row = st.columns(_COL_W)
                 if i == 0:
@@ -2163,9 +2163,7 @@ def _render_nudge_guidance(
                 param = sug["param"]
                 cur_val = sug["current_value"]
                 sug_val = sug["suggested_value"]
-                has_slider = sug["has_slider"]
 
-                # Format param display: inline code + description as caption
                 row[4].markdown(
                     f"`{param}`  \n"
                     f"<span style='font-size:0.75rem;color:#aaa'>{sug['description']}</span>",
@@ -2183,37 +2181,10 @@ def _render_nudge_guidance(
                         f"**{sug_val}**",
                         help=f"Delta: {delta_str}",
                     )
-                    storage = sug.get("storage", "sandbox")
-                    apply_key = f"nudge_apply_{preset_name}_{metric_name}_{param}_{i}"
-                    if row[7].button("Apply", key=apply_key, type="primary"):
-                        if storage == "ricky_weights":
-                            # Write to Ricky Ranking weights dict
-                            _rk = f"sim_lab_ricky_weights_{preset_name}"
-                            if _rk not in st.session_state:
-                                st.session_state[_rk] = {}
-                            st.session_state[_rk][param] = sug_val
-                            if has_slider:
-                                slider_key = f"sl_ricky_{param.replace('w_', '')}_{preset_name}"
-                                st.session_state.pop(slider_key, None)
-                        else:
-                            # Write to sandbox config dict
-                            sk = _sandbox_config_key(preset_name)
-                            if sk not in st.session_state:
-                                st.session_state[sk] = {}
-                            st.session_state[sk][param] = sug_val
-                            if has_slider:
-                                slider_key = f"sl_{preset_name}_{param}"
-                                st.session_state.pop(slider_key, None)
-                        # Persist to disk so it survives page refreshes
-                        _save_slider_state(
-                            preset_name,
-                            dict(st.session_state.get(_sandbox_config_key(preset_name), {})),
-                            dict(st.session_state.get(f"sim_lab_ricky_weights_{preset_name}", {})),
-                        )
-                        st.toast(f"✅ {param} → {sug_val}")
-                        st.rerun()
+                    # Collect for batch apply
+                    all_suggestions.append(sug)
                     if sug.get("warning"):
-                        row[7].caption(f"⚠️ {sug['warning']}")
+                        row[6].caption(f"⚠️ {sug['warning']}")
                 else:
                     row[6].write(str(sug_val))
 
@@ -2221,6 +2192,66 @@ def _render_nudge_guidance(
 
         if not any_rows:
             st.caption("No metrics defined for this profile.")
+
+        # ── Cross-effect warnings ─────────────────────────────────────
+        if all_suggestions:
+            try:
+                from utils.nudge_params import PARAM_CROSS_EFFECTS
+                affected_params = {s["param"] for s in all_suggestions}
+                cross_warnings = []
+                for p in affected_params:
+                    effects = PARAM_CROSS_EFFECTS.get(p, [])
+                    for eff in effects:
+                        if eff not in affected_params:
+                            cross_warnings.append(f"`{p}` also affects **{eff}**")
+                if cross_warnings:
+                    st.info("Cross-effects: " + " · ".join(cross_warnings))
+            except ImportError:
+                pass
+
+        # ── Apply All Recommendations button ──────────────────────────
+        if all_suggestions:
+            st.divider()
+            n_changes = len(all_suggestions)
+            if st.button(
+                f"Apply All Recommendations ({n_changes} changes)",
+                key="nudge_apply_all",
+                type="primary",
+                use_container_width=True,
+            ):
+                sk = _sandbox_config_key(preset_name)
+                if sk not in st.session_state:
+                    st.session_state[sk] = {}
+                _rk = f"sim_lab_ricky_weights_{preset_name}"
+                if _rk not in st.session_state:
+                    st.session_state[_rk] = {}
+
+                applied_params = []
+                for sug in all_suggestions:
+                    param = sug["param"]
+                    sug_val = sug["suggested_value"]
+                    has_slider = sug["has_slider"]
+                    storage = sug.get("storage", "sandbox")
+
+                    if storage == "ricky_weights":
+                        st.session_state[_rk][param] = sug_val
+                        if has_slider:
+                            slider_key = f"sl_ricky_{param.replace('w_', '')}_{preset_name}"
+                            st.session_state.pop(slider_key, None)
+                    else:
+                        st.session_state[sk][param] = sug_val
+                        if has_slider:
+                            slider_key = f"sl_{preset_name}_{param}"
+                            st.session_state.pop(slider_key, None)
+                    applied_params.append(f"{param}→{sug_val}")
+
+                _save_slider_state(
+                    preset_name,
+                    dict(st.session_state.get(sk, {})),
+                    dict(st.session_state.get(_rk, {})),
+                )
+                st.toast(f"Applied {n_changes} changes: {', '.join(applied_params)}")
+                st.rerun()
 
         # ── Reset to Defaults + Re-run batch buttons ─────────────────────
         st.divider()
@@ -2443,6 +2474,19 @@ def _render_auto_calibrate(
         "across historical slates. Replaces the manual nudge-apply loop."
     )
 
+    # Contest type selector
+    _autocal_contest_types = ["SE GPP", "MME GPP", "Cash"]
+    autocal_contest_type = st.selectbox(
+        "Contest type objective",
+        _autocal_contest_types,
+        key="autocal_contest_type",
+        help=(
+            "SE GPP: maximize SE Core actual FP. "
+            "MME GPP: maximize best-of-N actual FP. "
+            "Cash: maximize % of lineups above cash line (260 FP)."
+        ),
+    )
+
     # Settings in expander
     with st.expander("Settings"):
         n_trials = st.slider(
@@ -2493,6 +2537,7 @@ def _render_auto_calibrate(
                 dates=available_dates,
                 current_ricky_weights=ricky_weights,
                 current_overrides=sandbox_overrides,
+                contest_type=autocal_contest_type,
                 n_trials=n_trials,
                 dates_per_trial=dates_per,
                 progress_callback=_on_progress,
@@ -2544,6 +2589,28 @@ def _render_auto_calibrate(
         })
     st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
+    # ── DS Recommendations comparison ─────────────────────────────────
+    from yak_core.auto_calibrate import DS_RECOMMENDATIONS
+    _ct = getattr(result, "contest_type", "SE GPP")
+    ds_rec = DS_RECOMMENDATIONS.get(_ct, {})
+    if ds_rec:
+        st.markdown(f"#### Recommended Slider Settings for {_ct}")
+        ds_rows = []
+        for key in sorted(set(list(ds_rec.keys()) + list(all_new.keys()))):
+            ds_val = ds_rec.get(key, "—")
+            ac_val = all_new.get(key, "—")
+            if key in result.best_ricky_weights:
+                cur = ricky_weights.get(key, "—")
+            else:
+                cur = sandbox_overrides.get(key, _slider_default(preset_name, key, "—"))
+            ds_rows.append({
+                "Parameter": key,
+                "DS Recommended": ds_val,
+                "Auto-Cal": ac_val,
+                "Current": cur,
+            })
+        st.dataframe(pd.DataFrame(ds_rows), hide_index=True, use_container_width=True)
+
     # ── Per-date breakdown ───────────────────────────────────────────
     with st.expander("Per-Date Breakdown"):
         date_rows = []
@@ -2560,32 +2627,48 @@ def _render_auto_calibrate(
             pd.DataFrame(date_rows), hide_index=True, use_container_width=True,
         )
 
-    # ── Accept / Reject ──────────────────────────────────────────────
-    c1, c2 = st.columns(2)
+    # ── Accept / DS Rec / Reject ────────────────────────────────────
+    c1, c2, c3 = st.columns(3)
     with c1:
         if st.button(
-            "Accept — Apply to Config", type="primary", key="autocal_accept",
+            "Apply Auto-Cal Results", type="primary", key="autocal_accept",
         ):
-            # Write optimized params into sandbox overrides
             sk = _sandbox_config_key(preset_name)
             if sk not in st.session_state:
                 st.session_state[sk] = {}
             for key, val in result.best_params.items():
                 st.session_state[sk][key] = val
-            # Write Ricky weights
             ricky_key = f"sim_lab_ricky_weights_{preset_name}"
             st.session_state[ricky_key] = dict(result.best_ricky_weights)
-            # Persist to disk
             _save_slider_state(
                 preset_name,
                 st.session_state[sk],
                 result.best_ricky_weights,
             )
-            st.success(
-                "Optimized parameters applied to config sliders and Ricky weights."
-            )
+            st.success("Auto-Cal parameters applied.")
             st.rerun()
     with c2:
+        if ds_rec and st.button("Apply DS Recommendations", key="autocal_apply_ds"):
+            sk = _sandbox_config_key(preset_name)
+            if sk not in st.session_state:
+                st.session_state[sk] = {}
+            ricky_key = f"sim_lab_ricky_weights_{preset_name}"
+            if ricky_key not in st.session_state:
+                st.session_state[ricky_key] = {}
+            from yak_core.auto_calibrate import _RICKY_KEYS
+            for key, val in ds_rec.items():
+                if key in _RICKY_KEYS:
+                    st.session_state[ricky_key][key] = val
+                else:
+                    st.session_state[sk][key] = val
+            _save_slider_state(
+                preset_name,
+                st.session_state[sk],
+                st.session_state[ricky_key],
+            )
+            st.success("DS Recommended parameters applied.")
+            st.rerun()
+    with c3:
         if st.button("Reject — Keep Current", key="autocal_reject"):
             del st.session_state["autocal_result"]
             st.rerun()

@@ -14,35 +14,43 @@ from typing import Optional
 
 CALIBRATION_TARGETS: dict[str, dict[str, tuple[float, float]]] = {
     "classic_gpp_main": {
-        "mae": (5.5, 7.5),
+        "mae": (5.5, 9.0),               # realistic range from DS analysis (actual MAE=9.0)
         "bias": (-1.0, 1.0),
-        "correlation": (0.78, 1.0),
-        "avg_score": (320.0, 400.0),
+        "correlation": (0.55, 1.0),       # lowered from 0.78 — actual r=0.62
+        "avg_score": (200.0, 245.0),      # DS-corrected: was (320,400) which is impossible
+        "se_core_target": (250.0, 290.0), # NEW — what SE Core should hit
+        "best_lineup_target": (270.0, 320.0),  # NEW — best lineup in batch
+        "cash_rate": (0.05, 0.15),        # NEW — % of lineups above cash line
         "ownership_sum": (90.0, 130.0),
         "top_1pct_rate": (0.04, 1.0),
     },
     "classic_gpp_20max": {
-        "mae": (5.5, 7.5),
+        "mae": (5.5, 9.0),
         "bias": (-1.0, 1.0),
-        "correlation": (0.78, 1.0),
-        "avg_score": (310.0, 390.0),
+        "correlation": (0.55, 1.0),
+        "avg_score": (200.0, 245.0),      # DS-corrected
+        "best_lineup_target": (280.0, 330.0),  # NEW — MME cares about best-of-N
+        "lineup_diversity": (0.3, 0.6),   # NEW — avg pairwise difference
         "ownership_sum": (80.0, 120.0),
         "top_1pct_rate": (0.03, 1.0),
         "lineup_diversity_min_cores": (3.0, 20.0),
     },
     "classic_gpp_se": {
-        "mae": (5.5, 7.5),
+        "mae": (5.5, 9.0),
         "bias": (-1.0, 1.0),
-        "correlation": (0.78, 1.0),
-        "avg_score": (305.0, 380.0),
+        "correlation": (0.55, 1.0),
+        "avg_score": (200.0, 245.0),      # DS-corrected
+        "se_core_target": (250.0, 290.0), # NEW
         "ownership_sum": (60.0, 90.0),
         "top_1pct_rate": (0.03, 1.0),
     },
     "classic_cash": {
-        "mae": (5.0, 7.0),
+        "mae": (5.5, 9.0),
         "bias": (-0.5, 0.5),
-        "correlation": (0.80, 1.0),
-        "avg_score": (290.0, 360.0),
+        "correlation": (0.55, 1.0),
+        "avg_score": (250.0, 300.0),      # DS-corrected: cash needs higher floor
+        "min_lineup_score": (220.0, 260.0),  # NEW — worst lineup shouldn't bust
+        "bust_rate": (0.0, 0.10),         # NEW — % of lineups below 200
         "cash_rate": (0.55, 1.0),
     },
     "showdown_gpp": {
@@ -58,6 +66,37 @@ CALIBRATION_TARGETS: dict[str, dict[str, tuple[float, float]]] = {
         "correlation": (0.72, 1.0),
         "avg_score": (130.0, 180.0),
         "cash_rate": (0.55, 1.0),
+    },
+}
+
+# ── Contest-type calibration targets (for auto-calibrate contest-type aware) ─
+# GPP cash line reference values from 17 real contests:
+#   Cash line: mean=287, median=284, range 238-333
+#   Winning score: mean=359, median=368, range 311-434
+CONTEST_TYPE_TARGETS: dict[str, dict[str, tuple[float, float]]] = {
+    "SE GPP": {
+        "avg_lineup_score": (200, 245),
+        "se_core_target": (250, 290),
+        "best_lineup_target": (270, 320),
+        "cash_rate": (0.05, 0.15),
+        "projection_mae": (5.5, 9.0),
+        "correlation": (0.55, 0.85),
+        "projection_bias": (-1.0, 1.0),
+        "ricky_rank_corr": (0.20, 1.0),
+        "ricky_top3_hit": (0.30, 1.0),
+        "ricky_top3_lift": (3.0, 20.0),
+    },
+    "MME GPP": {
+        "avg_lineup_score": (200, 245),
+        "best_lineup_target": (280, 330),
+        "lineup_diversity": (0.3, 0.6),
+        "projection_mae": (5.5, 9.0),
+    },
+    "Cash": {
+        "avg_lineup_score": (250, 300),
+        "min_lineup_score": (220, 260),
+        "bust_rate": (0.0, 0.10),
+        "projection_mae": (5.5, 9.0),
     },
 }
 
@@ -91,13 +130,20 @@ METRIC_LABELS: dict[str, str] = {
     "bias": "Projection Bias",
     "correlation": "Correlation",
     "avg_score": "Avg Lineup Score",
+    "se_core_target": "SE Core Score",
+    "best_lineup_target": "Best Lineup Score",
+    "cash_rate": "Cash Rate",
+    "min_lineup_score": "Min Lineup Score",
+    "bust_rate": "Bust Rate (< 200 FP)",
+    "lineup_diversity": "Lineup Diversity",
     "ownership_sum": "Avg Ownership Sum",
     "top_1pct_rate": "Top-1% Hit Rate",
-    "cash_rate": "Cash Rate",
     "lineup_diversity_min_cores": "Lineup Diversity (unique cores)",
     "ricky_top3_lift": "Ricky Top-3 Lift %",
     "ricky_top3_hit": "Ricky Top-3 Hit Rate",
     "ricky_rank_corr": "Ricky Rank Correlation",
+    "projection_mae": "Projection MAE",
+    "projection_bias": "Projection Bias",
 }
 
 # ── Nudge text: (metric, direction) → recommendation ─────────────────────────

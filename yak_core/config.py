@@ -218,20 +218,21 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "archetype": "Ceiling Hunter",
         "internal_contest": "MME",
         "CONTEST_TYPE": "gpp",
-        # GPP scoring weights (v11 — rebalanced for 300+ lineup totals)
-        "GPP_PROJ_WEIGHT": 0.30,
-        "GPP_UPSIDE_WEIGHT": 0.30,
-        "GPP_BOOM_WEIGHT": 0.35,
-        "GPP_OWN_PENALTY_STRENGTH": 1.0,
-        # Edge signal weights (activated — v11)
-        "GPP_SMASH_WEIGHT": 0.15,
+        # GPP scoring weights (v12 — DS-calibrated: ceiling is strongest signal r=0.574)
+        "GPP_PROJ_WEIGHT": 0.15,          # projections r=0.03 within-date — halved
+        "GPP_UPSIDE_WEIGHT": 0.45,        # ceiling is strongest signal r=0.574
+        "GPP_BOOM_WEIGHT": 0.35,          # batch data shows 0.55 hurts
+        "GPP_OWN_PENALTY_STRENGTH": 0.30, # chalk outperforms (r=+0.256) — reduced from 1.0
+        # Edge signal weights (v12 — zeroed unvalidated signals)
+        "GPP_SMASH_WEIGHT": 0.0,          # too sparse/binary — use binary flag instead
         "GPP_DVP_WEIGHT": 0.12,
         "GPP_PACE_ENV_WEIGHT": 0.10,
         "GPP_FORM_WEIGHT": 0.08,
-        "GPP_BUST_PENALTY": 0.10,
+        "GPP_BUST_PENALTY": 0.15,         # keep — directionally correct
         "GPP_SPREAD_PENALTY_WEIGHT": 0.08,
         "GPP_CATALYST_WEIGHT": 0.05,
-        "GPP_LEVERAGE_WEIGHT": 0.05,
+        "GPP_LEVERAGE_WEIGHT": 0.0,       # no validated signal
+        "OWN_WEIGHT": 0.0,                # contrarian hurts — zeroed
         "projection_style": "ceil",
         "volatility": "high",
         "correlation_mode": "stack",
@@ -269,30 +270,31 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
     },
     "GPP Early": {
         "display_name": "20-Max GPP",
-        "description": "Early slate GPP — afternoon games only, 20 lineups",
+        "description": "MME GPP — 20-max multi-entry, diversity-focused, 50 lineups",
         "slate_type": "Classic",
         "archetype": "Ceiling Hunter",
         "internal_contest": "GPP",
         "CONTEST_TYPE": "gpp",
-        # GPP scoring weights (v11 — rebalanced for 300+ lineup totals)
-        "GPP_PROJ_WEIGHT": 0.30,
-        "GPP_UPSIDE_WEIGHT": 0.30,
+        # GPP scoring weights (v12 — DS-calibrated MME preset)
+        "GPP_PROJ_WEIGHT": 0.15,
+        "GPP_UPSIDE_WEIGHT": 0.45,
         "GPP_BOOM_WEIGHT": 0.35,
-        "GPP_OWN_PENALTY_STRENGTH": 1.0,
-        # Edge signal weights (activated — v11)
-        "GPP_SMASH_WEIGHT": 0.15,
+        "GPP_OWN_PENALTY_STRENGTH": 0.30,
+        # Edge signal weights (v12 — zeroed unvalidated signals)
+        "GPP_SMASH_WEIGHT": 0.0,
         "GPP_DVP_WEIGHT": 0.12,
         "GPP_PACE_ENV_WEIGHT": 0.10,
         "GPP_FORM_WEIGHT": 0.08,
-        "GPP_BUST_PENALTY": 0.10,
+        "GPP_BUST_PENALTY": 0.15,
         "GPP_SPREAD_PENALTY_WEIGHT": 0.08,
         "GPP_CATALYST_WEIGHT": 0.05,
-        "GPP_LEVERAGE_WEIGHT": 0.05,
+        "GPP_LEVERAGE_WEIGHT": 0.0,
+        "OWN_WEIGHT": 0.0,
         "projection_style": "ceil",
         "volatility": "high",
         "correlation_mode": "stack",
-        "default_lineups": 20,
-        "default_max_exposure": 0.5,
+        "default_lineups": 50,            # more lineups for MME
+        "default_max_exposure": 0.40,     # tighter for diversity
         "min_salary": 49000,
         # Pool sizing
         "pool_size_min": 20,
@@ -320,6 +322,7 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "max_per_team": 2,
         # Exposure
         "exposure_rules": True,
+        "MIN_UNIQUES": 2,             # force 2 unique players between lineups for MME
         # Ownership sim contest type
         "ownership_contest_type": "gpp_early",
     },
@@ -330,20 +333,21 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
         "archetype": "Ceiling Hunter",
         "internal_contest": "GPP",
         "CONTEST_TYPE": "gpp",
-        # GPP scoring weights (v11 — rebalanced for 300+ lineup totals)
-        "GPP_PROJ_WEIGHT": 0.30,
-        "GPP_UPSIDE_WEIGHT": 0.30,
+        # GPP scoring weights (v12 — DS-calibrated)
+        "GPP_PROJ_WEIGHT": 0.15,
+        "GPP_UPSIDE_WEIGHT": 0.45,
         "GPP_BOOM_WEIGHT": 0.35,
-        "GPP_OWN_PENALTY_STRENGTH": 1.0,
-        # Edge signal weights (activated — v11)
-        "GPP_SMASH_WEIGHT": 0.15,
+        "GPP_OWN_PENALTY_STRENGTH": 0.30,
+        # Edge signal weights (v12 — zeroed unvalidated signals)
+        "GPP_SMASH_WEIGHT": 0.0,
         "GPP_DVP_WEIGHT": 0.12,
         "GPP_PACE_ENV_WEIGHT": 0.10,
         "GPP_FORM_WEIGHT": 0.08,
-        "GPP_BUST_PENALTY": 0.10,
+        "GPP_BUST_PENALTY": 0.15,
         "GPP_SPREAD_PENALTY_WEIGHT": 0.08,
         "GPP_CATALYST_WEIGHT": 0.05,
-        "GPP_LEVERAGE_WEIGHT": 0.05,
+        "GPP_LEVERAGE_WEIGHT": 0.0,
+        "OWN_WEIGHT": 0.0,
         "projection_style": "ceil",
         "volatility": "high",
         "correlation_mode": "stack",
@@ -420,16 +424,25 @@ CONTEST_PRESETS: Dict[str, Dict[str, Any]] = {
     },
     "Cash Main": {
         "display_name": "Cash (H2H / 50-50)",
-        "description": "Cash / 50-50 / Double-Up — high-floor plays, 1 lineup, low volatility",
+        "description": "Cash / 50-50 / Double-Up — high-floor plays, DS-calibrated for floor optimization",
         "slate_type": "Classic",
         "archetype": "Floor Lock",
         "internal_contest": "50/50",
         "CONTEST_TYPE": "cash",
+        # Cash scoring weights (v12 — DS-calibrated: floor optimization)
+        "GPP_PROJ_WEIGHT": 0.35,          # projections more useful for floor
+        "GPP_UPSIDE_WEIGHT": 0.0,         # don't chase ceiling
+        "GPP_BOOM_WEIGHT": 0.0,           # don't chase boom
+        "GPP_OWN_PENALTY_STRENGTH": 0.0,  # go full chalk
+        "GPP_SMASH_WEIGHT": 0.0,
+        "GPP_BUST_PENALTY": 0.25,         # heavily penalize bust risk
+        "GPP_LEVERAGE_WEIGHT": 0.0,
+        "OWN_WEIGHT": 0.0,
         "projection_style": "floor",
         "volatility": "low",
         "correlation_mode": "none",
-        "default_lineups": 1,
-        "default_max_exposure": 0.8,
+        "default_lineups": 10,
+        "default_max_exposure": 0.60,
         "min_salary": 49000,
         # Pool sizing
         "pool_size_min": 15,
@@ -645,6 +658,52 @@ NAMED_PROFILES: Dict[str, Dict[str, Any]] = {
             "max_punt=2, min_mid=3, own_cap=6.0, Ricky sorter (1.0/0.8/0.3)"
         ),
     },
+    "GPP_MAIN_V2": {
+        "display_name": "GPP Main V2 (DS-Calibrated)",
+        "base_preset": "GPP Main",
+        "overrides": {
+            "GPP_PROJ_WEIGHT": 0.15,
+            "GPP_UPSIDE_WEIGHT": 0.45,
+            "GPP_BOOM_WEIGHT": 0.35,
+            "GPP_OWN_PENALTY_STRENGTH": 0.30,
+            "GPP_SMASH_WEIGHT": 0.0,
+            "GPP_BUST_PENALTY": 0.15,
+            "GPP_LEVERAGE_WEIGHT": 0.0,
+            "OWN_WEIGHT": 0.0,
+            "NUM_LINEUPS": 25,
+            "MAX_EXPOSURE": 0.45,
+            "MIN_UNIQUES": 1,
+        },
+        "ricky_weights": {"w_gpp": 0.0, "w_ceil": 1.0, "w_own": 0.15},
+        "version": "V2",
+        "description": (
+            "DS-calibrated SE GPP — ceiling-weighted (r=0.574), positive ownership, "
+            "Ricky sorter (0.0/1.0/+0.15). Based on 17-slate data analysis."
+        ),
+    },
+    "MME_GPP_V2": {
+        "display_name": "MME GPP V2 (DS-Calibrated)",
+        "base_preset": "GPP Early",
+        "overrides": {
+            "GPP_PROJ_WEIGHT": 0.15,
+            "GPP_UPSIDE_WEIGHT": 0.45,
+            "GPP_BOOM_WEIGHT": 0.35,
+            "GPP_OWN_PENALTY_STRENGTH": 0.30,
+            "GPP_SMASH_WEIGHT": 0.0,
+            "GPP_BUST_PENALTY": 0.15,
+            "GPP_LEVERAGE_WEIGHT": 0.0,
+            "OWN_WEIGHT": 0.0,
+            "NUM_LINEUPS": 50,
+            "MAX_EXPOSURE": 0.40,
+            "MIN_UNIQUES": 2,
+        },
+        "ricky_weights": {"w_gpp": 0.0, "w_ceil": 1.0, "w_own": 0.15},
+        "version": "V2",
+        "description": (
+            "DS-calibrated MME GPP — 50 lineups, tighter exposure, 2 unique players, "
+            "ceiling-weighted ranking. For 3-max and 20-max contests."
+        ),
+    },
     "CASH_MAIN_V1": {
         "display_name": "Cash Main V1",
         "base_preset": "Cash Main",
@@ -663,6 +722,29 @@ NAMED_PROFILES: Dict[str, Dict[str, Any]] = {
         "description": (
             "Cash 50/50 & Double-Up — floor-lock, high minutes threshold, "
             "chalk-friendly, single lineup, tight salary usage"
+        ),
+    },
+    "CASH_MAIN_V2": {
+        "display_name": "Cash Main V2 (DS-Calibrated)",
+        "base_preset": "Cash Main",
+        "overrides": {
+            "GPP_PROJ_WEIGHT": 0.35,
+            "GPP_UPSIDE_WEIGHT": 0.0,
+            "GPP_BOOM_WEIGHT": 0.0,
+            "GPP_OWN_PENALTY_STRENGTH": 0.0,
+            "GPP_SMASH_WEIGHT": 0.0,
+            "GPP_BUST_PENALTY": 0.25,
+            "GPP_LEVERAGE_WEIGHT": 0.0,
+            "OWN_WEIGHT": 0.0,
+            "NUM_LINEUPS": 10,
+            "MAX_EXPOSURE": 0.60,
+            "MIN_UNIQUES": 1,
+        },
+        "ricky_weights": {"w_gpp": 0.5, "w_ceil": 0.3, "w_own": 0.0},
+        "version": "V2",
+        "description": (
+            "DS-calibrated Cash — full chalk, no ceiling chasing, heavy bust penalty, "
+            "balanced Ricky weights. For 50/50 and double-up contests."
         ),
     },
     "CASH_GAME_V1": {
