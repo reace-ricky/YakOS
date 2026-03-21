@@ -9,14 +9,14 @@
         "MIN_UNIQUES": 1,
         "GPP_DVP_WEIGHT": 0.1,
         "GPP_PACE_ENV_WEIGHT": 0.11,
-        "GPP_OWN_PENALTY_STRENGTH": 0.5,
+        "GPP_OWN_PENALTY_STRENGTH": 0.6,
         "GPP_BUST_PENALTY": 0.15,
         "NUM_LINEUPS": 40,
         "GPP_PROJ_WEIGHT": 0.35,
         "GPP_UPSIDE_WEIGHT": 0.25
       },
       "ricky_weights": {
-        "w_gpp": 1.0,
+        "w_gpp": 1.1,
         "w_ceil": 0.8,
         "w_own": 0.3
       }
