@@ -8,7 +8,7 @@
         "GPP_LEVERAGE_WEIGHT": 0.1,
         "MIN_UNIQUES": 1,
         "GPP_DVP_WEIGHT": 0.11,
-        "MIN_SALARY_USED": 48500
+        "GPP_UPSIDE_WEIGHT": 0.25
       },
       "ricky_weights": {
         "w_gpp": 1.0,
