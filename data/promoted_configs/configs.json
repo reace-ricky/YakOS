@@ -1,0 +1,30 @@
+[
+  {
+    "key": "STARS_AND_SCRUBS_CEILING_V1",
+    "display_name": "Stars & Scrubs Ceiling",
+    "base_preset": "GPP Main",
+    "overrides": {
+      "GPP_BOOM_WEIGHT": 0.4,
+      "MIN_PLAYER_MINUTES": 2,
+      "GPP_PROJ_WEIGHT": 0.25
+    },
+    "ricky_weights": {
+      "w_gpp": 1.0,
+      "w_ceil": 0.8,
+      "w_own": 0.3
+    },
+    "validation_stats": {
+      "avg_diff": 34.84,
+      "beat_proj_pct": 77.5,
+      "sample_size": 4,
+      "dates_tested": [
+        "2026-03-04",
+        "2026-03-14",
+        "2026-03-15",
+        "2026-03-18"
+      ]
+    },
+    "promoted_at": "2026-03-21T00:43:37.510145",
+    "description": ""
+  }
+]
