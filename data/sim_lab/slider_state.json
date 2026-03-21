@@ -1,10 +1,13 @@
 {
   "configs": {
     "GPP Main": {
-      "overrides": {},
+      "overrides": {
+        "GPP_OWN_PENALTY_STRENGTH": 0.5,
+        "GPP_LOW_OWN_THRESHOLD": 0.33
+      },
       "ricky_weights": {
-        "w_gpp": 1.0,
-        "w_ceil": 0.8,
+        "w_gpp": 1.1,
+        "w_ceil": 0.9,
         "w_own": 0.3
       }
     }
