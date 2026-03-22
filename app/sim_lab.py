@@ -224,6 +224,14 @@ def _append_batch_history(
         to *False*) so long-term trends are never lost.
     """
     successful_runs = batch.get("runs", [])
+
+    # Filter out batches with too few lineups (likely failed/partial runs)
+    _MIN_LINEUPS = 10
+    _num_lu = successful_runs[0].get("num_lineups", 0) if successful_runs else 0
+    if _num_lu < _MIN_LINEUPS and not is_baseline:
+        _logger.info("Skipping batch append: only %d lineups (min %d)", _num_lu, _MIN_LINEUPS)
+        return
+
     best_slate_fp = 0.0
     worst_slate_fp = 0.0
     if successful_runs:
@@ -464,17 +472,53 @@ def _render_history_table() -> None:
     show_cols = [c for c in col_rename if c in display.columns]
     display = display[show_cols].rename(columns=col_rename)
 
-    st.dataframe(
-        display.style.format({
-            "Avg Actual": "{:.1f}",
-            "Avg Proj": "{:.1f}",
-            "Best Slate": "{:.1f}",
-            "Worst Slate": "{:.1f}",
-            "Beat Proj %": "{:.0f}%",
-        }),
+    # Add delete checkbox column
+    display.insert(0, "\U0001f5d1\ufe0f", False)
+
+    edited = st.data_editor(
+        display,
+        column_config={
+            "\U0001f5d1\ufe0f": st.column_config.CheckboxColumn("\U0001f5d1\ufe0f", default=False),
+            "Avg Actual": st.column_config.NumberColumn(format="%.1f"),
+            "Avg Proj": st.column_config.NumberColumn(format="%.1f"),
+            "Best Slate": st.column_config.NumberColumn(format="%.1f"),
+            "Worst Slate": st.column_config.NumberColumn(format="%.1f"),
+            "Beat Proj %": st.column_config.NumberColumn(format="%.0f%%"),
+            "Dates": st.column_config.NumberColumn(format="%d"),
+            "Lineups": st.column_config.NumberColumn(format="%d"),
+            "Errors": st.column_config.NumberColumn(format="%d"),
+        },
         use_container_width=True,
         hide_index=True,
+        key="batch_history_editor",
     )
+
+    # Remove selected rows
+    if st.button("\U0001f5d1\ufe0f Remove Selected", key="remove_batch_rows"):
+        to_delete = edited[edited["\U0001f5d1\ufe0f"] == True]  # noqa: E712
+        if not to_delete.empty:
+            # Soft-delete by marking rows as removed in the parquet
+            full_history = _load_batch_history()
+            # Match on timestamp (unique per row)
+            delete_timestamps = set()
+            for _, row in to_delete.iterrows():
+                # The "When" column was formatted from timestamp
+                delete_timestamps.add(str(row.get("When", "")))
+            for idx in full_history.index:
+                ts = pd.to_datetime(full_history.at[idx, "timestamp"]).strftime("%m/%d %I:%M %p")
+                if ts in delete_timestamps:
+                    full_history.at[idx, "removed"] = True
+            try:
+                full_history.to_parquet(_HISTORY_FILE, index=False)
+                from yak_core.github_persistence import sync_feedback_async
+                sync_feedback_async(
+                    files=[_HISTORY_REL_PATH],
+                    commit_message="Remove batch history rows",
+                )
+            except Exception:
+                pass
+            st.toast(f"Removed {len(to_delete)} row(s)")
+            st.rerun()
 
 
 # ---------------------------------------------------------------------------
