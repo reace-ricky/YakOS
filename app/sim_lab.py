@@ -2947,15 +2947,28 @@ def _render_auto_calibrate(
         for base, opt in zip(result.baseline_per_date, result.per_date_results):
             b_fp = base["se_core_actual"]
             o_fp = opt["se_core_actual"]
+            delta = (o_fp - b_fp) if (b_fp and o_fp) else None
+            # Delta indicator: red = hurts (< -10), yellow = slight regression, green = helps
+            if delta is not None:
+                indicator = "🔴" if delta < -10 else ("🟡" if delta < 0 else "🟢")
+            else:
+                indicator = ""
+            # Avg lineup delta (not just SE Core)
+            b_avg = base.get("avg_lineup_actual", 0) or 0
+            o_avg = opt.get("avg_lineup_actual", 0) or 0
+            avg_delta = (o_avg - b_avg) if (b_avg and o_avg) else None
             date_rows.append({
+                "": indicator,
                 "Date": base["date"],
-                "Baseline FP": f"{b_fp:.1f}" if b_fp else "—",
-                "Optimized FP": f"{o_fp:.1f}" if o_fp else "—",
-                "Delta": f"{o_fp - b_fp:+.1f}" if (b_fp and o_fp) else "—",
+                "Games": opt.get("n_games", base.get("n_games", "—")),
+                "Baseline SE": f"{b_fp:.1f}" if b_fp else "—",
+                "Optimized SE": f"{o_fp:.1f}" if o_fp else "—",
+                "Δ SE": f"{delta:+.1f}" if delta is not None else "—",
+                "Δ Avg": f"{avg_delta:+.1f}" if avg_delta is not None else "—",
             })
-        st.dataframe(
-            pd.DataFrame(date_rows), hide_index=True, use_container_width=True,
-        )
+        # Sort by delta ascending — worst dates first
+        date_df = pd.DataFrame(date_rows)
+        st.dataframe(date_df, hide_index=True, use_container_width=True)
 
     # ── Accept / DS Rec / Reject ────────────────────────────────────
     c1, c2, c3 = st.columns(3)

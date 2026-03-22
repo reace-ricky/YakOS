@@ -761,10 +761,14 @@ def _run_pipeline_headless(
         summary, w_gpp=ricky_w_gpp, w_ceil=ricky_w_ceil, w_own=ricky_w_own,
     )
 
+    # Slate size: count unique games from team pairs
+    _n_games = pool_df["team"].nunique() // 2 if "team" in pool_df.columns else 0
+
     return {
         "date": str(selected_date),
         "summary_df": summary,
         "avg_actual": float(summary["total_actual"].mean()) if len(summary) else 0,
+        "n_games": _n_games,
     }
 
 
@@ -1047,6 +1051,7 @@ def run_auto_calibration(
                 "date": str(d),
                 "se_core_actual": obj_val,
                 "summary_df": run.get("summary_df"),
+                "n_games": run.get("n_games", 0),
             })
         except IncompleteSlateError as e:
             logger.warning("Skipping incomplete date %s during baseline: %s", d, e)
@@ -1056,10 +1061,10 @@ def run_auto_calibration(
                 "completeness_pct": 0.0,
             })
             _runtime_skipped.append(d)
-            baseline_results.append({"date": str(d), "se_core_actual": None, "summary_df": None})
+            baseline_results.append({"date": str(d), "se_core_actual": None, "summary_df": None, "n_games": 0})
         except Exception as e:
             logger.warning("Baseline failed for %s: %s", d, e)
-            baseline_results.append({"date": str(d), "se_core_actual": None, "summary_df": None})
+            baseline_results.append({"date": str(d), "se_core_actual": None, "summary_df": None, "n_games": 0})
 
     # Remove runtime-discovered incomplete dates from the working set
     if _runtime_skipped:
@@ -1213,10 +1218,11 @@ def run_auto_calibration(
                 "se_core_actual": obj_val,
                 "avg_lineup_actual": run.get("avg_actual", 0),
                 "summary_df": run.get("summary_df"),
+                "n_games": run.get("n_games", 0),
             })
         except Exception as e:
             logger.warning("Validation failed for %s: %s", d, e)
-            validation_results.append({"date": str(d), "se_core_actual": None, "summary_df": None})
+            validation_results.append({"date": str(d), "se_core_actual": None, "summary_df": None, "n_games": 0})
 
     valid_actuals = [
         r["se_core_actual"] for r in validation_results if r["se_core_actual"] is not None
