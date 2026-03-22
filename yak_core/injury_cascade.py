@@ -387,6 +387,9 @@ def apply_injury_cascade(
     for _, out_row in key_injuries.iterrows():
         out_name = str(out_row.get("player_name", ""))
         out_team = str(out_row.get("team", "")).upper()
+        # Normalize to pool abbreviations (Tank01 pool uses SA/GS/PHO/NO)
+        _DK_TO_POOL = {"SAS": "SA", "GSW": "GS", "PHX": "PHO", "NOP": "NO"}
+        out_team = _DK_TO_POOL.get(out_team, out_team)
         out_pos = _primary_pos(str(out_row.get("pos", "")))
         out_mins = float(
             pd.to_numeric(out_row.get("proj_minutes", 0), errors="coerce") or 0

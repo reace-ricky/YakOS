@@ -1181,11 +1181,14 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
         odds_df = fetch_betting_odds(slate_date, api_key)
         if not odds_df.empty and "team" in pool.columns:
             # Build game_spreads dict for apply_blowout_cascade
+            _DK_TO_POOL = {"SAS": "SA", "GSW": "GS", "PHX": "PHO", "NOP": "NO"}
             game_spreads = {}
             for _, row in odds_df.iterrows():
                 spread_val = float(row.get("spread", 0))
                 home = str(row.get("home_team", "")).upper()
                 away = str(row.get("away_team", "")).upper()
+                home = _DK_TO_POOL.get(home, home)
+                away = _DK_TO_POOL.get(away, away)
                 if not home or not away:
                     continue
                 # Determine favorite/underdog
@@ -1206,10 +1209,13 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
                     print(f"[_load_nba_pool] Blowout risk adjusted minutes for {_n_adj} player(s)")
 
             # Map spread to each player for b2b/spread minute dampening
+            _DK_TO_POOL = {"SAS": "SA", "GSW": "GS", "PHX": "PHO", "NOP": "NO"}
             spread_map = {}
             for _, row in odds_df.iterrows():
                 home = str(row.get("home_team", "")).upper()
                 away = str(row.get("away_team", "")).upper()
+                home = _DK_TO_POOL.get(home, home)
+                away = _DK_TO_POOL.get(away, away)
                 sp = abs(float(row.get("spread", 0)))
                 spread_map[home] = sp
                 spread_map[away] = sp
@@ -1220,6 +1226,8 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
             for _, row in odds_df.iterrows():
                 home = str(row.get("home_team", "")).upper()
                 away = str(row.get("away_team", "")).upper()
+                home = _DK_TO_POOL.get(home, home)
+                away = _DK_TO_POOL.get(away, away)
                 total = float(row.get("vegas_total", 0))
                 vegas_total_map[home] = total
                 vegas_total_map[away] = total
