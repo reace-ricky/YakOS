@@ -1131,7 +1131,8 @@ def run_auto_calibration(
                 obj_val = _get_objective_value(run, contest_type)
                 if obj_val is not None:
                     obj_values.append(obj_val)
-            except Exception:
+            except Exception as e:
+                trial.set_user_attr(f"error_date_{d}", str(e))
                 continue
 
             # Intermediate pruning
@@ -1141,7 +1142,7 @@ def run_auto_calibration(
                     raise optuna.TrialPruned()
 
         if not obj_values:
-            return 0.0  # worst case
+            raise optuna.TrialPruned()  # don't poison study with 0.0
 
         score = -mean(obj_values)
 
@@ -1161,7 +1162,23 @@ def run_auto_calibration(
 
     study.optimize(_objective, n_trials=n_trials, show_progress_bar=False)
 
+    # ── Diagnostic: trial completion stats ────────────────────────────────
+    _completed = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+    _failed = [t for t in study.trials if t.state == optuna.trial.TrialState.FAIL]
+    _pruned = [t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED]
+    logger.info(
+        "Optuna finished: %d completed, %d failed, %d pruned out of %d trials",
+        len(_completed), len(_failed), len(_pruned), n_trials,
+    )
+
     # ── Phase 3: Extract best params ─────────────────────────────────────
+    if not _completed:
+        raise ValueError(
+            f"Auto-calibrate: all {n_trials} trials failed or were pruned. "
+            f"Failed: {len(_failed)}, Pruned: {len(_pruned)}. "
+            f"First trial errors: {study.trials[0].user_attrs if study.trials else 'none'}"
+        )
+
     best_trial = study.best_trial
     best_overrides: Dict[str, Any] = {}
     best_ricky: Dict[str, float] = {}
