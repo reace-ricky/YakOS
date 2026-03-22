@@ -3144,6 +3144,9 @@ def render_sim_lab(sport: str) -> None:
             )
         st.session_state[_ricky_key] = _rw
 
+        # Persist to disk on every slider change so weights survive navigation/reboot
+        _save_slider_state(preset_name, st.session_state.get(_sandbox_config_key(preset_name), {}), _rw)
+
         _rerank_clicked = st.button(
             "\U0001f504 Re-rank Lineups", key="sim_lab_rerank",
             use_container_width=True,
