@@ -489,8 +489,14 @@ def render_edge_tab(sport: str) -> None:
                                 {0: "Early", 1: "Late", "Early": "Early", "Late": "Late"}
                             )
                     avail = [c for c in display_cols if c in lu.columns]
+                    _lu_edge_disp = lu[avail].reset_index(drop=True)
+                    _fmt = {}
+                    for _rc in ["proj", "ceil", "floor", "gpp_score", "own_pct"]:
+                        if _rc in _lu_edge_disp.columns:
+                            _lu_edge_disp[_rc] = pd.to_numeric(_lu_edge_disp[_rc], errors="coerce").round(2)
+                            _fmt[_rc] = "{:.2f}"
                     st.dataframe(
-                        lu[avail].reset_index(drop=True),
+                        _lu_edge_disp.style.format(_fmt, na_rep="") if _fmt else _lu_edge_disp,
                         use_container_width=True,
                         hide_index=True,
                     )
