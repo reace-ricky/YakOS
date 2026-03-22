@@ -2405,9 +2405,9 @@ def _render_nudge_guidance(
             if st.button("↩️ Reset to Defaults", key="nudge_reset_defaults", use_container_width=True):
                 # Clear sandbox overrides
                 st.session_state[_sandbox_config_key(preset_name)] = {}
-                # Reset Ricky weights to defaults
+                # Reset Ricky weights to DS-recommended defaults
                 st.session_state[f"sim_lab_ricky_weights_{preset_name}"] = {
-                    "w_gpp": 1.0, "w_ceil": 0.8, "w_own": 0.3,
+                    "w_gpp": RICKY_W_GPP, "w_ceil": RICKY_W_CEIL, "w_own": RICKY_W_OWN,
                 }
                 # Pop slider widget keys so they re-render with defaults
                 _keys_to_pop = [
@@ -2418,7 +2418,7 @@ def _render_nudge_guidance(
                 for k in _keys_to_pop:
                     st.session_state.pop(k, None)
                 # Persist cleared state
-                _save_slider_state(preset_name, {}, {"w_gpp": 1.0, "w_ceil": 0.8, "w_own": 0.3})
+                _save_slider_state(preset_name, {}, {"w_gpp": RICKY_W_GPP, "w_ceil": RICKY_W_CEIL, "w_own": RICKY_W_OWN})
                 st.toast("↩️ All parameters reset to defaults")
                 st.rerun()
         with col_rerun:
@@ -3027,6 +3027,14 @@ def render_sim_lab(sport: str) -> None:
             elif not is_pga and _named_key:
                 _apply_named_profile(_named_key)
             if _disk_rw and _rk not in st.session_state:
+                st.session_state[_rk] = _disk_rw
+        # Ricky weights: restore from disk independently of sandbox overrides.
+        # Without this, navigating away then back skips the disk load above
+        # (because sk IS in session_state) and the fallback at the slider
+        # block overwrites with hardcoded defaults.
+        if _rk not in st.session_state:
+            _, _disk_rw = _load_slider_state(preset_name)
+            if _disk_rw:
                 st.session_state[_rk] = _disk_rw
 
     # --- Archetype selector (NBA GPP presets only) ---
