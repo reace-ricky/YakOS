@@ -512,6 +512,8 @@ def _merge_rg_csv(pool: pd.DataFrame, rg_file: Path) -> pd.DataFrame:
             rg = pd.read_csv(rg_file, sep=None, engine="python")
 
     rg.columns = [c.strip().upper() for c in rg.columns]
+    # Drop duplicate columns (RG CSVs can have two FPTS columns)
+    rg = rg.loc[:, ~rg.columns.duplicated()]
 
     if "PLAYER" not in rg.columns:
         st.error(

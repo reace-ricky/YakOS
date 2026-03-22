@@ -1397,6 +1397,8 @@ def _merge_rg_csv(pool, rg_file):
 
     # Normalise column names: strip whitespace, uppercase
     rg.columns = [c.strip().upper() for c in rg.columns]
+    # Drop duplicate columns (RG CSVs can have two FPTS columns — median and optimizer)
+    rg = rg.loc[:, ~rg.columns.duplicated()]
 
     if "PLAYER" not in rg.columns:
         st.error(
