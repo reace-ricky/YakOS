@@ -69,18 +69,23 @@ _NBA_GPP_ARCHETYPES: Dict[str, Dict[str, Any]] = {
     },
     "Stars & Scrubs Ceiling": {
         "description": "Heavy stud concentration + max ceiling. "
-                       "High boom weight, aggressive ownership penalty, "
-                       "fewer mid-range players.",
+                       "High upside weight, tighter exposure, "
+                       "projection-aware ranking.",
         "overrides": {
             "GPP_PROJ_WEIGHT": 0.20,
-            "GPP_UPSIDE_WEIGHT": 0.35,
-            "GPP_BOOM_WEIGHT": 0.45,
+            "GPP_UPSIDE_WEIGHT": 0.60,
+            "GPP_BOOM_WEIGHT": 0.15,
             "GPP_OWN_PENALTY_STRENGTH": 1.4,
             "GPP_SMASH_WEIGHT": 0.20,
             "GPP_LEVERAGE_WEIGHT": 0.10,
-            "GPP_BUST_PENALTY": 0.05,
+            "GPP_BUST_PENALTY": 0.25,
             "NUM_LINEUPS": 20,
-            "MAX_EXPOSURE": 0.50,
+            "MAX_EXPOSURE": 0.40,
+        },
+        "ricky_weights": {
+            "w_gpp": 0.50,
+            "w_ceil": 0.80,
+            "w_own": 0.30,
         },
     },
     "Balanced Leverage": {
@@ -2627,6 +2632,12 @@ def _apply_archetype(preset_name: str, archetype_name: str) -> None:
     else:
         # Seed overrides with archetype values
         st.session_state[sk] = dict(arch["overrides"])
+
+    # Apply archetype Ricky weights if defined
+    if "ricky_weights" in arch:
+        _rk = f"sim_lab_ricky_weights_{preset_name}"
+        st.session_state[_rk] = dict(arch["ricky_weights"])
+        _save_slider_state(preset_name, st.session_state[sk], arch["ricky_weights"])
 
 
 def _apply_named_profile(profile_key: str) -> None:
