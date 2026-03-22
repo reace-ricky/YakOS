@@ -807,9 +807,19 @@ def _get_objective_value(
         se_core = _get_se_core_actual(run)
         if se_core is None:
             return None
-        # Bonus for 300+ lineups (sniper metric)
+        # 300+ generation bonus — reward configs that produce high-ceiling lineups
         count_300 = float((actuals >= 300.0).sum())
-        return se_core + count_300 * 2.0
+        # Best lineup score — pushes optimizer toward ceiling
+        best_lineup = float(actuals.max())
+        # Sorter accuracy bonus — reward configs where 300+ lineups rank in top 5
+        sorter_bonus = 0.0
+        if count_300 > 0 and "ricky_rank" in summary.columns:
+            top5_mask = summary["ricky_rank"] <= 5
+            above_300 = summary["total_actual"] >= 300.0
+            n_300_in_top5 = float((top5_mask & above_300).sum())
+            sorter_bonus = n_300_in_top5 * 10.0  # strong reward for surfacing 300+ to top
+        # Combined: SE Core (baseline) + ceiling chase + sorter accuracy
+        return se_core + count_300 * 5.0 + (best_lineup - 250.0) * 0.1 + sorter_bonus
     elif contest_type == "MME GPP":
         best = float(actuals.max())
         # Bonus for top-5 avg (sniper metric)
