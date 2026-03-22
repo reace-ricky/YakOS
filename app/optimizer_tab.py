@@ -610,17 +610,21 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
                         with _exp_col:
                             with st.expander(_exp_label):
                                 _tagged_disp = _lu_players[_p_avail].copy()
+                                _fmt = {}
                                 for _rc in ["proj", "ceil", "floor", "gpp_score", "own_pct"]:
                                     if _rc in _tagged_disp.columns:
                                         _tagged_disp[_rc] = pd.to_numeric(_tagged_disp[_rc], errors="coerce").round(2)
-                                st.dataframe(_tagged_disp, use_container_width=True, hide_index=True)
+                                        _fmt[_rc] = "{:.2f}"
+                                st.dataframe(_tagged_disp.style.format(_fmt, na_rep=""), use_container_width=True, hide_index=True)
                     else:
                         with st.expander(_exp_label):
                             _tagged_disp = _lu_players[_p_avail].copy()
+                            _fmt = {}
                             for _rc in ["proj", "ceil", "floor", "gpp_score", "own_pct"]:
                                 if _rc in _tagged_disp.columns:
                                     _tagged_disp[_rc] = pd.to_numeric(_tagged_disp[_rc], errors="coerce").round(2)
-                            st.dataframe(_tagged_disp, use_container_width=True, hide_index=True)
+                                    _fmt[_rc] = "{:.2f}"
+                            st.dataframe(_tagged_disp.style.format(_fmt, na_rep=""), use_container_width=True, hide_index=True)
 
             if is_admin:  # Full ranking table (admin only)
                 with st.expander("Full Ricky Ranking"):
@@ -672,15 +676,17 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
                 avail = [c for c in show_cols if c in lu.columns]
                 _lu_display = lu[avail].reset_index(drop=True)
                 # Round numeric columns to 2 decimals
+                _fmt = {}
                 for _rc in ["proj", "ceil", "floor", "gpp_score", "own_pct", "ownership"]:
                     if _rc in _lu_display.columns:
                         _lu_display[_rc] = pd.to_numeric(_lu_display[_rc], errors="coerce").round(2)
+                        _fmt[_rc] = "{:.2f}"
                 if "cpt_own_pct" in _lu_display.columns:
                     _lu_display["cpt_own_pct"] = _lu_display["cpt_own_pct"].apply(
                         lambda x: f"{float(x) * 100:.1f}%" if pd.notna(x) else ""
                     )
                     _lu_display = _lu_display.rename(columns={"cpt_own_pct": "cpt_own%"})
-                st.dataframe(_lu_display, use_container_width=True, hide_index=True)
+                st.dataframe(_lu_display.style.format(_fmt, na_rep=""), use_container_width=True, hide_index=True)
         else:
             st.dataframe(lineups_df, use_container_width=True)
 

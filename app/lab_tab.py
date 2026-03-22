@@ -678,7 +678,13 @@ def render_lab_tab(sport: str) -> None:
                                 _p_cols = ["player_name", "pos", "team", "salary", "proj", "ceil", "gpp_score", "own_pct"]
                                 _p_avail = [c for c in _p_cols if c in _lu_players.columns]
                                 with st.expander(f"{_tag} — Lineup #{int(_li)}"):
-                                    st.dataframe(_lu_players[_p_avail], use_container_width=True, hide_index=True)
+                                    _lu_disp = _lu_players[_p_avail].copy()
+                                    _fmt = {}
+                                    for _rc in ["proj", "ceil", "floor", "gpp_score", "own_pct"]:
+                                        if _rc in _lu_disp.columns:
+                                            _lu_disp[_rc] = pd.to_numeric(_lu_disp[_rc], errors="coerce").round(2)
+                                            _fmt[_rc] = "{:.2f}"
+                                    st.dataframe(_lu_disp.style.format(_fmt, na_rep=""), use_container_width=True, hide_index=True)
 
                         # ── Overwrite lineups parquet with ONLY SE picks ──
                         # Build 40, rank, save only the top 3 tagged lineups
