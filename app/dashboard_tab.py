@@ -549,6 +549,15 @@ def render_dashboard_tab(sport: str) -> None:
         help="Interactive scatter plot — click categories to isolate, shift+click to toggle, use filters to drill in.",
     )
 
+    # ── Ricky's Hot Box ───────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### 🔥 Ricky's Hot Box")
+    with st.expander("Projection Accuracy Report", expanded=False):
+        try:
+            _render_projection_accuracy_report(sport)
+        except Exception as e:
+            st.error(f"Projection Accuracy Report error: {e}\n```\n{traceback.format_exc()}\n```")
+
     # ── Maintenance Tools ─────────────────────────────────────────────────
     st.markdown("---")
     with st.expander("Maintenance Tools", expanded=False):
@@ -563,7 +572,127 @@ def render_dashboard_tab(sport: str) -> None:
             st.error(f"Recalibrate from Archive error: {e}\n```\n{traceback.format_exc()}\n```")
 
 
-def _render_post_slate_feedback(sport: str) -> None:
+def _render_projection_accuracy_report(sport: str) -> None:
+    """Render the Projection Accuracy Report — Raw RG vs Config-Adjusted side-by-side.
+
+    Read-only. Does not modify any projection logic or calibration settings.
+    """
+    from yak_core.projection_accuracy import (
+        OUTLIER_MAE_DELTA,
+        compute_config_adjusted_accuracy,
+        load_accuracy_report,
+        build_summary_df,
+        build_per_date_df,
+    )
+
+    st.caption(
+        "Compares raw RotoGrinders projections against Ceiling Hunter config-adjusted "
+        "projections. Green = config improved accuracy. Red = config degraded accuracy."
+    )
+
+    col_run, col_cached = st.columns([1, 3])
+    with col_run:
+        run_clicked = st.button(
+            "▶ Run Accuracy Report",
+            key=f"proj_acc_run_{sport}",
+            help="Scans all available RG archive dates against actuals on demand.",
+        )
+
+    if run_clicked:
+        with st.spinner("Computing accuracy metrics across all dates…"):
+            report = compute_config_adjusted_accuracy(sport=sport)
+        if "error" in report:
+            st.warning(f"Could not compute report: {report['error']}")
+            return
+        n = report.get("n_dates", 0)
+        st.success(f"Report updated — {n} date{'s' if n != 1 else ''} analyzed.")
+    else:
+        report = load_accuracy_report()
+        if report is None:
+            st.info("No report computed yet. Click **▶ Run Accuracy Report** to generate.")
+            return
+
+    if not report.get("summary"):
+        st.warning("Report is empty — no dates with both RG projections and actuals found.")
+        return
+
+    n_dates = report.get("n_dates", 0)
+    st.caption(f"Based on {n_dates} date(s) with matched RG projections + actuals.")
+
+    # ── Summary table ────────────────────────────────────────────────────
+    st.markdown("#### Summary")
+    summary_df = build_summary_df(report)
+
+    def _highlight_delta(row: pd.Series) -> list[str]:
+        delta = row["Delta"]
+        metric = row["Metric"]
+        # For MAE and Bias: lower adj = better → green if delta < 0
+        # For all others: higher adj = better → green if delta > 0
+        if metric in ("MAE (avg)", "Bias (avg)"):
+            good = delta < 0
+        else:
+            good = delta > 0
+        color = "color: #2ecc71" if good else ("color: #e74c3c" if delta != 0 else "")
+        return ["", "", "", color]
+
+    styled = summary_df.style.apply(_highlight_delta, axis=1).format(
+        {
+            "Raw RG": "{:.3f}",
+            "Config-Adjusted": "{:.3f}",
+            "Delta": "{:+.3f}",
+        }
+    )
+    st.dataframe(styled, use_container_width=True, hide_index=True)
+
+    # ── Per-date breakdown ────────────────────────────────────────────────
+    with st.expander("Per-date breakdown", expanded=False):
+        per_date_df = build_per_date_df(report)
+        if per_date_df.empty:
+            st.caption("No per-date data available.")
+        else:
+            # Highlight MAE delta column using the same threshold as the stored outlier flag
+            def _highlight_per_date(row: pd.Series) -> list[str]:
+                styles = [""] * len(row)
+                try:
+                    delta_idx = per_date_df.columns.get_loc("MAE Δ")
+                    delta_val = row.iloc[delta_idx]
+                    if isinstance(delta_val, (int, float)) and not pd.isna(delta_val):
+                        if delta_val < -OUTLIER_MAE_DELTA:
+                            styles[delta_idx] = "color: #2ecc71"
+                        elif delta_val > OUTLIER_MAE_DELTA:
+                            styles[delta_idx] = "color: #e74c3c"
+                except Exception:
+                    pass
+                return styles
+
+            fmt: Dict[str, str] = {}
+            for col in ["RG MAE", "Adj MAE", "MAE Δ", "RG Bias", "Adj Bias", "RG Corr", "Adj Corr", "RG Top-20%", "Adj Top-20%"]:
+                if col in per_date_df.columns:
+                    fmt[col] = "{:.3f}"
+
+            try:
+                styled_pd = per_date_df.style.apply(_highlight_per_date, axis=1).format(
+                    fmt, na_rep=""
+                )
+                st.dataframe(styled_pd, use_container_width=True, hide_index=True)
+            except Exception:
+                st.dataframe(per_date_df, use_container_width=True, hide_index=True)
+
+        # Outlier callouts
+        per_date = report.get("per_date", {})
+        outliers = [
+            (d, v["mae_delta"])
+            for d, v in per_date.items()
+            if v.get("is_outlier")
+        ]
+        if outliers:
+            st.markdown("**Outlier dates** (config MAE δ ≥ 1.0):")
+            for d, delta in sorted(outliers, key=lambda x: abs(x[1]), reverse=True):
+                icon = "🟢" if delta < 0 else "🔴"
+                st.caption(f"{icon} {d}: MAE Δ = {delta:+.3f}")
+
+
+
     st.markdown("### Post-Slate Feedback")
 
     feedback_date = st.date_input(
