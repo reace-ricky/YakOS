@@ -10,8 +10,8 @@ This PR fix: when exposure-cap exhaustion makes a lineup infeasible, the
 
 import pandas as pd
 import pytest
-from yak_core.lineups import _eligible_slots, build_multiple_lineups_with_exposure
-
+from yak_core.lineups import build_multiple_lineups_with_exposure
+from yak_core.ownership import _eligible_slots
 
 def _make_pool(c_players: int = 20, pfc_players: int = 9, other_players: int = 82) -> pd.DataFrame:
     """Return a minimal pool with the given position mix."""
