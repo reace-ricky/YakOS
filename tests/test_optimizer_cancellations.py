@@ -13,7 +13,7 @@ import pytest
 from yak_core.lineups import build_multiple_lineups_with_exposure
 from yak_core.ownership import _eligible_slots
 
-def _make_pool(c_players: int = 20, pfc_players: int = 9, other_players: int = 82) -> pd.DataFrame:
+def _make_pool(c_players: int = 20, pfc_players: int = 9, other_players: int = 160) -> pd.DataFrame:
     """Return a minimal pool with the given position mix."""
     rows = []
     pid = 0
@@ -25,7 +25,7 @@ def _make_pool(c_players: int = 20, pfc_players: int = 9, other_players: int = 8
             "player_name": f"Player_{pid}",
             "team": team,
             "opponent": opp,
-            "pos": pos,
+            "position": pos,
             "salary": salary,
             "proj": salary / 1000.0 * 4.0,
         })
@@ -51,6 +51,11 @@ _BASE_CFG = {
     "MIN_SALARY_USED": 46000,
     "PROJ_COL": "proj",
     "SOLVER_TIME_LIMIT": 30,
+    "GPP_MIN_LINEUP_CEILING": 0,
+    "GPP_MIN_PROJ_FLOOR": 0,
+    "GPP_MIN_STUD_PLAYERS": 0,
+    "MIN_PLAYER_MINUTES": 0,
+    "TIERED_EXPOSURE": [],
 }
 
 
@@ -128,7 +133,7 @@ class TestExposureFallback:
         assert lu_df["lineup_index"].nunique() == 5
         # Verify PF/C players are used in C slot
         c_slot_players = lu_df[lu_df["slot"] == "C"]
-        pfc_in_c = c_slot_players[c_slot_players["pos"] == "PF/C"]
+        pfc_in_c = c_slot_players[c_slot_players["position"] == "PF/C"]
         assert len(pfc_in_c) > 0, "PF/C players must be eligible for and fill the C slot"
 
 
@@ -153,9 +158,9 @@ class TestFallbackUniqueness:
         lineup_indices = list(lu_df["lineup_index"].unique())
         assert len(lineup_indices) == 5, "All 5 lineups should be built"
 
-        # Build a frozenset of player_ids per lineup for pairwise comparison.
+        # Build a frozenset of player_names per lineup for pairwise comparison.
         lineup_sets = {
-            lu: frozenset(lu_df[lu_df["lineup_index"] == lu]["player_id"])
+            lu: frozenset(lu_df[lu_df["lineup_index"] == lu]["player_name"])
             for lu in lineup_indices
         }
         min_diff = 3  # matches _MIN_DIFF in the optimizer

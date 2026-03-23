@@ -57,6 +57,7 @@ MAX_PLAYER_MINUTES: float = 40.0
 # A player projected for 20 FP can get at most +3 FP (0.15×20), totaling 23 FP.
 _MAX_BUMP_MULTIPLIER: float = 0.15  # 35% was over-inflating — bench players don't maintain FP/min at higher minute loads
 _MAX_TOTAL_BUMP_MULTIPLIER: float = 0.40  # Max total bump (injury + minutes gap combined)
+_MAX_GAP_BUMP_MULTIPLIER: float = 1.0  # Gap redistribution cap — compensates for missing slate players (large, predictable gaps)
 
 # ---------------------------------------------------------------------------
 # Position matching
@@ -720,11 +721,11 @@ def apply_minutes_gap_redistribution(pool_df: pd.DataFrame) -> pd.DataFrame:
             bump_fp = round(extra_min * fp_per_min, 2)
 
             # Cap: total bumps (injury + minutes gap) cannot exceed
-            # _MAX_TOTAL_BUMP_MULTIPLIER × original projection.
+            # _MAX_GAP_BUMP_MULTIPLIER × original projection.
             orig_proj = float(df.at[idx, "original_proj"]) if "original_proj" in df.columns else current_proj
             existing_injury_bump = float(df.at[idx, "injury_bump_fp"]) if "injury_bump_fp" in df.columns else 0.0
             total_bump_so_far = existing_injury_bump
-            max_total_bump = orig_proj * _MAX_TOTAL_BUMP_MULTIPLIER
+            max_total_bump = orig_proj * _MAX_GAP_BUMP_MULTIPLIER
             room = max(max_total_bump - total_bump_so_far, 0.0)
             bump_fp = min(bump_fp, round(room, 2))
 
