@@ -883,6 +883,37 @@ def get_profile_config(profile_key: str) -> Dict[str, Any]:
 # Ordered list of ALL contest preset labels (internal, preserves display order)
 CONTEST_PRESET_LABELS: List[str] = list(CONTEST_PRESETS.keys())
 
+# ---------------------------------------------------------------------------
+# Ceiling Hunter — fixed GPP projection calibration profile
+# ---------------------------------------------------------------------------
+# For all GPP presets, Ceiling Hunter is always ON at the projection layer.
+# It is NOT user-tunable from the UI.  The Tuning Lab controls how aggressively
+# the optimizer uses those projections, not what the projections look like.
+#
+# "Ceiling Hunter sets the numbers; the Lab controls how we use them."
+# ---------------------------------------------------------------------------
+GPP_PRESET_NAMES: frozenset = frozenset({
+    "GPP Main", "GPP Early", "GPP Late", "Showdown",
+    "PGA GPP", "PGA Showdown",
+})
+
+CEILING_HUNTER_CAL_PROFILE: Dict[str, Any] = {
+    "name": "Ceiling Hunter",
+    "description": "GPP projection baseline — ceil-heavy, floor-light. Always ON for GPP.",
+    "proj_multiplier": 1.0,
+    "ceiling_boost": 0.15,   # +15% of ceil added on top of proj
+    "floor_reduction": 0.0,
+    "ceil_weight": 0.85,
+    "floor_weight": 0.15,
+    "stack_bonus": 2.0,
+    "value_threshold": 2.5,
+}
+
+
+def is_gpp_preset(preset_name: str) -> bool:
+    """Return True if ``preset_name`` is a GPP-family preset (Ceiling Hunter ON)."""
+    return preset_name in GPP_PRESET_NAMES
+
 # User-facing contest type labels — sport-aware.
 # NBA gets GPP/Cash/Showdown, PGA gets GPP only.
 UI_CONTEST_LABELS: List[str] = ["GPP", "Cash", "Cash Game", "Showdown"]
