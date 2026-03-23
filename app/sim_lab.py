@@ -2999,6 +2999,21 @@ def _render_auto_calibrate(
                 st.session_state[sk],
                 result.best_ricky_weights,
             )
+            # ── Also save to Tuning Lab run history ──────────────────────
+            try:
+                from app.tuning_lab import apply_auto_cal_result
+                _autocal_ct = getattr(result, "contest_type", autocal_contest_type)
+                apply_auto_cal_result(
+                    contest_type=_autocal_ct,
+                    preset_name=preset_name,
+                    best_params=result.best_params,
+                    best_ricky_weights=result.best_ricky_weights,
+                    per_date_results=result.per_date_results,
+                    label=f"Auto-Cal {datetime.now().strftime('%m/%d %H:%M')}",
+                )
+            except Exception as _tl_err:
+                _logger.warning("Tuning Lab save failed: %s", _tl_err)
+            # ─────────────────────────────────────────────────────────────
             st.success("Auto-Cal parameters applied.")
             st.rerun()
     with c2:
@@ -3410,8 +3425,8 @@ def render_sim_lab(sport: str) -> None:
                 use_container_width=True,
             )
 
-    # Sim Lab Report (read-only analysis of CSV exports)
-    with st.expander("Sim Lab Report", expanded=False):
+    # Sim Lab Report (read-only analysis of CSV exports) — moved to Legacy / Advanced
+    with st.expander("Legacy / Advanced — Sim Lab Report", expanded=False):
         _render_sim_lab_report()
 
     # Run log (always visible at bottom)

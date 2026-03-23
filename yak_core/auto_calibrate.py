@@ -789,55 +789,60 @@ def _get_objective_value(
 ) -> Optional[float]:
     """Extract contest-type-specific objective value from a pipeline run.
 
-    SE GPP:        Maximize SE Core actual + 300+ count bonus.
-    MME GPP:       Maximize best-of-N actual FP + top-5 avg bonus.
-    Cash:          Maximize % of lineups above estimated cash line (260 FP).
-    Showdown GPP:  Maximize SE Core actual (adapted for 6-player lineups).
-    Showdown Cash: Maximize % above showdown cash line (180 FP).
+    Objective: produce 300+ lineup sets that reliably hit cash / top-5% / top-1%
+    bands per contest type.
+
+    The composite score weights three band hit rates:
+        hit_rate_cash  (% of lineups above cash line)        × 1.0
+        hit_rate_top5  (% of lineups in top 5% of our set)   × 1.5
+        hit_rate_top1  (% of lineups in top 1% of our set)   × 2.0
+
+    An additional 300+ bonus rewards configs that generate truly elite lineups.
+
+    SE GPP / MME GPP: cash line = 287, 300+ bonus active.
+    Cash:             cash line = 260, upside penalties removed.
+    Showdown GPP:     cash line = 180, 300+ threshold = 200.
+    Showdown Cash:    cash line = 180, no upside bonus.
     """
+    from yak_core.tuning_lab import compute_lineup_hit_rates
+
     summary = run.get("summary_df")
     if summary is None or summary.empty:
         return None
 
-    actuals = summary["total_actual"].dropna()
+    actuals = pd.to_numeric(summary["total_actual"], errors="coerce").dropna()
     if actuals.empty:
         return None
 
-    if contest_type == "SE GPP":
-        se_core = _get_se_core_actual(run)
-        if se_core is None:
-            return None
-        # 300+ generation bonus — reward configs that produce high-ceiling lineups
+    # ── Hit-rate objective (shared across all contest types) ──────────────
+    hit_rates = compute_lineup_hit_rates(summary, contest_type=contest_type)
+    hit_cash  = hit_rates["hit_rate_cash"]   # 0–100
+    hit_top5  = hit_rates["hit_rate_top5"]   # 0–100
+    hit_top1  = hit_rates["hit_rate_top1"]   # 0–100
+
+    base_score = hit_cash * 1.0 + hit_top5 * 1.5 + hit_top1 * 2.0
+
+    # ── 300+ generation bonus (GPP contests) ─────────────────────────────
+    if contest_type in ("SE GPP", "MME GPP"):
         count_300 = float((actuals >= 300.0).sum())
-        # Best lineup score — pushes optimizer toward ceiling
-        best_lineup = float(actuals.max())
-        # Sorter accuracy bonus — reward configs where 300+ lineups rank in top 5
+        # Sorter bonus: reward configs where 300+ lineups rise to the top of Ricky's ranking
         sorter_bonus = 0.0
         if count_300 > 0 and "ricky_rank" in summary.columns:
             top5_mask = summary["ricky_rank"] <= 5
             above_300 = summary["total_actual"] >= 300.0
             n_300_in_top5 = float((top5_mask & above_300).sum())
-            sorter_bonus = n_300_in_top5 * 10.0  # strong reward for surfacing 300+ to top
-        # Combined: SE Core (baseline) + ceiling chase + sorter accuracy
-        return se_core + count_300 * 5.0 + (best_lineup - 250.0) * 0.1 + sorter_bonus
-    elif contest_type == "MME GPP":
-        best = float(actuals.max())
-        # Bonus for top-5 avg (sniper metric)
-        top5 = actuals.nlargest(min(5, len(actuals)))
-        top5_avg = float(top5.mean())
-        return best * 0.6 + top5_avg * 0.4
-    elif contest_type == "Cash":
-        cash_line = 260.0
-        n_above = (actuals >= cash_line).sum()
-        return float(n_above / len(actuals)) * 100  # percentage
-    elif contest_type == "Showdown GPP":
-        return _get_se_core_actual(run)
-    elif contest_type == "Showdown Cash":
-        cash_line = 180.0
-        n_above = (actuals >= cash_line).sum()
-        return float(n_above / len(actuals)) * 100
-    else:
-        return _get_se_core_actual(run)
+            sorter_bonus = n_300_in_top5 * 5.0
+        base_score += count_300 * 2.0 + sorter_bonus
+
+    elif contest_type in ("Showdown GPP",):
+        count_200 = float((actuals >= 200.0).sum())
+        base_score += count_200 * 1.0
+
+    # ── Tie-break: average actual FP (very small weight) ─────────────────
+    avg_actual = float(actuals.mean())
+    base_score += avg_actual * 0.01
+
+    return base_score
 
 
 def compute_sniper_metrics(per_date_results: List[Dict[str, Any]]) -> Dict[str, float | None]:
@@ -845,12 +850,17 @@ def compute_sniper_metrics(per_date_results: List[Dict[str, Any]]) -> Dict[str, 
 
     Each entry in *per_date_results* should contain a ``summary_df`` key with
     the scored/ranked lineup DataFrame produced by ``_run_pipeline_headless``.
+
+    Includes the canonical band hit-rate metrics aligned with the Tuning Lab
+    objective: ``hit_rate_cash``, ``hit_rate_top5``, ``hit_rate_top1``.
     """
     from statistics import mean as _mean
+    from yak_core.tuning_lab import compute_lineup_hit_rates
 
     all_300_counts: list[float] = []
     all_350_counts: list[float] = []
     all_cash_rates: list[float] = []
+    all_top5_rates: list[float] = []
     all_top1pct_rates: list[float] = []
     all_top5_avgs: list[float] = []
     all_best_scores: list[float] = []
@@ -880,14 +890,11 @@ def compute_sniper_metrics(per_date_results: List[Dict[str, Any]]) -> Dict[str, 
         all_300_counts.append(float((actuals >= 300.0).sum()))
         all_350_counts.append(float((actuals >= 350.0).sum()))
 
-        # Cash rate (% above 287)
-        cash_rate = float((actuals >= 287.0).sum()) / len(actuals)
-        all_cash_rates.append(cash_rate)
-
-        # Top-1% hit rate
-        top_1pct_threshold = actuals.quantile(0.99)
-        top_1pct_count = float((actuals >= top_1pct_threshold).sum())
-        all_top1pct_rates.append(top_1pct_count / len(actuals) * 100)
+        # Band hit rates (canonical Tuning Lab metrics)
+        hit_r = compute_lineup_hit_rates(summary)
+        all_cash_rates.append(hit_r["hit_rate_cash"])
+        all_top5_rates.append(hit_r["hit_rate_top5"])
+        all_top1pct_rates.append(hit_r["hit_rate_top1"])
 
         # Top-5 avg score
         top5 = actuals.nlargest(min(5, len(actuals)))
@@ -924,8 +931,13 @@ def compute_sniper_metrics(per_date_results: List[Dict[str, Any]]) -> Dict[str, 
         "avg_se_core": round(_mean(all_se_core), 1) if all_se_core else None,
         "count_300_avg": round(_mean(all_300_counts), 1) if all_300_counts else None,
         "count_350_avg": round(_mean(all_350_counts), 2) if all_350_counts else None,
+        # Canonical Tuning Lab band metrics
+        "hit_rate_cash": round(_mean(all_cash_rates), 1) if all_cash_rates else None,
+        "hit_rate_top5": round(_mean(all_top5_rates), 1) if all_top5_rates else None,
+        "hit_rate_top1": round(_mean(all_top1pct_rates), 1) if all_top1pct_rates else None,
+        # Legacy aliases kept for backward compatibility
+        "cash_rate_pct": round(_mean(all_cash_rates), 1) if all_cash_rates else None,
         "top1pct_rate": round(_mean(all_top1pct_rates), 1) if all_top1pct_rates else None,
-        "cash_rate_pct": round(_mean(all_cash_rates) * 100, 1) if all_cash_rates else None,
         "top5_avg": round(_mean(all_top5_avgs), 1) if all_top5_avgs else None,
         "best_lineup_avg": round(_mean(all_best_scores), 1) if all_best_scores else None,
         "avg_ceiling": round(_mean(all_avg_ceils), 1) if all_avg_ceils else None,
