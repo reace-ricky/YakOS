@@ -28,6 +28,7 @@ def _make_pool(n: int = 8) -> pd.DataFrame:
         "floor": [14.0 + i for i in range(n)],
         "ceil": [30.0 + i * 3 for i in range(n)],
         "ownership": [5.0 + i * 2 for i in range(n)],
+                "dvp_boost": [0.0] * n,
     })
 
 
