@@ -28,7 +28,7 @@ def _make_classic_pool(n: int = 120) -> pd.DataFrame:
             "player_name": f"Player_{i}",
             "team": f"T{i % 6}",
             "opponent": f"T{(i + 3) % 6}",
-            "pos": positions[i % len(positions)],
+            "position": positions[i % len(positions)],
             "salary": 4000 + (i % 30) * 200,
             "proj": 10.0 + (i % 20) * 1.5,
         })
@@ -46,7 +46,7 @@ def _make_showdown_pool(n: int = 20) -> pd.DataFrame:
             "player_name": f"Player_{i}",
             "team": team,
             "opponent": opp,
-            "pos": ["PG", "SG", "SF", "PF", "C"][i % 5],
+            "position": ["PG", "SG", "SF", "PF", "C"][i % 5],
             "salary": 6000 + i * 300,
             "proj": 20.0 + i * 2.0,
         })
@@ -60,6 +60,11 @@ _BASE_CFG = {
     "MAX_EXPOSURE": 1.0,
     "PROJ_COL": "proj",
     "SOLVER_TIME_LIMIT": 30,
+    "GPP_MIN_LINEUP_CEILING": 0,
+    "GPP_MIN_PROJ_FLOOR": 0,
+    "GPP_MIN_STUD_PLAYERS": 0,
+    "MIN_PLAYER_MINUTES": 0,
+    "TIERED_EXPOSURE": [],
 }
 
 _SHOWDOWN_CFG = {
@@ -69,6 +74,11 @@ _SHOWDOWN_CFG = {
     "MAX_EXPOSURE": 1.0,
     "PROJ_COL": "proj",
     "SOLVER_TIME_LIMIT": 30,
+    "GPP_MIN_LINEUP_CEILING": 0,
+    "GPP_MIN_PROJ_FLOOR": 0,
+    "GPP_MIN_STUD_PLAYERS": 0,
+    "MIN_PLAYER_MINUTES": 0,
+    "TIERED_EXPOSURE": [],
 }
 
 
@@ -91,16 +101,11 @@ class TestMaxPairAppearances:
         cfg = dict(_BASE_CFG, NUM_LINEUPS=8, MAX_PAIR_APPEARANCES=max_pair, MAX_EXPOSURE=1.0)
         lu_df, _ = build_multiple_lineups_with_exposure(pool, cfg)
 
-        # Build (player_id, lineup_index) presence set
-        presence = lu_df.set_index("lineup_index")["player_id"]
         lineup_sets = {
-            lu: set(lu_df[lu_df["lineup_index"] == lu]["player_id"])
+            lu: set(lu_df[lu_df["lineup_index"] == lu]["player_name"])
             for lu in lu_df["lineup_index"].unique()
         }
         lineups = list(lineup_sets.values())
-        from itertools import combinations
-        for a, b in combinations(range(len(lineups)), 2):
-            pair_together = len(lineups[a] & lineups[b]) > 0  # count doesn't matter for pairs
         # Count occurrences of each player pair
         pair_count: dict = {}
         for lu_set in lineups:
@@ -120,7 +125,7 @@ class TestMaxPairAppearances:
         cfg = dict(_BASE_CFG, NUM_LINEUPS=5, MAX_PAIR_APPEARANCES=1, MAX_EXPOSURE=1.0)
         lu_df, _ = build_multiple_lineups_with_exposure(pool, cfg)
         lineup_sets = {
-            lu: set(lu_df[lu_df["lineup_index"] == lu]["player_id"])
+            lu: set(lu_df[lu_df["lineup_index"] == lu]["player_name"])
             for lu in sorted(lu_df["lineup_index"].unique())
         }
         lineups = list(lineup_sets.values())

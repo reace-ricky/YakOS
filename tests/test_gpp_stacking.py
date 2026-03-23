@@ -36,13 +36,15 @@ def _make_stacking_pool(n_per_team: int = 8) -> pd.DataFrame:
     for home, away in _GAMES:
         for team in (home, away):
             opp = away if team == home else home
+            game_id = "_".join(sorted([home, away]))
             for i in range(n_per_team):
                 rows.append({
                     "player_id": str(pid),
                     "player_name": f"{team}_{i}",
                     "team": team,
                     "opponent": opp,
-                    "pos": positions[i % len(positions)],
+                    "game_id": game_id,
+                    "position": positions[i % len(positions)],
                     "salary": 4000 + (pid % 20) * 300,
                     "proj": 15.0 + (pid % 15) * 2.0,
                     "ceil": 20.0 + (pid % 15) * 3.0,
@@ -68,6 +70,11 @@ _GPP_CFG = {
     "GPP_OWN_CAP": 20.0,
     "GPP_MIN_LOW_OWN_PLAYERS": 0,
     "GPP_LOW_OWN_THRESHOLD": 0.01,
+    "GPP_MIN_LINEUP_CEILING": 0,
+    "GPP_MIN_PROJ_FLOOR": 0,
+    "GPP_MIN_STUD_PLAYERS": 0,
+    "MIN_PLAYER_MINUTES": 0,
+    "TIERED_EXPOSURE": [],
 }
 
 _CASH_CFG = {
@@ -80,6 +87,11 @@ _CASH_CFG = {
     "GPP_FORCE_GAME_STACK": False,
     "GPP_MIN_TEAM_STACK": 0,
     "GPP_FORCE_BRING_BACK": False,
+    "GPP_MIN_LINEUP_CEILING": 0,
+    "GPP_MIN_PROJ_FLOOR": 0,
+    "GPP_MIN_STUD_PLAYERS": 0,
+    "MIN_PLAYER_MINUTES": 0,
+    "TIERED_EXPOSURE": [],
 }
 
 
@@ -97,6 +109,10 @@ class TestGameStack:
         pool = _make_stacking_pool()
         lu_df, _ = build_multiple_lineups_with_exposure(pool, _GPP_CFG)
         assert lu_df["lineup_index"].nunique() == 5
+
+        opp_map = pool.set_index("player_name")["opponent"]
+        lu_df = lu_df.copy()
+        lu_df["opponent"] = lu_df["player_name"].map(opp_map)
 
         for lu_idx in lu_df["lineup_index"].unique():
             lu = _get_lineup_players(lu_df, lu_idx)
@@ -117,6 +133,10 @@ class TestGameStack:
         cfg = dict(_GPP_CFG, GPP_MIN_GAME_STACK=4, GPP_MIN_TEAM_STACK=0,
                    GPP_FORCE_BRING_BACK=False, NUM_LINEUPS=3)
         lu_df, _ = build_multiple_lineups_with_exposure(pool, cfg)
+
+        opp_map = pool.set_index("player_name")["opponent"]
+        lu_df = lu_df.copy()
+        lu_df["opponent"] = lu_df["player_name"].map(opp_map)
 
         for lu_idx in lu_df["lineup_index"].unique():
             lu = _get_lineup_players(lu_df, lu_idx)
@@ -164,6 +184,10 @@ class TestBringBack:
         (2+ players) must have an opponent player in the lineup."""
         pool = _make_stacking_pool()
         lu_df, _ = build_multiple_lineups_with_exposure(pool, _GPP_CFG)
+
+        opp_map = pool.set_index("player_name")["opponent"]
+        lu_df = lu_df.copy()
+        lu_df["opponent"] = lu_df["player_name"].map(opp_map)
 
         for lu_idx in lu_df["lineup_index"].unique():
             lu = _get_lineup_players(lu_df, lu_idx)

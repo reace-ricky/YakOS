@@ -336,7 +336,7 @@ class TestConfigWiring:
         """GPP v8 scoring weights must be present."""
         cfg = _make_cfg()
         # v8 sim-based scoring weights
-        assert cfg.get("GPP_PROJ_WEIGHT") == 0.25
+        assert cfg.get("GPP_PROJ_WEIGHT") == 0.15
         assert "GPP_UPSIDE_WEIGHT" in cfg
         assert "GPP_BOOM_WEIGHT" in cfg
         assert "GPP_OWN_PENALTY_STRENGTH" in cfg
@@ -500,7 +500,16 @@ class TestGPPv8SimScoring:
         cfg = {**DEFAULT_CONFIG, "GPP_PROJ_WEIGHT": 1.0,
                "GPP_UPSIDE_WEIGHT": 0.0, "GPP_BOOM_WEIGHT": 0.0,
                "GPP_OWN_PENALTY_STRENGTH": 0.0, "GPP_OWN_LOW_BOOST": 0.0,
-               "GPP_RICKY_EDGE_WEIGHT": 0.0}
+               "GPP_RICKY_EDGE_WEIGHT": 0.0,
+               "GPP_SMASH_WEIGHT": 0.0,
+               "GPP_DVP_WEIGHT": 0.0,
+               "GPP_PACE_ENV_WEIGHT": 0.0,
+               "GPP_FORM_WEIGHT": 0.0,
+               "GPP_BUST_PENALTY": 0.0,
+               "GPP_SPREAD_PENALTY_WEIGHT": 0.0,
+               "GPP_CATALYST_WEIGHT": 0.0,
+               "GPP_LEVERAGE_WEIGHT": 0.0,
+               "GPP_EFFICIENCY_WEIGHT": 0.0}
         result = _add_scores(df, cfg)
         # With zero ownership penalty and pure projection, gpp_score = proj * 1.0
         for i in range(len(df)):
