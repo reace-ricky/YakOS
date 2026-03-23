@@ -60,8 +60,8 @@ class TestActiveConfig:
         loaded = load_active_config()
         assert loaded is not None
         # Now returns per-contest-type dict
-        gpp = loaded["gpp"]
-        assert gpp["name"] == "GPP Working Config"
+        gpp = loaded["classic_gpp_main"]
+        assert gpp["name"] == "CLASSIC_GPP_MAIN Working Config"
         assert gpp["values"]["proj_weight"] == 0.25
         assert "2026-03-14" in gpp["slates_trained"]
 
@@ -70,27 +70,27 @@ class TestActiveConfig:
         save_active_config(vals, slate_date="2026-03-14")
         save_active_config(vals, slate_date="2026-03-15")
         loaded = load_active_config()
-        assert loaded["gpp"]["slates_trained"] == ["2026-03-14", "2026-03-15"]
+        assert loaded["classic_gpp_main"]["slates_trained"] == ["2026-03-14", "2026-03-15"]
 
     def test_save_deduplicates_slate_dates(self):
         vals = _sample_values()
         save_active_config(vals, slate_date="2026-03-14")
         save_active_config(vals, slate_date="2026-03-14")
         loaded = load_active_config()
-        assert loaded["gpp"]["slates_trained"].count("2026-03-14") == 1
+        assert loaded["classic_gpp_main"]["slates_trained"].count("2026-03-14") == 1
 
     def test_save_without_slate_date(self):
         vals = _sample_values()
         save_active_config(vals)
         loaded = load_active_config()
-        assert loaded["gpp"]["slates_trained"] == []
+        assert loaded["classic_gpp_main"]["slates_trained"] == []
 
     def test_only_slider_keys_persisted(self):
         vals = _sample_values()
         vals["extra_garbage"] = 999
         save_active_config(vals)
         loaded = load_active_config()
-        assert "extra_garbage" not in loaded["gpp"]["values"]
+        assert "extra_garbage" not in loaded["classic_gpp_main"]["values"]
 
     def test_get_active_slider_values(self):
         save_active_config(_sample_values())
@@ -104,10 +104,10 @@ class TestActiveConfig:
     def test_save_creates_all_contest_types(self):
         vals = _sample_values()
         saved = save_active_config(vals, contest_type="cash")
-        assert "gpp" in saved
-        assert "cash" in saved
-        assert "showdown" in saved
-        assert saved["cash"]["values"]["proj_weight"] == 0.25
+        assert "classic_gpp_main" in saved
+        assert "classic_cash" in saved
+        assert "showdown_gpp" in saved
+        assert saved["classic_cash"]["values"]["proj_weight"] == 0.25
 
     def test_contest_types_independent(self):
         vals_gpp = _sample_values()
@@ -116,8 +116,8 @@ class TestActiveConfig:
         save_active_config(vals_gpp, contest_type="gpp")
         save_active_config(vals_cash, contest_type="cash")
         loaded = load_active_config()
-        assert loaded["gpp"]["values"]["proj_weight"] == 0.25
-        assert loaded["cash"]["values"]["proj_weight"] == 0.70
+        assert loaded["classic_gpp_main"]["values"]["proj_weight"] == 0.25
+        assert loaded["classic_cash"]["values"]["proj_weight"] == 0.70
 
     def test_get_active_slider_values_per_contest_type(self):
         vals_gpp = _sample_values()
@@ -170,7 +170,7 @@ class TestConfigHistory:
         vals = _sample_values()
         append_config_history("test_action", vals, contest_type="showdown")
         history = load_config_history()
-        assert history[0]["contest_type"] == "showdown"
+        assert history[0]["contest_type"] == "showdown_gpp"
 
 
 class TestResetConfig:
@@ -179,7 +179,7 @@ class TestResetConfig:
         save_active_config(vals, slate_date="2026-03-14")
         reset_active_config(vals)
         loaded = load_active_config()
-        assert loaded["gpp"]["slates_trained"] == []
+        assert loaded["classic_gpp_main"]["slates_trained"] == []
 
     def test_reset_records_history(self):
         vals = _sample_values()
@@ -193,8 +193,8 @@ class TestResetConfig:
         save_active_config(vals, slate_date="2026-03-14", contest_type="cash")
         reset_active_config(vals, contest_type="gpp")
         loaded = load_active_config()
-        assert loaded["gpp"]["slates_trained"] == []
-        assert "2026-03-14" in loaded["cash"]["slates_trained"]
+        assert loaded["classic_gpp_main"]["slates_trained"] == []
+        assert "2026-03-14" in loaded["classic_cash"]["slates_trained"]
 
 
 class TestApplyToOptimizer:
@@ -332,11 +332,11 @@ class TestLegacyMigration:
         }
         acp.write_text(json.dumps(legacy))
         loaded = load_active_config()
-        assert "gpp" in loaded
-        assert "cash" in loaded
-        assert "showdown" in loaded
-        assert loaded["gpp"]["values"]["proj_weight"] == 0.60
-        assert loaded["gpp"]["slates_trained"] == ["2026-01-01"]
+        assert "classic_gpp_main" in loaded
+        assert "classic_cash" in loaded
+        assert "showdown_gpp" in loaded
+        assert loaded["classic_gpp_main"]["values"]["proj_weight"] == 0.60
+        assert loaded["classic_gpp_main"]["slates_trained"] == ["2026-01-01"]
 
 
 class TestGitHubSyncOnSave:
