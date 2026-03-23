@@ -661,7 +661,8 @@ def apply_projections(
     Main entry point: apply the configured projection method to pool_df.
 
     Config keys used:
-      PROJ_SOURCE     : "parquet", "salary_implied", "regression", "blend"
+      PROJ_SOURCE     : "parquet", "salary_implied", "regression", "blend",
+                        "model", "ensemble", "ricky_proj"
                         (default: "parquet")
       FP_PER_K        : float, used by salary_implied (default: 4.0)
       PROJ_NOISE      : float, noise std as fraction (default: 0.05)
@@ -669,6 +670,13 @@ def apply_projections(
 
     The function always preserves the original parquet projection as
     'proj_parquet' and writes the final projection to 'proj'.
+
+    When PROJ_SOURCE is "ricky_proj", Ricky's recency-weighted game-log model
+    is used.  The ``ricky_proj`` column becomes the primary projection and is
+    also copied to ``proj`` so the rest of the optimizer pipeline is unchanged.
+    ``ricky_floor`` and ``ricky_ceil`` are populated and copied to ``floor``/
+    ``ceil`` (unless those columns already exist from a prior step).
+
     If 'actual_fp' exists it is never touched.
     """
     df = pool_df.copy()
@@ -728,14 +736,40 @@ def apply_projections(
         ]
         print("[projections] Using ensemble (YakOS + Tank01 + RG blend)")
 
+    elif method == "ricky_proj":
+        # Ricky's recency-weighted game-log projection model.
+        # Produces ricky_proj / ricky_floor / ricky_ceil columns and
+        # promotes ricky_proj to the primary 'proj' column used by the
+        # optimizer.  Falls back to salary-implied when rolling data is absent.
+        from yak_core.ricky_projections import compute_ricky_proj
+
+        adjustments = cfg.get("RICKY_ADJUSTMENTS") or {}
+        df = compute_ricky_proj(df, cfg=cfg, adjustments=adjustments)
+
+        # Promote ricky_proj → proj (primary optimizer column)
+        df["proj"] = df["ricky_proj"]
+
+        # Promote floor / ceil only when they are not already set
+        if "floor" not in df.columns or df["floor"].isna().all():
+            df["floor"] = df["ricky_floor"]
+        if "ceil" not in df.columns or df["ceil"].isna().all():
+            df["ceil"] = df["ricky_ceil"]
+
+        print("[projections] Using ricky_proj (recency-weighted game-log model)")
+
     else:
         raise ValueError(
             f"Unknown PROJ_SOURCE '{method}'. "
-            f"Expected: parquet, salary_implied, regression, blend, model, ensemble"
+            f"Expected: parquet, salary_implied, regression, blend, model, "
+            f"ensemble, ricky_proj"
         )
 
     # Add salary-implied as reference column
     df["proj_salary_implied"] = sal_proj
+
+    # Ensure proj falls back to salary-implied if still missing
+    if "proj" not in df.columns or df["proj"].isna().all():
+        df["proj"] = sal_proj
 
     return df
 

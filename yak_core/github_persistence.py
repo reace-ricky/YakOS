@@ -54,6 +54,7 @@ _FEEDBACK_FILES = [
     "data/sim_lab/slider_state.json",
     "data/tuning_lab/run_history.parquet",
     "data/calibration_feedback/config_adjusted_baseline.json",
+    "data/ricky_archive/nba/archive.parquet",
 ]
 
 # Binary file extensions that need base64 encoding directly from bytes
