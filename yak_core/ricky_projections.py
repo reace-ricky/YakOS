@@ -175,6 +175,19 @@ def compute_ricky_proj(
     df["ricky_floor"] = ricky_floor
     df["ricky_ceil"] = ricky_ceil
 
+    # ------------------------------------------------------------------
+    # 5. Ownership proxy when no external source available
+    # ------------------------------------------------------------------
+    has_own = (
+        "ownership" in df.columns
+        and pd.to_numeric(df["ownership"], errors="coerce").fillna(0).sum() > 0
+    )
+    if not has_own:
+        rank_pct = sal.rank(pct=True)  # 0-1, higher salary = higher rank
+        df["ownership"] = (rank_pct * 0.25 + 0.01).round(4)  # 1% to 26%
+        df["own_proj"] = df["ownership"]
+        print("[ricky_projections] Ownership estimated from salary rank (no external source)")
+
     n_rolling = int(has_rolling.sum()) if rolling_cols_present else 0
     print(
         f"[ricky_projections] {n_rolling}/{n} players had rolling game-log data"

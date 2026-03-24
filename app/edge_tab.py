@@ -1,7 +1,8 @@
 """Tab 1: Ricky's Edge Analysis (public).
 
 Displays the pre-computed edge analysis from data/published/{sport}/:
-  - The Board: Last Slate Recap, Today's Edge (voice-driven callouts), Bust Call
+  - The Board (unified Ricky voice): Last Slate Recap → Today's Edge
+    (stacks, snipers, fades, injury edges, bust call — all in voice)
   - 3-box dashboard: Core, Leverage, Value (boxed cards)
   - PGA wave split summary
   - Published lineups by contest type
@@ -172,179 +173,102 @@ def _render_edge_box(key: str, players: List[Dict], is_pga: bool, cleared_player
     st.markdown(box_html, unsafe_allow_html=True)
 
 
-def _generate_board_callouts(
-    stacks: List[Dict[str, Any]],
-    snipers: List[Dict[str, Any]],
-    fades: List[Dict[str, Any]],
-    pool: pd.DataFrame,
-) -> List[str]:
-    """Convert structured board data into Ricky-voice text callouts.
+def _board_data_to_voice(stacks, snipers, fades, pool):
+    """Convert board structured data into Ricky-voice callout strings."""
+    callouts = []
 
-    Returns 3-6 callouts depending on what's relevant. Uses the
-    _TemplateRotator from rickys_take.py for daily variety.
-    """
-    from yak_core.rickys_take import _pick_template, _pick_template_by_key
-
-    callouts: List[str] = []
-
-    # ── Sniper alerts ──
-    _SNIPER_TEMPLATES = [
-        "The field is sleeping on {name} tonight. Ranked #{rank} in my model at just {own:.1f}% ownership — {ceil:.0f} ceiling in a {total:.0f}-total game.",
-        "{name} at ${salary:,} is my favorite misfire tonight. {own:.1f}% owned, {proj:.1f} projected, {ceil:.0f} ceiling. The field doesn't see it.",
-        "If you're looking for a pivot, {name} checks every box. Top-20 projection, sub-10% ownership, in a game totaling {total:.0f}.",
-    ]
-    for i, p in enumerate(snipers):
-        # Look up vegas total for this player's game
-        game_total = 0.0
-        if not pool.empty and "player_name" in pool.columns:
-            prow = pool[pool["player_name"] == p["player_name"]]
-            if not prow.empty:
-                for vc in ("over_under", "vegas_total", "total"):
-                    if vc in prow.columns and prow[vc].notna().any():
-                        game_total = float(prow[vc].iloc[0])
-                        break
-        # Rank = position in top-N by proj (1-indexed)
-        rank = i + 1
-        tmpl = _pick_template(
-            _SNIPER_TEMPLATES, p["player_name"], "board_sniper",
+    # Stack callouts
+    for s in (stacks or []):
+        callouts.append(
+            f"{s['team1']}-{s['team2']} is the game to stack tonight. "
+            f"{s['vegas_total']:.0f} total — {s['top_player1']} and {s['top_player2']} "
+            f"combine for a {s['combined_ceil']:.0f} ceiling."
         )
-        callouts.append(tmpl.format(
-            name=p["player_name"], rank=rank, own=p["own_pct"],
-            ceil=p["ceil"], total=game_total, salary=p["salary"],
-            proj=p["proj"],
-        ))
 
-    # ── Fades ──
-    _FADE_TEMPLATES = [
-        "{name} at {own:.1f}% ownership? Pass. My model has him ranked #{rank} — there are better plays at ${salary:,}.",
-        "The field loves {name} at {own:.1f}% tonight. I don't. Ranked #{rank} with a {proj:.1f} projection. You're paying for the name.",
-        "Ownership trap alert: {name} ({own:.1f}%). Model says he's a fade — ranked #{rank}, ceiling doesn't justify the chalk.",
-    ]
-    for p in fades:
-        # Extract rank from reasoning ("Ranked #30 by Ricky vs #5 by salary")
-        rank = 0
-        reasoning = p.get("reasoning", "")
-        if "Ranked #" in reasoning:
-            try:
-                rank = int(reasoning.split("Ranked #")[1].split(" ")[0])
-            except (ValueError, IndexError):
-                pass
-        tmpl = _pick_template(
-            _FADE_TEMPLATES, p["player_name"], "board_fade",
+    # Sniper callouts
+    for p in (snipers or []):
+        own_str = f"{p['own_pct']:.1f}%" if p.get('own_pct', 0) > 0 else "low"
+        callouts.append(
+            f"The field is sleeping on {p['player_name']} tonight. "
+            f"{p['proj']:.1f} projected with a {p['ceil']:.0f} ceiling at just {own_str} ownership. "
+            f"That's a misfire at ${p['salary']:,}."
         )
-        callouts.append(tmpl.format(
-            name=p["player_name"], own=p["own_pct"], rank=rank,
-            salary=p["salary"], proj=p["proj"],
-        ))
 
-    # ── Stack callouts ──
-    _STACK_TEMPLATES = [
-        "{team1}-{team2} is the stack tonight. {total:.0f} total, {p1} + {p2} combine for a {ceil:.0f} ceiling.",
-        "Game environment alert: {team1} at {team2} with a {total:.0f} total. Stack {p1} and {p2} — that's where the ceiling lives.",
-    ]
-    for s in stacks:
-        key = f"{s['team1']}:{s['team2']}"
-        tmpl = _pick_template_by_key(
-            _STACK_TEMPLATES, key, "board_stack",
+    # Fade callouts
+    for p in (fades or []):
+        callouts.append(
+            f"{p['player_name']} at {p['own_pct']:.1f}% ownership? Pass. "
+            f"{p.get('reasoning', 'Model says fade.')}"
         )
-        callouts.append(tmpl.format(
-            team1=s["team1"], team2=s["team2"],
-            total=s["vegas_total"], p1=s["top_player1"],
-            p2=s["top_player2"], ceil=s["combined_ceil"],
-        ))
 
-    # ── Injury edges (players with injury_bump_fp > 0) ──
-    _INJURY_TEMPLATES = [
-        "{name} picks up an extra {bump:.1f} FP from the {out_player} absence. The field hasn't priced this in yet.",
-    ]
-    if not pool.empty and "injury_bump_fp" in pool.columns:
-        bump_col = pd.to_numeric(pool["injury_bump_fp"], errors="coerce").fillna(0)
-        bumped = pool[bump_col > 0].copy()
-        bumped["_bump"] = bump_col[bumped.index]
-        if not bumped.empty:
-            top_bump = bumped.nlargest(1, "_bump").iloc[0]
-            out_player = top_bump.get("injury_source", "an injury")
-            tmpl = _pick_template(
-                _INJURY_TEMPLATES, str(top_bump.get("player_name", "")), "board_injury",
+    # Injury edge callouts (from pool data)
+    if "injury_bump_fp" in pool.columns:
+        bumped = pool[pool["injury_bump_fp"] > 2.0].nlargest(2, "injury_bump_fp")
+        for _, row in bumped.iterrows():
+            callouts.append(
+                f"{row['player_name']} picks up an extra {row['injury_bump_fp']:.1f} FP from an injury cascade. "
+                f"The field hasn't priced this in."
             )
-            callouts.append(tmpl.format(
-                name=top_bump.get("player_name", "?"),
-                bump=float(top_bump["_bump"]),
-                out_player=out_player,
-            ))
 
-    # ── Blowout flags (spread > 10) ──
-    _BLOWOUT_TEMPLATES = [
-        "Blowout watch: {team} is a {spread:.0f}-point favorite. Starters could see reduced 4th-quarter minutes.",
-    ]
-    if not pool.empty and "spread" in pool.columns:
-        spread_col = pd.to_numeric(pool["spread"], errors="coerce").fillna(0)
-        blowout = pool[spread_col.abs() > 10].copy()
-        if not blowout.empty:
-            blowout["_spread"] = spread_col[blowout.index].abs()
-            top_bo = blowout.nlargest(1, "_spread").iloc[0]
-            team = top_bo.get("team", "?")
-            tmpl = _pick_template_by_key(
-                _BLOWOUT_TEMPLATES, str(team), "board_blowout",
+    # Blowout flags (from pool data)
+    if "spread" in pool.columns:
+        blowout_teams = pool[pool["spread"].abs() > 10]["team"].unique()
+        for team in blowout_teams[:1]:  # max 1 blowout flag
+            spread_val = pool[pool["team"] == team]["spread"].iloc[0]
+            callouts.append(
+                f"Blowout watch: {team} in a {abs(spread_val):.0f}-point spread game. "
+                f"Starters could see reduced 4th-quarter minutes."
             )
-            callouts.append(tmpl.format(
-                team=team, spread=float(top_bo["_spread"]),
-            ))
 
-    # Cap at 6, minimum is whatever data produced (don't force empty)
-    return callouts[:6]
+    return callouts
 
 
 def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, Any], slate_date: str = "") -> None:
-    """Render The Board: Last Slate recap, Today's Edge callouts, Bust Call."""
+    """Render The Board — unified Ricky voice briefing."""
     from yak_core.board import compute_stack_targets, compute_sniper_spots, compute_fades
-    from yak_core.rickys_take import generate_bust_call, generate_last_night, reset_rotator
+    from yak_core.rickys_take import (
+        generate_bust_call, generate_last_night, generate_tonights_edges, reset_rotator
+    )
 
-    # Reset the template rotator so intra-post dedup starts fresh and the
-    # seed is pinned to the current slate date (deterministic output).
     reset_rotator(slate_date=slate_date or None)
 
-    st.markdown('<div class="the-board"><h3>📋 The Board</h3>', unsafe_allow_html=True)
+    # ── The Board header ──
+    st.markdown("### 📋 The Board")
 
-    # ── 1. Last Slate Recap (moved to top) ────────────────────────────────
+    # ── 1. Last Slate Recap ──
     recap = None
     try:
         from yak_core.slate_recap import get_previous_slate_recap
         recap = get_previous_slate_recap(sport)
-    except Exception as exc:
-        print(f"[edge_tab] Slate recap error: {exc}")
+    except Exception:
+        pass
 
     last_night = generate_last_night(recap, sport=sport)
     if last_night:
         recap_date = recap.get("slate_date", "") if recap else ""
-        date_label = f' <span style="color:rgba(240,240,240,0.4);font-size:0.8rem;">({recap_date})</span>' if recap_date else ""
+        date_label = f" ({recap_date})" if recap_date else ""
         st.markdown(
-            f'<div style="margin-bottom:4px;font-weight:600;font-size:0.88rem;color:rgba(240,240,240,0.5);">Last Slate{date_label}</div>'
-            f'<div class="the-board-last-night">{last_night}</div>',
+            f'<div class="the-board">'
+            f'<div style="margin-bottom:4px;font-weight:600;font-size:0.88rem;'
+            f'color:rgba(240,240,240,0.5);">Last Slate{date_label}</div>'
+            f'<div class="the-board-last-night">{last_night}</div>'
+            f'</div>',
             unsafe_allow_html=True,
         )
 
-    # ── 2. Today's Edge — voice-driven callouts ──────────────────────────
+    # ── 2. Today's Edge — ALL callouts in Ricky's voice ──
+    # Get structured data for voice generation
     stacks = compute_stack_targets(pool, edge_analysis)
     snipers = compute_sniper_spots(pool, edge_analysis)
     fades = compute_fades(pool, edge_analysis)
 
-    callouts = _generate_board_callouts(stacks, snipers, fades, pool)
+    # Generate edge callouts from generate_tonights_edges (already Ricky's voice)
+    edge_callouts = generate_tonights_edges(pool)
 
-    st.markdown(
-        '<div style="margin-top:8px;margin-bottom:4px;font-weight:700;font-size:1.0rem;">Today\'s Edge</div>',
-        unsafe_allow_html=True,
-    )
-    if callouts:
-        for callout in callouts:
-            st.markdown(
-                f'<div class="the-board-edge-callout">{callout}</div>',
-                unsafe_allow_html=True,
-            )
-    else:
-        st.caption("No strong edges on this slate")
+    # Generate voice callouts from board data (stacks, snipers, fades)
+    board_callouts = _board_data_to_voice(stacks, snipers, fades, pool)
 
-    # ── 3. Bust Call ──────────────────────────────────────────────────────
+    # Bust call
     _pos_names = set()
     for _tier in ("core_plays", "leverage_plays", "value_plays"):
         for _p in edge_analysis.get(_tier, []):
@@ -360,7 +284,29 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             unsafe_allow_html=True,
         )
 
-    st.markdown('</div>', unsafe_allow_html=True)
+    # Combine all callouts (deduped — board_callouts may overlap with edge_callouts)
+    all_callouts = board_callouts + [c for c in edge_callouts if c not in board_callouts]
+
+    if all_callouts or bust:
+        parts = []
+        parts.append(
+            '<div style="margin-bottom:4px;font-weight:600;font-size:0.88rem;">Today\'s Edge</div>'
+        )
+        for callout in all_callouts:
+            parts.append(f'<div class="the-board-edge-callout">{callout}</div>')
+        if bust:
+            parts.append(
+                f'<div class="the-board-bust-call">'
+                f'<strong>💀 Fade of the slate: {bust["name"]} (${bust["salary"]:,}).</strong> '
+                f'{bust["explanation"]}'
+                f'</div>'
+            )
+        st.markdown(
+            '<div class="the-board">' + "".join(parts) + '</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.caption("No strong edges on this slate")
 
 
 def _render_late_swap_alerts(alerts: list, sport: str, lineups: dict | None = None) -> None:
