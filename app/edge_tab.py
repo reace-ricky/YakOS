@@ -173,6 +173,59 @@ def _render_edge_box(key: str, players: List[Dict], is_pga: bool, cleared_player
     st.markdown(box_html, unsafe_allow_html=True)
 
 
+def _sniper_reason(p: Dict[str, Any], pool: pd.DataFrame) -> str:
+    """Generate a player-specific reason for a Ricky's Play pick.
+
+    Checks the pool for what makes this player unique — injury cascade,
+    pace-up spot, salary value, minutes certainty, etc. Returns a 1-sentence
+    reason, never a generic closer.
+    """
+    name = p.get("player_name", "")
+    proj = p.get("proj", 0)
+    ceil = p.get("ceil", 0)
+    own = p.get("own_pct", 0)
+    sal = p.get("salary", 0)
+
+    # Try to find the player in the pool for richer data
+    row = None
+    if not pool.empty and "player_name" in pool.columns:
+        match = pool[pool["player_name"] == name]
+        if not match.empty:
+            row = match.iloc[0]
+
+    # Check each signal and return the first strong one
+    if row is not None:
+        # Injury cascade bump
+        bump = float(row.get("injury_bump_fp", 0) or 0)
+        if bump > 2.0:
+            return (f"Picking up {bump:.1f} extra FP from an injury cascade. "
+                    f"{own:.1f}% owned — the field hasn't adjusted.")
+
+        # High minutes in a pace-up game
+        mins = float(row.get("proj_minutes", 0) or 0)
+        vegas = float(row.get("vegas_total", 0) or 0)
+        if mins >= 30 and vegas >= 225:
+            return (f"{mins:.0f} projected minutes in a {vegas:.0f}-total game. "
+                    f"Only {own:.1f}% owned — salary is suppressing his ownership.")
+
+        # Big ceiling-to-projection gap
+        if ceil > 0 and proj > 0 and (ceil - proj) / proj > 0.35:
+            return (f"{ceil:.0f} ceiling on a {proj:.1f} projection — "
+                    f"{((ceil - proj) / proj * 100):.0f}% upside gap at {own:.1f}% owned.")
+
+        # Low salary relative to projection
+        if sal > 0 and proj > 0:
+            pts_per_k = proj / (sal / 1000)
+            if pts_per_k >= 6.5:
+                return (f"{pts_per_k:.1f} pts/$1K at ${sal:,}. "
+                        f"{proj:.1f} projected, {own:.1f}% owned. Pure value.")
+
+    # Fallback: use what we have
+    own_str = f"{own:.1f}%" if own > 0 else "low"
+    return (f"{proj:.1f} projected with a {ceil:.0f} ceiling at {own_str} ownership. "
+            f"Underpriced at ${sal:,}.")
+
+
 def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, Any], slate_date: str = "") -> None:
     """Render The Board -- tight, curated Ricky voice briefing.
 
@@ -263,11 +316,10 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
         )
         for p in snipers[:3]:
             own_str = f"{p['own_pct']:.1f}%" if p.get("own_pct", 0) > 0 else "low"
+            reason = _sniper_reason(p, pool)
             parts.append(
                 f'<div class="the-board-edge-callout">'
-                f"{p['player_name']} ({p['team']}, ${p['salary']:,}) \u2014 "
-                f"{p['proj']:.1f} proj, {p['ceil']:.0f} ceiling, {own_str} owned. "
-                f"The field doesn't see this one."
+                f"{p['player_name']} ({p['team']}, ${p['salary']:,}) \u2014 {reason}"
                 f'</div>'
             )
 

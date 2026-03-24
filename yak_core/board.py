@@ -187,8 +187,37 @@ def compute_sniper_spots(
     if df.empty:
         return []
 
-    # Must be in top 20 by Ricky projection
-    top_n = df.nlargest(SNIPER_TOP_N, "_ricky_proj")
+    # Exclude top-15 by salary — those are the obvious plays everyone sees.
+    # Ricky's Plays should surface non-obvious edges.
+    if "salary" in df.columns and len(df) > 20:
+        sal = pd.to_numeric(df["salary"], errors="coerce").fillna(0)
+        top_sal_idx = sal.nlargest(15).index
+        df = df.drop(index=top_sal_idx).copy()
+
+    if df.empty:
+        return []
+
+    # Prioritize players with a situational edge (injury cascade, pace-up, value)
+    # by adding a sniper_priority score
+    df["_sniper_priority"] = df["_ricky_proj"].copy()
+    # Boost players with injury cascade bump
+    if "injury_bump_fp" in df.columns:
+        bump = pd.to_numeric(df["injury_bump_fp"], errors="coerce").fillna(0)
+        df["_sniper_priority"] += bump * 2.0  # strong boost for cascade beneficiaries
+    # Boost players in high-total games
+    for vc in ("vegas_total", "over_under", "total"):
+        if vc in df.columns:
+            vt = pd.to_numeric(df[vc], errors="coerce").fillna(0)
+            df["_sniper_priority"] += (vt - 220).clip(lower=0) * 0.1  # small boost for pace-up
+            break
+    # Boost value plays (high pts/$1K)
+    if "salary" in df.columns:
+        sal = pd.to_numeric(df["salary"], errors="coerce").fillna(1)
+        pts_per_k = df["_ricky_proj"] / (sal / 1000)
+        df["_sniper_priority"] += (pts_per_k - 5.0).clip(lower=0) * 1.5
+
+    # Must be in top 20 by sniper priority (not raw projection)
+    top_n = df.nlargest(SNIPER_TOP_N, "_sniper_priority")
 
     # Must be below ownership threshold
     snipers = top_n[top_n["_own"] < SNIPER_OWN_MAX].copy()
