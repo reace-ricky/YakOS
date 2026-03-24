@@ -275,6 +275,14 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             _pos_names.add(_p.get("player_name", ""))
     _pos_names.discard("")
     bust = generate_bust_call(pool, edge_analysis.get("fade_candidates"), positive_tier_names=_pos_names or None)
+    if bust:
+        st.markdown(
+            f'<div class="the-board-bust-call">'
+            f'<strong>💀 Fade of the slate: {bust["name"]} (${bust["salary"]:,}).</strong> '
+            f'{bust["explanation"]}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
     # Combine all callouts (deduped — board_callouts may overlap with edge_callouts)
     all_callouts = board_callouts + [c for c in edge_callouts if c not in board_callouts]
