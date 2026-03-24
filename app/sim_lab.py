@@ -2997,6 +2997,22 @@ def _render_auto_calibrate(
             "Dates per trial (subsample)", 3, 8, 5,
             key="autocal_dates_per",
         )
+        lineups_per_trial = st.slider(
+            "Lineups per trial", 5, 50, 10, step=5,
+            key="autocal_lineups_trial",
+            help=(
+                "NUM_LINEUPS built per date during optimization trials. "
+                "Lower = faster trials, higher = more stable signal."
+            ),
+        )
+        lineups_validation = st.slider(
+            "Lineups for validation", 10, 50, 20, step=5,
+            key="autocal_lineups_validation",
+            help=(
+                "NUM_LINEUPS built per date in the final validation pass. "
+                "Higher = better 300+ count and Ricky Top 3 visibility."
+            ),
+        )
         skip_incomplete = st.checkbox(
             "Skip incomplete dates",
             value=True,
@@ -3067,6 +3083,8 @@ def _render_auto_calibrate(
                 contest_type=autocal_contest_type,
                 n_trials=n_trials,
                 dates_per_trial=dates_per,
+                lineups_per_trial=lineups_per_trial,
+                lineups_validation=lineups_validation,
                 progress_callback=_on_progress,
                 skip_incomplete=skip_incomplete,
                 completeness_threshold=float(completeness_threshold),
