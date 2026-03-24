@@ -63,9 +63,9 @@ SEARCH_SPACE: Dict[str, Dict[str, Any]] = {
 # Keys that go into the Ricky ranker vs the optimizer config
 _RICKY_KEYS = {"w_gpp", "w_ceil", "w_own"}
 
-# RG archive location (same as sim_lab.py)
-_RG_ARCHIVE_DIR = Path(__file__).resolve().parent.parent / "data" / "rg_archive" / "nba"
-_RG_DATE_RE = re.compile(r"^rg_(\d{4}-\d{2}-\d{2})\.csv$")
+# Slate archive location — replaced RG CSVs (deleted in PR #331)
+_SLATE_ARCHIVE_DIR = Path(__file__).resolve().parent.parent / "data" / "slate_archive"
+_SLATE_DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})_gpp_main\.parquet$")
 
 
 @dataclass
@@ -240,13 +240,13 @@ DS_RECOMMENDATIONS: Dict[str, Dict[str, Any]] = {
 }
 
 
-def scan_rg_dates() -> List[date]:
-    """Return dates with RG archive files, sorted most-recent-first."""
-    if not _RG_ARCHIVE_DIR.is_dir():
+def scan_archive_dates() -> List[date]:
+    """Return dates with slate archive parquet files, sorted most-recent-first."""
+    if not _SLATE_ARCHIVE_DIR.is_dir():
         return []
     dates: List[date] = []
-    for f in _RG_ARCHIVE_DIR.iterdir():
-        m = _RG_DATE_RE.match(f.name)
+    for f in _SLATE_ARCHIVE_DIR.iterdir():
+        m = _SLATE_DATE_RE.match(f.name)
         if m:
             try:
                 dates.append(date.fromisoformat(m.group(1)))
@@ -254,6 +254,10 @@ def scan_rg_dates() -> List[date]:
                 continue
     dates.sort(reverse=True)
     return dates
+
+
+# Backward-compat alias
+scan_rg_dates = scan_archive_dates
 
 
 def check_slate_completeness(
@@ -301,36 +305,51 @@ def check_slate_completeness(
             is_future=True,
         )
 
-    # Try to fetch pool + actuals
+    # Try slate archive first, then fall back to API
+    date_dash = selected_date.strftime("%Y-%m-%d")
     date_key = selected_date.strftime("%Y%m%d")
-    api_key = _get_nba_api_key()
-    if not api_key:
-        return SlateCompleteness(
-            slate_date=selected_date,
-            is_complete=False,
-            reason="NBA API key not available — cannot verify actuals",
-            completeness_pct=0.0,
-            total_players=0,
-            players_with_actuals=0,
-            is_future=False,
-        )
+    archive_path = _SLATE_ARCHIVE_DIR / f"{date_dash}_gpp_main.parquet"
 
-    preset = CONTEST_PRESETS.get("GPP Main", {})
-    cfg = merge_config(preset)
-    cfg["RAPIDAPI_KEY"] = api_key
+    pool_df: Optional[pd.DataFrame] = None
+    actuals_col_available = False
 
-    try:
-        pool_df = fetch_live_dfs(date_key, cfg)
-    except Exception as exc:
-        return SlateCompleteness(
-            slate_date=selected_date,
-            is_complete=False,
-            reason=f"Failed to fetch player pool: {exc}",
-            completeness_pct=0.0,
-            total_players=0,
-            players_with_actuals=0,
-            is_future=False,
-        )
+    if archive_path.is_file():
+        try:
+            pool_df = pd.read_parquet(archive_path)
+            if "actual_fp" in pool_df.columns:
+                actuals_col_available = True
+        except Exception:
+            pool_df = None
+
+    if pool_df is None or pool_df.empty:
+        api_key = _get_nba_api_key()
+        if not api_key:
+            return SlateCompleteness(
+                slate_date=selected_date,
+                is_complete=False,
+                reason="NBA API key not available — cannot verify actuals",
+                completeness_pct=0.0,
+                total_players=0,
+                players_with_actuals=0,
+                is_future=False,
+            )
+
+        preset = CONTEST_PRESETS.get("GPP Main", {})
+        cfg = merge_config(preset)
+        cfg["RAPIDAPI_KEY"] = api_key
+
+        try:
+            pool_df = fetch_live_dfs(date_key, cfg)
+        except Exception as exc:
+            return SlateCompleteness(
+                slate_date=selected_date,
+                is_complete=False,
+                reason=f"Failed to fetch player pool: {exc}",
+                completeness_pct=0.0,
+                total_players=0,
+                players_with_actuals=0,
+                is_future=False,
+            )
 
     if pool_df is None or pool_df.empty:
         return SlateCompleteness(
@@ -343,18 +362,27 @@ def check_slate_completeness(
             is_future=False,
         )
 
-    try:
-        actuals_df = fetch_actuals_from_api(date_key, cfg)
-    except Exception as exc:
-        return SlateCompleteness(
-            slate_date=selected_date,
-            is_complete=False,
-            reason=f"Failed to fetch actuals: {exc}",
-            completeness_pct=0.0,
-            total_players=len(pool_df),
-            players_with_actuals=0,
-            is_future=False,
-        )
+    # Get actuals — from archive column or API
+    if actuals_col_available:
+        actuals_df = pool_df[["player_name", "actual_fp"]].copy()
+    else:
+        try:
+            api_key = _get_nba_api_key()
+            preset = CONTEST_PRESETS.get("GPP Main", {})
+            cfg = merge_config(preset)
+            if api_key:
+                cfg["RAPIDAPI_KEY"] = api_key
+            actuals_df = fetch_actuals_from_api(date_key, cfg)
+        except Exception as exc:
+            return SlateCompleteness(
+                slate_date=selected_date,
+                is_complete=False,
+                reason=f"Failed to fetch actuals: {exc}",
+                completeness_pct=0.0,
+                total_players=len(pool_df),
+                players_with_actuals=0,
+                is_future=False,
+            )
 
     # Normalize player name column
     if "player_name" not in actuals_df.columns:
@@ -651,22 +679,23 @@ def _run_pipeline_headless(
     if "NUM_LINEUPS" not in cfg or cfg["NUM_LINEUPS"] <= 0:
         cfg["NUM_LINEUPS"] = preset.get("default_lineups", 10)
 
-    # Step 1: Fetch pool (NBA only)
-    api_key = _get_nba_api_key()
-    if not api_key:
-        raise ValueError("NBA API key not found.")
-    cfg["RAPIDAPI_KEY"] = api_key
-    pool_df = fetch_live_dfs(date_key, cfg)
+    # Step 1: Load pool from slate archive (fully-enriched parquet) or fall
+    # back to API fetch when no archive file exists.
+    archive_path = _SLATE_ARCHIVE_DIR / f"{date_dash}_gpp_main.parquet"
+    if archive_path.is_file():
+        pool_df = pd.read_parquet(archive_path)
+        logger.info("Loaded archived pool for %s (%d players)", date_dash, len(pool_df))
+    else:
+        api_key = _get_nba_api_key()
+        if not api_key:
+            raise ValueError("NBA API key not found.")
+        cfg["RAPIDAPI_KEY"] = api_key
+        pool_df = fetch_live_dfs(date_key, cfg)
 
     if pool_df is None or pool_df.empty:
         raise ValueError(f"No pool for {date_dash}")
 
-    # Step 2: Merge RG projections
-    rg_path = _RG_ARCHIVE_DIR / f"rg_{date_dash}.csv"
-    if rg_path.is_file():
-        pool_df = _merge_rg_csv_headless(pool_df, rg_path)
-
-    # Step 3: Auto-sim (if sim columns missing)
+    # Step 2: Auto-sim (if sim columns missing — archive usually has them)
     if "sim90th" not in pool_df.columns and "SIM90TH" not in pool_df.columns:
         try:
             _proj = pd.to_numeric(pool_df["proj"], errors="coerce").fillna(0)
@@ -685,18 +714,27 @@ def _run_pipeline_headless(
         except Exception:
             pass
 
-    # Step 4: Edge + scores
-    edge_df = compute_edge_metrics(pool_df, calibration_state=None, sport="NBA")
+    # Step 3: Edge + scores (skip if archive already has edge_score)
+    if "edge_score" in pool_df.columns:
+        edge_df = pool_df.copy()
+    else:
+        edge_df = compute_edge_metrics(pool_df, calibration_state=None, sport="NBA")
     numeric_cols = edge_df.select_dtypes(include="number").columns
     edge_df[numeric_cols] = (
         edge_df[numeric_cols].replace([np.inf, -np.inf], np.nan).fillna(0)
     )
     edge_df = edge_df[edge_df["proj"] > 0].copy()
 
-    # Step 5: Actuals
-    actuals_df = fetch_actuals_from_api(date_key, cfg)
+    # Step 4: Actuals — use archive column if available, else fetch from API
+    if "actual_fp" in edge_df.columns and pd.to_numeric(
+        edge_df["actual_fp"], errors="coerce"
+    ).fillna(0).gt(0).any():
+        actuals_df = edge_df[["player_name", "actual_fp"]].copy()
+        logger.info("Using archived actuals for %s", date_dash)
+    else:
+        actuals_df = fetch_actuals_from_api(date_key, cfg)
 
-    # Step 5b: Inline completeness check — reject dates with mostly-zero actuals
+    # Step 4b: Inline completeness check — reject dates with mostly-zero actuals
     if "player_name" not in actuals_df.columns:
         for _c in ("name", "dg_name", "player"):
             if _c in actuals_df.columns:
@@ -712,14 +750,14 @@ def _run_pipeline_headless(
             f"players ({_pct:.1f}%) have actual FP"
         )
 
-    # Step 6: Build lineups
+    # Step 5: Build lineups
     prepped = prepare_pool(edge_df, cfg)
     lineups_df, _ = build_multiple_lineups_with_exposure(prepped, cfg)
 
     if lineups_df is None or lineups_df.empty:
         raise ValueError("No lineups built")
 
-    # Step 7: Score + Ricky rank
+    # Step 6: Score + Ricky rank
     if "player_name" not in actuals_df.columns:
         for c in ("name", "dg_name", "player"):
             if c in actuals_df.columns:

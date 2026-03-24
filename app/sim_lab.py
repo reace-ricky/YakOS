@@ -2,7 +2,7 @@
 
 Consolidates the former Sim Lab and Tuning Lab into a single page.
 Pick a contest preset, adjust knobs across 4 tuning groups,
-batch-run all available RG archive dates, and compare configs
+batch-run all available slate archive dates, and compare configs
 via trend chart + summary table.  Batch history persists to
 data/sim_lab/batch_history.parquet and syncs to GitHub.
 
@@ -556,20 +556,20 @@ def _render_history_table() -> None:
 
 
 # ---------------------------------------------------------------------------
-# RG archive helpers (NBA)
+# Slate archive helpers (NBA) — replaced RG CSVs (deleted in PR #331)
 # ---------------------------------------------------------------------------
 
-_RG_ARCHIVE_DIR = Path(__file__).resolve().parent.parent / "data" / "rg_archive" / "nba"
-_RG_DATE_RE = re.compile(r"^rg_(\d{4}-\d{2}-\d{2})\.csv$")
+_SLATE_ARCHIVE_DIR = Path(__file__).resolve().parent.parent / "data" / "slate_archive"
+_SLATE_DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})_gpp_main\.parquet$")
 
 
 def _scan_rg_dates() -> List[date]:
-    """Return dates with RG archive files, sorted most-recent-first."""
-    if not _RG_ARCHIVE_DIR.is_dir():
+    """Return dates with slate archive parquet files, sorted most-recent-first."""
+    if not _SLATE_ARCHIVE_DIR.is_dir():
         return []
     dates: List[date] = []
-    for f in _RG_ARCHIVE_DIR.iterdir():
-        m = _RG_DATE_RE.match(f.name)
+    for f in _SLATE_ARCHIVE_DIR.iterdir():
+        m = _SLATE_DATE_RE.match(f.name)
         if m:
             try:
                 dates.append(date.fromisoformat(m.group(1)))
@@ -844,13 +844,20 @@ def _run_pipeline(
     if "NUM_LINEUPS" not in cfg or cfg["NUM_LINEUPS"] <= 0:
         cfg["NUM_LINEUPS"] = preset.get("default_lineups", 10)
 
-    # Step 1: Fetch pool
+    # Step 1: Fetch pool — use slate archive if available, else API
+    _from_archive = False
     if sport == "NBA":
-        api_key = _get_nba_api_key()
-        if not api_key:
-            raise ValueError("NBA API key not found. Set RAPIDAPI_KEY or TANK01_RAPIDAPI_KEY.")
-        cfg["RAPIDAPI_KEY"] = api_key
-        pool_df = fetch_live_dfs(date_key, cfg)
+        archive_path = _SLATE_ARCHIVE_DIR / f"{date_dash}_gpp_main.parquet"
+        if archive_path.is_file():
+            pool_df = pd.read_parquet(archive_path)
+            _from_archive = True
+            _logger.info("Loaded archived pool for %s (%d players)", date_dash, len(pool_df))
+        else:
+            api_key = _get_nba_api_key()
+            if not api_key:
+                raise ValueError("NBA API key not found. Set RAPIDAPI_KEY or TANK01_RAPIDAPI_KEY.")
+            cfg["RAPIDAPI_KEY"] = api_key
+            pool_df = fetch_live_dfs(date_key, cfg)
     else:
         api_key = _get_pga_api_key()
         if not api_key:
@@ -860,12 +867,10 @@ def _run_pipeline(
     if pool_df is None or pool_df.empty:
         raise ValueError(f"No DFS pool found for {date_dash}.")
 
-    # Step 2: Merge projections (NBA only)
-    if sport == "NBA":
+    # Step 2: Merge projections (NBA only, skip if loaded from archive)
+    if sport == "NBA" and not _from_archive:
         if proj_source == "Ricky's Projections":
-            # Use Ricky's recency-weighted game-log projections
             pool_df = compute_ricky_proj(pool_df, cfg=cfg)
-            # Map ricky_proj → proj so downstream code uses it
             if "ricky_proj" in pool_df.columns:
                 pool_df["proj"] = pool_df["ricky_proj"]
                 pool_df["proj_source"] = "ricky"
@@ -874,12 +879,6 @@ def _run_pipeline(
             if "ricky_ceil" in pool_df.columns:
                 pool_df["ceil"] = pool_df["ricky_ceil"]
             _logger.info("Using Ricky's projections for %s", date_dash)
-        else:
-            rg_path = _RG_ARCHIVE_DIR / f"rg_{date_dash}.csv"
-            if rg_path.is_file():
-                pool_df = _merge_rg_csv(pool_df, rg_path)
-            else:
-                _logger.warning("No RG archive file for %s — using Tank01 projections", date_dash)
 
     # Step 3: Auto-run Monte Carlo sims (if sim columns missing)
     if sport == "NBA" and "sim90th" not in pool_df.columns and "SIM90TH" not in pool_df.columns:
@@ -903,8 +902,11 @@ def _run_pipeline(
         except Exception as _sim_err:
             _logger.warning("Auto-sim failed (%s), continuing with fallback estimates", _sim_err)
 
-    # Step 4: Compute edge
-    edge_df = compute_edge_metrics(pool_df, calibration_state=None, sport=sport)
+    # Step 4: Compute edge (skip if archive already has edge_score)
+    if "edge_score" in pool_df.columns:
+        edge_df = pool_df.copy()
+    else:
+        edge_df = compute_edge_metrics(pool_df, calibration_state=None, sport=sport)
 
     # Step 4b: Clean NaN/inf values that crash PuLP's LP solver
     numeric_cols = edge_df.select_dtypes(include="number").columns
@@ -913,8 +915,13 @@ def _run_pipeline(
     # Step 4c: Drop players with no usable projection
     edge_df = edge_df[edge_df["proj"] > 0].copy()
 
-    # Step 5: Fetch actuals
-    if sport == "NBA":
+    # Step 5: Fetch actuals — use archive column if available
+    if _from_archive and "actual_fp" in edge_df.columns and pd.to_numeric(
+        edge_df["actual_fp"], errors="coerce"
+    ).fillna(0).gt(0).any():
+        actuals_df = edge_df[["player_name", "actual_fp"]].copy()
+        _logger.info("Using archived actuals for %s", date_dash)
+    elif sport == "NBA":
         actuals_df = fetch_actuals_from_api(date_key, cfg)
     else:
         actuals_df = _fetch_pga_actuals(api_key, date_dash)
@@ -2849,14 +2856,14 @@ def _render_auto_calibrate(
             disabled=not skip_incomplete,
         )
 
-    # Discover available dates from RG archive
-    from yak_core.auto_calibrate import scan_rg_dates
+    # Discover available dates from slate archive
+    from yak_core.auto_calibrate import scan_archive_dates
 
-    available_dates = scan_rg_dates()
+    available_dates = scan_archive_dates()
 
     if len(available_dates) < 3:
         st.warning(
-            f"Need at least 3 historical slates in data/rg_archive/nba/. "
+            f"Need at least 3 historical slates in data/slate_archive/. "
             f"Found {len(available_dates)}."
         )
         return
@@ -3767,12 +3774,12 @@ def render_sim_lab(sport: str) -> None:
     )
 
     if sport == "NBA":
-        # --- NBA: Batch run across RG dates ---
+        # --- NBA: Batch run across archive dates ---
         rg_dates = _scan_rg_dates()
         _run_dates: List[date] = []
 
         if rg_dates:
-            st.caption(f"{len(rg_dates)} RG archive dates available")
+            st.caption(f"{len(rg_dates)} archive dates available")
 
             # Date selection: Run All vs Select Dates
             _date_mode = st.radio(
@@ -3900,7 +3907,7 @@ def render_sim_lab(sport: str) -> None:
             # ── Manual baseline promotion button (outside batch run) ────────
             # Rendered in the comparison table form below.
         else:
-            st.warning("No RG archive files found in data/rg_archive/nba/")
+            st.warning("No archive files found in data/slate_archive/")
 
         # --- Re-rank existing batch when slider button clicked ---
         if _rerank_clicked:

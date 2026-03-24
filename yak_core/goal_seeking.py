@@ -33,8 +33,8 @@ _RUNS_FILE = _DATA_DIR / "runs.json"
 _CONFIG_REL = "data/calibration_feedback/calibration_config.json"
 _RUNS_REL = "data/calibration_feedback/runs.json"
 
-# RG archive (same as auto_calibrate.py)
-_RG_ARCHIVE_DIR = Path(__file__).resolve().parent.parent / "data" / "rg_archive" / "nba"
+# Slate archive — replaced RG CSVs (deleted in PR #331)
+_SLATE_ARCHIVE_DIR = Path(__file__).resolve().parent.parent / "data" / "slate_archive"
 
 # Ricky archive
 _RICKY_ARCHIVE = Path(__file__).resolve().parent.parent / "data" / "ricky_archive" / "nba" / "archive.parquet"
@@ -171,13 +171,13 @@ def get_kept_runs(contest_type: Optional[str] = None) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 def scan_available_dates() -> List[date]:
-    """Return RG archive dates available for backtesting, most recent first."""
+    """Return slate archive dates available for backtesting, most recent first."""
     import re
-    _RG_DATE_RE = re.compile(r"^rg_(\d{4}-\d{2}-\d{2})\.csv$")
+    _SLATE_DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})_gpp_main\.parquet$")
     dates: List[date] = []
-    if _RG_ARCHIVE_DIR.is_dir():
-        for f in _RG_ARCHIVE_DIR.iterdir():
-            m = _RG_DATE_RE.match(f.name)
+    if _SLATE_ARCHIVE_DIR.is_dir():
+        for f in _SLATE_ARCHIVE_DIR.iterdir():
+            m = _SLATE_DATE_RE.match(f.name)
             if m:
                 try:
                     dates.append(date.fromisoformat(m.group(1)))
