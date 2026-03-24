@@ -2856,14 +2856,15 @@ def _render_auto_calibrate(
             disabled=not skip_incomplete,
         )
 
-    # Discover available dates from slate archive
+    # Discover available dates from RickyArchive (primary) + slate_archive (fallback)
     from yak_core.auto_calibrate import scan_archive_dates
 
     available_dates = scan_archive_dates()
 
     if len(available_dates) < 3:
         st.warning(
-            f"Need at least 3 historical slates in data/slate_archive/. "
+            f"Need at least 3 historical slates in the Ricky archive "
+            f"(data/ricky_archive/nba/archive.parquet). "
             f"Found {len(available_dates)}."
         )
         return
