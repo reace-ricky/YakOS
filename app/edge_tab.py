@@ -2,7 +2,8 @@
 
 Displays the pre-computed edge analysis from data/published/{sport}/:
   - Analysis bullets + recommendation up top
-  - Ricky's Take: Last Slate recap, The Board, Bust Call
+  - The Board: confidence-gated edge briefing (player cards with signal indicators)
+  - Last Slate recap + Bust Call
   - 3-box dashboard: Core, Leverage, Value (boxed cards)
   - PGA wave split summary
   - Published lineups by contest type
@@ -63,17 +64,17 @@ _CARD_CSS = """
     margin-bottom: 4px;
     font-size: 0.92rem;
 }
-.rickys-take {
+.the-board {
     border: 1px solid rgba(255,255,255,0.1);
     border-radius: 10px;
     padding: 18px 20px;
     margin-bottom: 16px;
     background: rgba(255,255,255,0.02);
 }
-.rickys-take h3 {
+.the-board h3 {
     margin: 0 0 14px 0;
 }
-.rickys-last-night {
+.the-board-last-night {
     color: rgba(240,240,240,0.65);
     font-size: 0.9rem;
     line-height: 1.5;
@@ -81,12 +82,12 @@ _CARD_CSS = """
     padding-bottom: 12px;
     border-bottom: 1px solid rgba(255,255,255,0.06);
 }
-.rickys-edge-callout {
+.the-board-edge-callout {
     font-size: 0.92rem;
     line-height: 1.5;
     margin-bottom: 8px;
 }
-.rickys-bust-call {
+.the-board-bust-call {
     border: 1px solid rgba(244,67,54,0.3);
     border-radius: 8px;
     padding: 12px 16px;
@@ -95,6 +96,52 @@ _CARD_CSS = """
     font-size: 0.95rem;
     line-height: 1.5;
 }
+.board-card {
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin-bottom: 10px;
+    background: rgba(255,255,255,0.03);
+}
+.board-card.high-conf {
+    border: 2px solid #4CAF50;
+}
+.board-card.mod-conf {
+    border: 2px solid #FF9800;
+}
+.board-card .board-name {
+    font-weight: 700;
+    font-size: 1.0rem;
+    margin-bottom: 4px;
+}
+.board-card .board-stats {
+    font-size: 0.85rem;
+    color: rgba(240,240,240,0.7);
+    margin-bottom: 6px;
+}
+.board-card .board-signals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.board-card .signal-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: rgba(76,175,80,0.15);
+    color: #4CAF50;
+}
+.board-card .conf-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    margin-left: 8px;
+}
+.conf-high { background: rgba(76,175,80,0.2); color: #4CAF50; }
+.conf-mod { background: rgba(255,152,0,0.2); color: #FF9800; }
 </style>
 """
 
@@ -173,21 +220,68 @@ def _render_edge_box(key: str, players: List[Dict], is_pga: bool, cleared_player
     st.markdown(box_html, unsafe_allow_html=True)
 
 
-def _render_rickys_take(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, Any], slate_date: str = "") -> None:
-    """Render the Ricky's Take section.
+def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, Any], slate_date: str = "") -> None:
+    """Render The Board: confidence-gated edge briefing + Last Slate recap + Bust Call.
 
-    Three parts:
-      1. Last Slate -- recap of previous slate in Ricky's voice
-      2. The Board -- data-driven callouts about current slate
-      3. Bust Call -- one bold prediction
+    The Board shows player cards with edge signal indicators, gated at 3+
+    independent signals agreeing on direction.  Includes contest-type selector,
+    sort control, and Lock/Exclude buttons wired to the optimizer.
     """
+    from yak_core.board import compute_board_signals, get_contest_emphasis, get_signal_labels
     from yak_core.rickys_take import generate_bust_call, generate_last_night, generate_tonights_edges, reset_rotator
 
     # Reset the template rotator so intra-post dedup starts fresh and the
     # seed is pinned to the current slate date (deterministic output).
     reset_rotator(slate_date=slate_date or None)
 
-    # -- Get previous slate recap data --
+    # ── The Board: confidence-gated player cards ──────────────────────────
+    st.markdown(f'<div class="the-board"><h3>📋 The Board</h3>', unsafe_allow_html=True)
+
+    # Contest-type selector
+    board_c1, board_c2 = st.columns([1, 2])
+    with board_c1:
+        contest_type = st.selectbox(
+            "Contest Type",
+            ["GPP", "Cash", "Showdown"],
+            key=f"board_contest_{sport}",
+        )
+    with board_c2:
+        emphasis = get_contest_emphasis(contest_type)
+        st.markdown(
+            f'{emphasis["icon"]} **{emphasis["label"]}** — {emphasis["emphasis"]}',
+        )
+
+    # Compute confidence signals
+    board_df = compute_board_signals(pool, edge_analysis, contest_type=contest_type)
+
+    if board_df.empty:
+        st.caption("No players with 3+ agreeing signals for this contest type.")
+    else:
+        # Sort control
+        sort_col = st.selectbox(
+            "Sort by",
+            ["Confidence Score", "Projection", "Ownership", "Ceiling"],
+            key=f"board_sort_{sport}",
+        )
+        sort_map = {
+            "Confidence Score": ("confidence_score", False),
+            "Projection": ("proj", False),
+            "Ownership": ("own_display", True),
+            "Ceiling": ("ceil", False),
+        }
+        sort_key, sort_asc = sort_map[sort_col]
+        if sort_key in board_df.columns:
+            board_df = board_df.sort_values(sort_key, ascending=sort_asc).reset_index(drop=True)
+
+        # Render player cards
+        for _, row in board_df.iterrows():
+            _render_board_card(row, sport)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown("")  # spacer
+
+    # ── Last Slate recap + Bust Call (below The Board) ────────────────────
     recap = None
     try:
         from yak_core.slate_recap import get_previous_slate_recap
@@ -197,7 +291,6 @@ def _render_rickys_take(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str,
 
     last_night = generate_last_night(recap, sport=sport)
     edges = generate_tonights_edges(pool)
-    # Collect positive-tier player names to exclude from bust candidacy
     _pos_names = set()
     for _tier in ("core_plays", "leverage_plays", "value_plays"):
         for _p in edge_analysis.get(_tier, []):
@@ -205,50 +298,103 @@ def _render_rickys_take(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str,
     _pos_names.discard("")
     bust = generate_bust_call(pool, edge_analysis.get("fade_candidates"), positive_tier_names=_pos_names or None)
 
-    # Don't render the section at all if there's nothing to show
-    if not last_night and not edges and not bust:
-        return
+    if last_night or edges or bust:
+        parts = []
+        if last_night:
+            recap_date = recap.get("slate_date", "") if recap else ""
+            date_label = f' <span style="color:rgba(240,240,240,0.4);font-size:0.8rem;">({recap_date})</span>' if recap_date else ""
+            parts.append(
+                f'<div style="margin-bottom:4px;font-weight:600;font-size:0.88rem;color:rgba(240,240,240,0.5);">Last Slate{date_label}</div>'
+                f'<div class="the-board-last-night">{last_night}</div>'
+            )
+        if edges:
+            parts.append(
+                '<div style="margin-bottom:4px;font-weight:600;font-size:0.88rem;">Edge Callouts</div>'
+            )
+            for callout in edges:
+                parts.append(f'<div class="the-board-edge-callout">{callout}</div>')
+        if bust:
+            parts.append(
+                f'<div class="the-board-bust-call">'
+                f'<strong>💀 Fade of the slate: {bust["name"]} (${bust["salary"]:,}).</strong> '
+                f'{bust["explanation"]}'
+                f'</div>'
+            )
+        html = '<div class="the-board">' + "".join(parts) + '</div>'
+        st.markdown(html, unsafe_allow_html=True)
 
-    # -- Build HTML --
-    parts = []
 
-    # Last Slate (muted, secondary)
-    if last_night:
-        slate_date = recap.get("slate_date", "") if recap else ""
-        date_label = f' <span style="color:rgba(240,240,240,0.4);font-size:0.8rem;">({slate_date})</span>' if slate_date else ""
-        parts.append(
-            f'<div style="margin-bottom:4px;font-weight:600;font-size:0.88rem;color:rgba(240,240,240,0.5);">Last Slate{date_label}</div>'
-            f'<div class="rickys-last-night">{last_night}</div>'
-        )
+def _render_board_card(row: pd.Series, sport: str) -> None:
+    """Render a single player card on The Board with Lock/Exclude buttons."""
+    from yak_core.board import get_signal_labels
 
-    # The Board (primary content)
-    if edges:
-        parts.append(
-            '<div style="margin-bottom:4px;font-weight:600;font-size:0.88rem;">The Board</div>'
-        )
-        for callout in edges:
-            parts.append(f'<div class="rickys-edge-callout">{callout}</div>')
+    name = row.get("player_name", "")
+    salary = int(row.get("salary", 0))
+    proj = float(row.get("proj", 0))
+    ceil = float(row.get("ceil", 0))
+    own = float(row.get("own_display", row.get("ownership", 0)))
+    conf = int(row.get("confidence_score", 0))
+    pos = row.get("pos", "")
 
-    # Bust Call (distinct callout)
-    if bust:
-        parts.append(
-            f'<div class="rickys-bust-call">'
-            f'<strong>💀 Fade of the slate: {bust["name"]} (${bust["salary"]:,}).</strong> '
-            f'{bust["explanation"]}'
-            f'</div>'
-        )
+    # Confidence class
+    if conf >= 5:
+        card_cls = "board-card high-conf"
+        conf_cls = "conf-high"
+    else:
+        card_cls = "board-card mod-conf"
+        conf_cls = "conf-mod"
 
-    html = (
-        f'<div class="rickys-take">'
-        f'<h3>☕ Ricky\'s Take</h3>'
-        + "".join(parts)
-        + '</div>'
+    # Signal badges
+    signals = get_signal_labels(row)
+    signal_html = "".join(f'<span class="signal-badge">{s}</span>' for s in signals)
+
+    stats_line = f"${salary:,} · {proj:.1f} proj · {ceil:.1f} ceil · {own:.1f}% own"
+    if pos:
+        stats_line = f"{pos} · {stats_line}"
+
+    card_html = (
+        f'<div class="{card_cls}">'
+        f'<div class="board-name">{name}'
+        f'<span class="conf-badge {conf_cls}">{conf}/6</span>'
+        f'</div>'
+        f'<div class="board-stats">{stats_line}</div>'
+        f'<div class="board-signals">{signal_html}</div>'
+        f'</div>'
     )
-    st.markdown(html, unsafe_allow_html=True)
+    st.markdown(card_html, unsafe_allow_html=True)
+
+    # Lock / Exclude buttons (wire into optimizer session_state keys)
+    btn_c1, btn_c2, _ = st.columns([1, 1, 4])
+    lock_key = f"opt_lock_{sport}"
+    excl_key = f"opt_excl_{sport}"
+
+    with btn_c1:
+        locked_list = list(st.session_state.get(lock_key, []))
+        is_locked = name in locked_list
+        lock_label = "Unlock" if is_locked else "Lock"
+        if st.button(f"🔒 {lock_label}", key=f"board_lock_{name}_{sport}"):
+            if is_locked:
+                locked_list.remove(name)
+            else:
+                locked_list.append(name)
+            st.session_state[lock_key] = locked_list
+            st.rerun()
+
+    with btn_c2:
+        excluded_list = list(st.session_state.get(excl_key, []))
+        is_excluded = name in excluded_list
+        excl_label = "Include" if is_excluded else "Exclude"
+        if st.button(f"🚫 {excl_label}", key=f"board_excl_{name}_{sport}"):
+            if is_excluded:
+                excluded_list.remove(name)
+            else:
+                excluded_list.append(name)
+            st.session_state[excl_key] = excluded_list
+            st.rerun()
 
 
 def _render_late_swap_alerts(alerts: list, sport: str, lineups: dict | None = None) -> None:
-    """Render late swap alert boxes above Ricky's Take.
+    """Render late swap alert boxes above The Board.
 
     - Red (high impact): st.error with cascade, pivots, lineup flags
     - Yellow (medium): st.warning one-liner
@@ -361,12 +507,12 @@ def render_edge_tab(sport: str) -> None:
     if is_pga:
         st.info("🚧 PGA — Under Construction. Course fit, SG breakdowns, and PGA-specific callouts coming soon.")
 
-    # ── Late Swap Alerts (above Ricky's Take) ────────────────────────────
+    # ── Late Swap Alerts (above The Board) ────────────────────────────
     _late_swap = edge_analysis.get("late_swap_alerts", [])
     _render_late_swap_alerts(_late_swap, sport, lineups)
 
-    # ── Ricky's Take ─────────────────────────────────────────────────────
-    _render_rickys_take(sport, pool, edge_analysis, slate_date=slate_date)
+    # ── The Board ─────────────────────────────────────────────────────
+    _render_the_board(sport, pool, edge_analysis, slate_date=slate_date)
 
     st.markdown("")  # spacer
 

@@ -1,8 +1,9 @@
-"""yak_core.rickys_take -- Deterministic voice generation for Ricky's Take.
+"""yak_core.rickys_take -- Deterministic voice generation for The Board.
 
-Generates three sections for the Edge Analysis tab:
+Generates supplementary content rendered below The Board's confidence-gated
+player cards (see yak_core/board.py for the primary Board logic):
   1. Last Slate -- recap of previous slate hits/misses in Ricky's voice
-  2. The Board -- data-driven callouts about the current slate
+  2. Edge Callouts -- data-driven callouts about the current slate
   3. Bust Call -- one bold prediction for the biggest underperformer
 
 All text is template-based with data slots. No LLM calls.
