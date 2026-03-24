@@ -74,6 +74,20 @@ POS_MULTIPLIER = {
 
 
 # ---------------------------------------------------------------------------
+# Scale-detection helper
+# ---------------------------------------------------------------------------
+
+def is_pct_scale(series: pd.Series) -> bool:
+    """Return True if series appears to be on 0-100 scale rather than 0-1.
+
+    Threshold: if the maximum value exceeds 1.5 we assume 0-100 scale.
+    Used consistently for own_proj detection across ownership, optimizer UI,
+    and leverage calculations.
+    """
+    return float(pd.to_numeric(series, errors="coerce").max()) > 1.5
+
+
+# ---------------------------------------------------------------------------
 # Legacy salary-rank model (kept as ultra-fast fallback)
 # ---------------------------------------------------------------------------
 
@@ -679,17 +693,25 @@ def apply_ownership(
     return pool_df
 
 
-def compute_leverage(pool_df: pd.DataFrame, own_col: str = "own_proj") -> pd.DataFrame:
-    """Compute leverage score: proj / own_proj.
-
-    Higher leverage = better value for GPP (high proj, low ownership).
-    Used by optimizer to weight the objective toward contrarian picks.
+def compute_leverage(
+    pool_df: pd.DataFrame,
+    own_col: str = "own_proj",
+    leverage_mode: str = "none",
+) -> pd.DataFrame:
+    """Compute leverage score using the selected mode.
 
     Parameters
     ----------
     pool_df : DataFrame with 'proj' and the projected-ownership column.
-    own_col : Projected ownership column name.  Defaults to ``"own_proj"``
-              (the canonical column set by :func:`apply_ownership`).
+    own_col : Projected ownership column name.  Defaults to ``"own_proj"``.
+    leverage_mode : str
+        How to compute leverage:
+        - ``'none'``           : classic proj/own_proj normalization (default).
+        - ``'smash_minus_own'``: leverage = smash_prob - own_proj (fraction scale).
+          Rewards high-ceiling, low-ownership plays.
+        - ``'fp_over_own'``    : leverage = proj_fp / (1 + own_proj).
+          Rewards high-projection, lower-ownership plays.
+        If own_proj is absent or NaN for a player, that player gets leverage=0.
 
     Returns
     -------
@@ -714,10 +736,38 @@ def compute_leverage(pool_df: pd.DataFrame, own_col: str = "own_proj") -> pd.Dat
         return df
 
     proj = df["proj"].astype(float).clip(lower=0.1)
-    own = df[own_col].astype(float).clip(lower=0.5)
+    own_raw = pd.to_numeric(df[own_col], errors="coerce")
 
-    raw_leverage = proj / own
+    mode = leverage_mode.lower()
 
+    if mode == "smash_minus_own":
+        # smash_prob column preferred; fall back to proj-based estimate
+        if "smash_prob" in df.columns:
+            smash = pd.to_numeric(df["smash_prob"], errors="coerce").fillna(0.0)
+        else:
+            smash = (proj / proj.max()).clip(0.0, 1.0)
+
+        # own_proj may be on 0-100 scale or 0-1 scale; normalise to 0-1
+        own_frac = own_raw.fillna(0.0)
+        if is_pct_scale(own_frac):
+            own_frac = own_frac / 100.0
+
+        raw_leverage = smash - own_frac
+
+    elif mode == "fp_over_own":
+        # own_proj may be on 0-100 scale; normalise to 0-1
+        own_frac = own_raw.fillna(0.0)
+        if is_pct_scale(own_frac):
+            own_frac = own_frac / 100.0
+
+        raw_leverage = proj / (1.0 + own_frac)
+
+    else:
+        # 'none' — classic normalization
+        own = own_raw.fillna(0.0).clip(lower=0.5)
+        raw_leverage = proj / own
+
+    # Normalise to [0, 1]
     lev_min = raw_leverage.min()
     lev_max = raw_leverage.max()
     if lev_max > lev_min:
@@ -725,7 +775,11 @@ def compute_leverage(pool_df: pd.DataFrame, own_col: str = "own_proj") -> pd.Dat
     else:
         df["leverage"] = 0.5
 
-    print(f"[ownership] Leverage computed using '{own_col}': "
+    # Players with missing own_proj get leverage=0 in non-'none' modes
+    if mode != "none":
+        df.loc[own_raw.isna(), "leverage"] = 0.0
+
+    print(f"[ownership] Leverage computed (mode='{mode}', own_col='{own_col}'): "
           f"mean={df['leverage'].mean():.3f}, "
           f"min={df['leverage'].min():.3f}, "
           f"max={df['leverage'].max():.3f}")
