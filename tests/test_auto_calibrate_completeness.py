@@ -1,6 +1,7 @@
 """Tests for auto-calibrate incomplete date detection."""
 
 from datetime import date, timedelta
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -78,17 +79,21 @@ class TestCheckSlateCompleteness:
         assert result.is_future
         assert "today" in result.reason.lower()
 
+    @patch("yak_core.auto_calibrate._load_ricky_pool_for_date", return_value=pd.DataFrame())
+    @patch("yak_core.auto_calibrate._SLATE_ARCHIVE_DIR", new=Path("/nonexistent_slate_dir"))
     @patch("yak_core.auto_calibrate._get_nba_api_key", return_value="")
-    def test_no_api_key(self, _mock_key):
+    def test_no_api_key(self, _mock_key, _mock_archive):
         past = date.today() - timedelta(days=3)
         result = check_slate_completeness(past)
         assert not result.is_complete
         assert "API key" in result.reason
 
+    @patch("yak_core.auto_calibrate._load_ricky_pool_for_date", return_value=pd.DataFrame())
+    @patch("yak_core.auto_calibrate._SLATE_ARCHIVE_DIR", new=Path("/nonexistent_slate_dir"))
     @patch("yak_core.auto_calibrate._get_nba_api_key", return_value="test-key")
     @patch("yak_core.live.fetch_actuals_from_api")
     @patch("yak_core.live.fetch_live_dfs")
-    def test_complete_date(self, mock_pool, mock_actuals, _mock_key):
+    def test_complete_date(self, mock_pool, mock_actuals, _mock_key, _mock_archive):
         past = date.today() - timedelta(days=3)
         pool = pd.DataFrame({
             "player_name": [f"Player{i}" for i in range(50)],
@@ -108,10 +113,12 @@ class TestCheckSlateCompleteness:
         assert result.players_with_actuals == 45
         assert result.total_players == 50
 
+    @patch("yak_core.auto_calibrate._load_ricky_pool_for_date", return_value=pd.DataFrame())
+    @patch("yak_core.auto_calibrate._SLATE_ARCHIVE_DIR", new=Path("/nonexistent_slate_dir"))
     @patch("yak_core.auto_calibrate._get_nba_api_key", return_value="test-key")
     @patch("yak_core.live.fetch_actuals_from_api")
     @patch("yak_core.live.fetch_live_dfs")
-    def test_incomplete_date_low_actuals(self, mock_pool, mock_actuals, _mock_key):
+    def test_incomplete_date_low_actuals(self, mock_pool, mock_actuals, _mock_key, _mock_archive):
         past = date.today() - timedelta(days=2)
         pool = pd.DataFrame({
             "player_name": [f"Player{i}" for i in range(50)],
@@ -130,10 +137,12 @@ class TestCheckSlateCompleteness:
         assert result.completeness_pct == 20.0
         assert "below" in result.reason.lower()
 
+    @patch("yak_core.auto_calibrate._load_ricky_pool_for_date", return_value=pd.DataFrame())
+    @patch("yak_core.auto_calibrate._SLATE_ARCHIVE_DIR", new=Path("/nonexistent_slate_dir"))
     @patch("yak_core.auto_calibrate._get_nba_api_key", return_value="test-key")
     @patch("yak_core.live.fetch_actuals_from_api")
     @patch("yak_core.live.fetch_live_dfs")
-    def test_custom_threshold(self, mock_pool, mock_actuals, _mock_key):
+    def test_custom_threshold(self, mock_pool, mock_actuals, _mock_key, _mock_archive):
         past = date.today() - timedelta(days=3)
         pool = pd.DataFrame({
             "player_name": [f"Player{i}" for i in range(100)],
@@ -155,9 +164,11 @@ class TestCheckSlateCompleteness:
         result = check_slate_completeness(past, completeness_threshold=60.0)
         assert not result.is_complete
 
+    @patch("yak_core.auto_calibrate._load_ricky_pool_for_date", return_value=pd.DataFrame())
+    @patch("yak_core.auto_calibrate._SLATE_ARCHIVE_DIR", new=Path("/nonexistent_slate_dir"))
     @patch("yak_core.auto_calibrate._get_nba_api_key", return_value="test-key")
     @patch("yak_core.live.fetch_live_dfs", side_effect=RuntimeError("API down"))
-    def test_pool_fetch_failure(self, _mock_pool, _mock_key):
+    def test_pool_fetch_failure(self, _mock_pool, _mock_key, _mock_archive):
         past = date.today() - timedelta(days=3)
         result = check_slate_completeness(past)
         assert not result.is_complete
