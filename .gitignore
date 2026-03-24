@@ -20,3 +20,4 @@ data/api_config.json
 # data/edge_feedback/*.json          -- ALLOWED
 streamlit_app_legacy.py
 data/published/
+!data/ricky_archive/**/*.parquet
