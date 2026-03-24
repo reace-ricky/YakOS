@@ -2,7 +2,7 @@
 
 Displays the pre-computed edge analysis from data/published/{sport}/:
   - Analysis bullets + recommendation up top
-  - The Board: confidence-gated edge briefing (player cards with signal indicators)
+  - The Board: Stack Targets, Sniper Spots, The Fade
   - Last Slate recap + Bust Call
   - 3-box dashboard: Core, Leverage, Value (boxed cards)
   - PGA wave split summary
@@ -102,12 +102,6 @@ _CARD_CSS = """
     margin-bottom: 10px;
     background: rgba(255,255,255,0.03);
 }
-.board-card.high-conf {
-    border: 2px solid #4CAF50;
-}
-.board-card.mod-conf {
-    border: 2px solid #FF9800;
-}
 .board-card .board-name {
     font-weight: 700;
     font-size: 1.0rem;
@@ -118,30 +112,6 @@ _CARD_CSS = """
     color: rgba(240,240,240,0.7);
     margin-bottom: 6px;
 }
-.board-card .board-signals {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-}
-.board-card .signal-badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    background: rgba(76,175,80,0.15);
-    color: #4CAF50;
-}
-.board-card .conf-badge {
-    display: inline-block;
-    padding: 2px 10px;
-    border-radius: 12px;
-    font-size: 0.78rem;
-    font-weight: 700;
-    margin-left: 8px;
-}
-.conf-high { background: rgba(76,175,80,0.2); color: #4CAF50; }
-.conf-mod { background: rgba(255,152,0,0.2); color: #FF9800; }
 </style>
 """
 
@@ -221,61 +191,76 @@ def _render_edge_box(key: str, players: List[Dict], is_pga: bool, cleared_player
 
 
 def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, Any], slate_date: str = "") -> None:
-    """Render The Board: confidence-gated edge briefing + Last Slate recap + Bust Call.
-
-    The Board shows player cards with edge signal indicators, gated at 3+
-    independent signals agreeing on direction.  Includes contest-type selector,
-    sort control, and Lock/Exclude buttons wired to the optimizer.
-    """
-    from yak_core.board import compute_board_signals, get_contest_emphasis, get_signal_labels
+    """Render The Board: Stack Targets, Sniper Spots, The Fade + Last Slate recap + Bust Call."""
+    from yak_core.board import compute_stack_targets, compute_sniper_spots, compute_fades
     from yak_core.rickys_take import generate_bust_call, generate_last_night, generate_tonights_edges, reset_rotator
 
     # Reset the template rotator so intra-post dedup starts fresh and the
     # seed is pinned to the current slate date (deterministic output).
     reset_rotator(slate_date=slate_date or None)
 
-    # ── The Board: confidence-gated player cards ──────────────────────────
-    st.markdown(f'<div class="the-board"><h3>📋 The Board</h3>', unsafe_allow_html=True)
+    # ── The Board ─────────────────────────────────────────────────────────
+    st.markdown('<div class="the-board"><h3>📋 The Board</h3>', unsafe_allow_html=True)
 
-    # Contest-type selector
-    board_c1, board_c2 = st.columns([1, 2])
-    with board_c1:
-        contest_type = st.selectbox(
-            "Contest Type",
-            ["GPP", "Cash", "Showdown"],
-            key=f"board_contest_{sport}",
-        )
-    with board_c2:
-        emphasis = get_contest_emphasis(contest_type)
-        st.markdown(
-            f'{emphasis["icon"]} **{emphasis["label"]}** — {emphasis["emphasis"]}',
-        )
-
-    # Compute confidence signals
-    board_df = compute_board_signals(pool, edge_analysis, contest_type=contest_type)
-
-    if board_df.empty:
-        st.caption("No players with 3+ agreeing signals for this contest type.")
+    # --- 1. Stack Targets (max 2) ---
+    stacks = compute_stack_targets(pool, edge_analysis)
+    st.markdown(
+        '<div style="margin-bottom:4px;font-weight:700;font-size:1.0rem;">🎯 Stack Targets</div>',
+        unsafe_allow_html=True,
+    )
+    if stacks:
+        for s in stacks:
+            st.markdown(
+                f'<div class="board-card" style="border: 1px solid rgba(76,175,80,0.4);">'
+                f'<div class="board-name">Game: {s["team1"]} vs {s["team2"]}</div>'
+                f'<div class="board-stats">Total: {s["vegas_total"]:.0f} · '
+                f'Top stack: {s["top_player1"]} + {s["top_player2"]} '
+                f'(combined ceil: {s["combined_ceil"]:.1f})</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
     else:
-        # Sort control
-        sort_col = st.selectbox(
-            "Sort by",
-            ["Confidence Score", "Projection", "Ownership", "Ceiling"],
-            key=f"board_sort_{sport}",
-        )
-        sort_map = {
-            "Confidence Score": ("confidence_score", False),
-            "Projection": ("proj", False),
-            "Ownership": ("own_display", True),
-            "Ceiling": ("ceil", False),
-        }
-        sort_key, sort_asc = sort_map[sort_col]
-        if sort_key in board_df.columns:
-            board_df = board_df.sort_values(sort_key, ascending=sort_asc).reset_index(drop=True)
+        st.caption("No strong stack targets on this slate")
 
-        # Render player cards
-        for _, row in board_df.iterrows():
-            _render_board_card(row, sport)
+    # --- 2. Sniper Spots (max 3) ---
+    snipers = compute_sniper_spots(pool, edge_analysis)
+    st.markdown(
+        '<div style="margin-top:12px;margin-bottom:4px;font-weight:700;font-size:1.0rem;">🔫 Sniper Spots</div>',
+        unsafe_allow_html=True,
+    )
+    if snipers:
+        for p in snipers:
+            st.markdown(
+                f'<div class="board-card" style="border: 1px solid rgba(33,150,243,0.4);">'
+                f'<div class="board-name">{p["player_name"]}</div>'
+                f'<div class="board-stats">{p["team"]} · ${p["salary"]:,} · '
+                f'{p["proj"]:.1f} proj · {p["ceil"]:.1f} ceil · {p["own_pct"]:.1f}% own</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+    else:
+        st.caption("No strong sniper spots on this slate")
+
+    # --- 3. The Fade (max 2) ---
+    fades = compute_fades(pool, edge_analysis)
+    st.markdown(
+        '<div style="margin-top:12px;margin-bottom:4px;font-weight:700;font-size:1.0rem;">💀 The Fade</div>',
+        unsafe_allow_html=True,
+    )
+    if fades:
+        for p in fades:
+            st.markdown(
+                f'<div class="board-card" style="border: 1px solid rgba(244,67,54,0.4);">'
+                f'<div class="board-name">{p["player_name"]}</div>'
+                f'<div class="board-stats">{p["team"]} · ${p["salary"]:,} · '
+                f'{p["proj"]:.1f} proj · {p["own_pct"]:.1f}% own</div>'
+                f'<div style="font-size:0.82rem;color:rgba(244,67,54,0.8);margin-top:4px;">'
+                f'{p["reasoning"]}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+    else:
+        st.caption("No strong fades on this slate")
 
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -322,75 +307,6 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             )
         html = '<div class="the-board">' + "".join(parts) + '</div>'
         st.markdown(html, unsafe_allow_html=True)
-
-
-def _render_board_card(row: pd.Series, sport: str) -> None:
-    """Render a single player card on The Board with Lock/Exclude buttons."""
-    from yak_core.board import get_signal_labels
-
-    name = row.get("player_name", "")
-    salary = int(row.get("salary", 0))
-    proj = float(row.get("proj", 0))
-    ceil = float(row.get("ceil", 0))
-    own = float(row.get("own_display", row.get("ownership", 0)))
-    conf = int(row.get("confidence_score", 0))
-    pos = row.get("pos", "")
-
-    # Confidence class
-    if conf >= 5:
-        card_cls = "board-card high-conf"
-        conf_cls = "conf-high"
-    else:
-        card_cls = "board-card mod-conf"
-        conf_cls = "conf-mod"
-
-    # Signal badges
-    signals = get_signal_labels(row)
-    signal_html = "".join(f'<span class="signal-badge">{s}</span>' for s in signals)
-
-    stats_line = f"${salary:,} · {proj:.1f} proj · {ceil:.1f} ceil · {own:.1f}% own"
-    if pos:
-        stats_line = f"{pos} · {stats_line}"
-
-    card_html = (
-        f'<div class="{card_cls}">'
-        f'<div class="board-name">{name}'
-        f'<span class="conf-badge {conf_cls}">{conf}/6</span>'
-        f'</div>'
-        f'<div class="board-stats">{stats_line}</div>'
-        f'<div class="board-signals">{signal_html}</div>'
-        f'</div>'
-    )
-    st.markdown(card_html, unsafe_allow_html=True)
-
-    # Lock / Exclude buttons (wire into optimizer session_state keys)
-    btn_c1, btn_c2, _ = st.columns([1, 1, 4])
-    lock_key = f"opt_lock_{sport}"
-    excl_key = f"opt_excl_{sport}"
-
-    with btn_c1:
-        locked_list = list(st.session_state.get(lock_key, []))
-        is_locked = name in locked_list
-        lock_label = "Unlock" if is_locked else "Lock"
-        if st.button(f"🔒 {lock_label}", key=f"board_lock_{name}_{sport}"):
-            if is_locked:
-                locked_list.remove(name)
-            else:
-                locked_list.append(name)
-            st.session_state[lock_key] = locked_list
-            st.rerun()
-
-    with btn_c2:
-        excluded_list = list(st.session_state.get(excl_key, []))
-        is_excluded = name in excluded_list
-        excl_label = "Include" if is_excluded else "Exclude"
-        if st.button(f"🚫 {excl_label}", key=f"board_excl_{name}_{sport}"):
-            if is_excluded:
-                excluded_list.remove(name)
-            else:
-                excluded_list.append(name)
-            st.session_state[excl_key] = excluded_list
-            st.rerun()
 
 
 def _render_late_swap_alerts(alerts: list, sport: str, lineups: dict | None = None) -> None:

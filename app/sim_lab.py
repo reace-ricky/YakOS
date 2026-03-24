@@ -1085,53 +1085,132 @@ def _render_config_panel(preset_name: str) -> Dict[str, Any]:
             del overrides[key]
         return val
 
-    # Group 1: Core Weights (expanded by default)
-    with st.expander("Core Weights", expanded=True):
+    # Group 1: Projection Weights (collapsed)
+    with st.expander("Projection Weights"):
         c1, c2 = st.columns(2)
         with c1:
             _sl("Proj Weight", "GPP_PROJ_WEIGHT", 0.0, 1.0, 0.05, 0.30)
             _sl("Upside Weight", "GPP_UPSIDE_WEIGHT", 0.0, 1.0, 0.05, 0.30)
         with c2:
             _sl("Boom Weight", "GPP_BOOM_WEIGHT", 0.0, 1.0, 0.05, 0.35)
+            _sl("Sniper Weight", "GPP_SNIPER_WEIGHT", 0.0, 1.0, 0.05, 0.0)
+
+    # Group 2: Build Weights (collapsed)
+    with st.expander("Build Weights"):
+        c1, c2 = st.columns(2)
+        with c1:
             _sl("Own Penalty Strength", "GPP_OWN_PENALTY_STRENGTH", 0.0, 3.0, 0.1, 1.0, fmt="%.1f")
-
-    # Group 2: Edge Signals
-    with st.expander("Edge Signals"):
-        c1, c2 = st.columns(2)
-        with c1:
-            _sl("Smash Weight", "GPP_SMASH_WEIGHT", 0.0, 0.50, 0.05, 0.15)
-            _sl("DVP Weight", "GPP_DVP_WEIGHT", 0.0, 0.50, 0.01, 0.12)
-            _sl("Pace Env Weight", "GPP_PACE_ENV_WEIGHT", 0.0, 0.50, 0.01, 0.10)
-            _sl("Form Weight", "GPP_FORM_WEIGHT", 0.0, 0.50, 0.01, 0.08)
-        with c2:
             _sl("Bust Penalty", "GPP_BUST_PENALTY", 0.0, 0.50, 0.05, 0.10)
-            _sl("Spread Penalty", "GPP_SPREAD_PENALTY_WEIGHT", 0.0, 0.50, 0.01, 0.08)
-            _sl("Catalyst Weight", "GPP_CATALYST_WEIGHT", 0.0, 0.50, 0.05, 0.05)
-            _sl("Efficiency Weight", "GPP_EFFICIENCY_WEIGHT", 0.0, 0.50, 0.05, 0.05)
-
-    # Group 3: Ownership Edge
-    with st.expander("Ownership Edge"):
-        c1, c2 = st.columns(2)
-        with c1:
-            _sl("Own Weight", "OWN_WEIGHT", 0.0, 1.0, 0.05, 0.0)
-            _sl("Leverage Weight", "GPP_LEVERAGE_WEIGHT", 0.0, 0.50, 0.05, 0.05)
-            _sl("Min Low Own Players", "GPP_MIN_LOW_OWN_PLAYERS", 0, 4, 1, 1)
-        with c2:
-            _sl("Low Own Threshold", "GPP_LOW_OWN_THRESHOLD", 0.0, 0.50, 0.05, 0.10)
-            _sl("Min Player Minutes", "MIN_PLAYER_MINUTES", 0, 30, 1, 0)
-
-    # Group 4: Structure (collapsed)
-    with st.expander("Structure"):
-        c1, c2 = st.columns(2)
-        with c1:
-            _sl("Num Lineups", "NUM_LINEUPS", 1, 50, 1, 10)
-            _sl("Min Salary Used", "MIN_SALARY_USED", 45000, 50000, 500, 49000)
-        with c2:
             _sl("Max Exposure", "MAX_EXPOSURE", 0.1, 1.0, 0.05, 0.6)
-            _sl("Min Uniques", "MIN_UNIQUES", 0, 5, 1, 0)
+            _sl("Own Weight", "OWN_WEIGHT", 0.0, 1.0, 0.05, 0.0)
+        with c2:
+            _sl("Leverage Weight", "GPP_LEVERAGE_WEIGHT", 0.0, 0.50, 0.05, 0.05)
+            _sl("Smash Weight", "GPP_SMASH_WEIGHT", 0.0, 0.50, 0.05, 0.15)
+            _sl("Min Player Minutes", "MIN_PLAYER_MINUTES", 0, 30, 1, 0)
+            _sl("Num Lineups", "NUM_LINEUPS", 1, 50, 1, 10)
 
     st.session_state[sk] = overrides
     return overrides
+
+
+def _render_sniper_metrics_table() -> None:
+    """Render the Sniper Metrics table (always visible, not in an expander).
+
+    Shows the latest auto-calibrate sniper metrics if available, otherwise
+    shows summary metrics from the latest batch run.
+    """
+    result = st.session_state.get("autocal_result")
+    if result is not None:
+        try:
+            from yak_core.auto_calibrate import compute_sniper_metrics
+            baseline_sniper = compute_sniper_metrics(result.baseline_per_date)
+            optimized_sniper = compute_sniper_metrics(result.per_date_results)
+        except Exception:
+            return
+
+        _SNIPER_LABELS = {
+            "avg_se_core": ("Avg SE Core", "{:.1f}", True),
+            "count_300_avg": ("300+ Lineups (avg/batch)", "{:.1f}", True),
+            "count_350_avg": ("350+ Lineups (avg/batch)", "{:.2f}", True),
+            "top1pct_rate": ("Top-1% Hit Rate", "{:.1f}%", True),
+            "cash_rate_pct": ("Cash Rate (% ≥ 287 FP)", "{:.1f}%", True),
+            "top5_avg": ("Top-5 Avg Score", "{:.1f}", True),
+            "best_lineup_avg": ("Best Lineup (avg)", "{:.1f}", True),
+            "avg_ceiling": ("Avg Lineup Ceiling", "{:.1f}", True),
+            "avg_ownership": ("Avg Lineup Ownership", "{:.4f}", True),
+            "pct_300_in_top3": ("300+ in Ricky Top 3", "{:.1f}%", True),
+            "pct_300_in_top5": ("300+ in Ricky Top 5", "{:.1f}%", True),
+            "best_lineup_avg_rank": ("Best Lineup Avg Rank", "{:.1f}", False),
+        }
+
+        sniper_rows = []
+        for key, (label, fmt, higher_is_better) in _SNIPER_LABELS.items():
+            b_val = baseline_sniper.get(key)
+            o_val = optimized_sniper.get(key)
+            if b_val is None and o_val is None:
+                continue
+            b_str = fmt.format(b_val) if b_val is not None else "—"
+            o_str = fmt.format(o_val) if o_val is not None else "—"
+            if b_val is not None and o_val is not None:
+                delta = o_val - b_val
+                is_better = (delta > 0) if higher_is_better else (delta < 0)
+                is_worse = (delta < 0) if higher_is_better else (delta > 0)
+                arrow = "↑" if delta > 0 else ("↓" if delta < 0 else "—")
+                color = "green" if is_better else ("red" if is_worse else "grey")
+                if "%" in fmt:
+                    d_str = f"{delta:+.1f}%"
+                elif "{:.4f}" in fmt:
+                    d_str = f"{delta:+.4f}"
+                elif "{:.2f}" in fmt:
+                    d_str = f"{delta:+.2f}"
+                else:
+                    d_str = f"{delta:+.1f}"
+                delta_display = f":{color}[{arrow} {d_str}]"
+            else:
+                delta_display = "—"
+            sniper_rows.append({
+                "Metric": label,
+                "Baseline": b_str,
+                "Optimized": o_str,
+                "_delta_display": delta_display,
+                "_is_sorter": key in ("pct_300_in_top3", "pct_300_in_top5", "best_lineup_avg_rank"),
+            })
+
+        if sniper_rows:
+            st.markdown("#### 🎯 Sniper Metrics")
+            header = "| Metric | Baseline | Optimized | Delta |"
+            sep = "|--------|----------|-----------|-------|"
+            lines = [header, sep]
+            for row in sniper_rows:
+                prefix = "**" if row["_is_sorter"] else ""
+                suffix = "**" if row["_is_sorter"] else ""
+                lines.append(
+                    f"| {prefix}{row['Metric']}{suffix} "
+                    f"| {row['Baseline']} "
+                    f"| {row['Optimized']} "
+                    f"| {row['_delta_display']} |"
+                )
+            st.markdown("\n".join(lines))
+            return
+
+    # Fallback: show latest batch summary metrics as a simple table
+    batches = st.session_state.get("sim_lab_batches", [])
+    if batches:
+        latest = batches[-1]
+        runs = latest.get("runs", [])
+        if runs:
+            st.markdown("#### 🎯 Sniper Metrics")
+            avg_actual = latest.get("avg_actual", 0)
+            best = latest.get("best_slate", latest.get("best", 0))
+            beat_pct = latest.get("beat_proj_pct", 0)
+            n_dates = len(runs)
+            rows = [
+                {"Metric": "Avg Actual FP", "Value": f"{avg_actual:.1f}"},
+                {"Metric": "Best Lineup", "Value": f"{best:.1f}"},
+                {"Metric": "Beat Proj %", "Value": f"{beat_pct:.0f}%"},
+                {"Metric": "Dates", "Value": str(n_dates)},
+            ]
+            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
 
 # ---------------------------------------------------------------------------
@@ -3544,6 +3623,16 @@ def render_sim_lab(sport: str) -> None:
             if _disk_rw:
                 st.session_state[_rk] = _disk_rw
 
+    # ── Sniper Metrics (always visible, not in an expander) ─────────────
+    _render_sniper_metrics_table()
+
+    # ── Table dropdown: switch between data views ─────────────────────
+    _table_view = st.selectbox(
+        "View",
+        ["Player Table", "Parameter Changes", "Recommended Settings", "Run History"],
+        key="hotbox_table_view",
+    )
+
     # --- Archetype selector (NBA GPP presets only) ---
     archetype_name = "Default"
     if sport == "NBA" and preset_name in _ARCHETYPE_ELIGIBLE_PRESETS:
@@ -3563,7 +3652,7 @@ def render_sim_lab(sport: str) -> None:
             st.session_state["_sim_lab_prev_archetype"] = archetype_name
             st.rerun()
 
-    # Config panel (4 groups) — sliders read from sandbox overrides
+    # Config panel (2 groups: Projection Weights, Build Weights)
     sandbox_overrides = _render_config_panel(preset_name)
 
     # --- Ricky Ranking Weights (local to Hot Box, per-contest-type) ---
@@ -3834,14 +3923,67 @@ def render_sim_lab(sport: str) -> None:
                 _save_slider_state(preset_name, sandbox_overrides, _ricky_weights)
                 st.toast("Lineups re-ranked with updated weights")
 
-        # Ricky SE Shortlist (tagged lineups from latest batch)
-        _render_ricky_shortlist()
-
-        # Per-slate lineup detail with ricky_rank/tag
-        _render_per_slate_detail()
-
-        # Download CSV of all ranked lineups
-        _render_download_button()
+        # ── Table dropdown content ────────────────────────────────────
+        if _table_view == "Player Table":
+            _render_ricky_shortlist()
+            _render_per_slate_detail()
+            _render_download_button()
+        elif _table_view == "Parameter Changes":
+            # Show auto-cal parameter changes if available
+            _ac_result = st.session_state.get("autocal_result")
+            if _ac_result is not None:
+                st.markdown("#### Parameter Changes")
+                _ac_rows = []
+                _ac_all_new = {**_ac_result.best_params, **_ac_result.best_ricky_weights}
+                for _ac_key, _ac_new_val in _ac_all_new.items():
+                    if _ac_key in _ac_result.best_ricky_weights:
+                        _ac_old_val = _ricky_weights.get(_ac_key, "—")
+                    else:
+                        _ac_old_val = sandbox_overrides.get(
+                            _ac_key, _slider_default(preset_name, _ac_key, "—"),
+                        )
+                    _ac_delta = ""
+                    if isinstance(_ac_old_val, (int, float)):
+                        _ac_delta = f"{_ac_new_val - float(_ac_old_val):+.2f}"
+                    _ac_rows.append({
+                        "Parameter": _ac_key,
+                        "Current": _ac_old_val,
+                        "Optimized": _ac_new_val,
+                        "Delta": _ac_delta or "—",
+                    })
+                st.dataframe(pd.DataFrame(_ac_rows), hide_index=True, use_container_width=True)
+            else:
+                st.caption("Run Auto-Calibrate to see parameter changes.")
+        elif _table_view == "Recommended Settings":
+            _ac_result = st.session_state.get("autocal_result")
+            if _ac_result is not None:
+                from yak_core.auto_calibrate import DS_RECOMMENDATIONS
+                _ct_rec = getattr(_ac_result, "contest_type", "SE GPP")
+                _ds_rec = DS_RECOMMENDATIONS.get(_ct_rec, {})
+                if _ds_rec:
+                    st.markdown(f"#### Recommended Slider Settings for {_ct_rec}")
+                    _ac_all_new = {**_ac_result.best_params, **_ac_result.best_ricky_weights}
+                    _ds_rows = []
+                    for _ds_key in sorted(set(list(_ds_rec.keys()) + list(_ac_all_new.keys()))):
+                        _ds_val = _ds_rec.get(_ds_key, "—")
+                        _ac_val = _ac_all_new.get(_ds_key, "—")
+                        if _ds_key in _ac_result.best_ricky_weights:
+                            _cur = _ricky_weights.get(_ds_key, "—")
+                        else:
+                            _cur = sandbox_overrides.get(_ds_key, _slider_default(preset_name, _ds_key, "—"))
+                        _ds_rows.append({
+                            "Parameter": _ds_key,
+                            "DS Recommended": _ds_val,
+                            "Auto-Cal": _ac_val,
+                            "Current": _cur,
+                        })
+                    st.dataframe(pd.DataFrame(_ds_rows), hide_index=True, use_container_width=True)
+                else:
+                    st.caption("No DS recommendations available for this contest type.")
+            else:
+                st.caption("Run Auto-Calibrate to see recommended settings.")
+        elif _table_view == "Run History":
+            _render_history_table()
 
         # Calibration Nudge Guidance (after batch results)
         _batches_now = st.session_state.get("sim_lab_batches", [])
@@ -3868,14 +4010,8 @@ def render_sim_lab(sport: str) -> None:
         # Trend chart — session per-date detail (when batches exist in memory)
         _render_trend_chart()
 
-        # Persistent performance trend — survives restarts, shows baseline ref line
-        _render_persistent_trend(preset_name)
-
         # Comparison table (persistent, with baseline pinning + checkboxes)
         _render_comparison_table(preset_name)
-
-        # Persistent history (survives restarts)
-        _render_history_table()
 
     else:
         # --- PGA: single date flow (no RG archive) ---

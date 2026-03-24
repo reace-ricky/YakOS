@@ -3,8 +3,7 @@
 Entry point.  Uses ``st.tabs()`` for navigation:
   - Edge Analysis (public)
   - Optimizer (public)
-  - The Lab (admin)
-  - Dashboard (admin)
+  - Lineup Builder (admin)
   - Ricky's Hot Box (admin) — consolidated tuning, batch replay, and Ricky's projections
 
 Sport toggle (NBA/PGA) and admin password gate live in the sidebar.
@@ -37,15 +36,14 @@ is_admin = check_admin_password()
 
 # ── Tabs ──────────────────────────────────────────────────────────────────
 if is_admin:
-    tab_edge, tab_optimizer, tab_lab, tab_dashboard, tab_cal_lab = st.tabs(
-        ["📐 Ricky's Edge Analysis", "⚙️ Optimizer", "🧪 The Lab", "📊 Dashboard",
+    tab_edge, tab_optimizer, tab_lab, tab_hotbox = st.tabs(
+        ["📐 Ricky's Edge Analysis", "⚙️ Optimizer", "🔨 Lineup Builder",
          "🔥 Ricky's Hot Box"]
     )
 else:
     tab_edge, tab_optimizer = st.tabs(["📐 Ricky's Edge Analysis", "⚙️ Optimizer"])
     tab_lab = None
-    tab_dashboard = None
-    tab_cal_lab = None
+    tab_hotbox = None
 
 # ── Render tabs ───────────────────────────────────────────────────────────
 from app.edge_tab import render_edge_tab
@@ -59,14 +57,10 @@ with tab_optimizer:
 
 if is_admin and tab_lab is not None:
     from app.lab_tab import render_lab_tab
-    from app.dashboard_tab import render_dashboard_tab
     from app.sim_lab import render_sim_lab
 
     with tab_lab:
         render_lab_tab(sport)
 
-    with tab_dashboard:
-        render_dashboard_tab(sport)
-
-    with tab_cal_lab:
+    with tab_hotbox:
         render_sim_lab(sport)
