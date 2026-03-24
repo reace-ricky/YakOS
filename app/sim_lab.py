@@ -46,6 +46,19 @@ from yak_core.ricky_rank import (
     rank_lineups_for_se,
 )
 from yak_core.sim_lab_report import summarize_sim_lab
+from yak_core.goal_seeking import (
+    PRESET_TO_CONTEST_TYPE,
+    compute_deltas,
+    get_kept_runs,
+    get_targets_for_contest,
+    load_targets,
+    run_backtest,
+    save_run,
+    save_targets,
+    scan_available_dates,
+    suggest_adjustments,
+    toggle_run_kept,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -3043,6 +3056,380 @@ def _render_auto_calibrate(
             st.rerun()
 
 
+# ---------------------------------------------------------------------------
+# Goal-seeking calibration UI
+# ---------------------------------------------------------------------------
+
+def _render_goal_seeking(
+    sport: str,
+    preset_name: str,
+    sandbox_overrides: Dict[str, Any],
+    ricky_weights: Dict[str, float],
+) -> None:
+    """Render the goal-seeking calibration section.
+
+    Purpose: user targets, historical backtester, persistent run tracking,
+    results chart with target lines, delta display, and slider suggestions.
+    """
+    contest_type = PRESET_TO_CONTEST_TYPE.get(preset_name, "SE GPP")
+
+    st.markdown("---")
+    st.subheader("🎯 Goal-Seeking Calibration")
+    st.caption(
+        "Set performance targets, backtest against historical slates, "
+        "and iterate toward your goals."
+    )
+
+    # ── 1. Target inputs ─────────────────────────────────────────────────
+    with st.expander("Performance Targets", expanded=False):
+        targets = get_targets_for_contest(contest_type)
+        tc1, tc2, tc3 = st.columns(3)
+        with tc1:
+            new_cash = st.number_input(
+                "Cash Line (FP)",
+                min_value=0.0,
+                max_value=500.0,
+                value=float(targets.get("cash_line", 287.0)),
+                step=5.0,
+                key=f"gs_cash_line_{contest_type}",
+                help="Lineup FP score above which we count a 'cash hit'",
+            )
+        with tc2:
+            new_top5 = st.number_input(
+                "Top 5% Rate Target (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(targets.get("top5_rate", 5.0)),
+                step=0.5,
+                key=f"gs_top5_{contest_type}",
+                help="Target: % of lineups in top 5% of set",
+            )
+        with tc3:
+            new_top1 = st.number_input(
+                "Top 1% Rate Target (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(targets.get("top1_rate", 1.0)),
+                step=0.5,
+                key=f"gs_top1_{contest_type}",
+                help="Target: % of lineups in top 1% of set",
+            )
+
+        new_targets = {
+            "cash_line": new_cash,
+            "top5_rate": new_top5,
+            "top1_rate": new_top1,
+        }
+
+        # Save if changed
+        if new_targets != targets:
+            all_targets = load_targets()
+            all_targets[contest_type] = new_targets
+            save_targets(all_targets)
+            st.toast(f"Targets saved for {contest_type}")
+
+    # ── 2. Historical backtest runner ────────────────────────────────────
+    available_dates = scan_available_dates()
+    today = date.today()
+    safe_dates = [d for d in available_dates if d < today]
+
+    if not safe_dates:
+        st.info(
+            "No historical dates available for backtesting. "
+            "Upload RG CSVs in The Lab to populate the archive."
+        )
+        return
+
+    st.caption(f"{len(safe_dates)} historical dates available for backtest")
+
+    _gs_date_mode = st.radio(
+        "Backtest date selection",
+        ["All Dates", "Select Dates"],
+        horizontal=True,
+        key=f"gs_date_mode_{contest_type}",
+    )
+
+    if _gs_date_mode == "Select Dates":
+        selected_date_strs = st.multiselect(
+            "Select dates",
+            options=[d.strftime("%Y-%m-%d") for d in safe_dates],
+            default=[d.strftime("%Y-%m-%d") for d in safe_dates[:7]],
+            key=f"gs_dates_{contest_type}",
+        )
+        run_dates = [d for d in safe_dates if d.strftime("%Y-%m-%d") in selected_date_strs]
+    else:
+        run_dates = safe_dates
+
+    if st.button(
+        "🔄 Run Goal-Seeking Backtest",
+        use_container_width=True,
+        key=f"gs_run_{contest_type}",
+        disabled=len(run_dates) == 0,
+    ):
+        with st.spinner(f"Running backtest across {len(run_dates)} dates..."):
+            run_record = run_backtest(
+                sport=sport,
+                preset_name=preset_name,
+                contest_type=contest_type,
+                selected_dates=run_dates,
+                sandbox_overrides=sandbox_overrides,
+                ricky_weights=ricky_weights,
+            )
+            save_run(run_record)
+            st.session_state[f"gs_latest_run_{contest_type}"] = run_record
+
+            n_ok = run_record["num_dates_ok"]
+            n_skip = run_record["num_dates_skipped"]
+            n_err = run_record["num_dates_error"]
+            parts = [f"{n_ok} dates scored"]
+            if n_skip:
+                parts.append(f"{n_skip} skipped")
+            if n_err:
+                parts.append(f"{n_err} errors")
+            st.success(f"Backtest complete: {', '.join(parts)}")
+
+            if run_record.get("errors"):
+                with st.expander("Errors"):
+                    for e in run_record["errors"]:
+                        st.warning(f"{e['date']}: {e['error']}")
+            if run_record.get("skipped"):
+                with st.expander("Skipped (incomplete)"):
+                    for s in run_record["skipped"]:
+                        st.caption(f"{s['date']}: {s['reason']}")
+
+    # ── 3. Results display with targets ──────────────────────────────────
+    latest_run = st.session_state.get(f"gs_latest_run_{contest_type}")
+    if latest_run is None:
+        # Try loading from persistent history
+        kept = get_kept_runs(contest_type)
+        if kept:
+            latest_run = kept[-1]
+
+    if latest_run and latest_run.get("results"):
+        results = latest_run["results"]
+        targets_now = get_targets_for_contest(contest_type)
+
+        # Metrics row
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Cash Rate", f"{results.get('cash_rate', 0):.1f}%")
+        m2.metric("Top 5% Rate", f"{results.get('top5_rate', 0):.1f}%")
+        m3.metric("Top 1% Rate", f"{results.get('top1_rate', 0):.1f}%")
+        m4.metric("Avg Score", f"{results.get('avg_score', 0):.1f}")
+
+        # Additional metrics
+        a1, a2, a3 = st.columns(3)
+        a1.metric("Best Score", f"{results.get('best_score', 0):.1f}")
+        a2.metric("MAE", f"{results.get('mae', 0):.1f}")
+        a3.metric("Bias", f"{results.get('bias', 0):+.1f}")
+
+        # ── 3b. Results chart with target lines ─────────────────────────
+        kept_runs = get_kept_runs(contest_type)
+        if len(kept_runs) >= 2:
+            _render_goal_chart(kept_runs, targets_now, contest_type)
+
+        # ── 4. Run tracking table ────────────────────────────────────────
+        _render_run_tracking(contest_type)
+
+        # ── 5. Goal-seeking iteration: deltas + suggestions ─────────────
+        _render_goal_deltas(
+            results, targets_now, sandbox_overrides,
+            preset_name, ricky_weights,
+        )
+
+
+def _render_goal_chart(
+    kept_runs: List[Dict[str, Any]],
+    targets: Dict[str, float],
+    contest_type: str,
+) -> None:
+    """Render trend chart of kept runs with horizontal target lines."""
+    try:
+        import plotly.graph_objects as go
+
+        timestamps = []
+        cash_rates = []
+        top5_rates = []
+        top1_rates = []
+
+        for r in kept_runs:
+            ts = r.get("timestamp", "")
+            res = r.get("results", {})
+            timestamps.append(ts[:16])  # trim to minute
+            cash_rates.append(res.get("cash_rate", 0))
+            top5_rates.append(res.get("top5_rate", 0))
+            top1_rates.append(res.get("top1_rate", 0))
+
+        fig = go.Figure()
+
+        # Data traces
+        fig.add_trace(go.Scatter(
+            x=timestamps, y=cash_rates,
+            mode="lines+markers", name="Cash Rate",
+            line=dict(color="#2ecc71", width=2),
+        ))
+        fig.add_trace(go.Scatter(
+            x=timestamps, y=top5_rates,
+            mode="lines+markers", name="Top 5% Rate",
+            line=dict(color="#f1c40f", width=2),
+        ))
+        fig.add_trace(go.Scatter(
+            x=timestamps, y=top1_rates,
+            mode="lines+markers", name="Top 1% Rate",
+            line=dict(color="#e74c3c", width=2),
+        ))
+
+        # Horizontal target lines
+        fig.add_hline(
+            y=targets.get("top5_rate", 5.0),
+            line_dash="dash", line_color="#f1c40f",
+            annotation_text="Top 5% Target",
+            annotation_position="top right",
+        )
+        fig.add_hline(
+            y=targets.get("top1_rate", 1.0),
+            line_dash="dash", line_color="#e74c3c",
+            annotation_text="Top 1% Target",
+            annotation_position="top right",
+        )
+
+        fig.update_layout(
+            title=f"Goal-Seeking Progress — {contest_type}",
+            xaxis_title="Run",
+            yaxis_title="Rate (%)",
+            template="plotly_dark",
+            height=350,
+            margin=dict(l=40, r=20, t=40, b=30),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+    except ImportError:
+        # Fallback to basic st.line_chart if plotly unavailable
+        chart_data = pd.DataFrame({
+            "Cash Rate": [r.get("results", {}).get("cash_rate", 0) for r in kept_runs],
+            "Top 5% Rate": [r.get("results", {}).get("top5_rate", 0) for r in kept_runs],
+            "Top 1% Rate": [r.get("results", {}).get("top1_rate", 0) for r in kept_runs],
+        })
+        st.line_chart(chart_data)
+
+
+def _render_run_tracking(contest_type: str) -> None:
+    """Render the persistent run tracking table with keep/discard toggles."""
+    all_runs = get_kept_runs(contest_type)
+    if not all_runs:
+        return
+
+    with st.expander(f"Run History ({len(all_runs)} runs)", expanded=False):
+        rows = []
+        for r in reversed(all_runs):  # most recent first
+            res = r.get("results", {})
+            rows.append({
+                "Run ID": r.get("run_id", "?"),
+                "Time": r.get("timestamp", "")[:16],
+                "Dates": r.get("num_dates_ok", 0),
+                "Cash%": f"{res.get('cash_rate', 0):.1f}",
+                "Top5%": f"{res.get('top5_rate', 0):.1f}",
+                "Top1%": f"{res.get('top1_rate', 0):.1f}",
+                "Avg": f"{res.get('avg_score', 0):.1f}",
+                "MAE": f"{res.get('mae', 0):.1f}",
+                "Kept": r.get("kept", True),
+            })
+
+        if rows:
+            df = pd.DataFrame(rows)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
+            # Toggle kept status
+            toggle_id = st.text_input(
+                "Toggle run ID (discard/keep)",
+                key=f"gs_toggle_{contest_type}",
+                placeholder="Enter run_id to toggle",
+            )
+            if toggle_id and st.button(
+                "Toggle Keep/Discard",
+                key=f"gs_toggle_btn_{contest_type}",
+            ):
+                # Find current status and flip
+                for r in all_runs:
+                    if r.get("run_id") == toggle_id:
+                        new_status = not r.get("kept", True)
+                        toggle_run_kept(toggle_id, new_status)
+                        st.toast(
+                            f"Run {toggle_id} {'kept' if new_status else 'discarded'}"
+                        )
+                        st.rerun()
+                        break
+
+
+def _render_goal_deltas(
+    results: Dict[str, float],
+    targets: Dict[str, float],
+    sandbox_overrides: Dict[str, Any],
+    preset_name: str,
+    ricky_weights: Dict[str, float],
+) -> None:
+    """Show deltas vs targets and suggest slider adjustments."""
+    st.markdown("#### Deltas vs Targets")
+
+    deltas = compute_deltas(results, targets)
+
+    for key, info in deltas.items():
+        if info.get("delta") is None:
+            # Cash rate — no direct rate target
+            st.markdown(
+                f"**{info['label']}**: {info['value']:.1f}{info['unit']}"
+            )
+            continue
+
+        delta = info["delta"]
+        improving = info.get("improving", False)
+        color = "green" if improving else "red"
+        arrow = "↑" if delta > 0 else "↓" if delta < 0 else "→"
+        st.markdown(
+            f"**{info['label']}**: {info['value']:.1f}{info['unit']} "
+            f"(target: {info['target']:.1f}{info['unit']}) — "
+            f":{color}[{arrow} {abs(delta):.1f}pp]"
+        )
+
+    # Suggest adjustments
+    from yak_core.config import merge_config, CONTEST_PRESETS
+    preset_defaults = merge_config(CONTEST_PRESETS.get(preset_name, {}))
+
+    suggestions = suggest_adjustments(
+        results=results,
+        targets=targets,
+        current_overrides=sandbox_overrides,
+        preset_defaults=preset_defaults,
+        ricky_weights=ricky_weights,
+    )
+
+    if suggestions:
+        st.markdown("#### Suggested Slider Adjustments")
+        for s in suggestions:
+            current = s["current_value"]
+            suggested = s["suggested_value"]
+            direction = "↑" if suggested > current else "↓"
+            warning_text = f" ⚠️ {s['warning']}" if s.get("warning") else ""
+            clamped_text = " (clamped to guardrail)" if s.get("clamped") else ""
+
+            st.markdown(
+                f"- **{s['label']}** ({s['param']}): "
+                f"`{current:.2f}` → `{suggested:.2f}` {direction} "
+                f"— {s['description']}{warning_text}{clamped_text}"
+            )
+    elif any(
+        d.get("improving") is False
+        for d in deltas.values()
+        if d.get("delta") is not None
+    ):
+        st.info(
+            "Some metrics are off-target but no automated suggestions available. "
+            "Try adjusting projection weights or Ricky ranking weights manually."
+        )
+    else:
+        st.success("All metrics on target or improving! 🎯")
+
+
 def render_sim_lab(sport: str) -> None:
     """Render the Sim Lab tab."""
     st.header("\U0001f52c Sim Lab")
@@ -3362,6 +3749,9 @@ def render_sim_lab(sport: str) -> None:
 
         # Promote Config button
         _render_promote_config(preset_name, sandbox_overrides, _ricky_weights, archetype_name)
+
+        # Goal-Seeking Calibration (targets, backtest, deltas, suggestions)
+        _render_goal_seeking(sport, preset_name, sandbox_overrides, _ricky_weights)
 
         # Trend chart — session per-date detail (when batches exist in memory)
         _render_trend_chart()
