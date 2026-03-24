@@ -83,6 +83,10 @@ _PRESET_TO_TUNING_CT: Dict[str, str] = {
     "Cash Game": "Showdown Cash",
 }
 
+# Fraction of the pool considered "Ricky's top-ranked" for the player rank
+# analysis summary.  0.20 = top-20% by projection at lock.
+_PLAYER_RANK_ANALYSIS_TOP_PCT: float = 0.20
+
 # ---------------------------------------------------------------------------
 # NBA GPP Archetypes — Sim Lab only, never touches main optimizer config.
 #
@@ -1030,6 +1034,37 @@ def _run_pipeline(
 
     chash = _config_hash(sandbox_overrides, archetype=archetype)
 
+    # ── Player-level rank analysis (pool × actuals) ───────────────────────
+    # Joins each player's Ricky projection rank at lock with their actual
+    # finish percentile so users can see whether top-ranked players cluster
+    # among top-5% finishers.
+    pool_analysis = edge_df.copy()
+    pool_analysis = pool_analysis.merge(
+        actuals_df[["player_name", "actual_fp"]].drop_duplicates(subset="player_name"),
+        on="player_name",
+        how="left",
+        suffixes=("_orig", "_actual"),
+    )
+    if "actual_fp_actual" in pool_analysis.columns:
+        pool_analysis["actual_fp"] = pool_analysis["actual_fp_actual"].combine_first(
+            pool_analysis.get("actual_fp_orig", pd.Series(dtype=float))
+        )
+        drop_cols = [c for c in ("actual_fp_orig", "actual_fp_actual") if c in pool_analysis.columns]
+        pool_analysis = pool_analysis.drop(columns=drop_cols)
+    pool_analysis["actual_fp"] = pd.to_numeric(pool_analysis["actual_fp"], errors="coerce").fillna(0.0)
+    # Rank players by their optimizer projection descending (1 = highest proj)
+    pool_analysis["player_proj_rank"] = (
+        pool_analysis["proj"].rank(ascending=False, method="first").astype(int)
+    )
+    n_pool = len(pool_analysis)
+    if n_pool > 0:
+        pool_analysis["finish_pct"] = (pool_analysis["actual_fp"].rank(pct=True) * 100).round(1)
+        _top5_thresh = pool_analysis["actual_fp"].quantile(0.95)
+        pool_analysis["is_top5pct_finish"] = pool_analysis["actual_fp"] >= _top5_thresh
+    else:
+        pool_analysis["finish_pct"] = 0.0
+        pool_analysis["is_top5pct_finish"] = False
+
     return {
         "timestamp": datetime.now().isoformat(),
         "date": str(selected_date),
@@ -1044,6 +1079,7 @@ def _run_pipeline(
         "config_hash": chash,
         "summary_df": summary,
         "player_df": scored,
+        "pool_analysis_df": pool_analysis,
         "completeness_pct": _completeness_pct,
     }
 
@@ -2088,6 +2124,131 @@ def _render_per_slate_detail() -> None:
 
         st.dataframe(
             display.style.format(fmt),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+
+def _render_player_rank_analysis() -> None:
+    """Render per-slate player rank vs actual finish analysis.
+
+    Purpose: for a historical slate, show a table sorted by player_proj_rank
+    so users can visually verify that top-5% actual finishers cluster near the
+    top of Ricky's projection ranking.
+
+    Inputs:  pool_analysis_df stored in each run dict (added by _run_pipeline).
+    Outputs: sortable player table + summary callout.
+    """
+    batches: List[Dict[str, Any]] = st.session_state.get("sim_lab_batches", [])
+    if not batches:
+        return
+
+    latest_batch = batches[-1]
+    runs = latest_batch.get("runs", [])
+    if not runs:
+        return
+
+    # Only show for runs that have pool_analysis_df
+    valid_runs = [r for r in runs if r.get("pool_analysis_df") is not None]
+    if not valid_runs:
+        return
+
+    with st.expander("📊 Player Rank vs Actual Finish", expanded=False):
+        st.caption(
+            "For each player in the pool at lock, shows their Ricky projection rank "
+            "and whether they finished in the actual top-5%. Sort by **Proj Rank** to "
+            "see if top-ranked players cluster among top-5% finishers."
+        )
+
+        date_options = [r["date"] for r in valid_runs]
+        selected_date_str = st.selectbox(
+            "Select Date",
+            options=date_options,
+            key="sim_lab_player_rank_date",
+        )
+        run = next((r for r in valid_runs if r["date"] == selected_date_str), None)
+        if run is None:
+            return
+
+        pa = run["pool_analysis_df"]
+        if pa is None or pa.empty:
+            st.caption("No pool data for this date.")
+            return
+
+        # ── Summary callout ─────────────────────────────────────────────
+        n_pool = len(pa)
+        n_top5 = int(pa["is_top5pct_finish"].sum())
+        if n_top5 > 0:
+            top5_n = max(1, round(n_pool * _PLAYER_RANK_ANALYSIS_TOP_PCT))
+            top5_by_rank = pa[pa["player_proj_rank"] <= top5_n]
+            n_top5_in_top_rank = int(
+                (top5_by_rank["is_top5pct_finish"]).sum()
+            )
+            pct_top5_from_top_rank = round(n_top5_in_top_rank / n_top5 * 100, 1)
+            top_pct_label = f"top-{int(_PLAYER_RANK_ANALYSIS_TOP_PCT * 100)}%"
+
+            col_a, col_b, col_c = st.columns(3)
+            col_a.metric("Pool Size", n_pool)
+            col_b.metric("Top-5% Finishers", n_top5)
+            col_c.metric(
+                f"% of Top-5% finishers in Ricky's top-{top5_n} ({top_pct_label} proj)",
+                f"{pct_top5_from_top_rank}%",
+            )
+            st.caption(
+                f"Of all **{n_top5} top-5% finishers**, **{n_top5_in_top_rank}** "
+                f"({pct_top5_from_top_rank}%) were ranked in Ricky's top-{top5_n} "
+                f"by projection at lock."
+            )
+        else:
+            st.caption("No actual results available for this date (actuals = 0).")
+
+        # ── Player table ─────────────────────────────────────────────────
+        display_cols = ["player_proj_rank", "player_name"]
+        for c in ["pos", "salary", "proj", "edge_score", "own_pct", "actual_fp",
+                  "finish_pct", "is_top5pct_finish"]:
+            if c in pa.columns:
+                display_cols.append(c)
+
+        display = (
+            pa[display_cols]
+            .sort_values("player_proj_rank")
+            .reset_index(drop=True)
+            .copy()
+        )
+
+        col_rename = {
+            "player_proj_rank": "Proj Rank",
+            "player_name": "Player",
+            "pos": "Pos",
+            "salary": "Salary",
+            "proj": "Proj",
+            "edge_score": "Edge",
+            "own_pct": "Own%",
+            "actual_fp": "Actual FP",
+            "finish_pct": "Finish %ile",
+            "is_top5pct_finish": "Top-5%?",
+        }
+        display = display.rename(columns=col_rename)
+
+        fmt: Dict[str, str] = {}
+        for col, fmt_str in [
+            ("Proj", "{:.1f}"),
+            ("Edge", "{:.2f}"),
+            ("Own%", "{:.1f}"),
+            ("Actual FP", "{:.1f}"),
+            ("Finish %ile", "{:.1f}"),
+            ("Salary", "${:,.0f}"),
+        ]:
+            if col in display.columns:
+                fmt[col] = fmt_str
+
+        def _highlight_top5(row: pd.Series) -> List[str]:
+            if row.get("Top-5%?", False):
+                return ["background-color: #1a4a1a"] * len(row)
+            return [""] * len(row)
+
+        st.dataframe(
+            display.style.apply(_highlight_top5, axis=1).format(fmt),
             use_container_width=True,
             hide_index=True,
         )
@@ -3935,6 +4096,7 @@ def render_sim_lab(sport: str) -> None:
         if _table_view == "Player Table":
             _render_ricky_shortlist()
             _render_per_slate_detail()
+            _render_player_rank_analysis()
             _render_download_button()
         elif _table_view == "Parameter Changes":
             # Show auto-cal parameter changes if available
