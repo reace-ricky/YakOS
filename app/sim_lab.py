@@ -3850,9 +3850,14 @@ def render_sim_lab(sport: str) -> None:
     # --- Ricky Ranking Weights (local to Hot Box, per-contest-type) ---
     _ricky_key = f"sim_lab_ricky_weights_{preset_name}"
     if _ricky_key not in st.session_state:
-        st.session_state[_ricky_key] = {
-            "w_gpp": RICKY_W_GPP, "w_ceil": RICKY_W_CEIL, "w_own": RICKY_W_OWN,
-        }
+        # Always try disk first before falling back to constants
+        _, _fallback_rw = _load_slider_state(preset_name)
+        if _fallback_rw:
+            st.session_state[_ricky_key] = _fallback_rw
+        else:
+            st.session_state[_ricky_key] = {
+                "w_gpp": RICKY_W_GPP, "w_ceil": RICKY_W_CEIL, "w_own": RICKY_W_OWN,
+            }
     with st.expander("Ricky Ranking Weights"):
         _rw = st.session_state[_ricky_key]
         rc1, rc2, rc3 = st.columns(3)
