@@ -1,9 +1,15 @@
-"""Sim Lab v2 — Config Tuning + Batch Replay.
+"""Ricky's Hot Box — Config Tuning + Batch Replay.
 
+Consolidates the former Sim Lab and Tuning Lab into a single page.
 Pick a contest preset, adjust knobs across 4 tuning groups,
 batch-run all available RG archive dates, and compare configs
 via trend chart + summary table.  Batch history persists to
 data/sim_lab/batch_history.parquet and syncs to GitHub.
+
+Tuning Lab controls (contest type selector, Apply button, run history)
+are integrated as a collapsible panel.  Ricky's projections
+(yak_core/ricky_projections.py) are available as an alternative
+projection source via a toggle.
 """
 from __future__ import annotations
 
@@ -45,6 +51,7 @@ from yak_core.ricky_rank import (
     RICKY_W_OWN,
     rank_lineups_for_se,
 )
+from yak_core.ricky_projections import compute_ricky_proj
 from yak_core.sim_lab_report import summarize_sim_lab
 
 # ---------------------------------------------------------------------------
@@ -53,6 +60,15 @@ from yak_core.sim_lab_report import summarize_sim_lab
 
 _NBA_PRESETS = ["GPP Main", "GPP Early", "GPP Late", "Showdown", "Cash Main", "Cash Game"]
 _PGA_PRESETS = ["PGA GPP", "PGA Cash", "PGA Showdown"]
+
+# Reverse mapping: preset_name → Tuning Lab contest type
+_PRESET_TO_TUNING_CT: Dict[str, str] = {
+    "GPP Main": "SE GPP",
+    "GPP Early": "MME GPP",
+    "Cash Main": "Cash",
+    "Showdown": "Showdown GPP",
+    "Cash Game": "Showdown Cash",
+}
 
 # ---------------------------------------------------------------------------
 # NBA GPP Archetypes — Sim Lab only, never touches main optimizer config.
@@ -803,6 +819,7 @@ def _run_pipeline(
     ricky_w_gpp: Optional[float] = None,
     ricky_w_ceil: Optional[float] = None,
     ricky_w_own: Optional[float] = None,
+    proj_source: str = "RG CSV",
 ) -> Dict[str, Any]:
     """Execute the full fetch -> build -> score pipeline. Returns a run dict."""
     date_key = selected_date.strftime("%Y%m%d")
@@ -830,13 +847,26 @@ def _run_pipeline(
     if pool_df is None or pool_df.empty:
         raise ValueError(f"No DFS pool found for {date_dash}.")
 
-    # Step 2: Merge RG projections (NBA only)
+    # Step 2: Merge projections (NBA only)
     if sport == "NBA":
-        rg_path = _RG_ARCHIVE_DIR / f"rg_{date_dash}.csv"
-        if rg_path.is_file():
-            pool_df = _merge_rg_csv(pool_df, rg_path)
+        if proj_source == "Ricky's Projections":
+            # Use Ricky's recency-weighted game-log projections
+            pool_df = compute_ricky_proj(pool_df, cfg=cfg)
+            # Map ricky_proj → proj so downstream code uses it
+            if "ricky_proj" in pool_df.columns:
+                pool_df["proj"] = pool_df["ricky_proj"]
+                pool_df["proj_source"] = "ricky"
+            if "ricky_floor" in pool_df.columns:
+                pool_df["floor"] = pool_df["ricky_floor"]
+            if "ricky_ceil" in pool_df.columns:
+                pool_df["ceil"] = pool_df["ricky_ceil"]
+            _logger.info("Using Ricky's projections for %s", date_dash)
         else:
-            _logger.warning("No RG archive file for %s — using Tank01 projections", date_dash)
+            rg_path = _RG_ARCHIVE_DIR / f"rg_{date_dash}.csv"
+            if rg_path.is_file():
+                pool_df = _merge_rg_csv(pool_df, rg_path)
+            else:
+                _logger.warning("No RG archive file for %s — using Tank01 projections", date_dash)
 
     # Step 3: Auto-run Monte Carlo sims (if sim columns missing)
     if sport == "NBA" and "sim90th" not in pool_df.columns and "SIM90TH" not in pool_df.columns:
@@ -1111,6 +1141,7 @@ def _run_batch(
     profile_name: str = "",
     skip_incomplete: bool = False,
     completeness_threshold: float = _DEFAULT_BATCH_COMPLETENESS_THRESHOLD,
+    proj_source: str = "RG CSV",
 ) -> Dict[str, Any]:
     """Run the pipeline for every date. Returns a batch record.
 
@@ -1139,6 +1170,7 @@ def _run_batch(
                     archetype=archetype,
                     ricky_w_gpp=ricky_w_gpp, ricky_w_ceil=ricky_w_ceil,
                     ricky_w_own=ricky_w_own,
+                    proj_source=proj_source,
                 )
             cpct = run.get("completeness_pct", 100.0)
             if skip_incomplete and cpct < completeness_threshold:
@@ -2492,6 +2524,9 @@ def _render_nudge_guidance(
                         skip_incomplete=st.session_state.get(
                             "sim_lab_batch_skip_incomplete", True
                         ),
+                        proj_source=st.session_state.get(
+                            "hotbox_proj_source", "RG CSV"
+                        ),
                     )
                     new_batch["overrides"] = dict(sandbox_overrides)
                     if "sim_lab_batches" not in st.session_state:
@@ -3044,8 +3079,8 @@ def _render_auto_calibrate(
 
 
 def render_sim_lab(sport: str) -> None:
-    """Render the Sim Lab tab."""
-    st.header("\U0001f52c Sim Lab")
+    """Render Ricky's Hot Box (formerly Sim Lab + Tuning Lab)."""
+    st.header("\U0001f525 Ricky's Hot Box")
 
     is_pga = sport != "NBA"
 
@@ -3144,7 +3179,7 @@ def render_sim_lab(sport: str) -> None:
     # Config panel (4 groups) — sliders read from sandbox overrides
     sandbox_overrides = _render_config_panel(preset_name)
 
-    # --- Ricky Ranking Weights (local to Sim Lab, per-contest-type) ---
+    # --- Ricky Ranking Weights (local to Hot Box, per-contest-type) ---
     _ricky_key = f"sim_lab_ricky_weights_{preset_name}"
     if _ricky_key not in st.session_state:
         st.session_state[_ricky_key] = {
@@ -3179,6 +3214,81 @@ def render_sim_lab(sport: str) -> None:
         )
 
     _ricky_weights = st.session_state[_ricky_key]
+
+    # ── Tuning Lab controls (folded in from the former Tuning Lab tab) ───
+    _tuning_ct = _PRESET_TO_TUNING_CT.get(preset_name)
+    if _tuning_ct and sport == "NBA":
+        with st.expander("🎛️ Tuning Lab — Apply & Run History", expanded=False):
+            from app.tuning_lab import (
+                _get_store,
+                _render_run_history_table,
+                _render_results_chart,
+            )
+            st.caption(
+                "Apply the current slider config to Tuning Lab run history. "
+                "Only *Applied* runs update the active config and appear in history."
+            )
+            _tl_btn_col1, _tl_btn_col2 = st.columns(2)
+            with _tl_btn_col1:
+                _tl_apply = st.button(
+                    "✅ Apply Config",
+                    type="primary",
+                    use_container_width=True,
+                    key="hotbox_tuning_apply",
+                )
+            with _tl_btn_col2:
+                _tl_reset = st.button(
+                    "↩️ Reset to Active",
+                    use_container_width=True,
+                    key="hotbox_tuning_reset",
+                )
+
+            if _tl_apply:
+                from app.tuning_lab import _apply_config as _tl_apply_config
+                _tl_apply_config(
+                    contest_type=_tuning_ct,
+                    preset_name=preset_name,
+                    optimizer_overrides=sandbox_overrides,
+                    ricky_weights=_ricky_weights,
+                )
+                st.rerun()
+
+            if _tl_reset:
+                from app.tuning_lab import _seed_ephemeral_from_active
+                _seed_ephemeral_from_active(_tuning_ct, preset_name)
+                st.rerun()
+
+            _tl_store = _get_store()
+            _tl_tab_hist, _tl_tab_chart = st.tabs(
+                ["📋 Run History", "📈 Hit Rate Chart"]
+            )
+            with _tl_tab_hist:
+                _render_run_history_table(_tuning_ct, _tl_store)
+            with _tl_tab_chart:
+                _render_results_chart(_tuning_ct, _tl_store)
+
+    # ── Projection source toggle ─────────────────────────────────────────
+    _proj_source_key = "hotbox_proj_source"
+    if _proj_source_key not in st.session_state:
+        st.session_state[_proj_source_key] = "Ricky's Projections"
+    _proj_source = st.radio(
+        "Projection Source",
+        ["Ricky's Projections", "RG CSV"],
+        horizontal=True,
+        key=_proj_source_key,
+        help=(
+            "Ricky's Projections uses recency-weighted game-log data. "
+            "RG CSV uses RotoGrinders archive projections."
+        ),
+    )
+    _proj_chip_color = "#1a4a1a" if _proj_source == "Ricky's Projections" else "#1a1a4a"
+    _proj_chip_text = "#00c851" if _proj_source == "Ricky's Projections" else "#4dabf7"
+    st.markdown(
+        f'<span style="background:{_proj_chip_color};color:{_proj_chip_text};padding:3px 10px;'
+        f'border-radius:12px;font-size:0.8rem;font-weight:600;">'
+        f'📊 {_proj_source}</span>',
+        unsafe_allow_html=True,
+    )
 
     if sport == "NBA":
         # --- NBA: Batch run across RG dates ---
@@ -3251,6 +3361,7 @@ def render_sim_lab(sport: str) -> None:
                             ricky_w_own=_ricky_weights["w_own"],
                             profile_name=_profile_key_internal or "",
                             skip_incomplete=_batch_skip_incomplete,
+                            proj_source=_proj_source,
                         )
                         _bl_batch["config_label"] = "Baseline (main config)"
                         _bl_batch["overrides"] = {}
@@ -3273,6 +3384,7 @@ def render_sim_lab(sport: str) -> None:
                         ricky_w_own=_ricky_weights["w_own"],
                         profile_name=_profile_key_internal or "",
                         skip_incomplete=_batch_skip_incomplete,
+                        proj_source=_proj_source,
                     )
                     batch["overrides"] = dict(sandbox_overrides)
 
