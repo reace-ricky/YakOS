@@ -206,7 +206,8 @@ def _sniper_reason(p: Dict[str, Any], pool: pd.DataFrame) -> str:
     """Generate a player-specific reason for a Ricky's Play pick.
 
     Each reason type has multiple templates that rotate so no two picks
-    on the same board get the same line.
+    on the same board get the same line. The seed shifts daily so the
+    same players on consecutive days get different commentary.
     """
     name = p.get("player_name", "")
     proj = p.get("proj", 0)
@@ -215,9 +216,15 @@ def _sniper_reason(p: Dict[str, Any], pool: pd.DataFrame) -> str:
     sal = p.get("salary", 0)
 
     def _pick(pool_key: str, lines: list) -> str:
+        # Use player name + date as seed so same player gets different line tomorrow
+        import hashlib
+        from datetime import date as _date
+        seed_str = f"{name}:{pool_key}:{_date.today().isoformat()}"
+        seed = int(hashlib.md5(seed_str.encode()).hexdigest(), 16)
+        # Also offset by counter so multiple picks of same type differ today
         idx = _sniper_counters.get(pool_key, 0)
         _sniper_counters[pool_key] = idx + 1
-        return lines[idx % len(lines)]
+        return lines[(seed + idx) % len(lines)]
 
     row = None
     if not pool.empty and "player_name" in pool.columns:
