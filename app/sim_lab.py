@@ -3264,16 +3264,39 @@ def _render_auto_calibrate(
             b_avg = base.get("avg_lineup_actual", 0) or 0
             o_avg = opt.get("avg_lineup_actual", 0) or 0
             avg_delta = (o_avg - b_avg) if (b_avg and o_avg) else None
+
+            # Ricky's top 3 picks vs actual top 3
+            sdf = opt.get("summary_df")
+            ricky_top3_str = "—"
+            actual_top3_str = "—"
+            best_rank_str = "—"
+            if sdf is not None and not sdf.empty and "ricky_rank" in sdf.columns:
+                actuals_col = pd.to_numeric(sdf["total_actual"], errors="coerce")
+                # Ricky's top 3 picks and their actual scores
+                ricky_picks = sdf[sdf["ricky_rank"] <= 3].sort_values("ricky_rank")
+                ricky_scores = [f'{row["total_actual"]:.0f}' for _, row in ricky_picks.iterrows()]
+                ricky_top3_str = " / ".join(ricky_scores) if ricky_scores else "—"
+                # Actual top 3 lineups and their Ricky ranks
+                actual_top = sdf.nlargest(3, "total_actual")
+                actual_info = [f'{row["total_actual"]:.0f} (R{int(row["ricky_rank"])})'
+                               for _, row in actual_top.iterrows()]
+                actual_top3_str = " / ".join(actual_info) if actual_info else "—"
+                # Where Ricky ranked the actual best lineup
+                best_idx = actuals_col.idxmax()
+                best_ricky_rank = int(sdf.loc[best_idx, "ricky_rank"])
+                best_actual = actuals_col.loc[best_idx]
+                best_rank_str = f"#{best_ricky_rank} ({best_actual:.0f})"
+
             date_rows.append({
                 "": indicator,
                 "Date": base["date"],
                 "Games": opt.get("n_games", base.get("n_games", "—")),
-                "Baseline SE": f"{b_fp:.1f}" if b_fp else "—",
-                "Optimized SE": f"{o_fp:.1f}" if o_fp else "—",
+                "Ricky Top 3": ricky_top3_str,
+                "Actual Top 3": actual_top3_str,
+                "Best → Rank": best_rank_str,
                 "Δ SE": f"{delta:+.1f}" if delta is not None else "—",
                 "Δ Avg": f"{avg_delta:+.1f}" if avg_delta is not None else "—",
             })
-        # Sort by delta ascending — worst dates first
         date_df = pd.DataFrame(date_rows)
         st.dataframe(date_df, hide_index=True, use_container_width=True)
 
