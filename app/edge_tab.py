@@ -244,7 +244,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
 
     parts: list = []
 
-    # -- 1. Last Slate (1-2 sentences) --
+    # -- 1. Last Slate (1-2 sentences) \u2014 quick recap --
     recap = None
     try:
         from yak_core.slate_recap import get_previous_slate_recap
@@ -270,7 +270,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     if stacks:
         s = stacks[0]
         slate_read_lines.append(
-            f"{s['team1']}-{s['team2']} is the game tonight. "
+            f"\U0001f525 {s['team1']}-{s['team2']} is the game tonight. "
             f"{s['vegas_total']:.0f} total \u2014 that's where the ceiling lives."
         )
 
@@ -283,7 +283,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             _bo_team = pool.loc[_bo_idx, "team"]
             _bo_sp = abs(_spread_col.loc[_bo_idx])
             slate_read_lines.append(
-                f"Blowout watch: {_bo_team} in a {_bo_sp:.0f}-point spread game. "
+                f"\u26a0\ufe0f Blowout watch: {_bo_team} in a {_bo_sp:.0f}-point spread game. "
                 f"Starters could see reduced 4th-quarter run."
             )
 
@@ -294,7 +294,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
         if _bump_mask.any():
             _bumped = pool.loc[_bump_mask].nlargest(1, "injury_bump_fp").iloc[0]
             slate_read_lines.append(
-                f"Injury edge: {_bumped['player_name']} picks up "
+                f"\U0001fa79 Injury edge: {_bumped['player_name']} picks up "
                 f"{_bumped['injury_bump_fp']:.1f} extra FP from a cascade. "
                 f"The field hasn't priced it in."
             )
@@ -302,7 +302,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     if slate_read_lines:
         parts.append(
             '<div style="margin-top:12px;margin-bottom:4px;font-weight:600;font-size:0.88rem;">'
-            'Slate Read</div>'
+            '\U0001f3af Slate Read</div>'
         )
         for line in slate_read_lines[:3]:
             parts.append(f'<div class="the-board-edge-callout">{line}</div>')
@@ -312,14 +312,15 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     if snipers:
         parts.append(
             '<div style="margin-top:12px;margin-bottom:4px;font-weight:600;font-size:0.88rem;">'
-            "Ricky's Plays</div>"
+            '\U0001f52b Ricky\'s Plays</div>'
         )
-        for p in snipers[:3]:
-            own_str = f"{p['own_pct']:.1f}%" if p.get("own_pct", 0) > 0 else "low"
+        _play_emojis = ["\U0001f3af", "\U0001f4a5", "\U0001f50d"]
+        for i, p in enumerate(snipers[:3]):
+            emoji = _play_emojis[i] if i < len(_play_emojis) else "\u2022"
             reason = _sniper_reason(p, pool)
             parts.append(
                 f'<div class="the-board-edge-callout">'
-                f"{p['player_name']} ({p['team']}, ${p['salary']:,}) \u2014 {reason}"
+                f"{emoji} <strong>{p['player_name']}</strong> ({p['team']}, ${p['salary']:,}) \u2014 {reason}"
                 f'</div>'
             )
 
