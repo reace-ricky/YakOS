@@ -173,12 +173,40 @@ def _render_edge_box(key: str, players: List[Dict], is_pga: bool, cleared_player
     st.markdown(box_html, unsafe_allow_html=True)
 
 
+# Rotate through varied closers so multiple picks of the same type don't repeat
+_CASCADE_LINES = [
+    "Someone's out, his role just expanded, and the ownership hasn't moved. Do the math.",
+    "More minutes, more usage, same price tag. The public won't adjust until it's too late.",
+    "Opportunity just knocked and nobody answered. I'll take it.",
+]
+_PACE_LINES = [
+    "High-pace game, full workload, and the field is looking elsewhere.",
+    "This game environment is a cheat code and his salary doesn't reflect it.",
+    "The matchup screams upside. The ownership says nobody noticed.",
+]
+_CEILING_LINES = [
+    "Massive gap between his floor and his ceiling. That's where tournaments are won.",
+    "The upside is right there in the numbers. The public is playing it safe. I'm not.",
+    "His best-case scenario is elite and his ownership is dirt cheap. Classic mispricing.",
+]
+_VALUE_LINES = [
+    "The price-to-production ratio here is absurd. This is a clearance sale.",
+    "At this salary he just needs a decent game to return value. His ceiling? That's the bonus.",
+    "If I could buy stock in a DFS player, I'd be all-in at this price.",
+]
+_FALLBACK_LINES = [
+    "The numbers are clean, the ownership is soft. That's all I need.",
+    "I've run the model three times. He keeps showing up. Trust the process.",
+    "This is the kind of play that looks obvious in hindsight. Be there first.",
+]
+_sniper_counters: Dict[str, int] = {}
+
+
 def _sniper_reason(p: Dict[str, Any], pool: pd.DataFrame) -> str:
     """Generate a player-specific reason for a Ricky's Play pick.
 
-    Checks the pool for what makes this player unique — injury cascade,
-    pace-up spot, salary value, minutes certainty, etc. Returns a 1-sentence
-    reason, never a generic closer.
+    Each reason type has multiple templates that rotate so no two picks
+    on the same board get the same line.
     """
     name = p.get("player_name", "")
     proj = p.get("proj", 0)
@@ -186,44 +214,36 @@ def _sniper_reason(p: Dict[str, Any], pool: pd.DataFrame) -> str:
     own = p.get("own_pct", 0)
     sal = p.get("salary", 0)
 
-    # Try to find the player in the pool for richer data
+    def _pick(pool_key: str, lines: list) -> str:
+        idx = _sniper_counters.get(pool_key, 0)
+        _sniper_counters[pool_key] = idx + 1
+        return lines[idx % len(lines)]
+
     row = None
     if not pool.empty and "player_name" in pool.columns:
         match = pool[pool["player_name"] == name]
         if not match.empty:
             row = match.iloc[0]
 
-    # Check each signal and return the first strong one
     if row is not None:
-        # Injury cascade bump
         bump = float(row.get("injury_bump_fp", 0) or 0)
         if bump > 2.0:
-            return (f"+{bump:.1f} FP from an injury cascade and nobody recalculated. "
-                    f"{own:.1f}% owned. I used to fire analysts for missing setups this obvious.")
+            return _pick("cascade", _CASCADE_LINES)
 
-        # High minutes in a pace-up game
         mins = float(row.get("proj_minutes", 0) or 0)
         vegas = float(row.get("vegas_total", 0) or 0)
         if mins >= 30 and vegas >= 225:
-            return (f"{mins:.0f} minutes in a {vegas:.0f}-total game at {own:.1f}% ownership. "
-                    f"Everyone's looking at the salary tag, not the matchup. Their loss.")
+            return _pick("pace", _PACE_LINES)
 
-        # Big ceiling-to-projection gap
         if ceil > 0 and proj > 0 and (ceil - proj) / proj > 0.35:
-            return (f"{((ceil - proj) / proj * 100):.0f}% gap between his floor and ceiling at {own:.1f}% owned. "
-                    f"Basic risk-reward math. But sure, let the public ignore it.")
+            return _pick("ceiling", _CEILING_LINES)
 
-        # Low salary relative to projection
         if sal > 0 and proj > 0:
             pts_per_k = proj / (sal / 1000)
             if pts_per_k >= 6.5:
-                return (f"{pts_per_k:.1f} pts per $1K at ${sal:,}. If this were a stock, I'd back up the truck. "
-                        f"{own:.1f}% owned because the public doesn't read spreadsheets.")
+                return _pick("value", _VALUE_LINES)
 
-    # Fallback: use what we have
-    own_str = f"{own:.1f}%" if own > 0 else "low"
-    return (f"{proj:.1f} projected, {ceil:.0f} ceiling, {own_str} ownership at ${sal:,}. "
-            f"I didn't leave a corner office to fade numbers this clean.")
+    return _pick("fallback", _FALLBACK_LINES)
 
 
 def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, Any], slate_date: str = "") -> None:
@@ -270,7 +290,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     if stacks:
         s = stacks[0]
         slate_read_lines.append(
-            f"\U0001f525 {s['team1']}-{s['team2']} \u2014 {s['vegas_total']:.0f} total. "
+            f"{s['team1']}-{s['team2']} \u2014 {s['vegas_total']:.0f} total. "
             f"This is where the money prints tonight. Stack it or watch someone else cash."
         )
 
@@ -283,7 +303,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             _bo_team = pool.loc[_bo_idx, "team"]
             _bo_sp = abs(_spread_col.loc[_bo_idx])
             slate_read_lines.append(
-                f"\u26a0\ufe0f {_bo_team} is a {_bo_sp:.0f}-point spread. "
+                f"{_bo_team} is a {_bo_sp:.0f}-point spread. "
                 f"Starters hit the bench in the 4th. Proceed accordingly."
             )
 
@@ -294,15 +314,14 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
         if _bump_mask.any():
             _bumped = pool.loc[_bump_mask].nlargest(1, "injury_bump_fp").iloc[0]
             slate_read_lines.append(
-                f"\U0001fa79 {_bumped['player_name']} just inherited "
-                f"{_bumped['injury_bump_fp']:.1f} extra FP worth of opportunity. "
+                f"{_bumped['player_name']} just inherited extra opportunity from an injury. "
                 f"The market is slow. We are not."
             )
 
     if slate_read_lines:
         parts.append(
             '<div style="margin-top:12px;margin-bottom:4px;font-weight:600;font-size:0.88rem;">'
-            '\U0001f3af Slate Read</div>'
+            'Slate Read</div>'
         )
         for line in slate_read_lines[:3]:
             parts.append(f'<div class="the-board-edge-callout">{line}</div>')
@@ -312,15 +331,13 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     if snipers:
         parts.append(
             '<div style="margin-top:12px;margin-bottom:4px;font-weight:600;font-size:0.88rem;">'
-            '\U0001f52b Ricky\'s Plays</div>'
+            'Ricky\'s Plays</div>'
         )
-        _play_emojis = ["\U0001f3af", "\U0001f4a5", "\U0001f50d"]
-        for i, p in enumerate(snipers[:3]):
-            emoji = _play_emojis[i] if i < len(_play_emojis) else "\u2022"
+        for p in snipers[:3]:
             reason = _sniper_reason(p, pool)
             parts.append(
                 f'<div class="the-board-edge-callout">'
-                f"{emoji} <strong>{p['player_name']}</strong> ({p['team']}, ${p['salary']:,}) \u2014 {reason}"
+                f"<strong>{p['player_name']}</strong> ({p['team']}, ${p['salary']:,}) \u2014 {reason}"
                 f'</div>'
             )
 
