@@ -198,32 +198,32 @@ def _sniper_reason(p: Dict[str, Any], pool: pd.DataFrame) -> str:
         # Injury cascade bump
         bump = float(row.get("injury_bump_fp", 0) or 0)
         if bump > 2.0:
-            return (f"Picking up {bump:.1f} extra FP from an injury cascade. "
-                    f"{own:.1f}% owned — the field hasn't adjusted.")
+            return (f"+{bump:.1f} FP from an injury cascade and nobody recalculated. "
+                    f"{own:.1f}% owned. I used to fire analysts for missing setups this obvious.")
 
         # High minutes in a pace-up game
         mins = float(row.get("proj_minutes", 0) or 0)
         vegas = float(row.get("vegas_total", 0) or 0)
         if mins >= 30 and vegas >= 225:
-            return (f"{mins:.0f} projected minutes in a {vegas:.0f}-total game. "
-                    f"Only {own:.1f}% owned — salary is suppressing his ownership.")
+            return (f"{mins:.0f} minutes in a {vegas:.0f}-total game at {own:.1f}% ownership. "
+                    f"Everyone's looking at the salary tag, not the matchup. Their loss.")
 
         # Big ceiling-to-projection gap
         if ceil > 0 and proj > 0 and (ceil - proj) / proj > 0.35:
-            return (f"{ceil:.0f} ceiling on a {proj:.1f} projection — "
-                    f"{((ceil - proj) / proj * 100):.0f}% upside gap at {own:.1f}% owned.")
+            return (f"{((ceil - proj) / proj * 100):.0f}% gap between his floor and ceiling at {own:.1f}% owned. "
+                    f"Basic risk-reward math. But sure, let the public ignore it.")
 
         # Low salary relative to projection
         if sal > 0 and proj > 0:
             pts_per_k = proj / (sal / 1000)
             if pts_per_k >= 6.5:
-                return (f"{pts_per_k:.1f} pts/$1K at ${sal:,}. "
-                        f"{proj:.1f} projected, {own:.1f}% owned. Pure value.")
+                return (f"{pts_per_k:.1f} pts per $1K at ${sal:,}. If this were a stock, I'd back up the truck. "
+                        f"{own:.1f}% owned because the public doesn't read spreadsheets.")
 
     # Fallback: use what we have
     own_str = f"{own:.1f}%" if own > 0 else "low"
-    return (f"{proj:.1f} projected with a {ceil:.0f} ceiling at {own_str} ownership. "
-            f"Underpriced at ${sal:,}.")
+    return (f"{proj:.1f} projected, {ceil:.0f} ceiling, {own_str} ownership at ${sal:,}. "
+            f"I didn't leave a corner office to fade numbers this clean.")
 
 
 def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, Any], slate_date: str = "") -> None:
@@ -270,8 +270,8 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     if stacks:
         s = stacks[0]
         slate_read_lines.append(
-            f"\U0001f525 {s['team1']}-{s['team2']} is the game tonight. "
-            f"{s['vegas_total']:.0f} total \u2014 that's where the ceiling lives."
+            f"\U0001f525 {s['team1']}-{s['team2']} \u2014 {s['vegas_total']:.0f} total. "
+            f"This is where the money prints tonight. Stack it or watch someone else cash."
         )
 
     # Blowout risk
@@ -283,8 +283,8 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             _bo_team = pool.loc[_bo_idx, "team"]
             _bo_sp = abs(_spread_col.loc[_bo_idx])
             slate_read_lines.append(
-                f"\u26a0\ufe0f Blowout watch: {_bo_team} in a {_bo_sp:.0f}-point spread game. "
-                f"Starters could see reduced 4th-quarter run."
+                f"\u26a0\ufe0f {_bo_team} is a {_bo_sp:.0f}-point spread. "
+                f"Starters hit the bench in the 4th. Proceed accordingly."
             )
 
     # Injury cascade opportunity
@@ -294,9 +294,9 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
         if _bump_mask.any():
             _bumped = pool.loc[_bump_mask].nlargest(1, "injury_bump_fp").iloc[0]
             slate_read_lines.append(
-                f"\U0001fa79 Injury edge: {_bumped['player_name']} picks up "
-                f"{_bumped['injury_bump_fp']:.1f} extra FP from a cascade. "
-                f"The field hasn't priced it in."
+                f"\U0001fa79 {_bumped['player_name']} just inherited "
+                f"{_bumped['injury_bump_fp']:.1f} extra FP worth of opportunity. "
+                f"The market is slow. We are not."
             )
 
     if slate_read_lines:
