@@ -1,9 +1,8 @@
 """Tab 1: Ricky's Edge Analysis (public).
 
 Displays the pre-computed edge analysis from data/published/{sport}/:
-  - Analysis bullets + recommendation up top
-  - The Board: Stack Targets, Sniper Spots, The Fade
-  - Last Slate recap + Bust Call
+  - The Board (unified Ricky voice): Last Slate Recap → Today's Edge
+    (stacks, snipers, fades, injury edges, bust call — all in voice)
   - 3-box dashboard: Core, Leverage, Value (boxed cards)
   - PGA wave split summary
   - Published lineups by contest type
@@ -96,22 +95,6 @@ _CARD_CSS = """
     font-size: 0.95rem;
     line-height: 1.5;
 }
-.board-card {
-    border-radius: 10px;
-    padding: 14px 18px;
-    margin-bottom: 10px;
-    background: rgba(255,255,255,0.03);
-}
-.board-card .board-name {
-    font-weight: 700;
-    font-size: 1.0rem;
-    margin-bottom: 4px;
-}
-.board-card .board-stats {
-    font-size: 0.85rem;
-    color: rgba(240,240,240,0.7);
-    margin-bottom: 6px;
-}
 </style>
 """
 
@@ -190,92 +173,102 @@ def _render_edge_box(key: str, players: List[Dict], is_pga: bool, cleared_player
     st.markdown(box_html, unsafe_allow_html=True)
 
 
-def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, Any], slate_date: str = "") -> None:
-    """Render The Board: Stack Targets, Sniper Spots, The Fade + Last Slate recap + Bust Call."""
-    from yak_core.board import compute_stack_targets, compute_sniper_spots, compute_fades
-    from yak_core.rickys_take import generate_bust_call, generate_last_night, generate_tonights_edges, reset_rotator
+def _board_data_to_voice(stacks, snipers, fades, pool):
+    """Convert board structured data into Ricky-voice callout strings."""
+    callouts = []
 
-    # Reset the template rotator so intra-post dedup starts fresh and the
-    # seed is pinned to the current slate date (deterministic output).
+    # Stack callouts
+    for s in (stacks or []):
+        callouts.append(
+            f"{s['team1']}-{s['team2']} is the game to stack tonight. "
+            f"{s['vegas_total']:.0f} total — {s['top_player1']} and {s['top_player2']} "
+            f"combine for a {s['combined_ceil']:.0f} ceiling."
+        )
+
+    # Sniper callouts
+    for p in (snipers or []):
+        own_str = f"{p['own_pct']:.1f}%" if p.get('own_pct', 0) > 0 else "low"
+        callouts.append(
+            f"The field is sleeping on {p['player_name']} tonight. "
+            f"{p['proj']:.1f} projected with a {p['ceil']:.0f} ceiling at just {own_str} ownership. "
+            f"That's a misfire at ${p['salary']:,}."
+        )
+
+    # Fade callouts
+    for p in (fades or []):
+        callouts.append(
+            f"{p['player_name']} at {p['own_pct']:.1f}% ownership? Pass. "
+            f"{p.get('reasoning', 'Model says fade.')}"
+        )
+
+    # Injury edge callouts (from pool data)
+    if "injury_bump_fp" in pool.columns:
+        bumped = pool[pool["injury_bump_fp"] > 2.0].nlargest(2, "injury_bump_fp")
+        for _, row in bumped.iterrows():
+            callouts.append(
+                f"{row['player_name']} picks up an extra {row['injury_bump_fp']:.1f} FP from an injury cascade. "
+                f"The field hasn't priced this in."
+            )
+
+    # Blowout flags (from pool data)
+    if "spread" in pool.columns:
+        blowout_teams = pool[pool["spread"].abs() > 10]["team"].unique()
+        for team in blowout_teams[:1]:  # max 1 blowout flag
+            spread_val = pool[pool["team"] == team]["spread"].iloc[0]
+            callouts.append(
+                f"Blowout watch: {team} in a {abs(spread_val):.0f}-point spread game. "
+                f"Starters could see reduced 4th-quarter minutes."
+            )
+
+    return callouts
+
+
+def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, Any], slate_date: str = "") -> None:
+    """Render The Board — unified Ricky voice briefing."""
+    from yak_core.board import compute_stack_targets, compute_sniper_spots, compute_fades
+    from yak_core.rickys_take import (
+        generate_bust_call, generate_last_night, generate_tonights_edges, reset_rotator
+    )
+
     reset_rotator(slate_date=slate_date or None)
 
-    # ── The Board ─────────────────────────────────────────────────────────
-    st.markdown('<div class="the-board"><h3>📋 The Board</h3>', unsafe_allow_html=True)
+    # ── The Board header ──
+    st.markdown("### 📋 The Board")
 
-    # --- 1. Stack Targets (max 2) ---
-    stacks = compute_stack_targets(pool, edge_analysis)
-    st.markdown(
-        '<div style="margin-bottom:4px;font-weight:700;font-size:1.0rem;">🎯 Stack Targets</div>',
-        unsafe_allow_html=True,
-    )
-    if stacks:
-        for s in stacks:
-            st.markdown(
-                f'<div class="board-card" style="border: 1px solid rgba(76,175,80,0.4);">'
-                f'<div class="board-name">Game: {s["team1"]} vs {s["team2"]}</div>'
-                f'<div class="board-stats">Total: {s["vegas_total"]:.0f} · '
-                f'Top stack: {s["top_player1"]} + {s["top_player2"]} '
-                f'(combined ceil: {s["combined_ceil"]:.1f})</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-    else:
-        st.caption("No strong stack targets on this slate")
-
-    # --- 2. Sniper Spots (max 3) ---
-    snipers = compute_sniper_spots(pool, edge_analysis)
-    st.markdown(
-        '<div style="margin-top:12px;margin-bottom:4px;font-weight:700;font-size:1.0rem;">🔫 Sniper Spots</div>',
-        unsafe_allow_html=True,
-    )
-    if snipers:
-        for p in snipers:
-            st.markdown(
-                f'<div class="board-card" style="border: 1px solid rgba(33,150,243,0.4);">'
-                f'<div class="board-name">{p["player_name"]}</div>'
-                f'<div class="board-stats">{p["team"]} · ${p["salary"]:,} · '
-                f'{p["proj"]:.1f} proj · {p["ceil"]:.1f} ceil · {p["own_pct"]:.1f}% own</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-    else:
-        st.caption("No strong sniper spots on this slate")
-
-    # --- 3. The Fade (max 2) ---
-    fades = compute_fades(pool, edge_analysis)
-    st.markdown(
-        '<div style="margin-top:12px;margin-bottom:4px;font-weight:700;font-size:1.0rem;">💀 The Fade</div>',
-        unsafe_allow_html=True,
-    )
-    if fades:
-        for p in fades:
-            st.markdown(
-                f'<div class="board-card" style="border: 1px solid rgba(244,67,54,0.4);">'
-                f'<div class="board-name">{p["player_name"]}</div>'
-                f'<div class="board-stats">{p["team"]} · ${p["salary"]:,} · '
-                f'{p["proj"]:.1f} proj · {p["own_pct"]:.1f}% own</div>'
-                f'<div style="font-size:0.82rem;color:rgba(244,67,54,0.8);margin-top:4px;">'
-                f'{p["reasoning"]}</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-    else:
-        st.caption("No strong fades on this slate")
-
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown("")  # spacer
-
-    # ── Last Slate recap + Bust Call (below The Board) ────────────────────
+    # ── 1. Last Slate Recap ──
     recap = None
     try:
         from yak_core.slate_recap import get_previous_slate_recap
         recap = get_previous_slate_recap(sport)
-    except Exception as exc:
-        print(f"[edge_tab] Slate recap error: {exc}")
+    except Exception:
+        pass
 
     last_night = generate_last_night(recap, sport=sport)
-    edges = generate_tonights_edges(pool)
+    if last_night:
+        recap_date = recap.get("slate_date", "") if recap else ""
+        date_label = f" ({recap_date})" if recap_date else ""
+        st.markdown(
+            f'<div class="the-board">'
+            f'<div style="margin-bottom:4px;font-weight:600;font-size:0.88rem;'
+            f'color:rgba(240,240,240,0.5);">Last Slate{date_label}</div>'
+            f'<div class="the-board-last-night">{last_night}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── 2. Today's Edge — ALL callouts in Ricky's voice ──
+    # Get structured data for voice generation
+    stacks = compute_stack_targets(pool, edge_analysis)
+    snipers = compute_sniper_spots(pool, edge_analysis)
+    fades = compute_fades(pool, edge_analysis)
+
+    # Generate edge callouts from generate_tonights_edges (already Ricky's voice)
+    edge_callouts = generate_tonights_edges(pool)
+
+    # Generate voice callouts from board data (stacks, snipers, fades)
+    board_callouts = _board_data_to_voice(stacks, snipers, fades, pool)
+
+    # Bust call
     _pos_names = set()
     for _tier in ("core_plays", "leverage_plays", "value_plays"):
         for _p in edge_analysis.get(_tier, []):
@@ -283,21 +276,16 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     _pos_names.discard("")
     bust = generate_bust_call(pool, edge_analysis.get("fade_candidates"), positive_tier_names=_pos_names or None)
 
-    if last_night or edges or bust:
+    # Combine all callouts (deduped — board_callouts may overlap with edge_callouts)
+    all_callouts = board_callouts + [c for c in edge_callouts if c not in board_callouts]
+
+    if all_callouts or bust:
         parts = []
-        if last_night:
-            recap_date = recap.get("slate_date", "") if recap else ""
-            date_label = f' <span style="color:rgba(240,240,240,0.4);font-size:0.8rem;">({recap_date})</span>' if recap_date else ""
-            parts.append(
-                f'<div style="margin-bottom:4px;font-weight:600;font-size:0.88rem;color:rgba(240,240,240,0.5);">Last Slate{date_label}</div>'
-                f'<div class="the-board-last-night">{last_night}</div>'
-            )
-        if edges:
-            parts.append(
-                '<div style="margin-bottom:4px;font-weight:600;font-size:0.88rem;">Edge Callouts</div>'
-            )
-            for callout in edges:
-                parts.append(f'<div class="the-board-edge-callout">{callout}</div>')
+        parts.append(
+            '<div style="margin-bottom:4px;font-weight:600;font-size:0.88rem;">Today\'s Edge</div>'
+        )
+        for callout in all_callouts:
+            parts.append(f'<div class="the-board-edge-callout">{callout}</div>')
         if bust:
             parts.append(
                 f'<div class="the-board-bust-call">'
@@ -305,8 +293,12 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
                 f'{bust["explanation"]}'
                 f'</div>'
             )
-        html = '<div class="the-board">' + "".join(parts) + '</div>'
-        st.markdown(html, unsafe_allow_html=True)
+        st.markdown(
+            '<div class="the-board">' + "".join(parts) + '</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.caption("No strong edges on this slate")
 
 
 def _render_late_swap_alerts(alerts: list, sport: str, lineups: dict | None = None) -> None:
