@@ -1132,23 +1132,23 @@ def _render_config_panel(preset_name: str) -> Dict[str, Any]:
     with st.expander("Projection Weights"):
         c1, c2 = st.columns(2)
         with c1:
-            _sl("Proj Weight", "GPP_PROJ_WEIGHT", 0.0, 1.0, 0.05, 0.30)
-            _sl("Upside Weight", "GPP_UPSIDE_WEIGHT", 0.0, 1.0, 0.05, 0.30)
+            _sl("Proj Weight", "GPP_PROJ_WEIGHT", 0.0, 1.0, 0.01, 0.30)
+            _sl("Upside Weight", "GPP_UPSIDE_WEIGHT", 0.0, 1.0, 0.01, 0.30)
         with c2:
-            _sl("Boom Weight", "GPP_BOOM_WEIGHT", 0.0, 1.0, 0.05, 0.35)
-            _sl("Sniper Weight", "GPP_SNIPER_WEIGHT", 0.0, 1.0, 0.05, 0.0)
+            _sl("Boom Weight", "GPP_BOOM_WEIGHT", 0.0, 1.0, 0.01, 0.35)
+            _sl("Sniper Weight", "GPP_SNIPER_WEIGHT", 0.0, 1.0, 0.01, 0.0)
 
     # Group 2: Build Weights (collapsed)
     with st.expander("Build Weights"):
         c1, c2 = st.columns(2)
         with c1:
-            _sl("Own Penalty Strength", "GPP_OWN_PENALTY_STRENGTH", 0.0, 3.0, 0.1, 1.0, fmt="%.1f")
-            _sl("Bust Penalty", "GPP_BUST_PENALTY", 0.0, 0.50, 0.05, 0.10)
-            _sl("Max Exposure", "MAX_EXPOSURE", 0.1, 1.0, 0.05, 0.6)
-            _sl("Own Weight", "OWN_WEIGHT", 0.0, 1.0, 0.05, 0.0)
+            _sl("Own Penalty Strength", "GPP_OWN_PENALTY_STRENGTH", 0.0, 3.0, 0.01, 1.0)
+            _sl("Bust Penalty", "GPP_BUST_PENALTY", 0.0, 0.50, 0.01, 0.10)
+            _sl("Max Exposure", "MAX_EXPOSURE", 0.1, 1.0, 0.01, 0.6)
+            _sl("Own Weight", "OWN_WEIGHT", 0.0, 1.0, 0.01, 0.0)
         with c2:
-            _sl("Leverage Weight", "GPP_LEVERAGE_WEIGHT", 0.0, 0.50, 0.05, 0.05)
-            _sl("Smash Weight", "GPP_SMASH_WEIGHT", 0.0, 0.50, 0.05, 0.15)
+            _sl("Leverage Weight", "GPP_LEVERAGE_WEIGHT", 0.0, 0.50, 0.01, 0.05)
+            _sl("Smash Weight", "GPP_SMASH_WEIGHT", 0.0, 0.50, 0.01, 0.15)
             _sl("Min Player Minutes", "MIN_PLAYER_MINUTES", 0, 30, 1, 0)
             _sl("Num Lineups", "NUM_LINEUPS", 1, 50, 1, 10)
 
@@ -3858,17 +3858,17 @@ def render_sim_lab(sport: str) -> None:
         rc1, rc2, rc3 = st.columns(3)
         with rc1:
             _rw["w_gpp"] = st.slider(
-                "GPP Score", 0.0, 2.0, float(_rw["w_gpp"]), 0.05,
+                "GPP Score", 0.0, 2.0, float(_rw["w_gpp"]), 0.01,
                 key=f"sl_ricky_gpp_{preset_name}", format="%.2f",
             )
         with rc2:
             _rw["w_ceil"] = st.slider(
-                "Ceiling", 0.0, 2.0, float(_rw["w_ceil"]), 0.05,
+                "Ceiling", 0.0, 2.0, float(_rw["w_ceil"]), 0.01,
                 key=f"sl_ricky_ceil_{preset_name}", format="%.2f",
             )
         with rc3:
             _rw["w_own"] = st.slider(
-                "Own Penalty", 0.0, 2.0, float(_rw["w_own"]), 0.05,
+                "Own Penalty", 0.0, 2.0, float(_rw["w_own"]), 0.01,
                 key=f"sl_ricky_own_{preset_name}", format="%.2f",
             )
         st.session_state[_ricky_key] = _rw
