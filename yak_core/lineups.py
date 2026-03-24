@@ -1620,6 +1620,19 @@ def build_multiple_lineups_with_exposure(
             )
         lineups_df["below_ceil_floor"] = lineups_df["lineup_index"].isin(set(below_ceil.index))
 
+    # ── Total own_proj per lineup ─────────────────────────────────────────────
+    # If the pool has own_proj, sum it across each lineup so downstream
+    # code / UI can sort by Total Own (chalk vs contrarian).
+    if not lineups_df.empty and "own_proj" in lineups_df.columns:
+        lu_own = (
+            lineups_df.groupby("lineup_index")["own_proj"]
+            .sum()
+            .rename("total_own_proj")
+        )
+        lineups_df = lineups_df.merge(
+            lu_own.reset_index(), on="lineup_index", how="left"
+        )
+
     # Exposure report
     if not lineups_df.empty:
         n_built = lineups_df["lineup_index"].nunique()
@@ -2275,6 +2288,17 @@ def build_showdown_lineups(
                 "exposure": times / max(n_built, 1),
             })
     exposures_df = pd.DataFrame(exp_rows).sort_values("exposure", ascending=False)
+
+    # ── Total own_proj per lineup ─────────────────────────────────────────────
+    if not lineups_df.empty and "own_proj" in lineups_df.columns:
+        lu_own = (
+            lineups_df.groupby("lineup_index")["own_proj"]
+            .sum()
+            .rename("total_own_proj")
+        )
+        lineups_df = lineups_df.merge(
+            lu_own.reset_index(), on="lineup_index", how="left"
+        )
 
     return lineups_df, exposures_df
 

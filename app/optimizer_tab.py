@@ -139,6 +139,18 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
     display_df = pool[avail_cols].copy()
     display_df = display_df.sort_values("salary", ascending=False).reset_index(drop=True)
 
+    # ── Own Proj column (from heuristic field builder) ──
+    if "own_proj" in pool.columns:
+        from yak_core.ownership import is_pct_scale as _is_pct_scale
+        own_proj_series = (
+            pool.sort_values("salary", ascending=False)
+            .reset_index(drop=True)["own_proj"]
+        )
+        _on_pct_scale = _is_pct_scale(own_proj_series)
+        display_df["Own Proj"] = own_proj_series.apply(
+            lambda x: (f"{x:.1f}%" if _on_pct_scale else f"{x * 100:.1f}%") if not pd.isna(x) else ""
+        )
+
     # ── Showdown: add CPT ownership column to pool display ──
     # Computed from salary tier multiplier × overall ownership
     # Show for NBA pools (useful context even outside showdown builds)
@@ -666,10 +678,20 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
                 ceil_part = f" | {total_ceil:.1f} ceil" if total_ceil > 0 else ""
                 rank_part = f" | Rank {_rank_map[idx]}" if is_admin and _tag_map_lu and idx in _rank_map else ""
                 tag_part = f" | {_tag_map_lu[idx]}" if is_admin and _tag_map_lu.get(idx) else ""
-                st.markdown(f"**Lineup {idx + 1}** — ${total_sal:,} sal | {total_proj:.1f} proj{ceil_part}{rank_part}{tag_part}")
+                # Total Own (from heuristic field builder)
+                own_part = ""
+                if "total_own_proj" in lu.columns:
+                    _tot_own = pd.to_numeric(lu["total_own_proj"], errors="coerce").iloc[0]
+                    if not pd.isna(_tot_own):
+                        # own_proj is stored on 0-1 scale; display as percentage
+                        own_part = f" | {_tot_own * 100:.0f}% tot own"
+                st.markdown(f"**Lineup {idx + 1}** — ${total_sal:,} sal | {total_proj:.1f} proj{ceil_part}{own_part}{rank_part}{tag_part}")
                 show_cols = ["player_name", "pos", "salary", "proj", "ceil"]
                 if "slot" in lu.columns:
                     show_cols = ["slot"] + show_cols
+                # Add own_proj column when available
+                if "own_proj" in lu.columns:
+                    show_cols.append("own_proj")
                 # Add CPT ownership column for showdown lineups
                 if "cpt_own_pct" in lu.columns:
                     show_cols.append("cpt_own_pct")
@@ -681,6 +703,14 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
                     if _rc in _lu_display.columns:
                         _lu_display[_rc] = pd.to_numeric(_lu_display[_rc], errors="coerce").round(2)
                         _fmt[_rc] = "{:.2f}"
+                if "own_proj" in _lu_display.columns:
+                    from yak_core.ownership import is_pct_scale as _is_pct_scale
+                    _own_vals = pd.to_numeric(_lu_display["own_proj"], errors="coerce")
+                    _on_pct = _is_pct_scale(_own_vals)
+                    _lu_display["own_proj"] = _own_vals.apply(
+                        lambda x: (f"{x:.1f}%" if _on_pct else f"{x * 100:.1f}%") if pd.notna(x) else ""
+                    )
+                    _lu_display = _lu_display.rename(columns={"own_proj": "Own Proj"})
                 if "cpt_own_pct" in _lu_display.columns:
                     _lu_display["cpt_own_pct"] = _lu_display["cpt_own_pct"].apply(
                         lambda x: f"{float(x) * 100:.1f}%" if pd.notna(x) else ""
