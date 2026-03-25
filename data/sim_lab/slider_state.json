@@ -1,19 +1,10 @@
 {
   "configs": {
     "GPP Main": {
-      "overrides": {
-        "GPP_PROJ_WEIGHT": 0.2,
-        "GPP_UPSIDE_WEIGHT": 0.6,
-        "GPP_BOOM_WEIGHT": 0.15,
-        "GPP_OWN_PENALTY_STRENGTH": 1.4,
-        "GPP_SMASH_WEIGHT": 0.2,
-        "GPP_LEVERAGE_WEIGHT": 0.1,
-        "GPP_BUST_PENALTY": 0.25,
-        "MAX_EXPOSURE": 0.4
-      },
+      "overrides": {},
       "ricky_weights": {
-        "w_gpp": 0.5,
-        "w_ceil": 0.8,
+        "w_gpp": 0.19,
+        "w_ceil": 1.3,
         "w_own": 0.3
       }
     },
