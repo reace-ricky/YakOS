@@ -122,6 +122,8 @@ _BOARD_VALUE_HIT = [
     "{name}: ${sal}, {actual:.0f} actual. Value play that cashed. The scoreboard validates, not the salary tag.",
     "Value target {name} at ${sal} delivered {actual:.0f}. That's the kind of edge the field ignores until it costs them.",
     "${sal} for {name}. Went for {actual:.0f}. The board said value. The box score confirmed.",
+    # ── Ricky brand-voice additions ──
+    "{name} at ${sal}: This is good chalk. Ceiling, role, and price all make sense. {actual:.0f} actual. If you faded this, I hope you had a real reason.",
 ]
 
 _BOARD_LOTTO_HIT = [
@@ -135,6 +137,9 @@ _BOARD_LOTTO_HIT = [
     "Lotto ticket: {name} at ${sal}. {actual:.0f} actual. The field priced this out of conversation. The scoreboard priced it back in.",
     "{name} at ${sal} — lotto tier. Dropped {actual:.0f}. Nobody talks about these picks until they win.",
     "${sal}. {name}. Lotto play. {actual:.0f} FP. The field walked right past it.",
+    # ── Ricky brand-voice additions ──
+    "{name} at ${sal}: The kind of ugly, thin-volume name that makes portfolios \u2013 and GPP lineups \u2013 work. {actual:.0f} actual.",
+    "{name} at ${sal}: This is the kind of asymmetric bet they\u2019d never approve in a risk meeting. {actual:.0f} actual.",
 ]
 
 _BOARD_FADE_HIT = [
@@ -148,6 +153,9 @@ _BOARD_FADE_HIT = [
     "{name}: fade call. {actual:.0f} on {proj:.0f}. The crowd went in. I stepped aside. Math wins.",
     "Called the fade. {name}: {actual:.0f} on {proj:.0f}. Popular and wrong. The two go together more than people admit.",
     "{name} was the fade. {actual:.0f} actual. Everyone else saw the name. I saw the context.",
+    # ── Ricky brand-voice additions ──
+    "{name}: Nice player, terrible bet. Over-owned for this role. {actual:.0f} actual on {proj:.0f}. The crowd donated.",
+    "{name}: Good players, bad bets. That\u2019s who we\u2019re fading. {actual:.0f} actual on {proj:.0f} proved it.",
 ]
 
 _BOARD_SUMMARY_GOOD = [
@@ -246,6 +254,8 @@ _HIT_TEMPLATES = [
     "{name}: {actual:.0f} on {proj:.0f}. No debate. Just the number.",
     "{name} went for {actual:.0f} against a {proj:.0f} line. The model doesn't get nervous. Neither do I.",
     "{name}: {actual:.0f} actual. {proj:.0f} projected. Edge identified, edge exploited. That's how this works.",
+    # ── Ricky brand-voice additions ──
+    "{name}: This is good chalk. Ceiling, role, and price all make sense. {actual:.0f} actual on {proj:.0f} projected. If you faded this, I hope you had a real reason.",
 ]
 
 _MISS_TEMPLATES = [
@@ -269,6 +279,9 @@ _MISS_TEMPLATES = [
     "{name} laid down {actual:.0f} against a {proj:.0f} line. The consensus case sounded great. The scoreboard disagreed.",
     "{name}: {actual:.0f} vs {proj:.0f}. The field went all-in. The results went the other way.",
     "{name} at {actual:.0f} on a {proj:.0f} projection. The most popular pick on the board. The least productive too.",
+    # ── Ricky brand-voice additions ──
+    "{name}: Nice player, terrible bet. Over-owned for this role. {actual:.0f} actual on a {proj:.0f} line. The crowd donated.",
+    "{name}: Good players, bad bets. That\u2019s who we\u2019re fading. {actual:.0f} actual on {proj:.0f} projected proved it.",
 ]
 
 _PATTERN_TEMPLATES_CHALK_HELD = [
@@ -766,6 +779,9 @@ def _find_contrarian_windows(pool: pd.DataFrame, mentioned: set) -> List[str]:
         "{name}, {own:.0f}% owned. {reason}. The model flagged this. The field didn't. I trust the model.",
         "{own:.0f}% on {name}. {reason}. Edge plus anonymity. The field can't fade what it doesn't see.",
         "{name}: {own:.0f}%. {reason}. The unpopular math. The profitable math. Same thing.",
+        # ── Ricky brand-voice additions ──
+        "{name} at {own:.0f}% owned. {reason}. The kind of ugly, thin-volume name that makes portfolios \u2013 and GPP lineups \u2013 work.",
+        "{name} at {own:.0f}% owned. {reason}. This is the kind of asymmetric bet they\u2019d never approve in a risk meeting.",
     ]
 
     # Contrarian Fallback templates (20)
@@ -1013,6 +1029,8 @@ _BUST_EXPLANATIONS_HIGH_OWN = [
     "{name} at {own:.0f}% owned. {reasons}. Popular and exposed. The field's worst combination.",
     "{own:.0f}% ownership on {name}. {reasons}. I've faded this setup a hundred times. The results haven't changed.",
     "{name}: {own:.0f}%. {reasons}. The crowd went all-in. The red flags went unread.",
+    # ── Ricky brand-voice additions ──
+    "If this turns into a 20-point corpse, {name} closes. {reasons}. Only the pros and the psychos click that at {own:.0f}% owned.",
 ]
 
 # Bust: low ownership + specific reasons (20)

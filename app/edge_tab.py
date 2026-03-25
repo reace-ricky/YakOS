@@ -188,6 +188,8 @@ _CEILING_LINES = [
     "Massive gap between his floor and his ceiling. That's where tournaments are won.",
     "The upside is right there in the numbers. The public is playing it safe. I'm not.",
     "His best-case scenario is elite and his ownership is dirt cheap. Classic mispricing.",
+    # ── Ricky brand-voice additions ──
+    "If this turns into a 20-point corpse, he closes. Only the pros and the psychos click that.",
 ]
 _VALUE_LINES = [
     "The price-to-production ratio here is absurd. This is a clearance sale.",
@@ -198,6 +200,8 @@ _FALLBACK_LINES = [
     "The numbers are clean, the ownership is soft. That's all I need.",
     "I've run the model three times. He keeps showing up. Trust the process.",
     "This is the kind of play that looks obvious in hindsight. Be there first.",
+    # ── Ricky brand-voice additions ──
+    "The field thinks it's gambling. We're just exploiting mispriced risk.",
 ]
 _sniper_counters: Dict[str, int] = {}
 
@@ -268,6 +272,19 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     reset_rotator(slate_date=slate_date or None)
 
     st.markdown("### \U0001f4cb The Board")
+
+    # ── Rotating brand-voice one-liner below The Board header ──
+    _BOARD_HEADER_LINES = [
+        "Disgruntled quant\u2019s tape \u2013 where the real edges are, and where the crowd is about to light money on fire.",
+        "Today\u2019s hit list from an ex\u2011Wall Street nerd who finally gets to say what he thinks.",
+        "This isn\u2019t a tout sheet. It\u2019s what a bored quant would tell you over beers before lock.",
+    ]
+    from yak_core.rickys_take import _pick_template_by_key
+    _header_line = _pick_template_by_key(_BOARD_HEADER_LINES, "board_header", "board_header")
+    st.markdown(
+        f'<div style="color:rgba(240,240,240,0.45);font-size:0.82rem;margin-top:-8px;margin-bottom:10px;">{_header_line}</div>',
+        unsafe_allow_html=True,
+    )
 
     parts: list = []
 
@@ -343,7 +360,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
         for p in snipers[:3]:
             reason = _sniper_reason(p, pool)
             parts.append(
-                f'<div class="the-board-edge-callout">'
+                f'<div class="the-board-edge-callout" title="Ricky would only click this in MME and only after a drink.">'
                 f"<strong>{p['player_name']}</strong> ({p['team']}, ${p['salary']:,}) \u2014 {reason}"
                 f'</div>'
             )
@@ -381,7 +398,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             unsafe_allow_html=True,
         )
     else:
-        st.caption("No strong reads on this slate")
+        st.caption("Nothing cute here. Sometimes the market\u2019s right. Play solid or take the night off.")
 
 
 def _render_late_swap_alerts(alerts: list, sport: str, lineups: dict | None = None) -> None:
@@ -492,6 +509,7 @@ def render_edge_tab(sport: str) -> None:
 
     # ── Header ──
     st.markdown(f"## 📐 Right Angle Ricky — {sport}")
+    st.caption("DFS from a disgruntled quant.")
     st.caption(f"{slate_date} · {pool_size} players · DraftKings")
 
     # PGA: Under Construction banner
