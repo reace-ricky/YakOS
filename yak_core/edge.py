@@ -365,7 +365,7 @@ def _compute_smash_bust_v2(
     # Legacy params accepted but ignored (preserves call-site flexibility)
     ceil: pd.Series | None = None,      # noqa: ARG001
     floor: pd.Series | None = None,     # noqa: ARG001
-    variance: float = 1.0,              # noqa: ARG001
+    variance: float = 1.0,
 ) -> tuple[pd.Series, pd.Series]:
     """Return (smash_prob, bust_prob) via empirical logistic model.
 
@@ -386,8 +386,11 @@ def _compute_smash_bust_v2(
         Projected minutes.  Falls back to 20.0 if missing/zero.
     rolling_fp_5 : pd.Series
         5-game rolling fantasy points average.  Falls back to proj if missing.
-    ceil, floor, variance :
+    ceil, floor :
         Accepted for backward compatibility but not used.
+    variance : float
+        Variance multiplier (default 1.0).  Values > 1 widen the
+        distribution (higher smash *and* bust), < 1 tighten it.
 
     Returns
     -------
@@ -423,6 +426,12 @@ def _compute_smash_bust_v2(
     # ── Predict ──────────────────────────────────────────────────────
     z_smash = X_scaled @ _V2_SMASH_COEF_VEC + _V2_SMASH_INTERCEPT
     z_bust  = X_scaled @ _V2_BUST_COEF_VEC  + _V2_BUST_INTERCEPT
+
+    # Variance multiplier: scale z-scores so higher variance pushes
+    # probabilities towards the extremes (more smash AND more bust).
+    if variance != 1.0:
+        z_smash = z_smash * variance
+        z_bust  = z_bust * variance
 
     smash_prob = pd.Series(np.clip(_sigmoid(z_smash), 0.01, 0.95), index=idx)
     bust_prob  = pd.Series(np.clip(_sigmoid(z_bust),  0.01, 0.95), index=idx)
@@ -927,6 +936,7 @@ def compute_edge_metrics(
     )
     smash_prob, bust_prob = _compute_smash_bust_v2(
         eff_proj, salary, own, proj_minutes, _rolling_fp_5,
+        variance=variance,
     )
 
     # Compute leverage: proj / (own * scale_factor)
@@ -1029,6 +1039,10 @@ def compute_edge_metrics(
         out["pop_catalyst_tag"] = ""
     out["fp_efficiency"] = eff_norm.values
     out["dvp_matchup_boost"] = _dvp_boost.values
+    # Ensure FP Cheatsheet signal columns are present (default 0.0 if not in pool)
+    for _cheat_col in ("dvp_boost", "blowout_risk", "pace_environment", "value_signal", "rest_factor"):
+        if _cheat_col not in out.columns:
+            out[_cheat_col] = 0.0
     out["edge_score"] = edge_score.values
     out["sim_leverage"] = sim_leverage.values
     out["is_anchor"] = is_anchor.values
