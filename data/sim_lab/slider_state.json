@@ -4,7 +4,7 @@
       "overrides": {},
       "ricky_weights": {
         "w_gpp": 0.21,
-        "w_ceil": 0.8,
+        "w_ceil": 1.3,
         "w_own": 0.3
       }
     },
