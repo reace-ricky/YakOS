@@ -10,5 +10,11 @@
     "reason": "Manual reset via Hot Box UI",
     "old_bias": -0.11,
     "preset": "GPP Main"
+  },
+  {
+    "ts": "2026-03-25T17:47:49.472525",
+    "reason": "Manual reset via Hot Box UI",
+    "old_bias": -0.11,
+    "preset": "GPP Main"
   }
 ]
