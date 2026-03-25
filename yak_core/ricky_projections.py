@@ -62,6 +62,7 @@ def compute_ricky_proj(
     pool_df: pd.DataFrame,
     cfg: Optional[Dict[str, Any]] = None,
     adjustments: Optional[Dict[str, float]] = None,
+    position_adjustments: Optional[Dict[str, float]] = None,
 ) -> pd.DataFrame:
     """Compute ``ricky_proj``, ``ricky_floor``, and ``ricky_ceil`` for every
     player in *pool_df*.
@@ -70,7 +71,8 @@ def compute_ricky_proj(
     ----------
     pool_df : pd.DataFrame
         Player pool.  Required column: ``salary``.
-        Optional columns: ``rolling_fp_5``, ``rolling_fp_10``, ``rolling_fp_20``.
+        Optional columns: ``rolling_fp_5``, ``rolling_fp_10``, ``rolling_fp_20``,
+        ``matchup_factor`` (float, 1.0 = neutral; clipped to [0.70, 1.30]).
     cfg : dict, optional
         Config overrides.  Keys used:
           * ``FP_PER_K`` (float, default 4.0) – salary-implied baseline multiplier.
@@ -79,6 +81,9 @@ def compute_ricky_proj(
     adjustments : dict, optional
         Per-player additive calibration adjustments keyed by ``player_name``.
         E.g. ``{"LeBron James": +2.5, "Nikola Jokic": +1.0}``.
+    position_adjustments : dict, optional
+        Per-position additive adjustments keyed by position string (``pos`` column).
+        E.g. ``{"PG": 2.0, "C": -1.0}``.  Applied after per-player adjustments.
 
     Returns
     -------
@@ -145,6 +150,23 @@ def compute_ricky_proj(
     if adjustments and "player_name" in df.columns:
         adj_series = df["player_name"].map(adjustments).fillna(0.0)
         ricky_proj = (ricky_proj + adj_series).clip(lower=0.0)
+
+    # ------------------------------------------------------------------
+    # 3b. Per-position additive adjustments (from calibration config)
+    # ------------------------------------------------------------------
+    if position_adjustments and "pos" in df.columns:
+        pos_adj_series = df["pos"].map(position_adjustments).fillna(0.0)
+        ricky_proj = (ricky_proj + pos_adj_series).clip(lower=0.0)
+
+    # ------------------------------------------------------------------
+    # 3c. Matchup factor (multiplicative, 1.0 = neutral)
+    # ------------------------------------------------------------------
+    if "matchup_factor" in df.columns:
+        mf = pd.to_numeric(df["matchup_factor"], errors="coerce").fillna(1.0)
+        mf = mf.clip(lower=0.70, upper=1.30)
+        n_affected = int((mf != 1.0).sum())
+        ricky_proj = (ricky_proj * mf).clip(lower=0.0)
+        print(f"[ricky_projections] matchup_factor applied to {n_affected} players")
 
     # ------------------------------------------------------------------
     # 4. Floor / ceil using salary-tier spread multipliers

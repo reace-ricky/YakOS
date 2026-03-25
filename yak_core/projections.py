@@ -18,7 +18,7 @@ import glob
 import numpy as np
 import os
 import pandas as pd
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 
 # ---- Constants calibrated from 2026-02-04 + 2026-02-12 historical data ----
@@ -742,9 +742,28 @@ def apply_projections(
         # promotes ricky_proj to the primary 'proj' column used by the
         # optimizer.  Falls back to salary-implied when rolling data is absent.
         from yak_core.ricky_projections import compute_ricky_proj
+        from yak_core.calibration import load_calibration_config
 
         adjustments = cfg.get("RICKY_ADJUSTMENTS") or {}
-        df = compute_ricky_proj(df, cfg=cfg, adjustments=adjustments)
+
+        # Load position-level adjustments from the active calibration config.
+        # "ricky_position_adjustments" lives at the TOP LEVEL of the config (not
+        # per-contest-type) and is intentionally SEPARATE from
+        # apply_contest_calibration() which operates on the merged `proj` column
+        # downstream (no double-dip).
+        position_adjustments: Optional[Dict[str, float]] = None
+        try:
+            cal_config = load_calibration_config()
+            _rpa = cal_config.get("ricky_position_adjustments")
+            if isinstance(_rpa, dict) and any(v != 0.0 for v in _rpa.values()):
+                position_adjustments = _rpa
+        except Exception:
+            pass
+
+        df = compute_ricky_proj(
+            df, cfg=cfg, adjustments=adjustments,
+            position_adjustments=position_adjustments,
+        )
 
         # Promote ricky_proj → proj (primary optimizer column)
         df["proj"] = df["ricky_proj"]
