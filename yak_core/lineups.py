@@ -19,7 +19,10 @@ from yak_core.config import (
     DK_SHOWDOWN_LINEUP_SIZE,
     DK_SHOWDOWN_SLOTS,
     DK_SHOWDOWN_CAPTAIN_MULTIPLIER,
+    INELIGIBLE_STATUSES,
+    DK_COLUMN_MAP,
 )
+from yak_core.ownership import detect_ownership_scale
 try:
     from app.calibration_persistence import load_optimizer_overrides
 except ImportError:
@@ -168,10 +171,8 @@ def _add_ownership(
                 break
 
     if src_col is not None and own_source != "salary_rank":
-        df["own_pct"] = pd.to_numeric(df[src_col], errors="coerce").fillna(0.0)
-        # Convert from percentage (0-100) to fraction (0-1) if needed
-        if df["own_pct"].max() > 1.5:
-            df["own_pct"] = df["own_pct"] / 100.0
+        raw = pd.to_numeric(df[src_col], errors="coerce").fillna(0.0)
+        df["own_pct"] = detect_ownership_scale(raw)
         return df
 
     # Generate salary-rank-based ownership proxy
@@ -659,19 +660,7 @@ def prepare_pool(
     df.columns = [c.lower().replace(" ", "_") for c in df.columns]
 
     # ---- Rename common DK export columns ----
-    rename_map = {
-        "name + id": "player_name",
-        "name+id": "player_name",
-        "name": "player_name",
-        "id": "player_id",
-        "pos": "position",
-        "position": "position",
-        "game info": "game_info",
-        "teamabbrev": "team",
-        "avgpointspergame": "proj",
-        "salary": "salary",
-    }
-    df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns}, inplace=True)
+    df.rename(columns={k: v for k, v in DK_COLUMN_MAP.items() if k in df.columns}, inplace=True)
 
     # ---- Drop duplicate columns (can occur when API returns both 'pos' and 'position') ----
     if df.columns.duplicated().any():
@@ -684,13 +673,12 @@ def prepare_pool(
         if col not in df.columns:
             raise ValueError(f"Player pool missing required column: '{col}'")
 
-    # ---- Filter OUT / IR / WD / Suspended players ----
+    # ---- Filter ineligible-status players ----
     # Must run early while 'status' column still exists in the DataFrame.
-    _REMOVE_STATUSES = {"OUT", "IR", "SUSPENDED", "WD"}
     if "status" in df.columns:
         _before = len(df)
         df = df[
-            ~df["status"].fillna("").str.strip().str.upper().isin(_REMOVE_STATUSES)
+            ~df["status"].fillna("").str.strip().str.upper().isin(INELIGIBLE_STATUSES)
         ].reset_index(drop=True)
         _removed = _before - len(df)
         if _removed:

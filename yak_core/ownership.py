@@ -19,6 +19,7 @@ Model logic:
   - Salary rank within the pool drives the distribution curve
   - Output is 0-100 scale (percentage of lineups containing this player)
 """
+import logging
 import numpy as np
 import pandas as pd
 import pulp
@@ -30,6 +31,8 @@ from .config import (
     DK_SHOWDOWN_SLOTS,
     DK_SHOWDOWN_CAPTAIN_MULTIPLIER,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -77,14 +80,35 @@ POS_MULTIPLIER = {
 # Scale-detection helper
 # ---------------------------------------------------------------------------
 
+def detect_ownership_scale(own_series: pd.Series) -> pd.Series:
+    """Detect if ownership is 0-1 (fraction) or 0-100 (percentage) and normalise.
+
+    Rules:
+    - If max > 1.0: assume 0-100 scale, divide by 100
+    - If max <= 1.0: assume 0-1 scale, use as-is
+    - Log a warning if max is in the 1.0-2.0 ambiguous zone
+    """
+    numeric = pd.to_numeric(own_series, errors="coerce")
+    mx = float(numeric.max())
+    if mx > 1.0:
+        ambiguous = mx <= 2.0
+        logger.warning(
+            "[OWN-SCALE] max ownership=%.4f, treating as 0-100 scale%s",
+            mx,
+            " (ambiguous 1.0-2.0 zone)" if ambiguous else "",
+        )
+        return numeric / 100.0
+    return numeric
+
+
 def is_pct_scale(series: pd.Series) -> bool:
     """Return True if series appears to be on 0-100 scale rather than 0-1.
 
-    Threshold: if the maximum value exceeds 1.5 we assume 0-100 scale.
+    Threshold: if the maximum value exceeds 1.0 we assume 0-100 scale.
     Used consistently for own_proj detection across ownership, optimizer UI,
     and leverage calculations.
     """
-    return float(pd.to_numeric(series, errors="coerce").max()) > 1.5
+    return float(pd.to_numeric(series, errors="coerce").max()) > 1.0
 
 
 # ---------------------------------------------------------------------------

@@ -12,13 +12,7 @@ import pandas as pd
 
 from yak_core.edge import compute_empirical_std  # noqa: E402
 from yak_core.sim_rating import compute_pipeline_ratings  # noqa: E402
-
-# Status values that make a player ineligible for sims.
-_INELIGIBLE_STATUSES = {
-    "OUT", "IR", "INJ", "SUSPENDED", "SUSP",
-    "G-LEAGUE", "G_LEAGUE", "GLEAGUE",
-    "DND", "NA", "O",
-}
+from yak_core.config import INELIGIBLE_STATUSES as _INELIGIBLE_STATUSES  # noqa: E402
 
 
 def compute_sim_eligible(
