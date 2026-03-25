@@ -2297,6 +2297,726 @@ def _render_download_button() -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# 5.1 — Lineup Review Table (post-actuals)
+# ---------------------------------------------------------------------------
+
+def _render_lineup_review_table() -> None:
+    """Render the Lineup Review Table after a batch run with actuals available."""
+    from yak_core.hindsight import lineup_review_metrics, build_lineup_review_df
+
+    batches: List[Dict[str, Any]] = st.session_state.get("sim_lab_batches", [])
+    if not batches:
+        return
+
+    latest = batches[-1]
+    runs = latest.get("runs", [])
+    if not runs:
+        return
+
+    # Collect all summary_dfs across runs (add date column)
+    all_summaries = []
+    for run in runs:
+        sdf = run.get("summary_df")
+        if sdf is not None and not sdf.empty:
+            sdf = sdf.copy()
+            sdf["_date"] = run.get("date", "")
+            all_summaries.append(sdf)
+
+    if not all_summaries:
+        return
+
+    combined = pd.concat(all_summaries, ignore_index=True)
+    has_actuals = (
+        "total_actual" in combined.columns
+        and pd.to_numeric(combined["total_actual"], errors="coerce").fillna(0).gt(0).any()
+    )
+    if not has_actuals:
+        return
+
+    with st.expander("📊 Lineup Review Table (Post-Actuals)", expanded=False):
+        # Date picker
+        run_dates = sorted({run.get("date", "") for run in runs if run.get("date")})
+        selected_review_date = st.selectbox(
+            "Select date",
+            run_dates,
+            key="lineup_review_date",
+        )
+        date_run = next((r for r in runs if r.get("date") == selected_review_date), None)
+        if date_run is None:
+            st.caption("No run data for selected date.")
+            return
+
+        sdf = date_run.get("summary_df")
+        if sdf is None or sdf.empty:
+            st.caption("No lineup data for this date.")
+            return
+
+        # Build display df
+        review_df = build_lineup_review_df(sdf)
+        metrics = lineup_review_metrics(sdf)
+
+        # Summary metrics
+        m1, m2, m3 = st.columns(3)
+        rank_corr = metrics["rank_corr"]
+        top5_overlap = metrics["top5_overlap"]
+        best_rank = metrics["best_lineup_rank"]
+
+        corr_str = f"{rank_corr:.3f}" if rank_corr is not None else "N/A"
+        corr_color = "green" if rank_corr is not None and rank_corr > 0.30 else "red"
+        m1.metric(
+            "Rank Correlation",
+            corr_str,
+            help="Spearman correlation between Ricky Rank and Actual Rank. Target: >0.30",
+        )
+        m2.metric(
+            "Top-5 Overlap",
+            f"{top5_overlap}/5",
+            help="How many of Ricky's top-5 lineups are also actual top-5. Target: ≥2/5",
+        )
+        m3.metric(
+            "Best Lineup at Rank",
+            f"#{best_rank}" if best_rank else "N/A",
+            help="Where the actual best lineup ranked in Ricky's ordering",
+        )
+
+        # Build the review dataframe with ricky_rank-sorted display
+        disp = review_df.copy()
+        if disp.empty:
+            st.caption("Could not build lineup review table.")
+            return
+
+        # Rename for display
+        col_map = {
+            "ricky_rank": "Rank",
+            "lineup_label": "Lineup",
+            "ricky_score": "Ricky Score",
+            "total_proj": "Projected",
+            "total_actual": "Actual",
+            "actual_rank": "Rank by Actual",
+            "delta": "Delta",
+        }
+        disp = disp.rename(columns={k: v for k, v in col_map.items() if k in disp.columns})
+
+        # Color coding: green = Ricky top 5 overlaps actual top 5, red = Ricky top 5 scored below median
+        def _row_style(row: pd.Series) -> List[str]:
+            rank = row.get("Rank", 999)
+            actual_rank = row.get("Rank by Actual", 999)
+            actual_fp = row.get("Actual", 0)
+            median_actual = float(disp["Actual"].median()) if "Actual" in disp.columns else 0
+            styles = []
+            for _ in row:
+                if rank <= 5 and actual_rank <= 5:
+                    styles.append("background-color: rgba(0,200,0,0.15)")
+                elif rank <= 5 and actual_fp < median_actual:
+                    styles.append("background-color: rgba(220,0,0,0.15)")
+                else:
+                    styles.append("")
+            return styles
+
+        styled = disp.style.apply(_row_style, axis=1)
+        if "Actual" in disp.columns:
+            styled = styled.format({"Projected": "{:.1f}", "Actual": "{:.1f}", "Ricky Score": "{:.3f}"}, na_rep="—")
+
+        st.dataframe(styled, use_container_width=True, hide_index=True)
+
+        # Audit print
+        n = len(disp)
+        r_corr_val = rank_corr if rank_corr is not None else float("nan")
+        best_k = best_rank if best_rank is not None else -1
+        print(
+            f"[AUDIT-5.1] Lineup Review: {n} lineups, "
+            f"rank_corr={r_corr_val:.3f}, "
+            f"top5_overlap={top5_overlap}/5, "
+            f"best_lineup_at_rank={best_k}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 5.2 — Player Review Table (post-actuals)
+# ---------------------------------------------------------------------------
+
+def _render_player_review_table() -> None:
+    """Render the Player Review Table after a batch run with actuals available."""
+    from yak_core.hindsight import player_review_metrics, build_player_review_df
+
+    batches: List[Dict[str, Any]] = st.session_state.get("sim_lab_batches", [])
+    if not batches:
+        return
+
+    latest = batches[-1]
+    runs = latest.get("runs", [])
+    if not runs:
+        return
+
+    # Check if actuals are available
+    any_actuals = any(
+        run.get("pool_analysis_df") is not None
+        and not run["pool_analysis_df"].empty
+        and "actual_fp" in run["pool_analysis_df"].columns
+        and pd.to_numeric(run["pool_analysis_df"]["actual_fp"], errors="coerce").fillna(0).gt(0).any()
+        for run in runs
+    )
+    if not any_actuals:
+        return
+
+    with st.expander("🏀 Player Review Table (Post-Actuals)", expanded=False):
+        run_dates = sorted({run.get("date", "") for run in runs if run.get("date")})
+        selected_review_date = st.selectbox(
+            "Select date",
+            run_dates,
+            key="player_review_date",
+        )
+        date_run = next((r for r in runs if r.get("date") == selected_review_date), None)
+        if date_run is None:
+            st.caption("No run data for selected date.")
+            return
+
+        pool_df = date_run.get("pool_analysis_df")
+        player_df = date_run.get("player_df")  # scored players per lineup
+
+        if pool_df is None or pool_df.empty:
+            st.caption("No player data for this date.")
+            return
+
+        review_df = build_player_review_df(pool_df, lineups_df=player_df)
+        metrics = player_review_metrics(pool_df)
+
+        # Summary metrics
+        m1, m2, m3, m4 = st.columns(4)
+        mae = metrics["mae"]
+        bias = metrics["bias"]
+        smash = metrics["smash_capture_rate"]
+        n_players = metrics["n_players"]
+
+        m1.metric("Players", str(n_players))
+        m2.metric("MAE", f"{mae:.2f} FP" if mae is not None else "N/A")
+        m3.metric(
+            "Bias",
+            f"{bias:+.2f} FP" if bias is not None else "N/A",
+            help="Positive = system underprojected on average",
+        )
+        m4.metric(
+            "Smash Capture",
+            f"{smash:.0f}%" if smash is not None else "N/A",
+            help="% of 1.5×-value smash players with >0% exposure",
+        )
+
+        if review_df.empty:
+            st.caption("Could not build player review table.")
+            return
+
+        # Color code: green = actual > proj + 5, red = actual < proj - 5
+        def _player_row_style(row: pd.Series) -> List[str]:
+            actual = row.get("Actual", 0)
+            proj = row.get("Proj", 0)
+            styles = []
+            for _ in row:
+                if actual > proj + 5:
+                    styles.append("background-color: rgba(0,200,0,0.15)")
+                elif actual < proj - 5:
+                    styles.append("background-color: rgba(220,0,0,0.15)")
+                else:
+                    styles.append("")
+            return styles
+
+        format_dict = {
+            "Salary": "${:,.0f}",
+            "Proj": "{:.1f}",
+            "Actual": "{:.1f}",
+            "Proj Error": "{:+.1f}",
+            "SHI/GPP Score": "{:.2f}",
+            "Exposure%": "{:.1f}",
+            "Ownership%": "{:.1f}",
+            "Value": "{:.2f}",
+        }
+        styled = review_df.style.apply(_player_row_style, axis=1)
+        styled = styled.format({k: v for k, v in format_dict.items() if k in review_df.columns}, na_rep="—")
+
+        st.dataframe(styled, use_container_width=True, hide_index=True)
+
+        # Audit print
+        mae_val = mae if mae is not None else float("nan")
+        bias_val = bias if bias is not None else float("nan")
+        smash_val = smash if smash is not None else float("nan")
+        print(
+            f"[AUDIT-5.2] Player Review: {n_players} players, "
+            f"MAE={mae_val:.2f}, bias={bias_val:+.2f}, "
+            f"smash_capture={smash_val:.1f}%"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 5.3 & 5.5 — Hindsight Picks with Diagnostic + Calibrate from Hindsight
+# ---------------------------------------------------------------------------
+
+def _render_hindsight_section(
+    preset_name: str,
+    sandbox_overrides: Dict[str, Any],
+    ricky_weights: Dict[str, float],
+) -> None:
+    """Render the Hindsight Picks section with diagnostic + calibration loop."""
+    from yak_core.hindsight import (
+        run_hindsight_diagnostic,
+        generate_calibration_recommendations,
+        append_hindsight_session,
+        ALL_GATES,
+        GATE_FILTERED,
+        GATE_CASCADE,
+        GATE_PROJ_ERROR,
+        GATE_EXPOSURE_CAP,
+        GATE_OWN_PENALTY,
+        GATE_SCORE_UNDERWEIGHT,
+        GATE_IN_LINEUPS_LOW_RANK,
+    )
+
+    batches: List[Dict[str, Any]] = st.session_state.get("sim_lab_batches", [])
+    if not batches:
+        return
+
+    latest = batches[-1]
+    runs = latest.get("runs", [])
+    if not runs:
+        return
+
+    # Check actuals available
+    has_actuals = any(
+        run.get("pool_analysis_df") is not None
+        and not run["pool_analysis_df"].empty
+        and "actual_fp" in run["pool_analysis_df"].columns
+        and pd.to_numeric(
+            run["pool_analysis_df"]["actual_fp"], errors="coerce"
+        ).fillna(0).gt(0).any()
+        for run in runs
+    )
+    if not has_actuals:
+        return
+
+    with st.expander("🔍 Hindsight Picks — Diagnostic & Calibration", expanded=False):
+        run_dates = sorted({run.get("date", "") for run in runs if run.get("date")})
+        selected_hs_date = st.selectbox(
+            "Select date for hindsight review",
+            run_dates,
+            key="hindsight_date",
+        )
+        hs_run = next((r for r in runs if r.get("date") == selected_hs_date), None)
+        if hs_run is None:
+            st.caption("No run data for selected date.")
+            return
+
+        pool_df = hs_run.get("pool_analysis_df")
+        player_df = hs_run.get("player_df")
+        summary_df = hs_run.get("summary_df")
+
+        if pool_df is None or pool_df.empty:
+            st.caption("No player pool data for this date.")
+            return
+
+        # Collect player names with actual FP for display
+        player_names = sorted(pool_df["player_name"].dropna().unique().tolist()) if "player_name" in pool_df.columns else []
+        if not player_names:
+            st.caption("No players found in pool.")
+            return
+
+        # Sort by actual FP descending so highest scorers appear first
+        if "actual_fp" in pool_df.columns:
+            act_sorted = (
+                pool_df[["player_name", "actual_fp"]]
+                .dropna(subset=["player_name"])
+                .sort_values("actual_fp", ascending=False)
+            )
+            player_names_sorted = act_sorted["player_name"].tolist()
+        else:
+            player_names_sorted = player_names
+
+        st.caption(
+            "Select 5-8 players who you consider 'obvious plays' in hindsight. "
+            "The system will diagnose WHY each was missed or underweighted."
+        )
+        selected_hindsight = st.multiselect(
+            "Hindsight Picks",
+            options=player_names_sorted,
+            default=[],
+            key="hindsight_picks",
+            help="Choose players with high actual FPTS but low exposure.",
+        )
+
+        if not selected_hindsight:
+            st.caption("Select players above to run the diagnostic.")
+            return
+
+        # Build config for diagnostic
+        from yak_core.config import CONTEST_PRESETS, merge_config
+        preset = CONTEST_PRESETS[preset_name]
+        cfg = merge_config(preset)
+        cfg.update(sandbox_overrides)
+
+        # Run diagnostic
+        with st.spinner("Running hindsight diagnostic..."):
+            diagnostics = run_hindsight_diagnostic(
+                hindsight_players=selected_hindsight,
+                pool_df=pool_df,
+                lineups_df=player_df,
+                summary_df=summary_df,
+                cfg=cfg,
+            )
+
+        if not diagnostics:
+            st.caption("Diagnostic returned no results.")
+            return
+
+        # Display diagnostic table
+        st.markdown("#### Diagnostic Results")
+        gate_display_names = {
+            GATE_FILTERED: "Filtered Out",
+            GATE_CASCADE: "Cascade Adjusted",
+            GATE_PROJ_ERROR: "Proj Error",
+            GATE_EXPOSURE_CAP: "Exposure Cap",
+            GATE_OWN_PENALTY: "Own Penalty",
+            GATE_SCORE_UNDERWEIGHT: "Score Rank",
+            GATE_IN_LINEUPS_LOW_RANK: "Lineup Rank",
+        }
+
+        diag_rows = []
+        for d in diagnostics:
+            row: Dict[str, Any] = {
+                "Player": d["player"],
+                "Actual FP": d["actual_fp"],
+                "Proj": d["proj"],
+                "Exposure%": d["exposure_pct"],
+                "Blocking Gate": d["blocking_gate"],
+            }
+            for gate, label in gate_display_names.items():
+                row[label] = d.get(gate, "—")
+            diag_rows.append(row)
+
+        diag_df = pd.DataFrame(diag_rows)
+        st.dataframe(diag_df, use_container_width=True, hide_index=True)
+
+        # Audit print
+        gates_hit = [d["blocking_gate"] for d in diagnostics if d["blocking_gate"] != "none"]
+        n = len(diagnostics)
+        print(f"[AUDIT-5.3] Hindsight diagnostic: {n} players checked, gates_hit={gates_hit}")
+
+        st.markdown("---")
+        st.markdown("#### 🎯 Calibrate from Hindsight")
+
+        # Generate recommendations
+        recommendations = generate_calibration_recommendations(diagnostics, cfg)
+        st.session_state["hindsight_recommendations"] = recommendations
+        st.session_state["hindsight_diagnostics"] = diagnostics
+        st.session_state["hindsight_date"] = selected_hs_date
+
+        if not recommendations:
+            st.caption("No strong calibration signals found across selected players.")
+            return
+
+        # Display recommendations table
+        rec_rows = []
+        for rec in recommendations:
+            rec_rows.append({
+                "Parameter": rec["parameter"],
+                "Current Value": rec["current_value"],
+                "Suggested Value": rec["suggested_value"],
+                "Reason": rec["reason"],
+                "# Players": rec["n_players"],
+            })
+        rec_df = pd.DataFrame(rec_rows)
+        st.dataframe(rec_df, use_container_width=True, hide_index=True)
+
+        # Accept / Reject buttons
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button(
+                "✅ Accept Recommendations",
+                type="primary",
+                key="hindsight_accept",
+            ):
+                _apply_hindsight_recommendations(
+                    recommendations, preset_name, sandbox_overrides, ricky_weights
+                )
+                # Persist session
+                append_hindsight_session(
+                    session_date=selected_hs_date,
+                    hindsight_picks=selected_hindsight,
+                    diagnostics=diagnostics,
+                    recommendations=recommendations,
+                    accepted=True,
+                    n_accepted=len(recommendations),
+                )
+                st.success(
+                    f"✅ Applied {len(recommendations)} recommendations to config. "
+                    "Re-run the batch to see the effect."
+                )
+                print(
+                    f"[AUDIT-5.5] Hindsight calibration: "
+                    f"{len(recommendations)} recommendations generated, "
+                    f"{len(recommendations)} accepted, "
+                    "config_updated=True, persisted=True"
+                )
+                st.rerun()
+
+        with c2:
+            if st.button("❌ Reject", key="hindsight_reject"):
+                append_hindsight_session(
+                    session_date=selected_hs_date,
+                    hindsight_picks=selected_hindsight,
+                    diagnostics=diagnostics,
+                    recommendations=recommendations,
+                    accepted=False,
+                    n_accepted=0,
+                )
+                st.toast("Hindsight session discarded.")
+                print(
+                    f"[AUDIT-5.5] Hindsight calibration: "
+                    f"{len(recommendations)} recommendations generated, "
+                    "0 accepted, config_updated=False, persisted=True"
+                )
+
+
+def _apply_hindsight_recommendations(
+    recommendations: List[Dict[str, Any]],
+    preset_name: str,
+    sandbox_overrides: Dict[str, Any],
+    ricky_weights: Dict[str, float],
+) -> None:
+    """Apply accepted hindsight recommendations to the sandbox config."""
+    sk = _sandbox_config_key(preset_name)
+    if sk not in st.session_state:
+        st.session_state[sk] = {}
+
+    ricky_key = f"sim_lab_ricky_weights_{preset_name}"
+    if ricky_key not in st.session_state:
+        st.session_state[ricky_key] = {}
+
+    _RICKY_PARAMS = {"w_gpp", "w_ceil", "w_own", "RICKY_W_GPP", "RICKY_W_CEIL", "RICKY_W_OWN"}
+
+    for rec in recommendations:
+        param = rec["parameter"]
+        val = rec["suggested_value"]
+
+        if param in _RICKY_PARAMS or param.startswith("RICKY_W_"):
+            st.session_state[ricky_key][param] = val
+        elif param == "_MAX_BUMP_MULTIPLIER":
+            # This lives in yak_core/injury_cascade.py — note it but cannot
+            # change a module constant at runtime. We store as override hint.
+            st.session_state[sk][param] = val
+            _logger.info(
+                "Hindsight: _MAX_BUMP_MULTIPLIER suggestion=%s noted in sandbox; "
+                "manual update to injury_cascade.py required for persistence.",
+                val,
+            )
+        else:
+            st.session_state[sk][param] = val
+
+    _save_slider_state(
+        preset_name,
+        st.session_state[sk],
+        st.session_state.get(ricky_key, ricky_weights),
+    )
+
+
+# ---------------------------------------------------------------------------
+# 5.4 — Reset Calibration & Re-baseline
+# ---------------------------------------------------------------------------
+
+def _render_reset_calibration(preset_name: str) -> None:
+    """Render the Reset Calibration button and rebuild flow (Ticket 5.4)."""
+    import json
+    from pathlib import Path
+    from yak_core.config import YAKOS_ROOT
+    from yak_core.github_persistence import sync_feedback_async
+
+    CALIB_DIR = Path(YAKOS_ROOT) / "data" / "calibration_feedback" / "nba"
+    CALIB_DIR.mkdir(parents=True, exist_ok=True)
+
+    CORRECTION_FACTORS_PATH = CALIB_DIR / "correction_factors.json"
+    RESET_LOG_PATH = CALIB_DIR / "reset_log.json"
+    BATCH_HISTORY_PATH = Path(YAKOS_ROOT) / "data" / "sim_lab" / "batch_history.parquet"
+    SLATE_ARCHIVE_DIR = Path(YAKOS_ROOT) / "data" / "slate_archive"
+
+    with st.expander("⚠️ Reset Calibration", expanded=False):
+        st.caption(
+            "Clear correction_factors.json back to zeroes and rebuild calibration "
+            "from the Ricky projection baseline across all available slate archives. "
+            "Use this when the current corrections are trained against the wrong baseline."
+        )
+
+        if st.button(
+            "🔄 Reset Calibration & Rebuild",
+            type="secondary",
+            key="reset_calibration_btn",
+        ):
+            old_bias = 0.0
+            # Read old bias before zeroing
+            if CORRECTION_FACTORS_PATH.exists():
+                try:
+                    with open(CORRECTION_FACTORS_PATH) as f:
+                        old_cf = json.load(f)
+                    old_bias = float(old_cf.get("overall_bias_correction", 0.0))
+                except Exception:
+                    pass
+
+            # ── Step 1: Zero out correction_factors.json ──────────────────
+            zero_cf = {
+                "n_slates": 0,
+                "dates_used": [],
+                "overall_bias_correction": 0.0,
+                "by_position": {},
+                "by_salary_tier": {},
+                "correction_strength": 0.5,
+                "reset_note": "Zeroed by Reset Calibration",
+            }
+            with open(CORRECTION_FACTORS_PATH, "w") as f:
+                json.dump(zero_cf, f, indent=2)
+
+            # ── Step 2: Clear batch_history.parquet ──────────────────────
+            if BATCH_HISTORY_PATH.exists():
+                BATCH_HISTORY_PATH.unlink()
+                st.session_state["sim_lab_batches"] = []
+                st.session_state["sim_lab_runs"] = []
+
+            # ── Step 3: Log reset event ───────────────────────────────────
+            reset_log = []
+            if RESET_LOG_PATH.exists():
+                try:
+                    with open(RESET_LOG_PATH) as f:
+                        reset_log = json.load(f)
+                except Exception:
+                    reset_log = []
+            reset_log.append({
+                "ts": datetime.now().isoformat(),
+                "reason": "Manual reset via Hot Box UI",
+                "old_bias": old_bias,
+                "preset": preset_name,
+            })
+            with open(RESET_LOG_PATH, "w") as f:
+                json.dump(reset_log, f, indent=2)
+
+            # ── Step 4: Rebuild calibration from archive ──────────────────
+            archive_files = sorted(SLATE_ARCHIVE_DIR.glob("*_gpp_main.parquet"))
+            n_slates = len(archive_files)
+
+            if n_slates == 0:
+                st.warning("No slate archive files found. Calibration not rebuilt.")
+                sync_feedback_async(commit_message="Reset calibration (no archive rebuild)")
+                return
+
+            prog = st.progress(0, text="Rebuilding calibration from archive...")
+            all_errors: Dict[str, List[float]] = {}
+            pos_errors: Dict[str, List[float]] = {}
+            sal_errors: Dict[str, Dict[str, List[float]]] = {}
+
+            from yak_core.calibration_feedback import _NBA_SALARY_BINS, _NBA_SALARY_LABELS
+
+            processed = 0
+            for i, f in enumerate(archive_files):
+                prog.progress((i + 1) / n_slates, text=f"Processing {f.stem} ({i+1}/{n_slates})")
+                try:
+                    df = pd.read_parquet(f)
+                    if "actual_fp" not in df.columns or "player_name" not in df.columns:
+                        continue
+                    # Use ricky_proj if available, otherwise proj
+                    proj_col = "ricky_proj" if "ricky_proj" in df.columns else "proj"
+                    if proj_col not in df.columns:
+                        continue
+                    df["_proj"] = pd.to_numeric(df[proj_col], errors="coerce").fillna(0)
+                    df["_actual"] = pd.to_numeric(df["actual_fp"], errors="coerce").fillna(0)
+                    valid = df[(df["_proj"] > 0) & (df["_actual"] > 0)].copy()
+                    if valid.empty:
+                        continue
+
+                    valid["_err"] = valid["_actual"] - valid["_proj"]
+                    overall_err = valid["_err"].tolist()
+                    all_errors.setdefault("overall", []).extend(overall_err)
+
+                    # Per-position
+                    pos_col = "pos" if "pos" in valid.columns else None
+                    if pos_col:
+                        for pos, grp in valid.groupby(pos_col):
+                            pos_errors.setdefault(str(pos), []).extend(grp["_err"].tolist())
+
+                    # Per-salary tier
+                    sal_col = "salary" if "salary" in valid.columns else None
+                    if sal_col:
+                        valid["_sal_tier"] = pd.cut(
+                            pd.to_numeric(valid[sal_col], errors="coerce").fillna(0),
+                            bins=_NBA_SALARY_BINS,
+                            labels=_NBA_SALARY_LABELS,
+                        ).astype(str)
+                        for tier, grp in valid.groupby("_sal_tier"):
+                            sal_errors.setdefault(str(tier), []).extend(grp["_err"].tolist())
+
+                    processed += 1
+                except Exception as _err:
+                    _logger.warning("Rebuild skip %s: %s", f.name, _err)
+
+            prog.empty()
+
+            # Compute new correction factors
+            _CORRECTION_STRENGTH = 0.5
+            _MIN_SAMPLES = 15
+            _MAX_CORRECTION = 3.0
+
+            overall_errors = all_errors.get("overall", [])
+            new_bias = round(np.mean(overall_errors) * _CORRECTION_STRENGTH, 2) if overall_errors else 0.0
+
+            new_by_pos: Dict[str, float] = {}
+            _VALID_POS = {"PG", "SG", "SF", "PF", "C", "PG/SG", "SG/SF", "SF/PF", "PF/C"}
+            for pos, errs in pos_errors.items():
+                if pos not in _VALID_POS or len(errs) < _MIN_SAMPLES:
+                    continue
+                corr = round(
+                    max(-_MAX_CORRECTION, min(_MAX_CORRECTION, np.mean(errs) * _CORRECTION_STRENGTH)), 2
+                )
+                new_by_pos[pos] = corr
+
+            new_by_sal: Dict[str, float] = {}
+            for tier, errs in sal_errors.items():
+                if len(errs) < _MIN_SAMPLES:
+                    continue
+                corr = round(
+                    max(-_MAX_CORRECTION, min(_MAX_CORRECTION, np.mean(errs) * _CORRECTION_STRENGTH)), 2
+                )
+                new_by_sal[tier] = corr
+
+            new_cf = {
+                "n_slates": processed,
+                "dates_used": [f.stem.split("_")[0] for f in archive_files[:processed]],
+                "overall_bias_correction": new_bias,
+                "by_position": new_by_pos,
+                "by_salary_tier": new_by_sal,
+                "correction_strength": _CORRECTION_STRENGTH,
+            }
+            with open(CORRECTION_FACTORS_PATH, "w") as f_out:
+                json.dump(new_cf, f_out, indent=2)
+
+            # Persist to GitHub
+            sync_feedback_async(commit_message=f"Reset calibration: rebuilt from {processed} slates")
+
+            st.success(
+                f"✅ Calibration reset complete: {processed}/{n_slates} slates reprocessed. "
+                f"New bias={new_bias:+.2f} FP"
+            )
+
+            # Summary table
+            st.markdown("**New Correction Factors**")
+            summary_rows = [
+                {"Category": "Overall Bias", "Value": f"{new_bias:+.2f}"},
+            ]
+            for pos, v in sorted(new_by_pos.items()):
+                summary_rows.append({"Category": f"Position: {pos}", "Value": f"{v:+.2f}"})
+            for tier, v in sorted(new_by_sal.items()):
+                summary_rows.append({"Category": f"Salary: {tier}", "Value": f"{v:+.2f}"})
+            st.dataframe(pd.DataFrame(summary_rows), hide_index=True, use_container_width=True)
+
+            print(
+                f"[AUDIT-5.4] Calibration reset: {processed} slates reprocessed, "
+                f"old_bias={old_bias:+.2f}, new_bias={new_bias:+.2f}, "
+                f"correction_strength=0.5"
+            )
+
+
 def _render_run_log() -> None:
     """Render the run log expander with per-run detail."""
     runs: List[Dict[str, Any]] = st.session_state.get("sim_lab_runs", [])
@@ -3249,6 +3969,14 @@ def render_sim_lab(sport: str) -> None:
 
         # Auto-Calibrate (Optuna optimization — below nudge guidance)
         _render_auto_calibrate(preset_name, sandbox_overrides, _ricky_weights)
+
+        # Reset Calibration (Ticket 5.4)
+        _render_reset_calibration(preset_name)
+
+        # Post-Actuals Review sections (Tickets 5.1, 5.2, 5.3 & 5.5)
+        _render_lineup_review_table()
+        _render_player_review_table()
+        _render_hindsight_section(preset_name, sandbox_overrides, _ricky_weights)
 
         # Promote Config button
         _render_promote_config(preset_name, sandbox_overrides, _ricky_weights, archetype_name)
