@@ -300,11 +300,21 @@ def compute_fades(
     # Sort by fade gap descending (biggest gap = biggest fade)
     popular = popular.sort_values("_fade_gap", ascending=False)
 
+    # Fade voice lines -- rotate based on player index for variety
+    _FADE_VOICE = [
+        "The crowd will see a game log. We see a balance sheet of minutes, usage, and blowout risk.",
+        "Good players, bad bets. That\u2019s who we\u2019re fading.",
+        "Popular and overpriced. The field\u2019s favorite combination.",
+    ]
+
     results = []
-    for _, row in popular.head(FADE_MAX).iterrows():
+    for i, (_, row) in enumerate(popular.head(FADE_MAX).iterrows()):
         ricky_rank = int(row.get("_ricky_rank", 0))
         salary_rank = int(row.get("_salary_rank", 0))
-        reasoning = f"Ranked #{ricky_rank} by Ricky vs #{salary_rank} by salary"
+        reasoning = (
+            f"Ranked #{ricky_rank} by Ricky vs #{salary_rank} by salary. "
+            f"{_FADE_VOICE[i % len(_FADE_VOICE)]}"
+        )
 
         results.append({
             "player_name": row.get("player_name", "?"),
