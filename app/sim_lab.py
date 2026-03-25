@@ -2705,7 +2705,6 @@ def _render_hindsight_section(
         recommendations = generate_calibration_recommendations(diagnostics, cfg)
         st.session_state["hindsight_recommendations"] = recommendations
         st.session_state["hindsight_diagnostics"] = diagnostics
-        st.session_state["hindsight_date"] = selected_hs_date
 
         if not recommendations:
             st.caption("No strong calibration signals found across selected players.")
