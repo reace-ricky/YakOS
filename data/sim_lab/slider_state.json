@@ -2,7 +2,8 @@
   "configs": {
     "GPP Main": {
       "overrides": {
-        "NUM_LINEUPS": 30
+        "NUM_LINEUPS": 30,
+        "overall_bias_correction": 12.42
       },
       "ricky_weights": {
         "w_gpp": 0.2,
