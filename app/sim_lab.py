@@ -2820,14 +2820,16 @@ def _apply_hindsight_recommendations(
 # 5.4 — Reset Calibration & Re-baseline
 # ---------------------------------------------------------------------------
 
-def _render_reset_calibration(preset_name: str) -> None:
-    """Render the Reset Calibration button and rebuild flow (Ticket 5.4)."""
+def _render_reset_calibration(preset_name: str, sport: str = "NBA") -> None:
+    """Render the Reset Calibration button and rebuild flow (Ticket 5.4 / 6.3)."""
     import json
     from pathlib import Path
     from yak_core.config import YAKOS_ROOT
     from yak_core.github_persistence import sync_feedback_async
 
-    CALIB_DIR = Path(YAKOS_ROOT) / "data" / "calibration_feedback" / "nba"
+    _is_pga = sport.upper() != "NBA"
+    _sport_dir = "pga" if _is_pga else "nba"
+    CALIB_DIR = Path(YAKOS_ROOT) / "data" / "calibration_feedback" / _sport_dir
     CALIB_DIR.mkdir(parents=True, exist_ok=True)
 
     CORRECTION_FACTORS_PATH = CALIB_DIR / "correction_factors.json"
@@ -2835,17 +2837,18 @@ def _render_reset_calibration(preset_name: str) -> None:
     BATCH_HISTORY_PATH = Path(YAKOS_ROOT) / "data" / "sim_lab" / "batch_history.parquet"
     SLATE_ARCHIVE_DIR = Path(YAKOS_ROOT) / "data" / "slate_archive"
 
+    _reset_btn_key = f"reset_calibration_btn_{_sport_dir}"
     with st.expander("⚠️ Reset Calibration", expanded=False):
         st.caption(
-            "Clear correction_factors.json back to zeroes and rebuild calibration "
-            "from the Ricky projection baseline across all available slate archives. "
+            f"Clear {_sport_dir.upper()} correction_factors.json back to zeroes and rebuild "
+            "calibration from all available slate archives. "
             "Use this when the current corrections are trained against the wrong baseline."
         )
 
         if st.button(
             "🔄 Reset Calibration & Rebuild",
             type="secondary",
-            key="reset_calibration_btn",
+            key=_reset_btn_key,
         ):
             old_bias = 0.0
             # Read old bias before zeroing
@@ -2894,7 +2897,10 @@ def _render_reset_calibration(preset_name: str) -> None:
                 json.dump(reset_log, f, indent=2)
 
             # ── Step 4: Rebuild calibration from archive ──────────────────
-            archive_files = sorted(SLATE_ARCHIVE_DIR.glob("*_gpp_main.parquet"))
+            if _is_pga:
+                archive_files = sorted(SLATE_ARCHIVE_DIR.glob("*pga*gpp.parquet"))
+            else:
+                archive_files = sorted(SLATE_ARCHIVE_DIR.glob("*_gpp_main.parquet"))
             n_slates = len(archive_files)
 
             if n_slates == 0:
@@ -2907,7 +2913,12 @@ def _render_reset_calibration(preset_name: str) -> None:
             pos_errors: Dict[str, List[float]] = {}
             sal_errors: Dict[str, Dict[str, List[float]]] = {}
 
-            from yak_core.calibration_feedback import _NBA_SALARY_BINS, _NBA_SALARY_LABELS
+            from yak_core.calibration_feedback import (
+                _NBA_SALARY_BINS, _NBA_SALARY_LABELS,
+                _PGA_SALARY_BINS, _PGA_SALARY_LABELS,
+            )
+            _sal_bins = _PGA_SALARY_BINS if _is_pga else _NBA_SALARY_BINS
+            _sal_labels = _PGA_SALARY_LABELS if _is_pga else _NBA_SALARY_LABELS
 
             processed = 0
             for i, f in enumerate(archive_files):
@@ -2941,8 +2952,8 @@ def _render_reset_calibration(preset_name: str) -> None:
                     if sal_col:
                         valid["_sal_tier"] = pd.cut(
                             pd.to_numeric(valid[sal_col], errors="coerce").fillna(0),
-                            bins=_NBA_SALARY_BINS,
-                            labels=_NBA_SALARY_LABELS,
+                            bins=_sal_bins,
+                            labels=_sal_labels,
                         ).astype(str)
                         for tier, grp in valid.groupby("_sal_tier"):
                             sal_errors.setdefault(str(tier), []).extend(grp["_err"].tolist())
@@ -2962,7 +2973,10 @@ def _render_reset_calibration(preset_name: str) -> None:
             new_bias = round(np.mean(overall_errors) * _CORRECTION_STRENGTH, 2) if overall_errors else 0.0
 
             new_by_pos: Dict[str, float] = {}
-            _VALID_POS = {"PG", "SG", "SF", "PF", "C", "PG/SG", "SG/SF", "SF/PF", "PF/C"}
+            _VALID_POS = (
+                {"G"} if _is_pga
+                else {"PG", "SG", "SF", "PF", "C", "PG/SG", "SG/SF", "SF/PF", "PF/C"}
+            )
             for pos, errs in pos_errors.items():
                 if pos not in _VALID_POS or len(errs) < _MIN_SAMPLES:
                     continue
@@ -3014,6 +3028,116 @@ def _render_reset_calibration(preset_name: str) -> None:
                 f"[AUDIT-5.4] Calibration reset: {processed} slates reprocessed, "
                 f"old_bias={old_bias:+.2f}, new_bias={new_bias:+.2f}, "
                 f"correction_strength=0.5"
+            )
+
+
+def _render_pga_backfill() -> None:
+    """Render the PGA Archive Backfill expander (Ticket 6.1)."""
+    st.markdown("---")
+    with st.expander("Backfill PGA Archive"):
+        st.caption(
+            "Fetch historical PGA tournaments from DataGolf and archive them "
+            "as parquet files. After backfill, PGA calibration is rebuilt automatically."
+        )
+
+        col1, col2 = st.columns(2)
+        with col1:
+            n_tournaments = st.number_input(
+                "Number of tournaments to backfill",
+                min_value=5,
+                max_value=50,
+                value=20,
+                key="pga_backfill_limit",
+            )
+        with col2:
+            min_year = st.number_input(
+                "Min year",
+                min_value=2023,
+                max_value=2026,
+                value=2025,
+                key="pga_backfill_min_year",
+            )
+
+        if st.button("Backfill PGA Archive", type="primary", key="pga_backfill_btn"):
+            api_key = _get_pga_api_key()
+            if not api_key:
+                st.error("DATAGOLF_API_KEY not found in secrets or environment.")
+                return
+
+            from yak_core.datagolf import DataGolfClient
+            from yak_core.pga_archiver import backfill_pga_slates
+
+            dg = DataGolfClient(api_key)
+            progress = st.progress(0, text="Starting PGA backfill...")
+            status_area = st.empty()
+
+            try:
+                summary = backfill_pga_slates(
+                    client=dg,
+                    limit=int(n_tournaments),
+                    min_year=int(min_year),
+                    overwrite=False,
+                )
+            except Exception as exc:
+                progress.empty()
+                st.error(f"Backfill failed: {exc}")
+                return
+
+            progress.progress(100, text="Backfill complete!")
+
+            if "error" in summary:
+                st.error(f"Backfill error: {summary['error']}")
+                return
+
+            archived = summary.get("archived", 0)
+            skipped = summary.get("skipped", 0)
+            failed = summary.get("failed", 0)
+            total = summary.get("total", 0)
+            events = summary.get("events", [])
+
+            # Show summary
+            st.success(
+                f"Backfill complete: {archived} archived, {skipped} skipped, "
+                f"{failed} failed out of {total} candidates."
+            )
+
+            if events:
+                event_dates = [e["date"] for e in events if e.get("date")]
+                if event_dates:
+                    st.caption(
+                        f"Date range: {min(event_dates)} to {max(event_dates)}"
+                    )
+
+                # Show event details
+                event_rows = [
+                    {
+                        "Event": e.get("event", ""),
+                        "Date": e.get("date", ""),
+                        "Status": e.get("status", ""),
+                    }
+                    for e in events
+                ]
+                st.dataframe(pd.DataFrame(event_rows), hide_index=True, use_container_width=True)
+
+            # After backfill, trigger PGA calibration replay
+            if archived > 0:
+                st.info("Rebuilding PGA calibration from expanded archive...")
+                try:
+                    from scripts.replay_pga_calibration import replay_pga_calibration
+                    replay_result = replay_pga_calibration()
+                    if replay_result.get("status") == "error":
+                        st.warning(
+                            f"Calibration replay issue: {replay_result.get('reason', 'unknown')}"
+                        )
+                    else:
+                        n_cal = replay_result.get("calibrated", 0)
+                        st.success(f"PGA calibration rebuilt from {n_cal} tournaments.")
+                except Exception as exc:
+                    st.warning(f"Calibration replay failed: {exc}")
+
+            print(
+                f"[AUDIT-6.1] PGA backfill: {archived} tournaments archived, "
+                f"{skipped} skipped (already archived)"
             )
 
 
@@ -3101,11 +3225,12 @@ def _render_auto_calibrate(
     preset_name: str,
     sandbox_overrides: Dict[str, Any],
     ricky_weights: Dict[str, float],
+    sport: str = "NBA",
 ) -> None:
     """Render the Auto-Calibrate section in Sim Lab.
 
     Uses Optuna TPE to optimize all build + Ricky ranking parameters
-    simultaneously, maximizing SE Core actual FP across RG archive slates.
+    simultaneously, maximizing SE Core actual FP across historical slates.
     """
     st.markdown("---")
     st.subheader("Auto-Calibrate")
@@ -3173,15 +3298,20 @@ def _render_auto_calibrate(
             disabled=not skip_incomplete,
         )
 
-    # Discover available dates from RickyArchive (primary) + slate_archive (fallback)
+    # Discover available dates from archive
     from yak_core.auto_calibrate import scan_archive_dates
 
-    available_dates = scan_archive_dates()
+    _sport_key = "pga" if sport.upper() != "NBA" else "nba"
+    available_dates = scan_archive_dates(sport=_sport_key)
 
     if len(available_dates) < 3:
+        _archive_label = (
+            "PGA slate archive (data/slate_archive/*pga*gpp.parquet)"
+            if _sport_key == "pga"
+            else "Ricky archive (data/ricky_archive/nba/archive.parquet)"
+        )
         st.warning(
-            f"Need at least 3 historical slates in the Ricky archive "
-            f"(data/ricky_archive/nba/archive.parquet). "
+            f"Need at least 3 historical slates in the {_archive_label}. "
             f"Found {len(available_dates)}."
         )
         return
@@ -4036,6 +4166,15 @@ def render_sim_lab(sport: str) -> None:
                 ),
                 use_container_width=True,
             )
+
+        # --- PGA: Backfill PGA Archive (Ticket 6.1) ---
+        _render_pga_backfill()
+
+        # --- PGA: Auto-Calibrate (Ticket 6.2) ---
+        _render_auto_calibrate(preset_name, sandbox_overrides, _ricky_weights, sport="PGA")
+
+        # --- PGA: Reset Calibration (Ticket 6.3) ---
+        _render_reset_calibration(preset_name, sport="PGA")
 
     # Run log (always visible at bottom)
     _render_run_log()

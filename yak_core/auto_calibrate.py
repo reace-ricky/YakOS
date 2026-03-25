@@ -68,6 +68,7 @@ _RICKY_KEYS = {"w_gpp", "w_ceil", "w_own"}
 # Slate archive location (per-date parquets, still used as primary pool source)
 _SLATE_ARCHIVE_DIR = Path(__file__).resolve().parent.parent / "data" / "slate_archive"
 _SLATE_DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})_gpp_main\.parquet$")
+_PGA_SLATE_DATE_RE = re.compile(r"^(?:pga_)?(\d{4}-\d{2}-\d{2}).*pga.*gpp\.parquet$|^(\d{4}-\d{2}-\d{2})_pga_gpp\.parquet$")
 
 
 @dataclass
@@ -242,42 +243,62 @@ DS_RECOMMENDATIONS: Dict[str, Dict[str, Any]] = {
 }
 
 
-def scan_archive_dates() -> List[date]:
+def scan_archive_dates(sport: str = "nba") -> List[date]:
     """Return available historical dates, most-recent-first.
 
-    Reads from the RickyArchive (data/ricky_archive/nba/archive.parquet) as
-    the primary source so the system works even when per-date slate_archive
-    files are absent.  Falls back to scanning slate_archive for any dates not
-    already covered by the fat archive.
+    Parameters
+    ----------
+    sport : str
+        "nba" (default) or "pga". Controls which archive files are scanned.
+
+    For NBA: reads from the RickyArchive as primary source, falls back to
+    scanning slate_archive for ``*_gpp_main.parquet`` files.
+
+    For PGA: scans slate_archive for ``*pga*gpp.parquet`` files.
     """
     seen: set = set()
     dates: List[date] = []
 
-    # 1. Primary: RickyArchive (single fat parquet, always present on warm start)
-    for d in _scan_ricky_dates():
-        if d not in seen:
-            seen.add(d)
-            dates.append(d)
+    if sport.lower() == "pga":
+        # PGA: scan slate_archive for PGA parquets
+        if _SLATE_ARCHIVE_DIR.is_dir():
+            for f in _SLATE_ARCHIVE_DIR.iterdir():
+                m = _PGA_SLATE_DATE_RE.match(f.name)
+                if m:
+                    date_str = m.group(1) or m.group(2)
+                    try:
+                        d = date.fromisoformat(date_str)
+                    except ValueError:
+                        continue
+                    if d not in seen:
+                        seen.add(d)
+                        dates.append(d)
+    else:
+        # NBA: primary = RickyArchive, fallback = slate_archive
+        for d in _scan_ricky_dates():
+            if d not in seen:
+                seen.add(d)
+                dates.append(d)
 
-    # 2. Fallback: per-date slate_archive parquets (may have dates not yet in archive)
-    if _SLATE_ARCHIVE_DIR.is_dir():
-        for f in _SLATE_ARCHIVE_DIR.iterdir():
-            m = _SLATE_DATE_RE.match(f.name)
-            if m:
-                try:
-                    d = date.fromisoformat(m.group(1))
-                except ValueError:
-                    continue
-                if d not in seen:
-                    seen.add(d)
-                    dates.append(d)
+        if _SLATE_ARCHIVE_DIR.is_dir():
+            for f in _SLATE_ARCHIVE_DIR.iterdir():
+                m = _SLATE_DATE_RE.match(f.name)
+                if m:
+                    try:
+                        d = date.fromisoformat(m.group(1))
+                    except ValueError:
+                        continue
+                    if d not in seen:
+                        seen.add(d)
+                        dates.append(d)
 
     dates.sort(reverse=True)
     return dates
 
 
 # Backward-compat alias
-scan_rg_dates = scan_archive_dates
+def scan_rg_dates(sport: str = "nba") -> List[date]:
+    return scan_archive_dates(sport=sport)
 
 
 def check_slate_completeness(
@@ -660,6 +681,37 @@ def _merge_rg_csv_headless(pool: pd.DataFrame, rg_file: Path) -> pd.DataFrame:
     return pool
 
 
+def _load_pga_pool_for_date(selected_date: date) -> Optional[pd.DataFrame]:
+    """Load a PGA pool from slate_archive for the given date."""
+    date_dash = selected_date.strftime("%Y-%m-%d")
+    if not _SLATE_ARCHIVE_DIR.is_dir():
+        return None
+
+    # Try known PGA naming patterns
+    candidates = []
+    for f in _SLATE_ARCHIVE_DIR.iterdir():
+        if not f.name.endswith(".parquet"):
+            continue
+        if "pga" not in f.name.lower():
+            continue
+        if date_dash in f.name:
+            candidates.append(f)
+
+    if not candidates:
+        return None
+
+    # Pick the first match (prefer _gpp files)
+    candidates.sort(key=lambda p: ("gpp" not in p.name, p.name))
+    path = candidates[0]
+    try:
+        pool_df = pd.read_parquet(path)
+        logger.info("Loaded PGA pool for %s from %s (%d players)", date_dash, path.name, len(pool_df))
+        return pool_df
+    except Exception as exc:
+        logger.warning("Failed to load PGA pool %s: %s", path.name, exc)
+        return None
+
+
 def _get_nba_api_key() -> str:
     """Read NBA API key from Streamlit secrets or env (no st dependency)."""
     import os
@@ -708,23 +760,30 @@ def _run_pipeline_headless(
 
     # Step 1: Load pool from slate archive (fully-enriched parquet), or fall
     # back to the RickyArchive, or finally the API.
-    archive_path = _SLATE_ARCHIVE_DIR / f"{date_dash}_gpp_main.parquet"
-    if archive_path.is_file():
-        pool_df = pd.read_parquet(archive_path)
-        logger.info("Loaded archived pool for %s (%d players)", date_dash, len(pool_df))
+    is_pga = sport.upper() != "NBA"
+    pool_df: Optional[pd.DataFrame] = None
+
+    if is_pga:
+        # PGA: scan slate_archive for matching PGA parquets
+        pool_df = _load_pga_pool_for_date(selected_date)
     else:
-        # Try the fat RickyArchive — works even when slate_archive is empty
-        pool_df = _load_ricky_pool_for_date(selected_date)
-        if pool_df is not None and not pool_df.empty:
-            logger.info(
-                "Loaded RickyArchive pool for %s (%d players)", date_dash, len(pool_df)
-            )
+        archive_path = _SLATE_ARCHIVE_DIR / f"{date_dash}_gpp_main.parquet"
+        if archive_path.is_file():
+            pool_df = pd.read_parquet(archive_path)
+            logger.info("Loaded archived pool for %s (%d players)", date_dash, len(pool_df))
         else:
-            api_key = _get_nba_api_key()
-            if not api_key:
-                raise ValueError("NBA API key not found.")
-            cfg["RAPIDAPI_KEY"] = api_key
-            pool_df = fetch_live_dfs(date_key, cfg)
+            # Try the fat RickyArchive — works even when slate_archive is empty
+            pool_df = _load_ricky_pool_for_date(selected_date)
+            if pool_df is not None and not pool_df.empty:
+                logger.info(
+                    "Loaded RickyArchive pool for %s (%d players)", date_dash, len(pool_df)
+                )
+            else:
+                api_key = _get_nba_api_key()
+                if not api_key:
+                    raise ValueError("NBA API key not found.")
+                cfg["RAPIDAPI_KEY"] = api_key
+                pool_df = fetch_live_dfs(date_key, cfg)
 
     if pool_df is None or pool_df.empty:
         raise ValueError(f"No pool for {date_dash}")
