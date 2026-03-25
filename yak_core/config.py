@@ -27,6 +27,33 @@ DK_SPORTS_ENABLED: List[str] = [
 # How often (in minutes) the scheduled ingest job should re-poll DK.
 DK_POLLING_FREQ_MINUTES: int = int(os.environ.get("DK_POLLING_FREQ_MINUTES", "30"))
 
+# ----- Shared player status filter -----
+# Single source of truth for statuses that make a player ineligible across
+# sims, lineup optimizer, and any other pipeline stage.  Import from here;
+# do NOT define local copies in individual modules.
+INELIGIBLE_STATUSES: frozenset = frozenset({
+    "OUT", "IR", "INJ", "SUSPENDED", "SUSP",
+    "G-LEAGUE", "G_LEAGUE", "GLEAGUE",
+    "DND", "NA", "O", "WD",
+})
+
+# ----- Shared DK CSV / API column rename map -----
+# Single source of truth for mapping DraftKings column names to YakOS internal
+# column names.  Import from here; do NOT define local rename maps in individual
+# modules.
+DK_COLUMN_MAP: Dict[str, str] = {
+    "name + id": "player_name",
+    "name+id": "player_name",
+    "name": "player_name",
+    "id": "player_id",
+    "pos": "position",
+    "position": "position",
+    "game info": "game_info",
+    "teamabbrev": "team",
+    "avgpointspergame": "proj",
+    "salary": "salary",
+}
+
 # ----- DK NBA roster shape (Classic) -----
 DK_LINEUP_SIZE = 8
 DK_POS_SLOTS = ["PG", "SG", "SF", "PF", "C", "G", "F", "UTIL"]
@@ -96,9 +123,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # in each salary tier.  Format: list of (min_salary, max_exposure) tuples,
     # evaluated top-down (first match wins).
     "TIERED_EXPOSURE": [
-        (9000, 0.50),   # $9K+ → 50% max exposure
-        (6000, 0.35),   # $6K-$9K → 35% max exposure
-        (0,    0.25),   # <$6K → 25% max exposure
+        (9000, 0.55),   # $9K+ → 55% max exposure
+        (6000, 0.40),   # $6K-$9K → 40% max exposure
+        (0,    0.35),   # <$6K → 35% max exposure
     ],
     "MIN_TEAM_STACK": 2,
     "MIN_GAME_STACK": 3,
@@ -127,8 +154,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # Value play floor filter: for players under VALUE_FLOOR_SALARY, if their
     # floor < proj * VALUE_FLOOR_RATIO, cap exposure to VALUE_FLOOR_MAX_EXPOSURE.
     "VALUE_FLOOR_SALARY": 5000,
-    "VALUE_FLOOR_RATIO": 0.35,
-    "VALUE_FLOOR_MAX_EXPOSURE": 0.15,
+    "VALUE_FLOOR_RATIO": 0.25,
+    "VALUE_FLOOR_MAX_EXPOSURE": 0.25,
     # Model projection tuning
     "MODEL_HIST_WEIGHT": 0.6,   # weight on historical avg vs salary-implied
     "MODEL_POS_REGRESS": 0.2,   # regress toward position-level mean
