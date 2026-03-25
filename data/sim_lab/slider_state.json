@@ -4,7 +4,8 @@
       "overrides": {
         "GPP_BOOM_SPREAD_WEIGHT": 0.3,
         "GPP_EFFICIENCY_WEIGHT": 0.0,
-        "CASH_FLOOR_WEIGHT": 0.1
+        "CASH_FLOOR_WEIGHT": 0.1,
+        "TIERED_EXPOSURE_VALUE": 0.4
       },
       "ricky_weights": {
         "w_gpp": 0.2,
