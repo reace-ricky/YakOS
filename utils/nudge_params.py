@@ -151,13 +151,13 @@ NUDGE_PARAM_RULES: dict[tuple[str, str], list[dict[str, Any]]] = {
             ),
         },
         {
-            "param": "GPP_OWN_CAP",
-            "label": "Ownership Cap",
-            "has_slider": False,
-            "slider_min": 2.0,
-            "slider_max": 10.0,
-            "step": 0.5,
-            "description": "Lower max lineup ownership cap",
+            "param": "GPP_OWN_PENALTY_STRENGTH",
+            "label": "Own Penalty Strength (High)",
+            "has_slider": True,
+            "slider_min": 0.0,
+            "slider_max": 3.0,
+            "step": 0.1,
+            "description": "Lower max lineup ownership by increasing chalk penalty",
             "compute": lambda cur, val, lo, hi: round(
                 max(cur - 0.5 * max(0.3, min(_severity(val, lo, hi), 1.5)), 2.0), 1
             ),
@@ -545,7 +545,6 @@ def get_nudge_suggestions(
         # Hard-coded fallback for the most commonly nudged parameters
         _DEFAULT_CFG = {
             "GPP_OWN_PENALTY_STRENGTH": 1.0,
-            "GPP_OWN_CAP": 6.0,
             "GPP_LOW_OWN_THRESHOLD": 0.40,
             "GPP_PROJ_WEIGHT": 0.30,
             "GPP_UPSIDE_WEIGHT": 0.30,

@@ -27,6 +27,22 @@ DK_SPORTS_ENABLED: List[str] = [
 # How often (in minutes) the scheduled ingest job should re-poll DK.
 DK_POLLING_FREQ_MINUTES: int = int(os.environ.get("DK_POLLING_FREQ_MINUTES", "30"))
 
+# ----- Shared rolling-window projection weights -----
+# [AUDIT-4.2] Single source of truth for rolling FP weights used by
+# projections.py and ricky_projections.py.  Import from here; do NOT define
+# local copies in individual modules.
+ROLLING_WEIGHTS: Dict[str, float] = {
+    "rolling_fp_5": 0.50,
+    "rolling_fp_10": 0.30,
+    "rolling_fp_20": 0.20,
+}
+ROLLING_BLEND_RATIO: float = 0.70  # 70% rolling + 30% salary
+
+# [AUDIT-4.1] Fraction of measured overall bias to apply per correction cycle.
+# At 85%, the optimizer closes most of the known bias gap each pass while
+# preserving a margin of stability against measurement noise.
+CALIBRATION_BIAS_STRENGTH: float = 0.85
+
 # ----- Shared player status filter -----
 # Single source of truth for statuses that make a player ineligible across
 # sims, lineup optimizer, and any other pipeline stage.  Import from here;
@@ -93,7 +109,6 @@ PGA_DEFAULT_CONFIG: Dict[str, Any] = {
     "MIN_GAME_STACK": 0,
     "CORRELATION_RULES": {},
     # GPP-specific for PGA
-    "GPP_OWN_CAP": 5.0,           # max total lineup ownership (6 players, not 8)
     "GPP_MIN_LOW_OWN_PLAYERS": 1,
     "GPP_LOW_OWN_THRESHOLD": 0.40,
     "GPP_FORCE_GAME_STACK": False,  # No games to stack in PGA
@@ -201,7 +216,6 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     # 0.8 in winners) and under-represented mid-tier (4.0 avg vs 4.8 in winners).
     "GPP_MAX_PUNT_PLAYERS": 2,      # max players with salary < $4000 (promoted from Sim Lab GPP Main)
     "GPP_MIN_MID_PLAYERS": 3,       # min players in $4000-$7000 range (promoted from Sim Lab GPP Main)
-    "GPP_OWN_CAP": 6.0,             # max total lineup ownership (promoted from Sim Lab GPP Main — looser)
     "GPP_MIN_LOW_OWN_PLAYERS": 1,   # min players below GPP_LOW_OWN_THRESHOLD
     "GPP_LOW_OWN_THRESHOLD": 0.40,  # ownership threshold for "low-owned" (promoted from Sim Lab GPP Main)
     "GPP_FORCE_GAME_STACK": True,   # require 3+ players from one game
@@ -1211,7 +1225,6 @@ _KEY_ALIASES = {
     "pos_slots": "POS_SLOTS",
     "pos_caps": "POS_CAPS",
     "own_weight": "OWN_WEIGHT",
-    "own_cap": "GPP_OWN_CAP",
     "min_low_own_players": "GPP_MIN_LOW_OWN_PLAYERS",
     "low_own_threshold": "GPP_LOW_OWN_THRESHOLD",
     "min_mid_salary_players": "GPP_MIN_MID_PLAYERS",
