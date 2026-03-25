@@ -2957,6 +2957,119 @@ def _render_historical_replay(sport: str) -> None:
             else:
                 st.dataframe(lu_df.head(30), use_container_width=True, hide_index=True)
 
+            # ── Player-level calibration metrics ──────────────────────────────
+            st.divider()
+
+            if "proj" not in lu_df.columns or "actual_fp" not in lu_df.columns:
+                st.info("Load actuals to see player-level calibration metrics.")
+            else:
+                # Aggregate to one row per player
+                _agg_dict: dict = {"proj": "mean", "actual_fp": "mean"}
+                for _col in ["pos", "salary", "team"]:
+                    if _col in lu_df.columns:
+                        _agg_dict[_col] = "first"
+                _pm_df = (
+                    lu_df.groupby("player_name", sort=False)
+                    .agg(_agg_dict)
+                    .reset_index()
+                )
+                _pm_df["error"] = _pm_df["actual_fp"] - _pm_df["proj"]
+                _pm_df["abs_error"] = _pm_df["error"].abs()
+
+                if _pm_df.empty:
+                    st.warning("No player-level data available for this slate.")
+                else:
+                    # 1. Metric cards
+                    _pl_mae = round(_pm_df["abs_error"].mean(), 2)
+                    _pl_median_err = round(_pm_df["error"].median(), 2)
+                    _pl_n = len(_pm_df)
+
+                    mc1, mc2, mc3 = st.columns(3)
+                    with mc1:
+                        st.metric("Player MAE", f"{_pl_mae:.2f}")
+                    with mc2:
+                        st.metric("Median Error", f"{_pl_median_err:+.2f}")
+                    with mc3:
+                        st.metric("Players Evaluated", _pl_n)
+
+                    # 2. Top misses table
+                    st.markdown("#### 🔍 Biggest Projection Misses")
+                    _miss_df = (
+                        _pm_df.sort_values("abs_error", ascending=False)
+                        .head(15)
+                        .copy()
+                    )
+                    _miss_cols = [
+                        "player_name", "pos", "salary", "proj",
+                        "actual_fp", "error", "abs_error",
+                    ]
+                    _miss_avail = [c for c in _miss_cols if c in _miss_df.columns]
+                    _miss_show = _miss_df[_miss_avail].copy()
+                    for _fc in ["proj", "actual_fp", "error", "abs_error"]:
+                        if _fc in _miss_show.columns:
+                            _miss_show[_fc] = _miss_show[_fc].round(1)
+
+                    _miss_col_cfg: dict = {}
+                    if "proj" in _miss_show.columns:
+                        _miss_col_cfg["proj"] = st.column_config.NumberColumn(
+                            "Proj", format="%.1f"
+                        )
+                    if "actual_fp" in _miss_show.columns:
+                        _miss_col_cfg["actual_fp"] = st.column_config.NumberColumn(
+                            "Actual", format="%.1f"
+                        )
+                    if "error" in _miss_show.columns:
+                        _miss_col_cfg["error"] = st.column_config.NumberColumn(
+                            "Error",
+                            format="%.1f",
+                            help="positive = under-projected, negative = over-projected",
+                        )
+                    if "abs_error" in _miss_show.columns:
+                        _miss_col_cfg["abs_error"] = st.column_config.NumberColumn(
+                            "Abs Error", format="%.1f"
+                        )
+                    if "salary" in _miss_show.columns:
+                        _miss_col_cfg["salary"] = st.column_config.NumberColumn(
+                            "Salary", format="$%d"
+                        )
+
+                    st.dataframe(
+                        _miss_show,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config=_miss_col_cfg,
+                    )
+
+                    # 3. Position breakdown (collapsible)
+                    with st.expander("📊 MAE by Position"):
+                        if "pos" in _pm_df.columns:
+                            _pos_grp = (
+                                _pm_df.groupby("pos", sort=False)
+                                .agg(
+                                    Player_Count=("player_name", "count"),
+                                    MAE=("abs_error", "mean"),
+                                    Mean_Error=("error", "mean"),
+                                )
+                                .reset_index()
+                                .rename(
+                                    columns={
+                                        "pos": "Position",
+                                        "Player_Count": "Player Count",
+                                        "Mean_Error": "Mean Error",
+                                    }
+                                )
+                                .sort_values("MAE", ascending=False)
+                            )
+                            _pos_grp["MAE"] = _pos_grp["MAE"].round(2)
+                            _pos_grp["Mean Error"] = _pos_grp["Mean Error"].round(2)
+                            st.dataframe(
+                                _pos_grp,
+                                use_container_width=True,
+                                hide_index=True,
+                            )
+                        else:
+                            st.caption("No position data available.")
+
         if st.button("Clear Actuals", key=f"replay_clear_{sport}"):
             actuals_path.unlink(missing_ok=True)
             st.rerun()
