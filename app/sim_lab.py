@@ -2638,6 +2638,7 @@ def _render_hindsight_section(
             options=player_names_sorted,
             default=[],
             key="hindsight_picks",
+            max_selections=8,
             help="Choose players with high actual FPTS but low exposure.",
         )
 

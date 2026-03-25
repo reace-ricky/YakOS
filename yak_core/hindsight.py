@@ -593,15 +593,43 @@ def generate_calibration_recommendations(
 
     Returns
     -------
-    list of dicts: {parameter, current_value, suggested_value, reason, n_players}
+    list of dicts: {parameter, current_value, suggested_value, reason, n_players,
+                    confidence}
     """
     if not diagnostic_results:
         return []
 
-    # Count blocking gates
+    # Count blocking gates for current session
     from collections import Counter
     gate_counts = Counter(r["blocking_gate"] for r in diagnostic_results)
     n_total = len(diagnostic_results)
+
+    # ── Load historical hindsight sessions for accumulation ──────────
+    history_df = load_hindsight_history()
+    hist_gate_counts: Dict[str, int] = {}
+    hist_session_counts: Dict[str, int] = {}
+    n_hist_sessions = 0
+    if not history_df.empty and "gates_hit" in history_df.columns:
+        n_hist_sessions = len(history_df)
+        for _idx, row in history_df.iterrows():
+            gates_str = row.get("gates_hit", "")
+            if not gates_str or pd.isna(gates_str):
+                continue
+            n_picks = int(row.get("n_picks", 1)) if not pd.isna(row.get("n_picks", 0)) else 1
+            for g in str(gates_str).split(","):
+                g = g.strip()
+                if g:
+                    hist_gate_counts[g] = hist_gate_counts.get(g, 0) + n_picks
+                    hist_session_counts[g] = hist_session_counts.get(g, 0) + 1
+
+    # Add current session counts to historical totals
+    total_gate_counts: Dict[str, int] = dict(hist_gate_counts)
+    total_session_counts: Dict[str, int] = dict(hist_session_counts)
+    for gate, count in gate_counts.items():
+        if gate and gate != "none":
+            total_gate_counts[gate] = total_gate_counts.get(gate, 0) + count
+            total_session_counts[gate] = total_session_counts.get(gate, 0) + 1
+    total_sessions = n_hist_sessions + 1  # +1 for current session
 
     recommendations: List[Dict[str, Any]] = []
 
@@ -620,6 +648,7 @@ def generate_calibration_recommendations(
                 "these players available to the optimizer."
             ),
             "n_players": n_filtered,
+            "_gate": GATE_FILTERED,
         })
 
     # ── Gate 2: Cascade dampening too aggressive ──────────────────────
@@ -638,6 +667,7 @@ def generate_calibration_recommendations(
                 "allows larger cascaded projections."
             ),
             "n_players": n_cascade,
+            "_gate": GATE_CASCADE,
         })
 
     # ── Gate 3: Systematic underprojection ───────────────────────────
@@ -659,6 +689,7 @@ def generate_calibration_recommendations(
                 "bias correction could close part of this gap."
             ),
             "n_players": n_underproj,
+            "_gate": GATE_PROJ_ERROR,
         })
 
     # ── Gate 4: Exposure capped ───────────────────────────────────────
@@ -680,6 +711,7 @@ def generate_calibration_recommendations(
                 f"{cur_val_exp:.0%}→{suggested_val_exp:.0%} increases their ceiling."
             ),
             "n_players": n_exposure,
+            "_gate": GATE_EXPOSURE_CAP,
         })
 
     # ── Gate 5: Ownership penalty too strong ─────────────────────────
@@ -697,6 +729,7 @@ def generate_calibration_recommendations(
                 "chalk discount."
             ),
             "n_players": n_own,
+            "_gate": GATE_OWN_PENALTY,
         })
 
     # ── Gate 6: Scoring formula underweights these players ───────────
@@ -714,6 +747,7 @@ def generate_calibration_recommendations(
                 f"weight {cur_proj_w:.2f}→{suggested_proj_w:.2f} could surface them."
             ),
             "n_players": n_score,
+            "_gate": GATE_SCORE_UNDERWEIGHT,
         })
 
     # ── Gate 7: Ricky Ranker undervalued lineups containing the player
@@ -734,7 +768,32 @@ def generate_calibration_recommendations(
                 "lineups."
             ),
             "n_players": n_rank,
+            "_gate": GATE_IN_LINEUPS_LOW_RANK,
         })
+
+    # ── Enrich recommendations with historical context ───────────────
+    for rec in recommendations:
+        gate = rec.pop("_gate", None)
+        if gate is None:
+            rec["confidence"] = "normal"
+            continue
+
+        hist_total = total_gate_counts.get(gate, rec["n_players"])
+        sess_total = total_session_counts.get(gate, 1)
+        current_n = rec["n_players"]
+
+        # Append historical context to reason
+        if n_hist_sessions > 0:
+            rec["reason"] += (
+                f" ({current_n} players this session, "
+                f"{hist_total} total across {sess_total} of {total_sessions} sessions)"
+            )
+
+        # Mark as high confidence if gate hit across 3+ sessions
+        if sess_total >= 3:
+            rec["confidence"] = "high"
+        else:
+            rec["confidence"] = "normal"
 
     return recommendations
 
