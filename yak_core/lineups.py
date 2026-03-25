@@ -747,36 +747,6 @@ def prepare_pool(
     # ---- Ownership proxy ----
     df = _add_ownership(df, cfg)
 
-    # ---- Deflate cascade-inflated projections before scoring ----
-    # Players whose injury_bump_fp >= 40% of their original (pre-cascade)
-    # projection have numbers driven by cascade math, not real expectation.
-    # Dampen their proj toward original + 50% of the bump so the optimizer
-    # doesn't over-rank them (especially as Showdown captains).
-    if "injury_bump_fp" in df.columns and "original_proj" in df.columns:
-        _bump = pd.to_numeric(df["injury_bump_fp"], errors="coerce").fillna(0)
-        _orig = pd.to_numeric(df["original_proj"], errors="coerce").fillna(0)
-        _base = _orig.where(_orig > 0, df["proj"])
-        _cascade_ratio = _bump / _base.clip(lower=1)
-        _inflated = (_cascade_ratio >= 0.40) & (_bump > 0)
-        if _inflated.any():
-            # Keep 50% of the cascade bump — acknowledges the opportunity
-            # without letting the full inflated number drive scoring
-            _dampened = _orig + _bump * 0.50
-            # Scale factor: ratio of dampened to CURRENT (inflated) proj
-            # Must compute before overwriting proj
-            _cur_proj = pd.to_numeric(df["proj"], errors="coerce").clip(lower=1)
-            _scale = _dampened / _cur_proj
-            df.loc[_inflated, "proj"] = _dampened[_inflated]
-            # Proportionally dampen ceil & sim percentiles so upside/boom
-            # don't still reflect the inflated number
-            for _sim_col in ["ceil", "floor", "sim15th", "sim33rd", "sim50th",
-                             "sim66th", "sim85th", "sim90th", "sim99th"]:
-                if _sim_col in df.columns:
-                    _vals = pd.to_numeric(df[_sim_col], errors="coerce")
-                    df.loc[_inflated, _sim_col] = (_vals * _scale)[_inflated]
-            n_deflated = _inflated.sum()
-            print(f"[prepare_pool] Dampened {n_deflated} cascade-inflated projection(s) (kept 50% of bump)")
-
     # ---- Apply calibration correction factors BEFORE scoring ----
     # Adjusts projections using position-level and overall bias corrections
     # from historical calibration feedback data.
@@ -1231,9 +1201,23 @@ def build_multiple_lineups_with_exposure(
 
     pos_slots = cfg.get("POS_SLOTS", DK_POS_SLOTS)
 
-    # ── MIN_PLAYER_MINUTES pool filter (GPP only) ────────────────────────────
-    min_minutes = float(cfg.get("MIN_PLAYER_MINUTES", 0))
+    # ── AUDIT-1.1 / 1.2: Apply injury cascade BEFORE pool filters ────────────
+    # Ensures that backup players whose projections get lifted by cascade are
+    # not silently removed by MIN_PLAYER_MINUTES or GPP_MIN_PROJ_FLOOR before
+    # the cascade has a chance to update their proj / proj_minutes columns.
+    # Guards: skip if cascade was already applied (original_proj present) OR
+    # if the pool has no status column (synthetic/test pools without injury data).
     lock_names_set = set(n.strip() for n in cfg.get("LOCK", []))
+    if "original_proj" not in player_pool.columns and "status" in player_pool.columns:
+        try:
+            from yak_core.injury_cascade import apply_injury_cascade
+            player_pool, _ = apply_injury_cascade(player_pool)
+        except Exception as _casc_err:
+            print(f"[build_lineups] Warning: injury cascade failed (non-fatal, build continues): {_casc_err}")
+
+    # ── MIN_PLAYER_MINUTES pool filter (GPP only) ────────────────────────────
+    # Runs AFTER cascade so post-cascade proj_minutes values are used.
+    min_minutes = float(cfg.get("MIN_PLAYER_MINUTES", 0))
     if min_minutes > 0 and is_gpp and "proj_minutes" in player_pool.columns:
         pre_filter = len(player_pool)
         below_min = pd.to_numeric(player_pool["proj_minutes"], errors="coerce").fillna(0) < min_minutes
@@ -1245,15 +1229,27 @@ def build_multiple_lineups_with_exposure(
             print(f"[Minutes filter] Removed {removed} players below {min_minutes} min")
 
     # ── MIN_PROJ_FLOOR pool filter ───────────────────────────────────────────
-    # Remove players whose standard projection is too low to contribute to a
-    # competitive lineup.  Prevents inflated SIM99TH tails on deep-bench
-    # players from pulling the optimizer toward unplayable rosters.
+    # Runs AFTER cascade (AUDIT-1.1) so post-cascade projections are used.
+    # Backup players lifted by cascade from pre_cascade_proj < floor to
+    # post_cascade_proj >= floor are now correctly kept in the pool.
     min_proj_floor = float(cfg.get("GPP_MIN_PROJ_FLOOR", 0))
     if min_proj_floor > 0 and "proj" in player_pool.columns:
         pre_filter = len(player_pool)
         below_proj = pd.to_numeric(player_pool["proj"], errors="coerce").fillna(0) < min_proj_floor
         locked = player_pool["player_name"].isin(lock_names_set)
         keep_mask = ~below_proj | locked
+        # Log cascade-rescued players (pre_cascade < floor but post_cascade >= floor)
+        if "original_proj" in player_pool.columns:
+            _pre_cascade_proj = player_pool["original_proj"]
+            _below_pre = pd.to_numeric(_pre_cascade_proj, errors="coerce").fillna(0) < min_proj_floor
+            _rescued = _below_pre & ~below_proj & ~locked
+            for _ridx in player_pool.index[_rescued]:
+                print(
+                    f"[AUDIT-1.1] Player {player_pool.at[_ridx, 'player_name']} kept: "
+                    f"pre_cascade_proj={float(_pre_cascade_proj.at[_ridx]):.1f}, "
+                    f"post_cascade_proj={float(player_pool.at[_ridx, 'proj']):.1f}, "
+                    f"min_floor={min_proj_floor:.1f}"
+                )
         player_pool = player_pool[keep_mask].reset_index(drop=True)
         removed = pre_filter - len(player_pool)
         if removed > 0:

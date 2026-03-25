@@ -726,14 +726,38 @@ def apply_projections(
 
     elif method == "ensemble":
         # Blend YakOS model + Tank01 + RG projections.
-        # Requires yakos_ensemble(); missing sources are handled gracefully.
+        # yakos_ensemble() skips NaN sources and re-weights remaining ones
+        # proportionally (AUDIT-1.5: handles missing tank01/rg gracefully).
         yakos_series = proj_model(df, cfg)
         tank01_vals = df["tank01_proj"].tolist() if "tank01_proj" in df.columns else [None] * len(df)
         rg_vals = df["rg_proj"].tolist() if "rg_proj" in df.columns else [None] * len(df)
-        df["proj"] = [
+        ensemble_results = [
             yakos_ensemble(float(y), t, r)
             for y, t, r in zip(yakos_series, tank01_vals, rg_vals)
         ]
+        df["proj"] = ensemble_results
+        # AUDIT-1.5: Rescue players whose ensemble returned 0.0 (all sources
+        # missing/NaN) but who have a valid ricky_proj available.
+        _n_rescued = 0
+        if "ricky_proj" in df.columns:
+            _ensemble_zero = pd.array(ensemble_results, dtype=float) == 0.0
+            _ricky_valid = df["ricky_proj"].notna() & (df["ricky_proj"] > 0)
+            _rescue_mask = _ensemble_zero & _ricky_valid.to_numpy()
+            if _rescue_mask.any():
+                _rescue_idx = df.index[_rescue_mask]
+                df.loc[_rescue_idx, "proj"] = df.loc[_rescue_idx, "ricky_proj"]
+                _n_rescued = len(_rescue_idx)
+                for _idx in _rescue_idx:
+                    print(
+                        f"[AUDIT-1.5] Player {df.at[_idx, 'player_name']}: "
+                        f"tank01_proj=NaN, ricky_proj={float(df.at[_idx, 'ricky_proj']):.1f}, "
+                        f"final_proj={float(df.at[_idx, 'proj']):.1f}, in_pool=True"
+                    )
+        _n_valid = int((pd.to_numeric(df["proj"], errors="coerce").fillna(0) > 0).sum())
+        print(
+            f"[AUDIT-1.5] Ensemble blend: {_n_valid} players with valid proj, "
+            f"{_n_rescued} rescued from NaN"
+        )
         print("[projections] Using ensemble (YakOS + Tank01 + RG blend)")
 
     elif method == "ricky_proj":
@@ -768,11 +792,21 @@ def apply_projections(
         # Promote ricky_proj → proj (primary optimizer column)
         df["proj"] = df["ricky_proj"]
 
-        # Promote floor / ceil only when they are not already set
-        if "floor" not in df.columns or df["floor"].isna().all():
+        # AUDIT-1.6: Always overwrite floor / ceil when ricky_proj is active.
+        # Stale Tank01 floor/ceil paired with ricky_proj creates a disconnected
+        # boom/upside score (sim99 - sim50 depends on the floor/ceil spread).
+        if "ricky_floor" in df.columns:
             df["floor"] = df["ricky_floor"]
-        if "ceil" not in df.columns or df["ceil"].isna().all():
+        if "ricky_ceil" in df.columns:
             df["ceil"] = df["ricky_ceil"]
+
+        # Verify alignment
+        if "ricky_floor" in df.columns and "ricky_ceil" in df.columns:
+            _mismatches = (
+                (df["floor"] != df["ricky_floor"]).sum() +
+                (df["ceil"] != df["ricky_ceil"]).sum()
+            )
+            print(f"[AUDIT-1.6] Floor/ceil source: ricky_proj, mismatches={_mismatches}")
 
         print("[projections] Using ricky_proj (recency-weighted game-log model)")
 

@@ -222,9 +222,11 @@ def fetch_live_opt_pool(slate_date, cfg):
         df["player_id"] = df["player_name"].str.lower().str.replace(" ", "_")
     # Preserve Tank01's projection as a named column before any overrides
     df["tank01_proj"] = df["proj"].copy()
-    # Treat Tank01 zero projections as missing — 0.0 poisons the ensemble blend
+    # Treat Tank01 zero projections as missing — 0.0 poisons the ensemble blend.
+    # AUDIT-1.4: Only set tank01_proj to NaN; do NOT set proj to NaN.
+    # Zeroing proj causes the player to vanish even when ricky_proj is valid.
     df.loc[df["tank01_proj"] == 0.0, "tank01_proj"] = float("nan")
-    df.loc[df["proj"] == 0.0, "proj"] = float("nan")
+    # Note: players with proj == 0.0 are left for the ensemble / ricky_proj fallback.
     df["proj_source"] = "tank01"
     print("[fetch_live_opt_pool] Live pool: " + str(len(df)) + " players for " + slate_date)
     return df

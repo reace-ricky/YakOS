@@ -54,8 +54,9 @@ KEY_INJURY_MIN_MINUTES: float = 15.0
 MAX_PLAYER_MINUTES: float = 40.0
 
 # Max bump multiplier: cascade bump cannot exceed this × original projection.
-# A player projected for 20 FP can get at most +3 FP (0.15×20), totaling 23 FP.
-_MAX_BUMP_MULTIPLIER: float = 0.15  # 35% was over-inflating — bench players don't maintain FP/min at higher minute loads
+# AUDIT-1.3: Raised from 0.15 → 0.40 (single dampening layer is sufficient).
+# A player projected for 10 FP can get at most +4 FP (0.40×10), totaling 14 FP.
+_MAX_BUMP_MULTIPLIER: float = 0.40
 _MAX_TOTAL_BUMP_MULTIPLIER: float = 0.40  # Max total bump (injury + minutes gap combined)
 _MAX_GAP_BUMP_MULTIPLIER: float = 1.0  # Gap redistribution cap — compensates for missing slate players (large, predictable gaps)
 
@@ -78,8 +79,9 @@ _TIER_STARTER: float = 0.4       # 28+ min    ← near ceiling, limited upside
 _PRIMARY_BACKUP_BOOST_MULT: float = 2.0   # weight multiplier for primary backup
 _PRIMARY_BACKUP_MAX_EXTRA_MINS: float = 12.0  # hard cap on extra mins per injury
 
-# Efficiency decay: players don't maintain FP/min when absorbing extra minutes
-_CASCADE_EFFICIENCY_DECAY: float = 0.65
+# Efficiency decay removed (AUDIT-1.3): single _MAX_BUMP_MULTIPLIER layer is
+# the only dampening.  Bumps are now applied at full fp_per_min rate.
+# _CASCADE_EFFICIENCY_DECAY: float = 0.65  # REMOVED
 
 # ---------------------------------------------------------------------------
 # Position-based FP/min floor rates (NBA) — DEPRECATED
@@ -534,7 +536,8 @@ def apply_injury_cascade(
             )
             player_pos = str(df.at[idx2, "pos"])
             fp_per_min = _player_fp_per_min(df.loc[idx2], orig_proj, orig_mins)
-            bump_fp = round(extra * fp_per_min * _CASCADE_EFFICIENCY_DECAY, 2)
+            # AUDIT-1.3: Apply bump at full efficiency (no _CASCADE_EFFICIENCY_DECAY).
+            bump_fp = round(extra * fp_per_min, 2)
 
             # Cap per-injury bump by remaining bump room (_MAX_BUMP_MULTIPLIER)
             already_bumped = float(df.at[idx2, "injury_bump_fp"])
@@ -590,7 +593,8 @@ def apply_injury_cascade(
             pd.to_numeric(df.at[idx, "proj_minutes"], errors="coerce") or 0
         )
         fp_per_min = _player_fp_per_min(df.loc[idx], orig_proj, orig_mins)
-        total_bump = round(total_extra * fp_per_min * _CASCADE_EFFICIENCY_DECAY, 2)
+        # AUDIT-1.3: No efficiency decay — apply bump at full fp_per_min rate.
+        total_bump = round(total_extra * fp_per_min, 2)
 
         # Safety net: cap bump at _MAX_BUMP_MULTIPLIER × original projection
         max_bump = orig_proj * _MAX_BUMP_MULTIPLIER
@@ -598,6 +602,16 @@ def apply_injury_cascade(
 
         df.at[idx, "adjusted_proj"] = round(orig_proj + total_bump, 2)
         df.at[idx, "injury_bump_fp"] = total_bump
+
+        # AUDIT-1.2: Update proj_minutes to reflect inherited minutes so that
+        # downstream MIN_PLAYER_MINUTES filter sees post-cascade minute values.
+        new_mins = min(orig_mins + total_extra, MAX_PLAYER_MINUTES)
+        df.at[idx, "proj_minutes"] = round(new_mins, 1)
+        print(
+            f"[AUDIT-1.2] Player {df.at[idx, 'player_name']}: "
+            f"pre_cascade_min={orig_mins:.1f}, post_cascade_min={new_mins:.1f}, "
+            f"bump_fp={total_bump:.2f}"
+        )
 
     # Make proj = adjusted_proj so all downstream consumers pick up the change
     df["proj"] = df["adjusted_proj"]
