@@ -20,6 +20,8 @@ import os
 import pandas as pd
 from typing import Dict, Any, Optional
 
+from yak_core.config import ROLLING_WEIGHTS as _ROLLING_WEIGHTS, ROLLING_BLEND_RATIO as _ROLLING_BLEND_RATIO
+
 
 # ---- Constants calibrated from 2026-02-04 + 2026-02-12 historical data ----
 DEFAULT_FP_PER_K = 4.0          # flat multiplier: proj = salary * FP_PER_K / 1000
@@ -196,15 +198,10 @@ def proj_model(
 
     if _n_with_rolling > 0:
         # Vectorised blend: rolling signals (70%) + salary baseline (30%)
-        # Weighting scheme: fp_5 heaviest (recent form), fp_20 lightest
-        _rolling_weights = {
-            "rolling_fp_5":  0.50,
-            "rolling_fp_10": 0.30,
-            "rolling_fp_20": 0.20,
-        }
+        # [AUDIT-4.2] Weights imported from yak_core.config.ROLLING_WEIGHTS (single source of truth)
         rolling_weighted = pd.Series(0.0, index=df.index)
         rolling_w_sum = pd.Series(0.0, index=df.index)
-        for col, w in _rolling_weights.items():
+        for col, w in _ROLLING_WEIGHTS.items():
             vals = pd.to_numeric(df[col], errors="coerce")
             valid = vals.notna() & (vals > 0)
             rolling_weighted += vals.fillna(0) * w * valid.astype(float)
@@ -214,11 +211,12 @@ def proj_model(
         rolling_avg = rolling_weighted / rolling_w_sum.replace(0, 1)
 
         # Blend: 70% rolling signal, 30% salary baseline for players with data.
+        # [AUDIT-4.2] Blend ratio from yak_core.config.ROLLING_BLEND_RATIO
         # Players with NO rolling data get pure salary-implied.
         proj_series = sal_proj.copy()
         proj_series[has_signal] = (
-            rolling_avg[has_signal] * 0.70
-            + sal_proj[has_signal] * 0.30
+            rolling_avg[has_signal] * _ROLLING_BLEND_RATIO
+            + sal_proj[has_signal] * (1.0 - _ROLLING_BLEND_RATIO)
         )
         proj_series = proj_series.clip(lower=0)
 

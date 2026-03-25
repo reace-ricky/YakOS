@@ -369,7 +369,7 @@ def print_report(results: list[dict]) -> None:
         "GPP_PROJ_WEIGHT", "GPP_UPSIDE_WEIGHT", "GPP_BOOM_WEIGHT",
         "GPP_OWN_PENALTY_STRENGTH", "GPP_OWN_LOW_BOOST",
         "GPP_MAX_PUNT_PLAYERS", "GPP_MIN_MID_PLAYERS",
-        "GPP_OWN_CAP", "GPP_MIN_LOW_OWN_PLAYERS",
+        "GPP_MIN_LOW_OWN_PLAYERS",
     ]:
         print(f"    {key}: {DEFAULT_CONFIG.get(key)}")
 
@@ -623,7 +623,7 @@ def main():
                 "GPP_PROJ_WEIGHT", "GPP_UPSIDE_WEIGHT", "GPP_BOOM_WEIGHT",
                 "GPP_OWN_PENALTY_STRENGTH", "GPP_OWN_LOW_BOOST",
                 "GPP_MAX_PUNT_PLAYERS", "GPP_MIN_MID_PLAYERS",
-                "GPP_OWN_CAP", "GPP_MIN_LOW_OWN_PLAYERS",
+                "GPP_MIN_LOW_OWN_PLAYERS",
                 "GPP_LOW_OWN_THRESHOLD", "GPP_PROJ_FLOOR",
             ]
         },

@@ -21,6 +21,7 @@ from yak_core.config import (
     DK_SHOWDOWN_CAPTAIN_MULTIPLIER,
     INELIGIBLE_STATUSES,
     DK_COLUMN_MAP,
+    CALIBRATION_BIAS_STRENGTH,
 )
 from yak_core.ownership import detect_ownership_scale
 try:
@@ -755,8 +756,9 @@ def prepare_pool(
                 _primary_pos = pd.Series("", index=df.index)
 
             # Compute per-player adjustment
+            # [AUDIT-4.1] Apply CALIBRATION_BIAS_STRENGTH (85%) of measured bias (up from 50%)
             _adjustment = pd.Series(0.0, index=df.index)
-            _adjustment += _overall_bias * 0.5
+            _adjustment += _overall_bias * CALIBRATION_BIAS_STRENGTH
             _pos_adj = _primary_pos.map(_pos_corr).fillna(0.0)
             _adjustment += _pos_adj
 
@@ -766,6 +768,11 @@ def prepare_pool(
                 df.loc[_mask, "proj"] = (df.loc[_mask, "proj"] + _adjustment[_mask]).clip(lower=0)
                 _n_adjusted = int(_mask.sum())
                 _total_adj = float(_adjustment[_mask].mean())
+                print(
+                    f"[AUDIT-4.1] Bias correction: measured_bias={_overall_bias:.3f}, "
+                    f"applied_correction={_overall_bias * CALIBRATION_BIAS_STRENGTH:.3f}, "
+                    f"strength={CALIBRATION_BIAS_STRENGTH:.0%}"
+                )
                 logger.info(
                     "[prepare_pool] Applied calibration corrections to %d players (avg adj: %.2f FP)",
                     _n_adjusted, _total_adj,
@@ -1174,7 +1181,6 @@ def build_multiple_lineups_with_exposure(
     # (single source of truth in config.py — do NOT add numeric literals here)
     gpp_max_punt_players = int(cfg.get("GPP_MAX_PUNT_PLAYERS", DEFAULT_CONFIG["GPP_MAX_PUNT_PLAYERS"]))
     gpp_min_mid_players  = int(cfg.get("GPP_MIN_MID_PLAYERS",  DEFAULT_CONFIG["GPP_MIN_MID_PLAYERS"]))
-    gpp_own_cap          = float(cfg.get("GPP_OWN_CAP",         DEFAULT_CONFIG["GPP_OWN_CAP"]))
     gpp_min_low_own      = int(cfg.get("GPP_MIN_LOW_OWN_PLAYERS", DEFAULT_CONFIG["GPP_MIN_LOW_OWN_PLAYERS"]))
     gpp_low_own_thresh   = float(cfg.get("GPP_LOW_OWN_THRESHOLD", DEFAULT_CONFIG["GPP_LOW_OWN_THRESHOLD"]))
     gpp_force_game_stack = bool(cfg.get("GPP_FORCE_GAME_STACK",  DEFAULT_CONFIG["GPP_FORCE_GAME_STACK"]))
@@ -1358,7 +1364,6 @@ def build_multiple_lineups_with_exposure(
             gpp_constraints_d = {
                 "max_punt_players":   gpp_max_punt_players,
                 "min_mid_players":    gpp_min_mid_players,
-                "own_cap":            gpp_own_cap,
                 "min_low_own_players": gpp_min_low_own,
                 "low_own_threshold": gpp_low_own_thresh,
                 "force_game_stack":   gpp_force_game_stack,

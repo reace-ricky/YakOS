@@ -52,7 +52,6 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "GPP_MIN_STUD_PLAYERS": 1,   # reduced from 3 — RG winners avg 1.5 studs
             "GPP_STUD_SALARY_THRESHOLD": 8000,
             "GPP_OBJECTIVE": "ceiling",
-            "GPP_OWN_CAP": 2.4,
             "GPP_LOW_OWN_THRESHOLD": 0.10,
             "GPP_MIN_LOW_OWN_PLAYERS": 1,
             "GPP_MIN_LINEUP_CEILING": 360,
@@ -106,7 +105,6 @@ SPORT_PRESETS: Dict[str, Dict[str, Dict[str, Any]]] = {
             "GPP_MIN_STUD_PLAYERS": 1,   # reduced from 2 — RG winners avg 1.5 studs
             "GPP_STUD_SALARY_THRESHOLD": 8000,
             "GPP_OBJECTIVE": "ceiling",
-            "GPP_OWN_CAP": 2.0,
             "GPP_LOW_OWN_THRESHOLD": 0.08,
             "GPP_MIN_LOW_OWN_PLAYERS": 2,
             "GPP_MIN_LINEUP_CEILING": 350,

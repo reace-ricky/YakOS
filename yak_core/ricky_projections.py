@@ -20,23 +20,22 @@ Usage
 
 from __future__ import annotations
 
+import logging
 import numpy as np
 import pandas as pd
 from typing import Any, Dict, Optional
+
+from yak_core.config import ROLLING_WEIGHTS as _ROLLING_WEIGHTS, ROLLING_BLEND_RATIO as _ROLLING_VS_SALARY
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-# Rolling-window weights (must sum to 1.0)
-_ROLLING_WEIGHTS: Dict[str, float] = {
-    "rolling_fp_5": 0.50,
-    "rolling_fp_10": 0.30,
-    "rolling_fp_20": 0.20,
-}
+# [AUDIT-4.2] _ROLLING_WEIGHTS and _ROLLING_VS_SALARY are now imported from
+# yak_core/config.py (single source of truth).
 
-# Blend: rolling signal vs salary baseline
-_ROLLING_VS_SALARY = 0.70  # 70% rolling, 30% salary
 _SALARY_ONLY = 1.00        # fallback when no rolling data
 
 # Floor/ceil spread multipliers by salary tier ($/1k)
@@ -112,6 +111,9 @@ def compute_ricky_proj(
     rolling_cols_present = [c for c in _ROLLING_WEIGHTS if c in df.columns]
 
     if rolling_cols_present:
+        logger.debug(
+            "[AUDIT-4.2] Rolling weights: single_source=True, projections_import=True, ricky_import=True"
+        )
         weighted_sum = pd.Series(0.0, index=df.index)
         weight_total = pd.Series(0.0, index=df.index)
 
