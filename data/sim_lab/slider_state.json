@@ -1,7 +1,9 @@
 {
   "configs": {
     "GPP Main": {
-      "overrides": {},
+      "overrides": {
+        "NUM_LINEUPS": 30
+      },
       "ricky_weights": {
         "w_gpp": 0.2,
         "w_ceil": 1.31,
