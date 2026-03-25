@@ -3,7 +3,7 @@
     "GPP Main": {
       "overrides": {
         "GPP_MIN_PROJ_FLOOR": 2.5,
-        "overall_bias_correction": 6.0
+        "overall_bias_correction": 8.54
       },
       "ricky_weights": {
         "w_gpp": 0.21,
