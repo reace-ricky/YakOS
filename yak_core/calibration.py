@@ -28,6 +28,12 @@ from .scoring import score_lineups, backtest_summary
 # ============================================================
 
 DEFAULT_CALIBRATION_CONFIG = {
+    # Ricky model position adjustments (additive, applied before contest calibration).
+    # These are shared across contest types — they tune compute_ricky_proj(), not
+    # apply_contest_calibration(). The Lab writes this key to wire calibration in.
+    "ricky_position_adjustments": {
+        "PG": 0.0, "SG": 0.0, "SF": 0.0, "PF": 0.0, "C": 0.0,
+    },
     "GPP": {
         "proj_multiplier": 1.0,
         "ceiling_boost": 0.15,

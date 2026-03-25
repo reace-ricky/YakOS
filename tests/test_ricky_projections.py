@@ -288,6 +288,211 @@ class TestApplyProjectionsRickyProj:
 
 
 # ---------------------------------------------------------------------------
+# Acceptance tests — matchup_factor
+# ---------------------------------------------------------------------------
+
+
+class TestMatchupFactor:
+    def test_matchup_factor_below_one_reduces_proj(self):
+        """matchup_factor=0.80 should lower ricky_proj by ~20%."""
+        pool = pd.DataFrame([{
+            "player_name": "P0", "pos": "PG", "salary": 7000,
+            "rolling_fp_5": 30.0, "rolling_fp_10": 30.0, "rolling_fp_20": 30.0,
+        }])
+        baseline = compute_ricky_proj(pool)
+        pool_with_mf = pool.copy()
+        pool_with_mf["matchup_factor"] = 0.80
+        result = compute_ricky_proj(pool_with_mf)
+        assert result["ricky_proj"].iloc[0] == pytest.approx(
+            baseline["ricky_proj"].iloc[0] * 0.80, rel=1e-2
+        )
+
+    def test_matchup_factor_above_one_raises_proj(self):
+        """matchup_factor=1.20 should raise ricky_proj by ~20%."""
+        pool = pd.DataFrame([{
+            "player_name": "P2", "pos": "C", "salary": 7000,
+            "rolling_fp_5": 30.0, "rolling_fp_10": 30.0, "rolling_fp_20": 30.0,
+        }])
+        baseline = compute_ricky_proj(pool)
+        pool_with_mf = pool.copy()
+        pool_with_mf["matchup_factor"] = 1.20
+        result = compute_ricky_proj(pool_with_mf)
+        assert result["ricky_proj"].iloc[0] == pytest.approx(
+            baseline["ricky_proj"].iloc[0] * 1.20, rel=1e-2
+        )
+
+    def test_matchup_factor_one_unchanged(self):
+        """matchup_factor=1.0 should produce the same projection as the baseline."""
+        pool = pd.DataFrame([{
+            "player_name": "P1", "pos": "SG", "salary": 7000,
+            "rolling_fp_5": 30.0, "rolling_fp_10": 30.0, "rolling_fp_20": 30.0,
+        }])
+        baseline = compute_ricky_proj(pool)
+        pool_with_mf = pool.copy()
+        pool_with_mf["matchup_factor"] = 1.0
+        result = compute_ricky_proj(pool_with_mf)
+        assert result["ricky_proj"].iloc[0] == pytest.approx(
+            baseline["ricky_proj"].iloc[0], rel=1e-6
+        )
+
+    def test_matchup_factor_clipped_at_130(self):
+        """matchup_factor=2.0 should be clipped to 1.30."""
+        pool = pd.DataFrame([{
+            "player_name": "P", "pos": "SF", "salary": 7000,
+            "rolling_fp_5": 30.0, "rolling_fp_10": 30.0, "rolling_fp_20": 30.0,
+        }])
+        baseline = compute_ricky_proj(pool)
+        pool_with_mf = pool.copy()
+        pool_with_mf["matchup_factor"] = 2.0  # should be clipped to 1.30
+        result = compute_ricky_proj(pool_with_mf)
+        assert result["ricky_proj"].iloc[0] == pytest.approx(
+            baseline["ricky_proj"].iloc[0] * 1.30, rel=1e-2
+        )
+
+    def test_matchup_factor_absent_unchanged(self):
+        """When matchup_factor column is absent, output is identical to baseline."""
+        pool = _make_pool(n=5)
+        baseline = compute_ricky_proj(pool)
+        result = compute_ricky_proj(pool)
+        pd.testing.assert_series_equal(
+            result["ricky_proj"].reset_index(drop=True),
+            baseline["ricky_proj"].reset_index(drop=True),
+        )
+
+    def test_matchup_factor_three_players(self):
+        """Acceptance test: 3-player pool with factors [0.80, 1.0, 1.20]."""
+        pool = pd.DataFrame([
+            {"player_name": "P0", "pos": "PG", "salary": 7000,
+             "rolling_fp_5": 30.0, "rolling_fp_10": 30.0, "rolling_fp_20": 30.0},
+            {"player_name": "P1", "pos": "SG", "salary": 7000,
+             "rolling_fp_5": 30.0, "rolling_fp_10": 30.0, "rolling_fp_20": 30.0},
+            {"player_name": "P2", "pos": "C", "salary": 7000,
+             "rolling_fp_5": 30.0, "rolling_fp_10": 30.0, "rolling_fp_20": 30.0},
+        ])
+        baseline = compute_ricky_proj(pool)
+        pool_with_mf = pool.copy()
+        pool_with_mf["matchup_factor"] = [0.80, 1.0, 1.20]
+        result = compute_ricky_proj(pool_with_mf)
+
+        base_proj = baseline["ricky_proj"].iloc[0]
+        assert result["ricky_proj"].iloc[0] == pytest.approx(base_proj * 0.80, rel=1e-2)
+        assert result["ricky_proj"].iloc[1] == pytest.approx(base_proj * 1.00, rel=1e-6)
+        assert result["ricky_proj"].iloc[2] == pytest.approx(base_proj * 1.20, rel=1e-2)
+
+
+# ---------------------------------------------------------------------------
+# Acceptance tests — position_adjustments
+# ---------------------------------------------------------------------------
+
+
+class TestPositionAdjustments:
+    def test_pg_adjustment_applied(self):
+        """position_adjustments={"PG": 2.0} adds 2 pts to PG players."""
+        pool = pd.DataFrame([
+            {"player_name": "P0", "pos": "PG", "salary": 7000,
+             "rolling_fp_5": 30.0, "rolling_fp_10": 30.0, "rolling_fp_20": 30.0},
+            {"player_name": "P1", "pos": "SG", "salary": 7000,
+             "rolling_fp_5": 30.0, "rolling_fp_10": 30.0, "rolling_fp_20": 30.0},
+        ])
+        baseline = compute_ricky_proj(pool)
+        result = compute_ricky_proj(pool, position_adjustments={"PG": 2.0})
+
+        assert result.iloc[0]["ricky_proj"] == pytest.approx(
+            baseline.iloc[0]["ricky_proj"] + 2.0, abs=0.01
+        )
+        # SG should be unchanged
+        assert result.iloc[1]["ricky_proj"] == pytest.approx(
+            baseline.iloc[1]["ricky_proj"], abs=0.01
+        )
+
+    def test_c_negative_adjustment(self):
+        """position_adjustments={"C": -1.0} subtracts 1 pt from C players."""
+        pool = pd.DataFrame([
+            {"player_name": "P0", "pos": "C", "salary": 7000,
+             "rolling_fp_5": 30.0, "rolling_fp_10": 30.0, "rolling_fp_20": 30.0},
+        ])
+        baseline = compute_ricky_proj(pool)
+        result = compute_ricky_proj(pool, position_adjustments={"C": -1.0})
+
+        assert result.iloc[0]["ricky_proj"] == pytest.approx(
+            baseline.iloc[0]["ricky_proj"] - 1.0, abs=0.01
+        )
+
+    def test_multiple_position_adjustments(self):
+        """PG gets +2.0, C gets -1.0, other positions unchanged."""
+        pool = pd.DataFrame([
+            {"player_name": "PG_p", "pos": "PG", "salary": 7000,
+             "rolling_fp_5": 30.0, "rolling_fp_10": 30.0, "rolling_fp_20": 30.0},
+            {"player_name": "SG_p", "pos": "SG", "salary": 7000,
+             "rolling_fp_5": 30.0, "rolling_fp_10": 30.0, "rolling_fp_20": 30.0},
+            {"player_name": "C_p", "pos": "C", "salary": 7000,
+             "rolling_fp_5": 30.0, "rolling_fp_10": 30.0, "rolling_fp_20": 30.0},
+        ])
+        baseline = compute_ricky_proj(pool)
+        result = compute_ricky_proj(pool, position_adjustments={"PG": 2.0, "C": -1.0})
+
+        assert result.iloc[0]["ricky_proj"] == pytest.approx(
+            baseline.iloc[0]["ricky_proj"] + 2.0, abs=0.01
+        )
+        assert result.iloc[1]["ricky_proj"] == pytest.approx(
+            baseline.iloc[1]["ricky_proj"], abs=0.01
+        )
+        assert result.iloc[2]["ricky_proj"] == pytest.approx(
+            baseline.iloc[2]["ricky_proj"] - 1.0, abs=0.01
+        )
+
+    def test_position_adj_floored_at_zero(self):
+        """Large negative position adjustment must not produce negative ricky_proj."""
+        pool = pd.DataFrame([{
+            "player_name": "P", "pos": "PG", "salary": 3500,
+        }])
+        result = compute_ricky_proj(pool, position_adjustments={"PG": -9999.0})
+        assert result["ricky_proj"].iloc[0] >= 0.0
+
+    def test_none_position_adjustments_no_change(self):
+        """position_adjustments=None is equivalent to not passing it."""
+        pool = _make_pool(n=5)
+        r1 = compute_ricky_proj(pool)
+        r2 = compute_ricky_proj(pool, position_adjustments=None)
+        pd.testing.assert_series_equal(
+            r1["ricky_proj"].reset_index(drop=True),
+            r2["ricky_proj"].reset_index(drop=True),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Acceptance tests — no double-dip
+# ---------------------------------------------------------------------------
+
+
+class TestNoDoubleDip:
+    def test_ricky_proj_and_proj_are_different_columns(self):
+        """After apply_projections, ricky_proj and proj must both exist as columns."""
+        pool = _make_pool()
+        cfg = {"PROJ_SOURCE": "ricky_proj"}
+        result = apply_projections(pool, cfg)
+        assert "ricky_proj" in result.columns
+        assert "proj" in result.columns
+
+    def test_apply_contest_calibration_does_not_receive_ricky_proj(self):
+        """apply_contest_calibration should operate on proj, never ricky_proj."""
+        from yak_core.calibration import apply_contest_calibration, DEFAULT_CALIBRATION_CONFIG
+        pool = _make_pool()
+        cfg = {"PROJ_SOURCE": "ricky_proj"}
+        result = apply_projections(pool, cfg)
+
+        # Simulate what the downstream pipeline does
+        result["proj"] = result["ricky_proj"]
+        calibrated = apply_contest_calibration(result, "GPP", DEFAULT_CALIBRATION_CONFIG)
+
+        # apply_contest_calibration must not modify ricky_proj
+        np.testing.assert_array_almost_equal(
+            calibrated["ricky_proj"].values,
+            result["ricky_proj"].values,
+        )
+
+
+# ---------------------------------------------------------------------------
 # build_ricky_proj_from_archive
 # ---------------------------------------------------------------------------
 
