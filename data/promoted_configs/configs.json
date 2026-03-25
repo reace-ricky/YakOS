@@ -35,25 +35,53 @@
   },
   {
     "key": "STARS_AND_SCRUBS_CEILING_V1",
-    "display_name": "Ricky's Ceiling Hunter",
+    "display_name": "Stars & Scrubs Ceiling",
     "base_preset": "GPP Main",
-    "overrides": {},
+    "overrides": {
+      "GPP_BOOM_SPREAD_WEIGHT": 0.4,
+      "GPP_EFFICIENCY_WEIGHT": 0.25,
+      "CASH_FLOOR_WEIGHT": 0.85,
+      "overall_bias_correction": 12.42
+    },
     "ricky_weights": {
-      "w_gpp": 0.1,
+      "w_gpp": 0.2,
       "w_ceil": 1.3,
       "w_own": 0.3
     },
     "validation_stats": {
-      "avg_diff": 50.43,
-      "beat_proj_pct": 81.7,
-      "sample_size": 3,
+      "avg_diff": 30.58,
+      "beat_proj_pct": 80.8,
+      "sample_size": 26,
       "dates_tested": [
-        "2026-03-04",
+        "2026-01-29",
+        "2026-01-31",
+        "2026-02-01",
+        "2026-02-02",
+        "2026-02-03",
+        "2026-02-04",
+        "2026-02-05",
+        "2026-02-08",
+        "2026-02-22",
+        "2026-02-23",
+        "2026-02-24",
+        "2026-02-27",
+        "2026-03-01",
+        "2026-03-02",
+        "2026-03-05",
+        "2026-03-06",
+        "2026-03-07",
+        "2026-03-08",
         "2026-03-09",
-        "2026-03-15"
+        "2026-03-10",
+        "2026-03-11",
+        "2026-03-15",
+        "2026-03-16",
+        "2026-03-17",
+        "2026-03-18",
+        "2026-03-21"
       ]
     },
-    "promoted_at": "2026-03-21T20:50:03.674879",
+    "promoted_at": "2026-03-25T19:48:45.010173",
     "description": ""
   }
 ]
