@@ -3195,6 +3195,10 @@ def _apply_archetype(preset_name: str, archetype_name: str) -> None:
     if "ricky_weights" in arch:
         _rk = f"sim_lab_ricky_weights_{preset_name}"
         st.session_state[_rk] = dict(arch["ricky_weights"])
+        # Sync widget keys so sliders pick up the new archetype values on rerun
+        st.session_state[f"sl_ricky_gpp_{preset_name}"] = arch["ricky_weights"]["w_gpp"]
+        st.session_state[f"sl_ricky_ceil_{preset_name}"] = arch["ricky_weights"]["w_ceil"]
+        st.session_state[f"sl_ricky_own_{preset_name}"] = arch["ricky_weights"]["w_own"]
         _save_slider_state(preset_name, st.session_state[sk], arch["ricky_weights"])
 
 
@@ -3218,6 +3222,10 @@ def _apply_named_profile(profile_key: str) -> None:
     # Set Ricky weights
     ricky_key = f"sim_lab_ricky_weights_{preset_name}"
     st.session_state[ricky_key] = dict(profile["ricky_weights"])
+    # Sync widget keys so sliders pick up the new profile values on rerun
+    st.session_state[f"sl_ricky_gpp_{preset_name}"] = profile["ricky_weights"]["w_gpp"]
+    st.session_state[f"sl_ricky_ceil_{preset_name}"] = profile["ricky_weights"]["w_ceil"]
+    st.session_state[f"sl_ricky_own_{preset_name}"] = profile["ricky_weights"]["w_own"]
 
 
 def _render_auto_calibrate(
@@ -3773,21 +3781,29 @@ def render_sim_lab(sport: str) -> None:
             }
     with st.expander("Ricky Ranking Weights"):
         _rw = st.session_state[_ricky_key]
+        # Widget keys are the source of truth during a session — prefer them
+        # over the dict so user slider moves survive page reruns.
+        _gpp_key = f"sl_ricky_gpp_{preset_name}"
+        _ceil_key = f"sl_ricky_ceil_{preset_name}"
+        _own_key = f"sl_ricky_own_{preset_name}"
+        _gpp_val = float(st.session_state.get(_gpp_key, _rw["w_gpp"]))
+        _ceil_val = float(st.session_state.get(_ceil_key, _rw["w_ceil"]))
+        _own_val = float(st.session_state.get(_own_key, _rw["w_own"]))
         rc1, rc2, rc3 = st.columns(3)
         with rc1:
             _rw["w_gpp"] = st.slider(
-                "GPP Score", 0.0, 2.0, float(_rw["w_gpp"]), 0.01,
-                key=f"sl_ricky_gpp_{preset_name}", format="%.2f",
+                "GPP Score", 0.0, 2.0, _gpp_val, 0.01,
+                key=_gpp_key, format="%.2f",
             )
         with rc2:
             _rw["w_ceil"] = st.slider(
-                "Ceiling", 0.0, 2.0, float(_rw["w_ceil"]), 0.01,
-                key=f"sl_ricky_ceil_{preset_name}", format="%.2f",
+                "Ceiling", 0.0, 2.0, _ceil_val, 0.01,
+                key=_ceil_key, format="%.2f",
             )
         with rc3:
             _rw["w_own"] = st.slider(
-                "Own Penalty", 0.0, 2.0, float(_rw["w_own"]), 0.01,
-                key=f"sl_ricky_own_{preset_name}", format="%.2f",
+                "Own Penalty", 0.0, 2.0, _own_val, 0.01,
+                key=_own_key, format="%.2f",
             )
         st.session_state[_ricky_key] = _rw
 
