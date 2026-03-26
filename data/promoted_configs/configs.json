@@ -38,10 +38,11 @@
     "display_name": "Stars & Scrubs Ceiling",
     "base_preset": "GPP Main",
     "overrides": {
-      "GPP_BOOM_SPREAD_WEIGHT": 0.4,
-      "GPP_EFFICIENCY_WEIGHT": 0.25,
-      "CASH_FLOOR_WEIGHT": 0.85,
-      "overall_bias_correction": 12.42
+      "GPP_BOOM_SPREAD_WEIGHT": 0.1,
+      "GPP_EFFICIENCY_WEIGHT": 0.05,
+      "CASH_FLOOR_WEIGHT": 0.25,
+      "MIN_PLAYER_MINUTES": 15,
+      "overall_bias_correction": 8.27
     },
     "ricky_weights": {
       "w_gpp": 0.2,
@@ -49,9 +50,9 @@
       "w_own": 0.3
     },
     "validation_stats": {
-      "avg_diff": 30.58,
-      "beat_proj_pct": 80.8,
-      "sample_size": 26,
+      "avg_diff": 39.18,
+      "beat_proj_pct": 90.7,
+      "sample_size": 28,
       "dates_tested": [
         "2026-01-29",
         "2026-01-31",
@@ -67,6 +68,7 @@
         "2026-02-27",
         "2026-03-01",
         "2026-03-02",
+        "2026-03-04",
         "2026-03-05",
         "2026-03-06",
         "2026-03-07",
@@ -74,6 +76,7 @@
         "2026-03-09",
         "2026-03-10",
         "2026-03-11",
+        "2026-03-14",
         "2026-03-15",
         "2026-03-16",
         "2026-03-17",
@@ -81,7 +84,7 @@
         "2026-03-21"
       ]
     },
-    "promoted_at": "2026-03-25T19:48:45.010173",
+    "promoted_at": "2026-03-26T21:33:51.262294",
     "description": ""
   }
 ]
