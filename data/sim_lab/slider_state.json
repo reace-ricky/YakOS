@@ -2,7 +2,8 @@
   "configs": {
     "GPP Main": {
       "overrides": {
-        "MAX_EXPOSURE": 0.5
+        "MAX_EXPOSURE": 0.5,
+        "OWN_WEIGHT": 0.1
       },
       "ricky_weights": {
         "w_gpp": 0.0,
