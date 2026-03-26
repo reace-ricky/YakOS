@@ -3,7 +3,8 @@
     "GPP Main": {
       "overrides": {
         "NUM_LINEUPS": 25,
-        "MIN_PLAYER_MINUTES": 12
+        "MIN_PLAYER_MINUTES": 12,
+        "OWN_WEIGHT": 0.1
       },
       "ricky_weights": {
         "w_gpp": 0.2,
