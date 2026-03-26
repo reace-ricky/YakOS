@@ -6,7 +6,7 @@
         "MIN_PLAYER_MINUTES": 10
       },
       "ricky_weights": {
-        "w_gpp": 1.15,
+        "w_gpp": 0.21,
         "w_ceil": 1.0,
         "w_own": 0.15
       }
