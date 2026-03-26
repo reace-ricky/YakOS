@@ -533,6 +533,7 @@ def fetch_actuals_multi_day(
         for gd in game_dates:
             try:
                 df = fetch_actuals_from_api(gd, cfg)
+                df["_game_date"] = gd
                 print(f"[fetch_actuals_multi_day]   {gd}: {len(df)} players")
                 frames.append(df)
             except NoGamesScheduledError:
@@ -541,8 +542,17 @@ def fetch_actuals_multi_day(
                 print(f"[fetch_actuals_multi_day]   {gd}: error — {exc}")
         if frames:
             combined = pd.concat(frames, ignore_index=True)
-            # De-duplicate by player_name, keeping first occurrence
-            combined = combined.drop_duplicates(subset="player_name")
+            # Prefer rows from the slate_date over other dates for
+            # players who appear on multiple days (e.g. DeRozan on
+            # 3/14 AND 3/15 — keep the slate-date row).
+            target = combined[combined["_game_date"] == date_clean]
+            padding = combined[combined["_game_date"] != date_clean]
+            target = target.drop_duplicates(subset="player_name")
+            padding = padding[
+                ~padding["player_name"].isin(target["player_name"])
+            ].drop_duplicates(subset="player_name")
+            combined = pd.concat([target, padding], ignore_index=True)
+            combined.drop(columns=["_game_date"], inplace=True)
             print(f"[fetch_actuals_multi_day] Combined: {len(combined)} unique players")
             return combined
         # Fall through to single-date if all multi-day fetches failed

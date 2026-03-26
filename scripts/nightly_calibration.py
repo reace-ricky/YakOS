@@ -691,6 +691,7 @@ def _fetch_nba_actuals_multi_day_backfill(
     for gd in [prev, curr, nxt]:
         try:
             df = fetch_actuals_from_api(gd, cfg)
+            df["_game_date"] = gd
             log.info("  %s: %d players", gd, len(df))
             frames.append(df)
         except Exception as exc:
@@ -699,7 +700,17 @@ def _fetch_nba_actuals_multi_day_backfill(
     if not frames:
         return pd.DataFrame()
     combined = pd.concat(frames, ignore_index=True)
-    return combined.drop_duplicates(subset="player_name")
+    # Prefer rows from the slate date (curr) over padding dates (prev/nxt)
+    # so that multi-game players like DeRozan get the correct day's stats.
+    target = combined[combined["_game_date"] == curr]
+    padding = combined[combined["_game_date"] != curr]
+    target = target.drop_duplicates(subset="player_name")
+    padding = padding[
+        ~padding["player_name"].isin(target["player_name"])
+    ].drop_duplicates(subset="player_name")
+    combined = pd.concat([target, padding], ignore_index=True)
+    combined.drop(columns=["_game_date"], inplace=True)
+    return combined
 
 
 def backfill_actuals(min_coverage: float = 0.8) -> list[dict]:
