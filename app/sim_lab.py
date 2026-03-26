@@ -102,9 +102,9 @@ _NBA_GPP_ARCHETYPES: Dict[str, Dict[str, Any]] = {
             "MAX_EXPOSURE": 0.40,
         },
         "ricky_weights": {
-            "w_gpp": 0.50,
-            "w_ceil": 0.80,
-            "w_own": 0.30,
+            "w_gpp": 0.0,
+            "w_ceil": 1.0,
+            "w_own": 0.15,
         },
     },
     "Balanced Leverage": {

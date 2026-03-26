@@ -12,7 +12,7 @@ Each entry:
         "display_name":     "20-Max V1",
         "base_preset":      "GPP Main",
         "overrides":        { ... slider values ... },
-        "ricky_weights":    {"w_gpp": 1.0, "w_ceil": 0.8, "w_own": 0.3},
+        "ricky_weights":    {"w_gpp": 0.0, "w_ceil": 1.0, "w_own": 0.15},
         "validation_stats": {
             "avg_diff": 1.23,
             "beat_proj_pct": 62.5,
