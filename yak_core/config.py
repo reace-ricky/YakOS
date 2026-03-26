@@ -777,11 +777,11 @@ NAMED_PROFILES: Dict[str, Dict[str, Any]] = {
             "MIN_PLAYER_MINUTES": 20,      # only rostered rotation players
             "GPP_MIN_PROJ_FLOOR": 15,      # higher floor bar for cash
         },
-        "ricky_weights": {"w_gpp": 0.0, "w_ceil": 1.0, "w_own": 0.15},
+        "ricky_weights": {"w_gpp": 1.0, "w_ceil": 0.0, "w_own": 0.15},
         "version": "V1",
         "description": (
             "Cash 50/50 & Double-Up — floor-lock, high minutes threshold, "
-            "chalk-friendly, single lineup, tight salary usage"
+            "chalk-friendly, single lineup, projection-dominant ranking"
         ),
     },
     "CASH_MAIN_V2": {
@@ -800,11 +800,11 @@ NAMED_PROFILES: Dict[str, Dict[str, Any]] = {
             "MAX_EXPOSURE": 0.60,
             "MIN_UNIQUES": 1,
         },
-        "ricky_weights": {"w_gpp": 0.0, "w_ceil": 1.0, "w_own": 0.15},
+        "ricky_weights": {"w_gpp": 1.0, "w_ceil": 0.0, "w_own": 0.15},
         "version": "V2",
         "description": (
             "DS-calibrated Cash — full chalk, no ceiling chasing, heavy bust penalty, "
-            "ceiling-dominant Ricky weights. For 50/50 and double-up contests."
+            "projection-dominant Ricky weights. For 50/50 and double-up contests."
         ),
     },
     "CASH_GAME_V1": {
@@ -820,11 +820,11 @@ NAMED_PROFILES: Dict[str, Dict[str, Any]] = {
             "MIN_PLAYER_MINUTES": 18,      # slightly lower — game slates have thin pools
             "GPP_MIN_PROJ_FLOOR": 12,      # lower floor bar — thin pool needs flexibility
         },
-        "ricky_weights": {"w_gpp": 0.0, "w_ceil": 1.0, "w_own": 0.15},
+        "ricky_weights": {"w_gpp": 1.0, "w_ceil": 0.1, "w_own": 0.15},
         "version": "V1",
         "description": (
-            "Cash for single-game / 3-man slates — ceiling-dominant ranking, "
-            "looser constraints for thin player pools"
+            "Cash for single-game / 3-man slates — projection-dominant ranking, "
+            "tiny ceiling tiebreaker, looser constraints for thin player pools"
         ),
     },
     # ── Showdown profiles (new — DS-calibrated) ──────────────────────────
@@ -867,11 +867,11 @@ NAMED_PROFILES: Dict[str, Dict[str, Any]] = {
             "NUM_LINEUPS": 10,
             "MAX_EXPOSURE": 0.60,
         },
-        "ricky_weights": {"w_gpp": 0.0, "w_ceil": 1.0, "w_own": 0.15},
+        "ricky_weights": {"w_gpp": 1.0, "w_ceil": 0.1, "w_own": 0.0},
         "version": "V1",
         "description": (
-            "DS-calibrated Showdown Cash — floor-first, chalk-friendly, "
-            "single-game pools. For showdown 50/50 and double-ups."
+            "DS-calibrated Showdown Cash — projection-dominant, slight ceiling tiebreaker, "
+            "no ownership weight (small pools). For showdown 50/50 and double-ups."
         ),
     },
     # ── SE-specific GPP profile ────────────────────────────────────────────
