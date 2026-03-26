@@ -1086,26 +1086,9 @@ def _run_post_slate(sport: str, slate_date: str) -> Dict[str, Any]:
             if actuals.empty:
                 return {"status": "error", "message": f"No actuals available for {slate_date}"}
 
-            # Merge actuals into pool — drop the placeholder actual_fp
-            # column first (set to NaN by fetch_live_dfs) so pandas doesn't
-            # create actual_fp_x / actual_fp_y suffix columns.
-            if "actual_fp" in pool.columns:
-                pool = pool.drop(columns=["actual_fp"])
-            if "mp_actual" in pool.columns:
-                pool = pool.drop(columns=["mp_actual"])
-
-            # Merge both actual_fp and mp_actual from actuals using two-pass name matching
-            from yak_core.name_utils import merge_with_normalized_names
-            value_cols = ["actual_fp"]
-            if "mp_actual" in actuals.columns:
-                value_cols.append("mp_actual")
-            pool_with_actuals = merge_with_normalized_names(
-                pool,
-                actuals[["player_name"] + value_cols],
-                on="player_name",
-                how="left",
-                value_cols=value_cols,
-            )
+            # Merge actuals using three-pass join (ID → exact name → normalized name)
+            from yak_core.name_utils import merge_actuals_three_pass
+            pool_with_actuals = merge_actuals_three_pass(pool, actuals)
         elif sport.upper() == "PGA":
             dg_key = _resolve_datagolf_key()
             if not dg_key:

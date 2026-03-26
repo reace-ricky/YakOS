@@ -426,11 +426,14 @@ def compute_calibration_metrics(
     Returns:
         Dictionary with metrics at lineup/player/position/salary/ownership levels
     """
-    from yak_core.name_utils import merge_with_normalized_names
+    from yak_core.name_utils import merge_actuals_three_pass
 
-    # Merge lineups with actuals using two-pass name matching
-    _actuals_sub = actual_outcomes[["player_name", "actual"]].drop_duplicates()
-    merged = merge_with_normalized_names(generated_lineups, _actuals_sub, on="player_name", how="left")
+    # Merge lineups with actuals using three-pass join (ID → exact name → normalized name)
+    merged = merge_actuals_three_pass(
+        generated_lineups,
+        actual_outcomes,
+        actuals_value_cols=["actual"],
+    )
 
     # Handle missing actuals
     merged["actual"] = merged["actual"].fillna(0)
