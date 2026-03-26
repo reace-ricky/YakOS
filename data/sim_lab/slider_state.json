@@ -2,7 +2,7 @@
   "configs": {
     "GPP Main": {
       "overrides": {
-        "overall_bias_correction": 12.02
+        "overall_bias_correction": 10.82
       },
       "ricky_weights": {
         "w_gpp": 0.2,
