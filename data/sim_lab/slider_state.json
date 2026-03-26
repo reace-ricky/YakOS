@@ -3,9 +3,9 @@
     "GPP Main": {
       "overrides": {},
       "ricky_weights": {
-        "w_gpp": 0.2,
+        "w_gpp": 0.26,
         "w_ceil": 0.85,
-        "w_own": 0.15
+        "w_own": 0.3
       }
     },
     "Cash Main": {
