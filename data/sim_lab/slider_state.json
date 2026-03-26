@@ -3,7 +3,9 @@
     "GPP Main": {
       "overrides": {
         "MAX_EXPOSURE": 0.5,
-        "OWN_WEIGHT": 0.1
+        "OWN_WEIGHT": 0.1,
+        "NUM_LINEUPS": 50,
+        "MIN_PLAYER_MINUTES": 15
       },
       "ricky_weights": {
         "w_gpp": 0.0,
