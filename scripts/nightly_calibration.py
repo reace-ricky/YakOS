@@ -47,6 +47,63 @@ def _signals_path(sport: str) -> Path:
     return Path(YAKOS_ROOT) / "data" / "published" / sport.lower() / "signals.parquet"
 
 
+# ── Multi-day actuals helper ───────────────────────────────────────────────
+
+
+def _fetch_nba_actuals_multi_day_backfill(
+    slate_date: str, api_key: str, pool: pd.DataFrame,
+) -> pd.DataFrame:
+    """Fetch NBA actuals handling multi-day slates, even without game_id.
+
+    If the pool has a ``game_id`` column, delegates to
+    ``fetch_actuals_multi_day`` which detects game dates from game_id.
+
+    If ``game_id`` is missing (older archives), fetches actuals for the
+    slate date, the day before, AND the day after.  Multi-day DK slates
+    span two consecutive days — for the first day of a multi-day slate
+    (e.g. 03-14) we need to also look at the NEXT day (03-15), not just
+    the previous day.  Fetching all three days (prev, curr, next) covers
+    both halves of any multi-day slate regardless of which day the archive
+    represents.
+    """
+    from yak_core.live import fetch_actuals_multi_day, fetch_actuals_from_api
+
+    cfg = {"RAPIDAPI_KEY": api_key}
+
+    # If pool has game_id, the standard multi-day function handles it
+    if "game_id" in pool.columns and pool["game_id"].notna().any():
+        return fetch_actuals_multi_day(slate_date, cfg, pool=pool)
+
+    # No game_id — compute prev/curr/next from the slate_date string directly.
+    # Use date.fromisoformat for reliable parsing (no strptime format ambiguity).
+    base_date = date.fromisoformat(slate_date)
+    prev_date = base_date - timedelta(days=1)
+    next_date = base_date + timedelta(days=1)
+
+    prev_str = prev_date.strftime("%Y%m%d")
+    curr_str = base_date.strftime("%Y%m%d")
+    next_str = next_date.strftime("%Y%m%d")
+
+    log.info(
+        "No game_id column — fetching actuals for %s: prev=%s, curr=%s, next=%s",
+        slate_date, prev_str, curr_str, next_str,
+    )
+
+    frames = []
+    for gd in [prev_str, curr_str, next_str]:
+        try:
+            df_actuals = fetch_actuals_from_api(gd, cfg)
+            log.info("  API date %s: %d players fetched", gd, len(df_actuals))
+            frames.append(df_actuals)
+        except Exception as exc:
+            log.info("  API date %s: %s", gd, exc)
+
+    if not frames:
+        return pd.DataFrame()
+    combined = pd.concat(frames, ignore_index=True)
+    return combined.drop_duplicates(subset="player_name")
+
+
 # ── NBA Flow ───────────────────────────────────────────────────────────────
 
 def run_nba_calibration(slate_date: str) -> dict:
@@ -56,7 +113,6 @@ def run_nba_calibration(slate_date: str) -> dict:
     """
     from yak_core.calibration_feedback import record_slate_errors
     from yak_core.edge_feedback import record_edge_outcomes
-    from yak_core.live import fetch_actuals_from_api, fetch_actuals_multi_day
     from yak_core.outcome_logger import log_slate_outcomes
     from yak_core.sim_sandbox import score_player_breakout
     from yak_core.slate_archive import archive_slate
@@ -118,7 +174,7 @@ def run_nba_calibration(slate_date: str) -> dict:
         return result
 
     try:
-        actuals = fetch_actuals_multi_day(slate_date, {"RAPIDAPI_KEY": api_key}, pool=pool)
+        actuals = _fetch_nba_actuals_multi_day_backfill(slate_date, api_key, pool)
     except Exception as e:
         log.error("Failed to fetch NBA actuals: %s", e)
         result["status"] = "error"
@@ -653,53 +709,6 @@ def sync_to_github(sports: list[str], extra_files: list[str] | None = None) -> d
 
 
 # ── Backfill ───────────────────────────────────────────────────────────────
-
-def _fetch_nba_actuals_multi_day_backfill(
-    slate_date: str, api_key: str, pool: pd.DataFrame,
-) -> pd.DataFrame:
-    """Fetch NBA actuals handling multi-day slates, even without game_id.
-
-    If the pool has a ``game_id`` column, delegates to
-    ``fetch_actuals_multi_day`` which detects game dates from game_id.
-
-    If ``game_id`` is missing (older archives), fetches actuals for the
-    slate date, the day before, AND the day after.  Multi-day DK slates
-    span two consecutive days — for the first day of a multi-day slate
-    (e.g. 03-14) we need to also look at the NEXT day (03-15), not just
-    the previous day.  Fetching all three days (prev, curr, next) covers
-    both halves of any multi-day slate regardless of which day the archive
-    represents.
-    """
-    from yak_core.live import fetch_actuals_multi_day, fetch_actuals_from_api
-
-    cfg = {"RAPIDAPI_KEY": api_key}
-
-    # If pool has game_id, the standard multi-day function handles it
-    if "game_id" in pool.columns and pool["game_id"].notna().any():
-        return fetch_actuals_multi_day(slate_date, cfg, pool=pool)
-
-    # No game_id — fetch slate date + day before + day after to cover
-    # multi-day slates in either direction
-    log.info("No game_id column — fetching actuals for %s, day before, and day after", slate_date)
-    from datetime import datetime as _dt
-    d = _dt.strptime(slate_date, "%Y-%m-%d")
-    prev = (d - timedelta(days=1)).strftime("%Y%m%d")
-    curr = d.strftime("%Y%m%d")
-    nxt = (d + timedelta(days=1)).strftime("%Y%m%d")
-
-    frames = []
-    for gd in [prev, curr, nxt]:
-        try:
-            df = fetch_actuals_from_api(gd, cfg)
-            log.info("  %s: %d players", gd, len(df))
-            frames.append(df)
-        except Exception as exc:
-            log.info("  %s: %s", gd, exc)
-
-    if not frames:
-        return pd.DataFrame()
-    combined = pd.concat(frames, ignore_index=True)
-    return combined.drop_duplicates(subset="player_name")
 
 
 def backfill_actuals(min_coverage: float = 0.8) -> list[dict]:
