@@ -2849,7 +2849,7 @@ def _render_historical_replay(sport: str) -> None:
                         st.success(f"Fetched actuals for {len(actuals_df)} players" + (f" ({event_name})" if event_name else "") + ".")
                         st.rerun()
         else:
-            # NBA: fetch from Tank01 box scores
+            # NBA: fetch from Tank01 box scores (multi-day aware)
             meta_path = out_dir / "slate_meta.json"
             slate_date = ""
             if meta_path.exists():
@@ -2859,9 +2859,10 @@ def _render_historical_replay(sport: str) -> None:
                 except Exception:
                     pass
 
+            # Use archive date if available (for full-archive replays)
             fetch_date = st.text_input(
                 "Slate date for actuals",
-                value=slate_date,
+                value=_slate_date_from_meta or slate_date,
                 key=f"replay_fetch_date_{sport}",
             )
             if st.button("Fetch Actuals from API", key=f"replay_fetch_{sport}"):
@@ -2876,8 +2877,22 @@ def _render_historical_replay(sport: str) -> None:
                 elif not fetch_date:
                     st.error("Enter a slate date.")
                 else:
-                    with st.spinner("Fetching box scores..."):
-                        actuals_df = _fetch_nba_actuals(api_key, fetch_date)
+                    with st.spinner("Fetching box scores (multi-day aware)..."):
+                        from yak_core.live import fetch_actuals_multi_day
+
+                        # Load pool for multi-day game detection
+                        _pool_for_fetch = None
+                        _pool_path = out_dir / "slate_pool.parquet"
+                        if _pool_path.exists():
+                            try:
+                                _pool_for_fetch = pd.read_parquet(_pool_path)
+                            except Exception:
+                                pass
+
+                        cfg = {"RAPIDAPI_KEY": api_key}
+                        actuals_df = fetch_actuals_multi_day(
+                            fetch_date, cfg, pool=_pool_for_fetch,
+                        )
                     if actuals_df.empty:
                         st.warning("No box score data found for that date. Games may not have finished yet.")
                     else:
@@ -2904,13 +2919,16 @@ def _render_historical_replay(sport: str) -> None:
 
     # ── Score lineups against actuals ──
     try:
-        # Merge actuals into lineup data and compute per-lineup totals
+        # Merge actuals into lineup data using three-pass join
+        # (ID → exact name → normalized name) for robust matching.
+        from yak_core.name_utils import merge_actuals_three_pass
+
         lu_df = replay_lineups.copy()
         if "player_name" in lu_df.columns:
-            lu_df = lu_df.merge(
-                actuals[["player_name", "actual_fp"]],
-                on="player_name",
-                how="left",
+            lu_df = merge_actuals_three_pass(
+                lu_df, actuals,
+                pool_id_col="player_id",
+                actuals_id_col="_tank01_id",
             )
             lu_df["actual_fp"] = lu_df["actual_fp"].fillna(0.0)
 
