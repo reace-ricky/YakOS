@@ -2,7 +2,10 @@
   "configs": {
     "GPP Main": {
       "overrides": {
-        "MIN_PLAYER_MINUTES": 10
+        "MIN_PLAYER_MINUTES": 10,
+        "GPP_BOOM_SPREAD_WEIGHT": 0.0,
+        "GPP_EFFICIENCY_WEIGHT": 0.0,
+        "CASH_FLOOR_WEIGHT": 0.2
       },
       "ricky_weights": {
         "w_gpp": 0.2,
