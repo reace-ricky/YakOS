@@ -1,33 +1,31 @@
 {
   "sport": "NBA",
-  "date": "2026-03-15",
+  "date": "2026-03-14",
   "core_names": [
-    "Deni Avdija",
-    "Cooper Flagg",
-    "Kristaps Porzingis",
-    "James Harden",
-    "Scottie Barnes"
+    "Nikola Jokic",
+    "Victor Wembanyama",
+    "Jalen Johnson",
+    "Kawhi Leonard",
+    "Luka Doncic"
   ],
   "leverage_names": [
     "Quentin Grimes",
-    "Toumani Camara",
-    "Cody Williams",
-    "Aaron Nesmith",
-    "Jerami Grant"
+    "Myron Gardner",
+    "Rui Hachimura"
   ],
   "value_names": [
-    "Paul Reed",
-    "Caleb Love",
+    "Bogdan Bogdanovic",
     "Paul George",
-    "Jose Alvarado",
-    "Kevin Love"
+    "Jalen Pickett",
+    "Ryan Kalkbrenner",
+    "Moe Wagner"
   ],
   "fade_names": [
-    "Jamison Battle",
-    "Pacome Dadiet",
-    "Jeremy Sochan",
-    "Taelon Peter",
-    "Jalen Slawson"
+    "Caleb Houstan",
+    "Bronny James",
+    "Trevor Keels",
+    "Adou Thiero",
+    "Vladislav Goldin"
   ],
   "calibration_slates": 28
 }
