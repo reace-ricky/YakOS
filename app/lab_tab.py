@@ -63,7 +63,12 @@ def render_lab_tab(sport: str) -> None:
             st.error("Missing RAPIDAPI_KEY. Set it in Streamlit secrets or environment.")
             return
 
-    slate_date = st.text_input("Slate date", value=today_str, key=f"lab_date_{sport}")
+    _ss_key = f"lab_date_{sport}"
+    _existing = st.session_state.get(_ss_key, "")
+    if not _existing or _existing < today_str:
+        st.session_state[_ss_key] = today_str
+
+    slate_date = st.text_input("Slate date", value=today_str, key=_ss_key)
 
     rg_file = None
     fp_file = None
@@ -2547,9 +2552,19 @@ def _publish_to_github(sport: str, out_dir: Path) -> dict:
     if not files:
         return {"status": "skipped", "reason": "No files to publish"}
 
+    # Use the actual slate date from meta, not today's date
+    _publish_date = date.today().isoformat()
+    _meta_path = out_dir / "slate_meta.json"
+    if _meta_path.exists():
+        try:
+            _meta = json.loads(_meta_path.read_text())
+            _publish_date = _meta.get("date", _publish_date)
+        except Exception:
+            pass
+
     result = sync_feedback_to_github(
         files=files,
-        commit_message=f"YakOS publish: {sport.upper()} lineups {date.today().isoformat()}",
+        commit_message=f"YakOS publish: {sport.upper()} lineups {_publish_date}",
     )
     return result
 
