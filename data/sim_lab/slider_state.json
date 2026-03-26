@@ -1,7 +1,11 @@
 {
   "configs": {
     "GPP Main": {
-      "overrides": {},
+      "overrides": {
+        "GPP_BOOM_SPREAD_WEIGHT": 0.05,
+        "GPP_EFFICIENCY_WEIGHT": 0.05,
+        "CASH_FLOOR_WEIGHT": 0.15
+      },
       "ricky_weights": {
         "w_gpp": 0.2,
         "w_ceil": 1.3,
