@@ -127,24 +127,35 @@ _SHOWDOWN_SEARCH_OVERRIDES: Dict[str, Dict[str, Any]] = {
 # within this neighborhood, not explore the entire parameter space.
 # Evidence: ds_expert_analysis.md Section 5.
 _SE_GPP_SEARCH_OVERRIDES: Dict[str, Dict[str, Any]] = {
-    "GPP_PROJ_WEIGHT":          {"low": 0.05, "high": 0.25, "step": 0.05},  # DS: 0.15, range ±0.10
-    "GPP_UPSIDE_WEIGHT":        {"low": 0.30, "high": 0.60, "step": 0.05},  # DS: 0.45, range ±0.15
-    "GPP_BOOM_WEIGHT":          {"low": 0.20, "high": 0.50, "step": 0.05},  # DS: 0.35, range ±0.15
-    "GPP_OWN_PENALTY_STRENGTH": {"low": 0.0,  "high": 0.60, "step": 0.1},   # DS: 0.30, range 0-0.60
-    "GPP_SMASH_WEIGHT":         {"low": 0.0,  "high": 0.10, "step": 0.05},  # DS: 0.0 (sparse binary)
-    "GPP_LEVERAGE_WEIGHT":      {"low": 0.0,  "high": 0.10, "step": 0.05},  # DS: 0.0 (no signal)
-    "OWN_WEIGHT":               {"low": 0.0,  "high": 0.10, "step": 0.05},  # DS: 0.0 (anti-chalk hurts)
-    # Ricky weights — DS is very clear on these
-    "w_gpp":                    {"low": 0.0,  "high": 0.3,  "step": 0.1},   # DS: 0.0, allow small exploration
-    "w_ceil":                   {"low": 0.7,  "high": 1.5,  "step": 0.1},   # DS: 1.0, range ±0.3-0.5
-    "w_own":                    {"low": 0.0,  "high": 0.40, "step": 0.05},  # DS: 0.15 (positive!)
+    # --- Existing (unchanged) ---
+    "GPP_PROJ_WEIGHT":          {"low": 0.05, "high": 0.25, "step": 0.05},
+    "GPP_UPSIDE_WEIGHT":        {"low": 0.30, "high": 0.60, "step": 0.05},
+    "GPP_BOOM_WEIGHT":          {"low": 0.20, "high": 0.50, "step": 0.05},
+    "GPP_SMASH_WEIGHT":         {"low": 0.0,  "high": 0.10, "step": 0.05},
+    "GPP_LEVERAGE_WEIGHT":      {"low": 0.0,  "high": 0.10, "step": 0.05},
+    "OWN_WEIGHT":               {"low": 0.0,  "high": 0.10, "step": 0.05},
+    "w_gpp":                    {"low": 0.0,  "high": 0.3,  "step": 0.1},
+    "w_ceil":                   {"low": 0.7,  "high": 1.5,  "step": 0.1},
+    "w_own":                    {"low": 0.0,  "high": 0.40, "step": 0.05},
+
+    # --- Tightened (floor raised to prevent zero penalty) ---
+    "GPP_OWN_PENALTY_STRENGTH": {"low": 0.10, "high": 0.50, "step": 0.1},
+
+    # --- New: structural params previously leaking to global bounds ---
+    "MAX_EXPOSURE":             {"low": 0.30, "high": 0.50, "step": 0.05},
+    "CASH_FLOOR_WEIGHT":        {"low": 0.10, "high": 0.40, "step": 0.05},
+    "GPP_BUST_PENALTY":         {"low": 0.05, "high": 0.25, "step": 0.05},
+
+    # --- New: sniper signals, capped tight on 30-slate history ---
+    "GPP_BOOM_SPREAD_WEIGHT":   {"low": 0.0,  "high": 0.15, "step": 0.05},
+    "GPP_SNIPER_WEIGHT":        {"low": 0.0,  "high": 0.15, "step": 0.05},
+    "GPP_EFFICIENCY_WEIGHT":    {"low": 0.0,  "high": 0.10, "step": 0.05},
 }
 
 _MME_GPP_SEARCH_OVERRIDES: Dict[str, Dict[str, Any]] = {
     "GPP_PROJ_WEIGHT":          {"low": 0.05, "high": 0.25, "step": 0.05},
     "GPP_UPSIDE_WEIGHT":        {"low": 0.30, "high": 0.60, "step": 0.05},
     "GPP_BOOM_WEIGHT":          {"low": 0.20, "high": 0.50, "step": 0.05},
-    "GPP_OWN_PENALTY_STRENGTH": {"low": 0.0,  "high": 0.60, "step": 0.1},
     "GPP_SMASH_WEIGHT":         {"low": 0.0,  "high": 0.10, "step": 0.05},
     "GPP_LEVERAGE_WEIGHT":      {"low": 0.0,  "high": 0.10, "step": 0.05},
     "OWN_WEIGHT":               {"low": 0.0,  "high": 0.10, "step": 0.05},
@@ -152,6 +163,18 @@ _MME_GPP_SEARCH_OVERRIDES: Dict[str, Dict[str, Any]] = {
     "w_gpp":                    {"low": 0.0,  "high": 0.3,  "step": 0.1},
     "w_ceil":                   {"low": 0.7,  "high": 1.5,  "step": 0.1},
     "w_own":                    {"low": 0.0,  "high": 0.40, "step": 0.05},
+
+    # --- Tightened (floor raised to prevent zero penalty) ---
+    "GPP_OWN_PENALTY_STRENGTH": {"low": 0.10, "high": 0.50, "step": 0.1},
+
+    # --- New: structural params previously leaking to global bounds ---
+    "CASH_FLOOR_WEIGHT":        {"low": 0.10, "high": 0.40, "step": 0.05},
+    "GPP_BUST_PENALTY":         {"low": 0.05, "high": 0.25, "step": 0.05},
+
+    # --- New: sniper signals, capped tight on 30-slate history ---
+    "GPP_BOOM_SPREAD_WEIGHT":   {"low": 0.0,  "high": 0.15, "step": 0.05},
+    "GPP_SNIPER_WEIGHT":        {"low": 0.0,  "high": 0.15, "step": 0.05},
+    "GPP_EFFICIENCY_WEIGHT":    {"low": 0.0,  "high": 0.10, "step": 0.05},
 }
 
 _SHOWDOWN_GPP_SEARCH_OVERRIDES: Dict[str, Dict[str, Any]] = {
