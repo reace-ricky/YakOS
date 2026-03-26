@@ -2,9 +2,9 @@
   "configs": {
     "GPP Main": {
       "overrides": {
-        "GPP_BOOM_SPREAD_WEIGHT": 0.1,
-        "GPP_EFFICIENCY_WEIGHT": 0.05,
-        "CASH_FLOOR_WEIGHT": 0.25,
+        "GPP_BOOM_SPREAD_WEIGHT": 0.05,
+        "GPP_EFFICIENCY_WEIGHT": 0.1,
+        "CASH_FLOOR_WEIGHT": 0.3,
         "MIN_PLAYER_MINUTES": 15,
         "overall_bias_correction": 8.27
       },
