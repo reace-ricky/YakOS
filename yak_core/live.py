@@ -360,8 +360,12 @@ def _fetch_actuals_from_box_scores(date_key: str, cfg: dict) -> pd.DataFrame:
         if isinstance(box_body, dict):
             raw_ps = box_body.get("playerStats", box_body.get("players", {}))
             # Tank01 returns playerStats as a dict keyed by playerID
+            # Preserve the keys as _tank01_id for downstream ID-based joins
             if isinstance(raw_ps, dict):
-                player_stats = list(raw_ps.values())
+                player_stats = []
+                for pid, stats in raw_ps.items():
+                    stats["_tank01_id"] = str(pid)
+                    player_stats.append(stats)
             elif isinstance(raw_ps, list):
                 player_stats = raw_ps
             else:
@@ -421,6 +425,9 @@ def _fetch_actuals_from_box_scores(date_key: str, cfg: dict) -> pd.DataFrame:
             row = {"player_name": str(name), "actual_fp": fp}
             if mp_actual is not None:
                 row["mp_actual"] = mp_actual
+            # Carry through Tank01 player ID if available
+            if p.get("_tank01_id"):
+                row["_tank01_id"] = p["_tank01_id"]
             all_players.append(row)
 
     if not all_players:
