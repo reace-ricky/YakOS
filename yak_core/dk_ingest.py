@@ -47,31 +47,9 @@ import pandas as pd
 import requests
 
 from .config import YAKOS_ROOT, DK_COLUMN_MAP
+from .name_utils import normalize_player_name  # canonical normalizer
 
 log = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Name normalisation helper (Ticket 2.4)
-# ---------------------------------------------------------------------------
-
-def normalize_player_name(name: str) -> str:
-    """Normalise a player name for reliable cross-source matching.
-
-    Handles:
-    - Apostrophes / special characters (De'Aaron Fox → De Aaron Fox)
-    - Jr / Sr / II / III / IV suffixes
-    - Leading/trailing whitespace and multiple internal spaces
-    """
-    if not isinstance(name, str):
-        return ""
-    # Remove suffix like Jr., Sr., II, III, IV (case-insensitive, optional trailing dot)
-    s = re.sub(r"\s+(?:Jr\.?|Sr\.?|II|III|IV|I)$", "", name.strip(), flags=re.IGNORECASE)
-    # Remove apostrophes, hyphens → space, then collapse whitespace
-    s = re.sub(r"['\u2019\u2018]", "", s)
-    s = re.sub(r"[-]", " ", s)
-    s = re.sub(r"\s+", " ", s).strip().lower()
-    return s
 
 # ---------------------------------------------------------------------------
 # Storage paths

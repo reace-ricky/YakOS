@@ -27,7 +27,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
 from yak_core.config import YAKOS_ROOT
-from yak_core.name_utils import normalize_player_name
+from yak_core.name_utils import merge_actuals_three_pass, normalize_player_name
 
 logging.basicConfig(
     level=logging.INFO,
@@ -56,7 +56,7 @@ def run_nba_calibration(slate_date: str) -> dict:
     """
     from yak_core.calibration_feedback import record_slate_errors
     from yak_core.edge_feedback import record_edge_outcomes
-    from yak_core.live import fetch_actuals_from_api
+    from yak_core.live import fetch_actuals_from_api, fetch_actuals_multi_day
     from yak_core.outcome_logger import log_slate_outcomes
     from yak_core.sim_sandbox import score_player_breakout
     from yak_core.slate_archive import archive_slate
@@ -118,7 +118,7 @@ def run_nba_calibration(slate_date: str) -> dict:
         return result
 
     try:
-        actuals = fetch_actuals_from_api(slate_date, {"RAPIDAPI_KEY": api_key})
+        actuals = fetch_actuals_multi_day(slate_date, {"RAPIDAPI_KEY": api_key}, pool=pool)
     except Exception as e:
         log.error("Failed to fetch NBA actuals: %s", e)
         result["status"] = "error"
@@ -133,20 +133,10 @@ def run_nba_calibration(slate_date: str) -> dict:
 
     log.info("Fetched actuals for %d players", len(actuals))
 
-    # 3. Merge actuals into pool using normalized player names
-    pool["_norm_name"] = pool["player_name"].apply(normalize_player_name)
-    actuals["_norm_name"] = actuals["player_name"].apply(normalize_player_name)
-    act_map = actuals.set_index("_norm_name")["actual_fp"].to_dict()
-    pool["actual_fp"] = pool["_norm_name"].map(act_map)
-
-    # Also merge actual minutes if available
-    if "mp_actual" in actuals.columns:
-        min_map = actuals.set_index("_norm_name")["mp_actual"].to_dict()
-        pool["mp_actual"] = pool["_norm_name"].map(min_map)
-
-    pool.drop(columns=["_norm_name"], inplace=True)
+    # 3. Merge actuals into pool using three-pass join (ID → exact name → normalized name)
+    pool = merge_actuals_three_pass(pool, actuals)
     matched = pool["actual_fp"].notna().sum()
-    log.info("Matched actuals for %d / %d players (normalized names)", matched, len(pool))
+    log.info("Matched actuals for %d / %d players (three-pass join)", matched, len(pool))
 
     if matched == 0:
         log.warning("No player matches — skipping calibration")
@@ -259,8 +249,9 @@ def run_nba_calibration(slate_date: str) -> dict:
                 lu_df, _ = build_multiple_lineups_with_exposure(opt_pool, opt_cfg)
 
                 if not lu_df.empty and "lineup_index" in lu_df.columns:
-                    # Map actual_fp onto lineup players
-                    lu_df["actual_fp"] = lu_df["player_name"].map(act_map).fillna(0.0)
+                    # Map actual_fp onto lineup players from pool (already merged via three-pass)
+                    nba_act_map = pool.set_index("player_name")["actual_fp"].to_dict()
+                    lu_df["actual_fp"] = lu_df["player_name"].map(nba_act_map).fillna(0.0)
                     lu_totals = lu_df.groupby("lineup_index")["actual_fp"].sum()
                     lineup_actuals = lu_totals.dropna().tolist()
 
@@ -439,19 +430,17 @@ def run_pga_calibration(slate_date: str) -> dict:
 
     log.info("Fetched actuals for %d players", len(actuals))
 
-    # 3. Merge actuals into pool (prefer dg_id, fall back to normalized name)
+    # 3. Merge actuals into pool using three-pass join
     if "dg_id" in pool.columns and "dg_id" in actuals.columns:
-        act_map = actuals.set_index("dg_id")["actual_fp"].to_dict()
-        pool["actual_fp"] = pool["dg_id"].map(act_map)
-    elif "player_name" in pool.columns and "player_name" in actuals.columns:
-        pool["_norm_name"] = pool["player_name"].apply(normalize_player_name)
-        actuals["_norm_name"] = actuals["player_name"].apply(normalize_player_name)
-        act_map = actuals.set_index("_norm_name")["actual_fp"].to_dict()
-        pool["actual_fp"] = pool["_norm_name"].map(act_map)
-        pool.drop(columns=["_norm_name"], inplace=True)
+        pool = merge_actuals_three_pass(
+            pool, actuals,
+            pool_id_col="dg_id", actuals_id_col="dg_id",
+        )
+    else:
+        pool = merge_actuals_three_pass(pool, actuals)
 
     matched = pool["actual_fp"].notna().sum() if "actual_fp" in pool.columns else 0
-    log.info("Matched actuals for %d / %d players", matched, len(pool))
+    log.info("Matched actuals for %d / %d players (three-pass join)", matched, len(pool))
 
     if matched == 0:
         log.warning("No player matches — skipping PGA calibration")
@@ -712,8 +701,8 @@ def backfill_actuals(min_coverage: float = 0.8) -> list[dict]:
                     log.warning("No RAPIDAPI_KEY — skipping NBA backfill for %s", fname)
                     continue
 
-                from yak_core.live import fetch_actuals_from_api
-                actuals = fetch_actuals_from_api(slate_date, {"RAPIDAPI_KEY": api_key})
+                from yak_core.live import fetch_actuals_multi_day
+                actuals = fetch_actuals_multi_day(slate_date, {"RAPIDAPI_KEY": api_key}, pool=df)
             else:
                 api_key = os.environ.get("DATAGOLF_API_KEY")
                 if not api_key:
@@ -737,16 +726,14 @@ def backfill_actuals(min_coverage: float = 0.8) -> list[dict]:
                 log.warning("No actuals returned for %s — skipping", fname)
                 continue
 
-            # Merge with name normalization
+            # Merge with three-pass join (PGA uses dg_id as ID column)
             if sport == "PGA" and "dg_id" in df.columns and "dg_id" in actuals.columns:
-                act_map = actuals.set_index("dg_id")["actual_fp"].to_dict()
-                df["actual_fp"] = df["dg_id"].map(act_map)
+                df = merge_actuals_three_pass(
+                    df, actuals,
+                    pool_id_col="dg_id", actuals_id_col="dg_id",
+                )
             else:
-                df["_norm_name"] = df["player_name"].apply(normalize_player_name)
-                actuals["_norm_name"] = actuals["player_name"].apply(normalize_player_name)
-                act_map = actuals.set_index("_norm_name")["actual_fp"].to_dict()
-                df["actual_fp"] = df["_norm_name"].map(act_map)
-                df.drop(columns=["_norm_name"], inplace=True)
+                df = merge_actuals_three_pass(df, actuals)
 
             new_coverage = df["actual_fp"].notna().mean()
             log.info(

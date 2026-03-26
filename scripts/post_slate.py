@@ -23,18 +23,22 @@ from _env import published_dir, require_env, today_str  # noqa: E402
 
 import pandas as pd
 
-from yak_core.name_utils import normalize_player_name
+from yak_core.name_utils import merge_actuals_three_pass, normalize_player_name
 
 
-def _fetch_nba_actuals(slate_date: str) -> pd.DataFrame:
-    """Fetch NBA actuals from Tank01 box scores."""
-    from yak_core.live import fetch_actuals_from_api
+def _fetch_nba_actuals(slate_date: str, pool: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Fetch NBA actuals from Tank01 box scores.
+
+    If *pool* is provided and contains games on multiple dates, fetches
+    actuals for all dates (multi-day slate support).
+    """
+    from yak_core.live import fetch_actuals_multi_day
 
     api_key = require_env("RAPIDAPI_KEY", alt_names=("TANK01_RAPIDAPI_KEY",))
     cfg = {"RAPIDAPI_KEY": api_key}
 
     print(f"[post_slate] Fetching NBA actuals for {slate_date} ...")
-    actuals = fetch_actuals_from_api(slate_date, cfg)
+    actuals = fetch_actuals_multi_day(slate_date, cfg, pool=pool)
 
     if actuals.empty:
         print("[post_slate] WARNING: No actuals returned (games may not be finished)")
@@ -74,15 +78,11 @@ def _run_calibration(pool: pd.DataFrame, actuals: pd.DataFrame,
     """Merge actuals into pool and run calibration feedback."""
     from yak_core.calibration_feedback import record_slate_errors, get_correction_factors
 
-    # Merge actuals into pool using normalized player names
+    # Merge actuals into pool using three-pass join (ID → exact name → normalized name)
     if actuals.empty or "actual_fp" not in actuals.columns:
         return {"error": "No actuals to calibrate against"}
 
-    pool["_norm_name"] = pool["player_name"].apply(normalize_player_name)
-    actuals["_norm_name"] = actuals["player_name"].apply(normalize_player_name)
-    act_map = actuals.set_index("_norm_name")["actual_fp"].to_dict()
-    pool["actual_fp"] = pool["_norm_name"].map(act_map)
-    pool.drop(columns=["_norm_name"], inplace=True)
+    pool = merge_actuals_three_pass(pool, actuals)
 
     played = pool["actual_fp"].notna() & (pool["actual_fp"] > 0)
     n_played = played.sum()
@@ -243,9 +243,9 @@ def post_slate(sport: str, slate_date: str) -> dict:
             sys.exit(f"ERROR: No published pool at {pool_path} and no archive found. Run publish first.")
         print(f"[post_slate] Loaded {len(pool)} players from {pool_path}")
 
-    # Step 1: Fetch actuals
+    # Step 1: Fetch actuals (pass pool for multi-day slate detection)
     if sport == "NBA":
-        actuals = _fetch_nba_actuals(slate_date)
+        actuals = _fetch_nba_actuals(slate_date, pool=pool)
     else:
         actuals = _fetch_pga_actuals(slate_date)
 
@@ -259,12 +259,8 @@ def post_slate(sport: str, slate_date: str) -> dict:
 
     # Step 3: Signal feedback
     print(f"\n[post_slate] Recording signal feedback ...")
-    # Re-merge actuals for signal feedback using normalized names
-    pool["_norm_name"] = pool["player_name"].apply(normalize_player_name)
-    actuals["_norm_name"] = actuals["player_name"].apply(normalize_player_name)
-    act_map = actuals.set_index("_norm_name")["actual_fp"].to_dict()
-    pool["actual_fp"] = pool["_norm_name"].map(act_map)
-    pool.drop(columns=["_norm_name"], inplace=True)
+    # Re-merge actuals for signal feedback using three-pass join
+    pool = merge_actuals_three_pass(pool, actuals)
     sig_result = _run_signal_feedback(pool, sport, slate_date)
 
     # Step 3b: Archive the completed slate for historical replay
@@ -298,7 +294,9 @@ def post_slate(sport: str, slate_date: str) -> dict:
             lu_df, _ = build_multiple_lineups_with_exposure(opt_pool, opt_cfg)
 
             if not lu_df.empty and "lineup_index" in lu_df.columns:
-                lu_df["actual_fp"] = lu_df["player_name"].map(act_map).fillna(0.0)
+                # Map actual_fp from pool (already merged via three-pass)
+                ps_act_map = pool.set_index("player_name")["actual_fp"].to_dict()
+                lu_df["actual_fp"] = lu_df["player_name"].map(ps_act_map).fillna(0.0)
                 lu_totals = lu_df.groupby("lineup_index")["actual_fp"].sum()
                 lineup_actuals = lu_totals.dropna().tolist()
 
