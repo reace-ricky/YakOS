@@ -1,16 +1,11 @@
 {
   "configs": {
     "GPP Main": {
-      "overrides": {
-        "MIN_PLAYER_MINUTES": 10,
-        "GPP_BOOM_SPREAD_WEIGHT": 0.0,
-        "GPP_EFFICIENCY_WEIGHT": 0.0,
-        "CASH_FLOOR_WEIGHT": 0.2
-      },
+      "overrides": {},
       "ricky_weights": {
-        "w_gpp": 0.2,
-        "w_ceil": 1.3,
-        "w_own": 0.31
+        "w_gpp": 0.0,
+        "w_ceil": 1.0,
+        "w_own": 0.15
       }
     },
     "Cash Main": {
