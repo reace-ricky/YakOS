@@ -859,6 +859,7 @@ def main():
     if args.backfill:
         log.info("Running backfill mode — re-fetching actuals for low-coverage archives")
         bf_results = backfill_actuals()
+        archive_files = []
         for bf in bf_results:
             if "error" in bf:
                 log.warning("Backfill %s: %s", bf["file"], bf["error"])
@@ -867,6 +868,19 @@ def main():
                     "Backfill %s: %.0f%% → %.0f%%",
                     bf["file"], bf["old_coverage"] * 100, bf["new_coverage"] * 100,
                 )
+                # Collect updated archive paths for final sync
+                if "skipped" not in bf:
+                    rel = os.path.join("data", "slate_archive", bf["file"])
+                    if os.path.isfile(os.path.join(YAKOS_ROOT, rel)):
+                        archive_files.append(rel)
+
+        # Final sync — push ALL updated archives in one commit.
+        # Individual archive_slate() calls fire sync_feedback_async()
+        # which can race ahead of later writes.  This catch-all ensures
+        # every updated parquet reaches the repo.
+        if archive_files:
+            log.info("Final backfill sync: %d archive files", len(archive_files))
+            sync_to_github([], extra_files=archive_files)
         return
 
     slate_date = args.date
