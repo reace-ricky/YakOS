@@ -56,7 +56,7 @@ def run_nba_calibration(slate_date: str) -> dict:
     """
     from yak_core.calibration_feedback import record_slate_errors
     from yak_core.edge_feedback import record_edge_outcomes
-    from yak_core.live import fetch_actuals_from_api
+    from yak_core.live import fetch_actuals_from_api, fetch_actuals_multi_day
     from yak_core.outcome_logger import log_slate_outcomes
     from yak_core.sim_sandbox import score_player_breakout
     from yak_core.slate_archive import archive_slate
@@ -118,7 +118,7 @@ def run_nba_calibration(slate_date: str) -> dict:
         return result
 
     try:
-        actuals = fetch_actuals_from_api(slate_date, {"RAPIDAPI_KEY": api_key})
+        actuals = fetch_actuals_multi_day(slate_date, {"RAPIDAPI_KEY": api_key}, pool=pool)
     except Exception as e:
         log.error("Failed to fetch NBA actuals: %s", e)
         result["status"] = "error"
@@ -712,8 +712,8 @@ def backfill_actuals(min_coverage: float = 0.8) -> list[dict]:
                     log.warning("No RAPIDAPI_KEY — skipping NBA backfill for %s", fname)
                     continue
 
-                from yak_core.live import fetch_actuals_from_api
-                actuals = fetch_actuals_from_api(slate_date, {"RAPIDAPI_KEY": api_key})
+                from yak_core.live import fetch_actuals_multi_day
+                actuals = fetch_actuals_multi_day(slate_date, {"RAPIDAPI_KEY": api_key}, pool=df)
             else:
                 api_key = os.environ.get("DATAGOLF_API_KEY")
                 if not api_key:

@@ -479,6 +479,79 @@ def fetch_actuals_from_api(date_key: str, cfg: dict) -> pd.DataFrame:
         raise RuntimeError(f"Tank01 actuals API error for {date_key}: {exc}") from exc
 
 
+def _extract_game_dates_from_pool(pool: pd.DataFrame) -> list:
+    """Parse unique YYYYMMDD dates from a pool's ``game_id`` column.
+
+    game_id format: ``20260314_MIL@PHI``.  Returns sorted list of date
+    strings like ``["20260314", "20260315"]``.
+    """
+    if "game_id" not in pool.columns:
+        return []
+    import re as _re
+    dates = set()
+    for gid in pool["game_id"].dropna().unique():
+        m = _re.match(r"^(\d{8})", str(gid))
+        if m:
+            dates.add(m.group(1))
+    return sorted(dates)
+
+
+def fetch_actuals_multi_day(
+    slate_date: str,
+    cfg: dict,
+    pool: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Fetch actuals for a slate, handling multi-day slates.
+
+    If *pool* is provided and contains a ``game_id`` column with games on
+    multiple dates, fetch box scores for **each** unique date and
+    concatenate results.  Otherwise falls back to single-date fetch.
+
+    Parameters
+    ----------
+    slate_date : str
+        Primary date in ``YYYY-MM-DD`` or ``YYYYMMDD`` format.
+    cfg : dict
+        Must contain ``RAPIDAPI_KEY``.
+    pool : DataFrame, optional
+        Player pool with ``game_id`` column for multi-day detection.
+
+    Returns
+    -------
+    pd.DataFrame
+        Combined actuals (``player_name``, ``actual_fp``, etc.).
+    """
+    date_clean = slate_date.replace("-", "")
+
+    # Detect multiple game dates from the pool
+    game_dates = _extract_game_dates_from_pool(pool) if pool is not None else []
+
+    # If the pool has games on multiple dates, fetch each
+    if len(game_dates) > 1:
+        print(f"[fetch_actuals_multi_day] Multi-day slate detected: {game_dates}")
+        frames = []
+        for gd in game_dates:
+            try:
+                df = fetch_actuals_from_api(gd, cfg)
+                print(f"[fetch_actuals_multi_day]   {gd}: {len(df)} players")
+                frames.append(df)
+            except NoGamesScheduledError:
+                print(f"[fetch_actuals_multi_day]   {gd}: no games scheduled")
+            except Exception as exc:
+                print(f"[fetch_actuals_multi_day]   {gd}: error — {exc}")
+        if frames:
+            combined = pd.concat(frames, ignore_index=True)
+            # De-duplicate by player_name, keeping first occurrence
+            combined = combined.drop_duplicates(subset="player_name")
+            print(f"[fetch_actuals_multi_day] Combined: {len(combined)} unique players")
+            return combined
+        # Fall through to single-date if all multi-day fetches failed
+        print("[fetch_actuals_multi_day] All multi-day fetches failed, falling back to single date")
+
+    # Single-date fetch (original behavior)
+    return fetch_actuals_from_api(slate_date, cfg)
+
+
 def fetch_injury_updates(date_key: str, cfg: dict) -> list:
     """Fetch player injury/news updates from Tank01 API for a given date.
 

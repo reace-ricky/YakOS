@@ -26,15 +26,19 @@ import pandas as pd
 from yak_core.name_utils import normalize_player_name
 
 
-def _fetch_nba_actuals(slate_date: str) -> pd.DataFrame:
-    """Fetch NBA actuals from Tank01 box scores."""
-    from yak_core.live import fetch_actuals_from_api
+def _fetch_nba_actuals(slate_date: str, pool: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Fetch NBA actuals from Tank01 box scores.
+
+    If *pool* is provided and contains games on multiple dates, fetches
+    actuals for all dates (multi-day slate support).
+    """
+    from yak_core.live import fetch_actuals_multi_day
 
     api_key = require_env("RAPIDAPI_KEY", alt_names=("TANK01_RAPIDAPI_KEY",))
     cfg = {"RAPIDAPI_KEY": api_key}
 
     print(f"[post_slate] Fetching NBA actuals for {slate_date} ...")
-    actuals = fetch_actuals_from_api(slate_date, cfg)
+    actuals = fetch_actuals_multi_day(slate_date, cfg, pool=pool)
 
     if actuals.empty:
         print("[post_slate] WARNING: No actuals returned (games may not be finished)")
@@ -243,9 +247,9 @@ def post_slate(sport: str, slate_date: str) -> dict:
             sys.exit(f"ERROR: No published pool at {pool_path} and no archive found. Run publish first.")
         print(f"[post_slate] Loaded {len(pool)} players from {pool_path}")
 
-    # Step 1: Fetch actuals
+    # Step 1: Fetch actuals (pass pool for multi-day slate detection)
     if sport == "NBA":
-        actuals = _fetch_nba_actuals(slate_date)
+        actuals = _fetch_nba_actuals(slate_date, pool=pool)
     else:
         actuals = _fetch_pga_actuals(slate_date)
 

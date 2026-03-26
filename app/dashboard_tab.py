@@ -1077,12 +1077,12 @@ def _run_post_slate(sport: str, slate_date: str) -> Dict[str, Any]:
     # Try to fetch actuals
     try:
         if sport.upper() == "NBA":
-            from yak_core.live import fetch_actuals_from_api
+            from yak_core.live import fetch_actuals_multi_day
             api_key = _resolve_rapidapi_key()
             if not api_key:
                 return {"status": "error", "message": "Missing RAPIDAPI_KEY for fetching actuals"}
 
-            actuals = fetch_actuals_from_api(slate_date, {"RAPIDAPI_KEY": api_key})
+            actuals = fetch_actuals_multi_day(slate_date, {"RAPIDAPI_KEY": api_key}, pool=pool)
             if actuals.empty:
                 return {"status": "error", "message": f"No actuals available for {slate_date}"}
 
