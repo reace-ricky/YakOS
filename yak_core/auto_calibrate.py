@@ -880,11 +880,11 @@ def _run_pipeline_headless(
                 actuals_df = actuals_df.rename(columns={c: "player_name"})
                 break
 
-    scored = lineups_df.merge(
-        actuals_df[["player_name", "actual_fp"]].drop_duplicates(subset="player_name"),
-        on="player_name",
-        how="left",
-    )
+    from yak_core.name_utils import merge_with_normalized_names
+
+    _actuals_sub = actuals_df[["player_name", "actual_fp"]].drop_duplicates(subset="player_name")
+    scored = merge_with_normalized_names(lineups_df, _actuals_sub, on="player_name", how="left")
+
     scored["actual_fp"] = (
         pd.to_numeric(scored.get("actual_fp", 0), errors="coerce").fillna(0.0)
     )

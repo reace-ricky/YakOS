@@ -25,7 +25,11 @@ import numpy as np
 import pandas as pd
 from typing import Any, Dict, Optional
 
-from yak_core.config import ROLLING_WEIGHTS as _ROLLING_WEIGHTS, ROLLING_BLEND_RATIO as _ROLLING_VS_SALARY
+from yak_core.config import (
+    ROLLING_WEIGHTS as _ROLLING_WEIGHTS,
+    ROLLING_BLEND_RATIO as _ROLLING_VS_SALARY,
+    PROJ_SALARY_CEILING_MULTIPLIER as _PROJ_SALARY_CEILING_MULTIPLIER,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +173,21 @@ def compute_ricky_proj(
         n_affected = int((mf != 1.0).sum())
         ricky_proj = (ricky_proj * mf).clip(lower=0.0)
         print(f"[ricky_projections] matchup_factor applied to {n_affected} players")
+
+    # ------------------------------------------------------------------
+    # 3d. Salary-implied ceiling guard
+    # Prevents a single monster game from inflating projections beyond
+    # a plausible multiple of the salary-implied baseline.
+    # E.g., $4,300 player: cap = 4.3 * 4.0 * 2.5 = 43.0 FP.
+    # ------------------------------------------------------------------
+    _proj_cap = sal_proj * _PROJ_SALARY_CEILING_MULTIPLIER
+    _capped = ricky_proj > _proj_cap
+    if _capped.any():
+        logger.info(
+            "[ricky_projections] Capped %d projections exceeding %.1fx salary-implied baseline",
+            int(_capped.sum()), _PROJ_SALARY_CEILING_MULTIPLIER,
+        )
+        ricky_proj = ricky_proj.clip(upper=_proj_cap)
 
     # ------------------------------------------------------------------
     # 4. Floor / ceil using salary-tier spread multipliers

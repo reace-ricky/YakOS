@@ -1094,14 +1094,17 @@ def _run_post_slate(sport: str, slate_date: str) -> Dict[str, Any]:
             if "mp_actual" in pool.columns:
                 pool = pool.drop(columns=["mp_actual"])
 
-            # Merge both actual_fp and mp_actual from actuals
-            merge_cols = ["player_name", "actual_fp"]
+            # Merge both actual_fp and mp_actual from actuals using two-pass name matching
+            from yak_core.name_utils import merge_with_normalized_names
+            value_cols = ["actual_fp"]
             if "mp_actual" in actuals.columns:
-                merge_cols.append("mp_actual")
-            pool_with_actuals = pool.merge(
-                actuals[merge_cols],
+                value_cols.append("mp_actual")
+            pool_with_actuals = merge_with_normalized_names(
+                pool,
+                actuals[["player_name"] + value_cols],
                 on="player_name",
                 how="left",
+                value_cols=value_cols,
             )
         elif sport.upper() == "PGA":
             dg_key = _resolve_datagolf_key()

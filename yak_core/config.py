@@ -38,6 +38,11 @@ ROLLING_WEIGHTS: Dict[str, float] = {
 }
 ROLLING_BLEND_RATIO: float = 0.70  # 70% rolling + 30% salary
 
+# Maximum projection as a multiple of the salary-implied baseline.
+# Prevents a single outlier game from inflating a projection to absurd levels.
+# E.g., $4,300 player: cap = 4.3 * 4.0 * 2.5 = 43.0 FP.
+PROJ_SALARY_CEILING_MULTIPLIER: float = 2.5
+
 # [AUDIT-4.1] Fraction of measured overall bias to apply per correction cycle.
 # At 85%, the optimizer closes most of the known bias gap each pass while
 # preserving a margin of stability against measurement noise.

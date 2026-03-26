@@ -20,7 +20,11 @@ import os
 import pandas as pd
 from typing import Dict, Any, Optional
 
-from yak_core.config import ROLLING_WEIGHTS as _ROLLING_WEIGHTS, ROLLING_BLEND_RATIO as _ROLLING_BLEND_RATIO
+from yak_core.config import (
+    ROLLING_WEIGHTS as _ROLLING_WEIGHTS,
+    ROLLING_BLEND_RATIO as _ROLLING_BLEND_RATIO,
+    PROJ_SALARY_CEILING_MULTIPLIER as _PROJ_SALARY_CEILING_MULTIPLIER,
+)
 
 
 # ---- Constants calibrated from 2026-02-04 + 2026-02-12 historical data ----
@@ -220,6 +224,14 @@ def proj_model(
         )
         proj_series = proj_series.clip(lower=0)
 
+        # Salary-implied ceiling guard — prevent single monster game inflation.
+        _proj_cap = sal_proj * _PROJ_SALARY_CEILING_MULTIPLIER
+        _capped = proj_series > _proj_cap
+        if _capped.any():
+            print(f"[proj_model] Capped {int(_capped.sum())} projections exceeding "
+                  f"{_PROJ_SALARY_CEILING_MULTIPLIER}x salary-implied baseline (Tier 1)")
+            proj_series = proj_series.clip(upper=_proj_cap)
+
         # Populate floor / ceil using salary-tier spread multipliers.
         # Higher-salaried players have tighter ranges (studs are more
         # predictable), value plays have wider variance.
@@ -306,6 +318,14 @@ def proj_model(
     proj_series = base.copy()
     proj_series[has_hist] = merged[has_hist] * w[has_hist] + base[has_hist] * (1 - w[has_hist])
     proj_series = proj_series.clip(lower=0)
+
+    # Salary-implied ceiling guard — prevent single monster game inflation.
+    _proj_cap = sal_proj * _PROJ_SALARY_CEILING_MULTIPLIER
+    _capped = proj_series > _proj_cap
+    if _capped.any():
+        print(f"[proj_model] Capped {int(_capped.sum())} projections exceeding "
+              f"{_PROJ_SALARY_CEILING_MULTIPLIER}x salary-implied baseline (Tier 2)")
+        proj_series = proj_series.clip(upper=_proj_cap)
 
     hist_used = int(has_hist.sum())
     print(f"[proj_model] {hist_used}/{len(df)} players had historical data, "
