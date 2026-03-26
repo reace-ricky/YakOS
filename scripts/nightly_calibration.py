@@ -654,6 +654,49 @@ def sync_to_github(sports: list[str], extra_files: list[str] | None = None) -> d
 
 # ── Backfill ───────────────────────────────────────────────────────────────
 
+def _fetch_nba_actuals_multi_day_backfill(
+    slate_date: str, api_key: str, pool: pd.DataFrame,
+) -> pd.DataFrame:
+    """Fetch NBA actuals handling multi-day slates, even without game_id.
+
+    If the pool has a ``game_id`` column, delegates to
+    ``fetch_actuals_multi_day`` which detects game dates from game_id.
+
+    If ``game_id`` is missing (older archives), fetches actuals for the
+    slate date AND the previous day, then concatenates.  Multi-day DK slates
+    typically span two consecutive days (e.g. games on 03-14 appear on a
+    03-15 slate), so fetching date-1 and date captures all players.
+    """
+    from yak_core.live import fetch_actuals_multi_day, fetch_actuals_from_api
+
+    cfg = {"RAPIDAPI_KEY": api_key}
+
+    # If pool has game_id, the standard multi-day function handles it
+    if "game_id" in pool.columns and pool["game_id"].notna().any():
+        return fetch_actuals_multi_day(slate_date, cfg, pool=pool)
+
+    # No game_id — fetch slate date + previous day to cover multi-day slates
+    log.info("No game_id column — fetching actuals for %s and day before", slate_date)
+    from datetime import datetime as _dt
+    d = _dt.strptime(slate_date, "%Y-%m-%d")
+    prev = (d - timedelta(days=1)).strftime("%Y%m%d")
+    curr = d.strftime("%Y%m%d")
+
+    frames = []
+    for gd in [prev, curr]:
+        try:
+            df = fetch_actuals_from_api(gd, cfg)
+            log.info("  %s: %d players", gd, len(df))
+            frames.append(df)
+        except Exception as exc:
+            log.info("  %s: %s", gd, exc)
+
+    if not frames:
+        return pd.DataFrame()
+    combined = pd.concat(frames, ignore_index=True)
+    return combined.drop_duplicates(subset="player_name")
+
+
 def backfill_actuals(min_coverage: float = 0.8) -> list[dict]:
     """Re-fetch actuals for archived slates with poor coverage and re-archive."""
     from yak_core.slate_archive import _ARCHIVE_DIR, archive_slate
@@ -701,8 +744,7 @@ def backfill_actuals(min_coverage: float = 0.8) -> list[dict]:
                     log.warning("No RAPIDAPI_KEY — skipping NBA backfill for %s", fname)
                     continue
 
-                from yak_core.live import fetch_actuals_multi_day
-                actuals = fetch_actuals_multi_day(slate_date, {"RAPIDAPI_KEY": api_key}, pool=df)
+                actuals = _fetch_nba_actuals_multi_day_backfill(slate_date, api_key, df)
             else:
                 api_key = os.environ.get("DATAGOLF_API_KEY")
                 if not api_key:

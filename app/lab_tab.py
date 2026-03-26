@@ -2532,6 +2532,12 @@ def _publish_to_github(sport: str, out_dir: Path) -> dict:
     from yak_core.config import YAKOS_ROOT
     from yak_core.github_persistence import sync_feedback_to_github
 
+    # ── Snapshot-on-publish: archive the slate pool so the nightly cron
+    #    always has a pool to work with, even if the published pool gets
+    #    overwritten before cron runs.  Only creates the archive if one
+    #    doesn't already exist (or exists but has no actuals yet).
+    _snapshot_on_publish(sport, out_dir)
+
     # Collect all files in the published directory as repo-relative paths
     files: list[str] = []
     for fname in sorted(os.listdir(out_dir)):
@@ -2546,6 +2552,58 @@ def _publish_to_github(sport: str, out_dir: Path) -> dict:
         commit_message=f"YakOS publish: {sport.upper()} lineups {date.today().isoformat()}",
     )
     return result
+
+
+def _snapshot_on_publish(sport: str, out_dir: Path) -> None:
+    """Archive the slate pool at publish time so nightly cron always has data.
+
+    Reads the current slate_pool.parquet + slate_meta.json, determines the
+    correct archive filename, and creates it if it doesn't exist yet or if
+    the existing archive has no actuals (safe to overwrite with fresh pool).
+    """
+    pool_path = out_dir / "slate_pool.parquet"
+    meta_path = out_dir / "slate_meta.json"
+    if not pool_path.exists() or not meta_path.exists():
+        return
+
+    try:
+        meta = json.loads(meta_path.read_text())
+        slate_date = meta.get("date", "")
+        if not slate_date:
+            return
+
+        pool = pd.read_parquet(pool_path)
+        if pool.empty:
+            return
+
+        from yak_core.slate_archive import _ARCHIVE_DIR, archive_slate
+
+        # Determine contest type from meta (default to GPP Main for NBA)
+        is_pga = sport.upper() == "PGA"
+        contest_type = "PGA GPP" if is_pga else "GPP Main"
+        safe_contest = contest_type.replace(" ", "_").lower()
+        archive_filename = f"{slate_date}_{safe_contest}.parquet"
+        archive_path = os.path.join(_ARCHIVE_DIR, archive_filename)
+
+        # Only create if archive doesn't exist, or exists but has no actuals
+        if os.path.exists(archive_path):
+            try:
+                existing = pd.read_parquet(archive_path)
+                has_actuals = (
+                    "actual_fp" in existing.columns
+                    and existing["actual_fp"].notna().any()
+                )
+                if has_actuals:
+                    # Archive already has actuals — don't overwrite
+                    return
+            except Exception:
+                pass  # corrupted file, safe to overwrite
+
+        archive_slate(pool, slate_date, contest_type=contest_type)
+        print(f"[snapshot-on-publish] Archived {sport} pool for {slate_date}")
+    except Exception as exc:
+        # Non-fatal — don't block the publish
+        print(f"[snapshot-on-publish] Warning: {exc}")
 
 
 def _fetch_nba_actuals(api_key: str, game_date: str) -> pd.DataFrame:
