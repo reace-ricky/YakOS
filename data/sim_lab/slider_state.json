@@ -2,7 +2,8 @@
   "configs": {
     "GPP Main": {
       "overrides": {
-        "MIN_PLAYER_MINUTES": 12
+        "MIN_PLAYER_MINUTES": 12,
+        "MAX_EXPOSURE": 0.57
       },
       "ricky_weights": {
         "w_gpp": 0.0,
