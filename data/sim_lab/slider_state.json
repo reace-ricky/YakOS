@@ -6,7 +6,7 @@
         "GPP_EFFICIENCY_WEIGHT": 0.25,
         "CASH_FLOOR_WEIGHT": 0.3,
         "NUM_LINEUPS": 40,
-        "overall_bias_correction": 12.5,
+        "overall_bias_correction": 10.28,
         "GPP_MIN_PROJ_FLOOR": 0
       },
       "ricky_weights": {
