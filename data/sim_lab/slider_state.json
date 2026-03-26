@@ -1,7 +1,10 @@
 {
   "configs": {
     "GPP Main": {
-      "overrides": {},
+      "overrides": {
+        "NUM_LINEUPS": 35,
+        "MIN_PLAYER_MINUTES": 12
+      },
       "ricky_weights": {
         "w_gpp": 0.0,
         "w_ceil": 1.0,
