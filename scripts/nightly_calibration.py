@@ -663,9 +663,12 @@ def _fetch_nba_actuals_multi_day_backfill(
     ``fetch_actuals_multi_day`` which detects game dates from game_id.
 
     If ``game_id`` is missing (older archives), fetches actuals for the
-    slate date AND the previous day, then concatenates.  Multi-day DK slates
-    typically span two consecutive days (e.g. games on 03-14 appear on a
-    03-15 slate), so fetching date-1 and date captures all players.
+    slate date, the day before, AND the day after.  Multi-day DK slates
+    span two consecutive days — for the first day of a multi-day slate
+    (e.g. 03-14) we need to also look at the NEXT day (03-15), not just
+    the previous day.  Fetching all three days (prev, curr, next) covers
+    both halves of any multi-day slate regardless of which day the archive
+    represents.
     """
     from yak_core.live import fetch_actuals_multi_day, fetch_actuals_from_api
 
@@ -675,15 +678,17 @@ def _fetch_nba_actuals_multi_day_backfill(
     if "game_id" in pool.columns and pool["game_id"].notna().any():
         return fetch_actuals_multi_day(slate_date, cfg, pool=pool)
 
-    # No game_id — fetch slate date + previous day to cover multi-day slates
-    log.info("No game_id column — fetching actuals for %s and day before", slate_date)
+    # No game_id — fetch slate date + day before + day after to cover
+    # multi-day slates in either direction
+    log.info("No game_id column — fetching actuals for %s, day before, and day after", slate_date)
     from datetime import datetime as _dt
     d = _dt.strptime(slate_date, "%Y-%m-%d")
     prev = (d - timedelta(days=1)).strftime("%Y%m%d")
     curr = d.strftime("%Y%m%d")
+    nxt = (d + timedelta(days=1)).strftime("%Y%m%d")
 
     frames = []
-    for gd in [prev, curr]:
+    for gd in [prev, curr, nxt]:
         try:
             df = fetch_actuals_from_api(gd, cfg)
             log.info("  %s: %d players", gd, len(df))
@@ -698,7 +703,12 @@ def _fetch_nba_actuals_multi_day_backfill(
 
 
 def backfill_actuals(min_coverage: float = 0.8) -> list[dict]:
-    """Re-fetch actuals for archived slates with poor coverage and re-archive."""
+    """Re-fetch actuals for archived slates with poor coverage and re-archive.
+
+    SAFETY: Never regresses coverage. New actuals are merged into existing
+    data, only filling NaN slots. Non-NaN actual_fp values are never
+    overwritten. The archive is only updated if new coverage >= old coverage.
+    """
     from yak_core.slate_archive import _ARCHIVE_DIR, archive_slate
 
     if not os.path.isdir(_ARCHIVE_DIR):
@@ -713,8 +723,8 @@ def backfill_actuals(min_coverage: float = 0.8) -> list[dict]:
         df = pd.read_parquet(path)
         if "actual_fp" not in df.columns:
             continue
-        coverage = df["actual_fp"].notna().mean()
-        if coverage >= min_coverage:
+        old_coverage = df["actual_fp"].notna().mean()
+        if old_coverage >= min_coverage:
             continue
 
         slate_date = fname[:10]
@@ -731,7 +741,7 @@ def backfill_actuals(min_coverage: float = 0.8) -> list[dict]:
 
         log.info(
             "Backfilling %s (%s, coverage: %.0f%%)",
-            fname, sport, coverage * 100,
+            fname, sport, old_coverage * 100,
         )
 
         try:
@@ -768,7 +778,11 @@ def backfill_actuals(min_coverage: float = 0.8) -> list[dict]:
                 log.warning("No actuals returned for %s — skipping", fname)
                 continue
 
-            # Merge with three-pass join (PGA uses dg_id as ID column)
+            # ── Preserve existing actuals: only fill NaN slots ──────────
+            # Save the existing actual_fp column BEFORE the merge overwrites it.
+            existing_actuals = df["actual_fp"].copy()
+
+            # Merge new actuals into pool using three-pass join
             if sport == "PGA" and "dg_id" in df.columns and "dg_id" in actuals.columns:
                 df = merge_actuals_three_pass(
                     df, actuals,
@@ -777,11 +791,32 @@ def backfill_actuals(min_coverage: float = 0.8) -> list[dict]:
             else:
                 df = merge_actuals_three_pass(df, actuals)
 
+            # Restore existing non-NaN actuals — NEVER overwrite good data.
+            # Only fill slots that were previously NaN with new values.
+            had_value = existing_actuals.notna()
+            df.loc[had_value, "actual_fp"] = existing_actuals[had_value]
+
             new_coverage = df["actual_fp"].notna().mean()
             log.info(
                 "Backfill %s: coverage %.0f%% → %.0f%%",
-                fname, coverage * 100, new_coverage * 100,
+                fname, old_coverage * 100, new_coverage * 100,
             )
+
+            # ── Safety check: never regress coverage ────────────────────
+            if new_coverage < old_coverage:
+                log.warning(
+                    "SKIPPING archive write for %s — new coverage (%.0f%%) < old (%.0f%%). "
+                    "Would regress data.",
+                    fname, new_coverage * 100, old_coverage * 100,
+                )
+                results.append({
+                    "file": fname,
+                    "sport": sport,
+                    "old_coverage": round(old_coverage, 3),
+                    "new_coverage": round(new_coverage, 3),
+                    "skipped": "would_regress",
+                })
+                continue
 
             # Re-archive the updated data
             archive_slate(df, slate_date, contest_type=contest_type)
@@ -789,7 +824,7 @@ def backfill_actuals(min_coverage: float = 0.8) -> list[dict]:
             results.append({
                 "file": fname,
                 "sport": sport,
-                "old_coverage": round(coverage, 3),
+                "old_coverage": round(old_coverage, 3),
                 "new_coverage": round(new_coverage, 3),
             })
         except Exception as e:

@@ -188,6 +188,26 @@ def merge_actuals_three_pass(
         f"Pass 3 (normalized name): {n_pass3} matched, {n_unmatched} still unmatched"
     )
 
+    # Log top unmatched players for diagnosis
+    if n_unmatched > 0:
+        unmatched_mask = ~pool["_merge_idx"].isin(matched_indices)
+        unmatched_df = pool.loc[unmatched_mask].copy()
+        # Sort by projected FP descending so highest-value misses are shown first
+        sort_col = "proj" if "proj" in unmatched_df.columns else None
+        if sort_col:
+            unmatched_df[sort_col] = pd.to_numeric(unmatched_df[sort_col], errors="coerce")
+            unmatched_df = unmatched_df.sort_values(sort_col, ascending=False)
+        top_n = min(20, len(unmatched_df))
+        lines = [f"[actuals_join] Top {top_n} unmatched players (by proj FP):"]
+        for _, row in unmatched_df.head(top_n).iterrows():
+            name = row.get(pool_name_col, "?")
+            team = row.get("team", "?")
+            proj_val = row.get("proj", "?")
+            lines.append(f"  {name} ({team}) proj={proj_val}")
+        msg = "\n".join(lines)
+        log.info(msg)
+        print(msg)
+
     pool = pool.drop(columns=["_merge_idx"])
     return pool
 
