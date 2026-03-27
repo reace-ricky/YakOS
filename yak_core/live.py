@@ -1330,7 +1330,3 @@ def get_slate_teams(team_times: Dict[str, str], slate_type: str = "Main (7-9pm)"
             slate_teams.add(team)
 
     return slate_teams
-
-
-# Backward compatibility alias
-get_main_slate_teams = get_slate_teams
