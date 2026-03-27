@@ -8,9 +8,9 @@
         "NUM_LINEUPS": 25
       },
       "ricky_weights": {
-        "w_gpp": 0.25,
-        "w_ceil": 0.9,
-        "w_own": 0.15
+        "w_gpp": 0.3,
+        "w_ceil": 0.8,
+        "w_own": 0.25
       }
     },
     "Cash Main": {
