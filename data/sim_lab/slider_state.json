@@ -6,7 +6,8 @@
         "MAX_EXPOSURE": 0.5,
         "MIN_PLAYER_MINUTES": 15,
         "NUM_LINEUPS": 25,
-        "OWN_WEIGHT": 0.05
+        "OWN_WEIGHT": 0.05,
+        "overall_bias_correction": 13.6
       },
       "ricky_weights": {
         "w_gpp": 0.3,
