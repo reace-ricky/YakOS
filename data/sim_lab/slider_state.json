@@ -9,7 +9,8 @@
         "NUM_LINEUPS": 25,
         "overall_bias_correction": 11.24,
         "GPP_MIN_PROJ_FLOOR": 1.0,
-        "MAX_EXPOSURE": 0.5
+        "MAX_EXPOSURE": 0.5,
+        "GPP_OWN_PENALTY_STRENGTH": 0.25
       },
       "ricky_weights": {
         "w_gpp": 0.25,
