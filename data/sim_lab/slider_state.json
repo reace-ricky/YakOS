@@ -8,7 +8,7 @@
         "NUM_LINEUPS": 25
       },
       "ricky_weights": {
-        "w_gpp": 0.26,
+        "w_gpp": 0.0,
         "w_ceil": 1.0,
         "w_own": 0.15
       }
@@ -22,9 +22,9 @@
         "GPP_MIN_PROJ_FLOOR": 15
       },
       "ricky_weights": {
-        "w_gpp": 0.3,
-        "w_ceil": 0.2,
-        "w_own": 0.0
+        "w_gpp": 1.0,
+        "w_ceil": 0.0,
+        "w_own": 0.15
       }
     },
     "GPP Early": {
@@ -38,9 +38,9 @@
         "GPP_SMASH_WEIGHT": 0.0
       },
       "ricky_weights": {
-        "w_gpp": 1.5,
-        "w_ceil": 0.8,
-        "w_own": 0.1
+        "w_gpp": 0.0,
+        "w_ceil": 1.0,
+        "w_own": 0.15
       }
     },
     "PGA GPP": {
