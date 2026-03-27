@@ -1288,23 +1288,49 @@ def fetch_game_times(date_key: str, cfg: dict) -> Dict[str, str]:
     return team_times
 
 
-def get_main_slate_teams(team_times: Dict[str, str]) -> set:
-    """Filter teams to those with 7pm-9pm ET tipoff (DK Main slate).
+def get_slate_teams(team_times: Dict[str, str], slate_type: str = "Main (7-9pm)") -> set:
+    """Filter teams based on DraftKings slate window.
 
-    Accepts times like "7:00p", "7:30p", "8:00p", "9:00p".
-    Returns set of team abbreviations on the main slate.
+    slate_type options:
+      - "Main (7-9pm)": games tipping off 7:00pm-9:59pm ET
+      - "Early (before 7pm)": games tipping off before 7:00pm ET
+      - "Late (after 9pm)": games tipping off 10:00pm+ ET
+      - "All Day": no filter, return all teams
     """
-    main_teams = set()
+    if slate_type == "All Day":
+        return set(team_times.keys())
+
+    slate_teams = set()
     for team, time_str in team_times.items():
         if not time_str:
             continue
         try:
-            # Parse "7:00p" or "10:30p" format
             hour = int(time_str.split(":")[0])
             is_pm = "p" in time_str.lower()
-            if is_pm and 7 <= hour <= 9:
-                main_teams.add(team)
+            is_am = "a" in time_str.lower()
+
+            # Convert to 24h for easier comparison
+            if is_pm and hour != 12:
+                hour24 = hour + 12
+            elif is_am and hour == 12:
+                hour24 = 0
+            elif is_am:
+                hour24 = hour
+            else:
+                hour24 = hour  # assume PM for NBA
+
+            if slate_type == "Main (7-9pm)" and 19 <= hour24 <= 21:
+                slate_teams.add(team)
+            elif slate_type == "Early (before 7pm)" and hour24 < 19:
+                slate_teams.add(team)
+            elif slate_type == "Late (after 9pm)" and hour24 > 21:
+                slate_teams.add(team)
         except (ValueError, IndexError):
-            # Can't parse — include by default to avoid dropping valid players
-            main_teams.add(team)
-    return main_teams
+            # Can't parse time — include in all slates to be safe
+            slate_teams.add(team)
+
+    return slate_teams
+
+
+# Backward compatibility alias
+get_main_slate_teams = get_slate_teams
