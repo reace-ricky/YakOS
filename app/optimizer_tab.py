@@ -266,13 +266,6 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
         default_exp = preset.get("default_max_exposure", 0.35)
         max_exposure = st.slider("Max exposure", 0.1, 1.0, default_exp, 0.05, key=f"opt_exp_{sport}")
 
-    # Power-user config expander (collapsed by default)
-    if is_admin:
-        with st.expander("\u2139\ufe0f Build config", expanded=False):
-            _prof_label = _profile_key_internal or "(preset defaults)"
-            _prof_desc = _active_profile["description"] if _active_profile else "No profile overrides"
-            st.caption(f"Profile: {_prof_label} — {_prof_desc}")
-
     # ── Showdown game picker (NBA only) — powered by DK lobby API ──
     showdown_teams: list[str] = []
     _sd_draft_group_id: int | None = None
