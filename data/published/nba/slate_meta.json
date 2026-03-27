@@ -2,6 +2,7 @@
   "sport": "NBA",
   "site": "DK",
   "date": "2026-03-27",
+  "slate_type": "Main (7-9pm)",
   "salary_cap": 50000,
   "roster_slots": [
     "PG",
