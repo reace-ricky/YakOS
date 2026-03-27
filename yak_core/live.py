@@ -1187,3 +1187,124 @@ def fetch_betting_odds(game_date: str, api_key: str) -> pd.DataFrame:
     except Exception as exc:
         print(f"[fetch_betting_odds] Error fetching odds for {game_date}: {exc}")
         return empty
+
+
+def fetch_game_times(date_key: str, cfg: dict) -> Dict[str, str]:
+    """Fetch game tipoff times from Tank01 team schedules.
+
+    Returns dict of {team_abv: game_time_str} for all teams playing on the date.
+    Game times are in ET (e.g. "7:00p", "9:30p").
+
+    Makes one getNBATeamSchedule call per game (using the away team) to keep
+    API usage efficient.
+    """
+    api_key = _get_rapidapi_key(cfg)
+    clean = date_key.replace("-", "")
+
+    # Get game list for the date
+    games_resp = requests.get(
+        f"https://{_TANK01_HOST}/getNBAGamesForDate",
+        headers=_headers(api_key),
+        params={"gameDate": clean},
+        timeout=30,
+    )
+    games_resp.raise_for_status()
+    games_data = games_resp.json()
+    games_body = games_data.get("body", games_data) if isinstance(games_data, dict) else games_data
+    if isinstance(games_body, dict):
+        game_list = games_body.get("games", [])
+        if not isinstance(game_list, list):
+            game_list = next((v for v in games_body.values() if isinstance(v, list)), [])
+    elif isinstance(games_body, list):
+        game_list = games_body
+    else:
+        game_list = []
+
+    # First try: check if gameTime is directly in the games response
+    team_times: Dict[str, str] = {}
+    _has_direct_times = False
+    for game in game_list:
+        if not isinstance(game, dict):
+            continue
+        gt = game.get("gameTime", game.get("gameTime_est", ""))
+        if gt:
+            away = str(game.get("away", "")).upper()
+            home = str(game.get("home", "")).upper()
+            if away:
+                team_times[away] = str(gt)
+            if home:
+                team_times[home] = str(gt)
+            _has_direct_times = True
+
+    if _has_direct_times and team_times:
+        print(f"[fetch_game_times] Got times for {len(team_times)} teams directly from games response")
+        return team_times
+
+    # Fallback: fetch one team schedule per game (away team) to get game times
+    # Determine season from the date
+    year = int(clean[:4])
+    month = int(clean[4:6])
+    # NBA season spans Oct-Jun; games in Jan-Jun belong to season starting prev year
+    season = str(year - 1) if month <= 6 else str(year)
+
+    for game in game_list:
+        if not isinstance(game, dict):
+            continue
+        away = str(game.get("away", "")).upper()
+        home = str(game.get("home", "")).upper()
+        game_id = game.get("gameID", game.get("gameId", ""))
+        if not away or not game_id:
+            continue
+
+        try:
+            sched_resp = requests.get(
+                f"https://{_TANK01_HOST}/getNBATeamSchedule",
+                headers=_headers(api_key),
+                params={"teamAbv": away, "season": season},
+                timeout=30,
+            )
+            if sched_resp.status_code != 200:
+                continue
+
+            sched_data = sched_resp.json().get("body", {})
+            schedule = sched_data.get("schedule", [])
+
+            for sg in schedule:
+                if not isinstance(sg, dict):
+                    continue
+                if sg.get("gameID") == str(game_id):
+                    gt = sg.get("gameTime", "")
+                    if gt:
+                        sg_away = str(sg.get("away", away)).upper()
+                        sg_home = str(sg.get("home", home)).upper()
+                        team_times[sg_away] = str(gt)
+                        team_times[sg_home] = str(gt)
+                    break
+        except Exception as exc:
+            print(f"[fetch_game_times] Schedule fetch failed for {away} (non-fatal): {exc}")
+            continue
+
+    print(f"[fetch_game_times] Got times for {len(team_times)} teams via schedule lookups")
+    return team_times
+
+
+def get_main_slate_teams(team_times: Dict[str, str]) -> set:
+    """Filter teams to those with 7pm-9pm ET tipoff (DK Main slate).
+
+    Accepts times like "7:00p", "7:30p", "8:00p", "9:00p".
+    Returns set of team abbreviations on the main slate.
+    """
+    main_teams = set()
+    for team, time_str in team_times.items():
+        if not time_str:
+            continue
+        try:
+            # Parse "7:00p" or "10:30p" format
+            hour = int(time_str.split(":")[0])
+            is_pm = "p" in time_str.lower()
+            if is_pm and 7 <= hour <= 9:
+                main_teams.add(team)
+        except (ValueError, IndexError):
+            # Can't parse — include by default to avoid dropping valid players
+            main_teams.add(team)
+    return main_teams
