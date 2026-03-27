@@ -5,7 +5,8 @@
         "GPP_OWN_PENALTY_STRENGTH": 0.25,
         "MAX_EXPOSURE": 0.5,
         "MIN_PLAYER_MINUTES": 15,
-        "NUM_LINEUPS": 25
+        "NUM_LINEUPS": 25,
+        "TIERED_EXPOSURE_VALUE": 0.4
       },
       "ricky_weights": {
         "w_gpp": 0.25,
