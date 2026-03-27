@@ -3,9 +3,9 @@
     "GPP Main": {
       "overrides": {
         "MIN_PLAYER_MINUTES": 15,
-        "GPP_BOOM_SPREAD_WEIGHT": 0.0,
-        "GPP_EFFICIENCY_WEIGHT": 0.0,
-        "CASH_FLOOR_WEIGHT": 0.1,
+        "GPP_BOOM_SPREAD_WEIGHT": 0.1,
+        "GPP_EFFICIENCY_WEIGHT": 0.05,
+        "CASH_FLOOR_WEIGHT": 0.25,
         "NUM_LINEUPS": 25,
         "overall_bias_correction": 10.18,
         "GPP_MIN_PROJ_FLOOR": 0,
