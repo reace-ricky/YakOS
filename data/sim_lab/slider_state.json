@@ -7,7 +7,7 @@
         "GPP_EFFICIENCY_WEIGHT": 0.0,
         "CASH_FLOOR_WEIGHT": 0.1,
         "NUM_LINEUPS": 25,
-        "overall_bias_correction": 7.25,
+        "overall_bias_correction": 10.18,
         "GPP_MIN_PROJ_FLOOR": 0,
         "MAX_EXPOSURE": 0.5,
         "GPP_OWN_PENALTY_STRENGTH": 0.25
