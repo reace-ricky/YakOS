@@ -6,7 +6,8 @@
         "GPP_EFFICIENCY_WEIGHT": 0.1,
         "CASH_FLOOR_WEIGHT": 0.35,
         "MIN_PLAYER_MINUTES": 15,
-        "overall_bias_correction": 7.74
+        "overall_bias_correction": 7.74,
+        "NUM_LINEUPS": 25
       },
       "ricky_weights": {
         "w_gpp": 0.25,
