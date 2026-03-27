@@ -55,6 +55,17 @@
         "w_ceil": 1.0,
         "w_own": 0.15
       }
+    },
+    "Showdown": {
+      "overrides": {
+        "MAX_EXPOSURE": 0.5,
+        "MIN_UNIQUES": 1
+      },
+      "ricky_weights": {
+        "w_gpp": 0.0,
+        "w_ceil": 1.0,
+        "w_own": 0.1
+      }
     }
   }
 }
