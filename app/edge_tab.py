@@ -352,6 +352,10 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     for _tier in ("core_plays", "leverage_plays", "value_plays"):
         for _p in edge_analysis.get(_tier, []):
             _pos_names.add(_p.get("player_name", ""))
+    # Also exclude snipers — can't recommend a player and fade them on the same board
+    if snipers:
+        for _s in snipers:
+            _pos_names.add(_s.get("player_name", ""))
     _pos_names.discard("")
 
     bust = generate_bust_call(pool, edge_analysis.get("fade_candidates"), positive_tier_names=_pos_names or None)
@@ -364,6 +368,8 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
         )
     else:
         fades = compute_fades(pool, edge_analysis)
+        if fades:
+            fades = [f for f in fades if f.get("player_name", "") not in _pos_names]
         if fades:
             f = fades[0]
             parts.append(
