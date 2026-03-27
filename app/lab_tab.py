@@ -82,6 +82,12 @@ def render_lab_tab(sport: str) -> None:
     pool_path = out_dir / "slate_pool.parquet"
     _meta_path_check = out_dir / "slate_meta.json"
     _pool_stale = False
+
+    # Show flash success message from previous Load Pool (survives rerun)
+    _flash_key = f"lab_pool_loaded_{sport}"
+    if st.session_state.pop(_flash_key, None):
+        st.success("Pool loaded successfully.")
+
     if _meta_path_check.exists():
         _chk_meta = json.loads(_meta_path_check.read_text())
         if _chk_meta.get("date") != slate_date:
@@ -260,7 +266,23 @@ def render_lab_tab(sport: str) -> None:
                 if _actuals_clear_path.exists():
                     _actuals_clear_path.unlink(missing_ok=True)
 
-                st.success(f"Loaded {len(pool)} players \u2192 {out_dir}")
+                # Sync pool + meta to GitHub so they survive cold restarts
+                try:
+                    from yak_core.github_persistence import sync_feedback_async
+                    _sport_dir = "pga" if is_pga else "nba"
+                    sync_feedback_async(
+                        files=[
+                            f"data/published/{_sport_dir}/slate_meta.json",
+                            f"data/published/{_sport_dir}/slate_pool.parquet",
+                        ],
+                        commit_message=f"Auto-sync pool + meta ({slate_date})",
+                    )
+                except Exception:
+                    pass
+
+                # Flash success and rerun so the stale-pool banner disappears
+                st.session_state[_flash_key] = True
+                st.rerun()
             except Exception as e:
                 st.error(f"Load pool error: {e}")
                 return
@@ -593,6 +615,19 @@ def render_lab_tab(sport: str) -> None:
                         pool_fresh.to_parquet(str(out_dir / "slate_pool.parquet"), index=False)
                         with open(out_dir / "slate_meta.json", "w") as f:
                             json.dump(meta_fresh, f, indent=2, default=str)
+                        # Sync pool + meta to GitHub so they survive cold restarts
+                        try:
+                            from yak_core.github_persistence import sync_feedback_async
+                            _sport_dir = "pga" if is_pga else "nba"
+                            sync_feedback_async(
+                                files=[
+                                    f"data/published/{_sport_dir}/slate_meta.json",
+                                    f"data/published/{_sport_dir}/slate_pool.parquet",
+                                ],
+                                commit_message=f"Auto-sync pool + meta ({slate_date})",
+                            )
+                        except Exception:
+                            pass
                     except Exception as e:
                         st.error(f"Pool load error: {e}")
                         return
