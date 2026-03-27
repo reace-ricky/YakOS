@@ -1377,11 +1377,20 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
     if "player_id" in pool.columns and "dk_player_id" not in pool.columns:
         pool["dk_player_id"] = pool["player_id"]
 
+    # Fetch game times for slate filtering at build time
+    _team_game_times = {}
+    try:
+        from yak_core.live import fetch_game_times
+        _team_game_times = fetch_game_times(slate_date, cfg)
+    except Exception as _gt_err:
+        print(f"[_load_nba_pool] Game time fetch failed (non-fatal): {_gt_err}")
+
     meta = {
         "sport": "NBA", "site": "DK", "date": slate_date,
         "salary_cap": SALARY_CAP, "roster_slots": DK_POS_SLOTS, "lineup_size": DK_LINEUP_SIZE,
         "pool_size": len(pool), "proj_source": _rg_source_used or cfg.get("PROJ_SOURCE", "salary_implied"),
         "matchups": matchups,
+        "game_times": _team_game_times,
     }
     return pool, meta
 
@@ -2431,27 +2440,26 @@ def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, o
 
     # ── Slate window filter (NBA classic only) ──
     if sport.upper() != "PGA" and slate_type != "All Day":
-        try:
-            from yak_core.live import fetch_game_times, get_slate_teams
-            import os
-            _rk = os.environ.get("RAPIDAPI_KEY") or os.environ.get("TANK01_RAPIDAPI_KEY", "")
+        import json
+        _meta_path = out_dir / "slate_meta.json"
+        _team_game_times = {}
+        if _meta_path.exists():
             try:
-                _rk = _rk or st.secrets.get("RAPIDAPI_KEY", "") or st.secrets.get("TANK01_RAPIDAPI_KEY", "")
+                _meta = json.loads(_meta_path.read_text())
+                _team_game_times = _meta.get("game_times", {})
             except Exception:
                 pass
-            if not _rk:
-                st.warning("Slate filter skipped — no API key found for game time lookup")
-            elif slate_date:
-                _gt = fetch_game_times(slate_date, {"RAPIDAPI_KEY": _rk})
-                _st_teams = get_slate_teams(_gt, slate_type=slate_type)
-                if _st_teams:
-                    _pre = len(pool)
-                    pool = pool[pool["team"].str.upper().isin(_st_teams)].copy()
-                    _dropped = _pre - len(pool)
-                    if _dropped > 0:
-                        st.info(f"Slate filter ({slate_type}): {len(pool)} players ({_dropped} excluded)")
-        except Exception as _sf_err:
-            print(f"[lab] Slate filter failed: {_sf_err}")
+        if _team_game_times:
+            from yak_core.live import get_slate_teams
+            _st_teams = get_slate_teams(_team_game_times, slate_type=slate_type)
+            if _st_teams:
+                _pre = len(pool)
+                pool = pool[pool["team"].str.upper().isin(_st_teams)].copy()
+                _dropped = _pre - len(pool)
+                if _dropped > 0:
+                    st.info(f"Slate filter ({slate_type}): {len(pool)} players ({_dropped} excluded)")
+        else:
+            st.warning("No game times cached. Re-load the pool to enable slate filtering.")
 
     # ── PGA: live re-check for withdrawals at build time ──
     # Catches players who withdrew AFTER the pool was loaded.

@@ -409,33 +409,18 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
 
         # Apply slate filter (NBA classic only)
         if not is_pga and _slate_type != "All Day":
-            try:
-                import os as _os_sf
-                from yak_core.live import fetch_game_times, get_slate_teams
-                _build_date = meta.get("date", "")
-                if _build_date:
-                    _rapid_key = (
-                        _os_sf.environ.get("RAPIDAPI_KEY")
-                        or _os_sf.environ.get("TANK01_RAPIDAPI_KEY", "")
-                    )
-                    if not _rapid_key:
-                        try:
-                            _rapid_key = st.secrets.get("RAPIDAPI_KEY", "") or st.secrets.get("TANK01_RAPIDAPI_KEY", "")
-                        except Exception:
-                            pass
-                    if not _rapid_key:
-                        st.warning("Slate filter skipped — no API key found for game time lookup")
-                    _build_cfg = {"RAPIDAPI_KEY": _rapid_key}
-                    _game_times = fetch_game_times(_build_date, _build_cfg)
-                    _slate_teams = get_slate_teams(_game_times, slate_type=_slate_type)
-                    if _slate_teams:
-                        _pre = len(build_pool)
-                        build_pool = build_pool[build_pool["team"].str.upper().isin(_slate_teams)].copy()
-                        _dropped = _pre - len(build_pool)
-                        if _dropped > 0:
-                            st.info(f"Slate filter ({_slate_type}): {len(build_pool)} players ({_dropped} excluded)")
-            except Exception as _sf_err:
-                st.warning(f"Slate filter failed, using full pool: {_sf_err}")
+            _team_game_times = meta.get("game_times", {})
+            if _team_game_times:
+                from yak_core.live import get_slate_teams
+                _slate_teams = get_slate_teams(_team_game_times, slate_type=_slate_type)
+                if _slate_teams:
+                    _pre = len(build_pool)
+                    build_pool = build_pool[build_pool["team"].str.upper().isin(_slate_teams)].copy()
+                    _dropped = _pre - len(build_pool)
+                    if _dropped > 0:
+                        st.info(f"Slate filter ({_slate_type}): {len(build_pool)} players ({_dropped} excluded)")
+            else:
+                st.warning("No game times in pool data. Re-load the pool to enable slate filtering.")
 
         cfg = _build_optimizer_cfg(preset, sport, num_lineups, max_exposure, locked, excluded)
         # Apply profile overrides into the optimizer config
