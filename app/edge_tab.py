@@ -175,33 +175,29 @@ def _render_edge_box(key: str, players: List[Dict], is_pga: bool, cleared_player
 
 # Rotate through varied closers so multiple picks of the same type don't repeat
 _CASCADE_LINES = [
-    "Someone's out, his role just expanded, and the ownership hasn't moved. Do the math.",
-    "More minutes, more usage, same price tag. The public won't adjust until it's too late.",
-    "Opportunity just knocked and nobody answered. I'll take it.",
+    "Role upgrade. Price didn't move. I'm not explaining this twice.",
+    "Injury opened the door. Ownership hasn't caught up. Act now.",
+    "More minutes, more usage, same tag. Public's asleep on this.",
 ]
 _PACE_LINES = [
-    "High-pace game, full workload, and the field is looking elsewhere.",
-    "This game environment is a cheat code and his salary doesn't reflect it.",
-    "The matchup screams upside. The ownership says nobody noticed.",
+    "Pace-up spot, full workload, soft ownership. Next.",
+    "Game environment is a cheat code. Salary doesn't know yet.",
+    "High total, full minutes, field looking elsewhere. Easy click.",
 ]
 _CEILING_LINES = [
-    "Massive gap between his floor and his ceiling. That's where tournaments are won.",
-    "The upside is right there in the numbers. The public is playing it safe. I'm not.",
-    "His best-case scenario is elite and his ownership is dirt cheap. Classic mispricing.",
-    # ── Ricky brand-voice additions ──
-    "If this turns into a 20-point corpse, he closes. Only the pros and the psychos click that.",
+    "Floor-to-ceiling gap is massive. That's the whole point of GPP.",
+    "Best case is elite, ownership is dirt cheap. Mispriced.",
+    "Ceiling screams and nobody's listening. Their loss.",
 ]
 _VALUE_LINES = [
-    "The price-to-production ratio here is absurd. This is a clearance sale.",
-    "At this salary he just needs a decent game to return value. His ceiling? That's the bonus.",
-    "If I could buy stock in a DFS player, I'd be all-in at this price.",
+    "Price is wrong. Production says so. Move on.",
+    "At this salary a decent game prints. Ceiling is the bonus.",
+    "Clearance rack. The sharp money already knows.",
 ]
 _FALLBACK_LINES = [
-    "The numbers are clean, the ownership is soft. That's all I need.",
-    "I've run the model three times. He keeps showing up. Trust the process.",
-    "This is the kind of play that looks obvious in hindsight. Be there first.",
-    # ── Ricky brand-voice additions ──
-    "The field thinks it's gambling. We're just exploiting mispriced risk.",
+    "Numbers are clean. Ownership is soft. Done.",
+    "Model keeps flagging him. I stopped questioning it.",
+    "Obvious in hindsight. Be there first.",
 ]
 _sniper_counters: Dict[str, int] = {}
 
@@ -273,19 +269,6 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
 
     st.markdown("### \U0001f4cb The Board")
 
-    # ── Rotating brand-voice one-liner below The Board header ──
-    _BOARD_HEADER_LINES = [
-        "Disgruntled quant\u2019s tape \u2013 where the real edges are, and where the crowd is about to light money on fire.",
-        "Today\u2019s hit list from an ex\u2011Wall Street nerd who finally gets to say what he thinks.",
-        "This isn\u2019t a tout sheet. It\u2019s what a bored quant would tell you over beers before lock.",
-    ]
-    from yak_core.rickys_take import _pick_template_by_key
-    _header_line = _pick_template_by_key(_BOARD_HEADER_LINES, "board_header", "board_header")
-    st.markdown(
-        f'<div style="color:rgba(240,240,240,0.45);font-size:0.82rem;margin-top:-8px;margin-bottom:10px;">{_header_line}</div>',
-        unsafe_allow_html=True,
-    )
-
     parts: list = []
 
     # -- 1. Last Slate (1-2 sentences) \u2014 quick recap --
@@ -315,7 +298,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
         s = stacks[0]
         slate_read_lines.append(
             f"{s['team1']}-{s['team2']} \u2014 {s['vegas_total']:.0f} total. "
-            f"This is where the money prints tonight. Stack it or watch someone else cash."
+            f"Highest total on the slate. Stack or get out of the way."
         )
 
     # Blowout risk
@@ -338,8 +321,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
         if _bump_mask.any():
             _bumped = pool.loc[_bump_mask].nlargest(1, "injury_bump_fp").iloc[0]
             slate_read_lines.append(
-                f"{_bumped['player_name']} just inherited extra opportunity from an injury. "
-                f"The market is slow. We are not."
+                f"{_bumped['player_name']} inherited extra opportunity from an injury. Act before ownership catches up."
             )
 
     if slate_read_lines:
@@ -360,7 +342,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
         for p in snipers[:3]:
             reason = _sniper_reason(p, pool)
             parts.append(
-                f'<div class="the-board-edge-callout" title="Ricky would only click this in MME and only after a drink.">'
+                f'<div class="the-board-edge-callout">'
                 f"<strong>{p['player_name']}</strong> ({p['team']}, ${p['salary']:,}) \u2014 {reason}"
                 f'</div>'
             )
@@ -398,7 +380,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             unsafe_allow_html=True,
         )
     else:
-        st.caption("Nothing cute here. Sometimes the market\u2019s right. Play solid or take the night off.")
+        st.caption("Nothing worth forcing. Play the board or sit tonight out.")
 
 
 def _render_late_swap_alerts(alerts: list, sport: str, lineups: dict | None = None) -> None:
@@ -509,7 +491,6 @@ def render_edge_tab(sport: str) -> None:
 
     # ── Header ──
     st.markdown(f"## 📐 Right Angle Ricky — {sport}")
-    st.caption("DFS from a disgruntled quant.")
     st.caption(f"{slate_date} · {pool_size} players · DraftKings")
 
     # PGA: Under Construction banner
