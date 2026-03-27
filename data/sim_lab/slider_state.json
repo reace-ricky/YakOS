@@ -7,7 +7,7 @@
         "MIN_PLAYER_MINUTES": 15,
         "NUM_LINEUPS": 25,
         "TIERED_EXPOSURE_VALUE": 0.4,
-        "overall_bias_correction": 8.76
+        "overall_bias_correction": 9.04
       },
       "ricky_weights": {
         "w_gpp": 0.25,
