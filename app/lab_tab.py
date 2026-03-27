@@ -992,6 +992,26 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
 
     pool = fetch_live_opt_pool(slate_date, cfg)
 
+    # ── Filter to Main slate games (7-9pm ET tipoff) ──
+    _main_slate_teams = set()
+    _main_slate_excluded = set()
+    try:
+        from yak_core.live import fetch_game_times, get_main_slate_teams
+        _game_times = fetch_game_times(slate_date, cfg)
+        _main_slate_teams = get_main_slate_teams(_game_times)
+        if _main_slate_teams:
+            _pre_filter = len(pool)
+            _all_teams = set(pool["team"].str.upper().unique()) if "team" in pool.columns else set()
+            pool = pool[pool["team"].str.upper().isin(_main_slate_teams)].copy()
+            _dropped = _pre_filter - len(pool)
+            _main_slate_excluded = _all_teams - _main_slate_teams
+            if _dropped > 0:
+                print(f"[_load_nba_pool] Main slate filter: dropped {_dropped} players from late/early games ({len(pool)} remaining)")
+                print(f"[_load_nba_pool] Main slate teams: {sorted(_main_slate_teams)}")
+                print(f"[_load_nba_pool] Excluded teams: {sorted(_main_slate_excluded)}")
+    except Exception as _gt_err:
+        print(f"[_load_nba_pool] Game time filter failed (non-fatal): {_gt_err}")
+
     # ── Fetch rolling game logs from Tank01 (5/10/20 game averages) ──
     # This gives proj_model real performance data so projections differ
     # from salary-implied. Without this the optimizer is a salary maximizer.
@@ -1372,6 +1392,10 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
         "pool_size": len(pool), "proj_source": _rg_source_used or cfg.get("PROJ_SOURCE", "salary_implied"),
         "matchups": matchups,
     }
+    if _main_slate_teams:
+        meta["main_slate_teams"] = sorted(_main_slate_teams)
+    if _main_slate_excluded:
+        meta["excluded_teams"] = sorted(_main_slate_excluded)
     return pool, meta
 
 
