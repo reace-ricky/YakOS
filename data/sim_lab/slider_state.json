@@ -12,7 +12,7 @@
       "ricky_weights": {
         "w_gpp": 0.25,
         "w_ceil": 0.85,
-        "w_own": 0.25
+        "w_own": 0.15
       }
     },
     "Cash Main": {
