@@ -1,11 +1,9 @@
 {
   "contest": "GPP Main",
   "sport": "NBA",
-  "num_lineups": 40,
-  "built_at": "2026-03-27 02:42 PM ET",
+  "num_lineups": 25,
+  "built_at": "2026-03-27 03:27 PM ET",
   "lock": [],
-  "exclude": [
-    "Cooper Flagg"
-  ],
+  "exclude": [],
   "profile_name": "classic_gpp_main"
 }
