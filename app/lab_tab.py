@@ -2439,7 +2439,9 @@ def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, o
                 _rk = _rk or st.secrets.get("RAPIDAPI_KEY", "") or st.secrets.get("TANK01_RAPIDAPI_KEY", "")
             except Exception:
                 pass
-            if _rk and slate_date:
+            if not _rk:
+                st.warning("Slate filter skipped — no API key found for game time lookup")
+            elif slate_date:
                 _gt = fetch_game_times(slate_date, {"RAPIDAPI_KEY": _rk})
                 _st_teams = get_slate_teams(_gt, slate_type=slate_type)
                 if _st_teams:

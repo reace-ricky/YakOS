@@ -418,6 +418,13 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
                         _os_sf.environ.get("RAPIDAPI_KEY")
                         or _os_sf.environ.get("TANK01_RAPIDAPI_KEY", "")
                     )
+                    if not _rapid_key:
+                        try:
+                            _rapid_key = st.secrets.get("RAPIDAPI_KEY", "") or st.secrets.get("TANK01_RAPIDAPI_KEY", "")
+                        except Exception:
+                            pass
+                    if not _rapid_key:
+                        st.warning("Slate filter skipped — no API key found for game time lookup")
                     _build_cfg = {"RAPIDAPI_KEY": _rapid_key}
                     _game_times = fetch_game_times(_build_date, _build_cfg)
                     _slate_teams = get_slate_teams(_game_times, slate_type=_slate_type)
