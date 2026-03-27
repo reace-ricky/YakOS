@@ -1,7 +1,7 @@
 {
   "sport": "NBA",
   "site": "DK",
-  "date": "2026-03-15",
+  "date": "2026-03-27",
   "salary_cap": 50000,
   "roster_slots": [
     "PG",
@@ -14,50 +14,68 @@
     "UTIL"
   ],
   "lineup_size": 8,
-  "pool_size": 209,
+  "pool_size": 357,
   "proj_source": "model",
   "matchups": [
     {
-      "away": "GS",
-      "home": "NY",
-      "game_id": "20260315_GS@NY",
-      "label": "GS @ NY"
+      "away": "UTA",
+      "home": "DEN",
+      "game_id": "20260327_UTA@DEN",
+      "label": "UTA @ DEN"
     },
     {
-      "away": "IND",
-      "home": "MIL",
-      "game_id": "20260315_IND@MIL",
-      "label": "IND @ MIL"
+      "away": "ATL",
+      "home": "BOS",
+      "game_id": "20260327_ATL@BOS",
+      "label": "ATL @ BOS"
     },
     {
-      "away": "DET",
-      "home": "TOR",
-      "game_id": "20260315_DET@TOR",
-      "label": "DET @ TOR"
+      "away": "HOU",
+      "home": "MEM",
+      "game_id": "20260327_HOU@MEM",
+      "label": "HOU @ MEM"
+    },
+    {
+      "away": "CHI",
+      "home": "OKC",
+      "game_id": "20260327_CHI@OKC",
+      "label": "CHI @ OKC"
+    },
+    {
+      "away": "BKN",
+      "home": "LAL",
+      "game_id": "20260327_BKN@LAL",
+      "label": "BKN @ LAL"
+    },
+    {
+      "away": "WAS",
+      "home": "GS",
+      "game_id": "20260327_WAS@GS",
+      "label": "WAS @ GS"
+    },
+    {
+      "away": "LAC",
+      "home": "IND",
+      "game_id": "20260327_LAC@IND",
+      "label": "LAC @ IND"
     },
     {
       "away": "DAL",
+      "home": "POR",
+      "game_id": "20260327_DAL@POR",
+      "label": "DAL @ POR"
+    },
+    {
+      "away": "NO",
+      "home": "TOR",
+      "game_id": "20260327_NO@TOR",
+      "label": "NO @ TOR"
+    },
+    {
+      "away": "MIA",
       "home": "CLE",
-      "game_id": "20260315_DAL@CLE",
-      "label": "DAL @ CLE"
-    },
-    {
-      "away": "UTA",
-      "home": "SAC",
-      "game_id": "20260315_UTA@SAC",
-      "label": "UTA @ SAC"
-    },
-    {
-      "away": "MIN",
-      "home": "OKC",
-      "game_id": "20260315_MIN@OKC",
-      "label": "MIN @ OKC"
-    },
-    {
-      "away": "POR",
-      "home": "PHI",
-      "game_id": "20260315_POR@PHI",
-      "label": "POR @ PHI"
+      "game_id": "20260327_MIA@CLE",
+      "label": "MIA @ CLE"
     }
   ]
 }
