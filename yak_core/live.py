@@ -255,7 +255,7 @@ def _calc_dk_nba_fp(stats: dict) -> float:
     stl = _f("stl", "steals", "STL")
     blk = _f("blk", "blocks", "BLK")
     tov = _f("TOV", "to", "turnovers", "tov")
-    fg3m = _f("fg3m", "threePM", "three_made", "3PM", "tpm")
+    fg3m = _f("tptfgm", "fg3m", "threePM", "three_made", "3PM", "tpm")
 
     fp = (
         pts
@@ -402,10 +402,8 @@ def _fetch_actuals_from_box_scores(date_key: str, cfg: dict) -> pd.DataFrame:
             elif fp_nested is not None:
                 fp_raw = fp_nested
 
-            try:
-                fp = float(fp_raw) if fp_raw is not None else _calc_dk_nba_fp(p)
-            except (ValueError, TypeError):
-                fp = _calc_dk_nba_fp(p)
+            # Always compute manually — Tank01's fantasyPoints field is missing the 3PM bonus
+            fp = _calc_dk_nba_fp(p)
 
             # Grab actual minutes from box score (Tank01 field: "mins")
             mins_raw = p.get("mins") or p.get("min") or p.get("minutes") or p.get("mp")
