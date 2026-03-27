@@ -5,14 +5,14 @@
     "Value targets: Caleb Love, Marvin Bagley III",
     "Fade candidates: Max Shulga, Caleb Houstan"
   ],
-  "recommendation": "5 core plays anchored at $8,700\u2013$12,500. 5 value plays averaging 8.3 pts/$1K. 5 leverage plays at 2\u20132% ownership.",
+  "recommendation": "5 core plays anchored at $8,700\u2013$12,500. 5 value plays averaging 8.4 pts/$1K. 5 leverage plays at 2\u20132% ownership.",
   "core_plays": [
     {
       "player_name": "Nikola Jokic",
       "salary": 12500,
       "proj": 59.48793355156745,
-      "ownership": 5.2,
-      "edge": 0.6141211011448757,
+      "ownership": 5.24,
+      "edge": 0.6141484456192509,
       "value": 4.759034684125396,
       "risk_score": 30.0,
       "proj_minutes": 34.6,
@@ -37,14 +37,14 @@
       "player_name": "Jalen Johnson",
       "salary": 10600,
       "proj": 53.55510182508627,
-      "ownership": 5.12,
-      "edge": 0.5862442807063605,
+      "ownership": 5.14,
+      "edge": 0.5862547798905324,
       "value": 5.052368096706252,
       "risk_score": 30.0,
       "proj_minutes": 35.4,
       "sim90th": 72.005,
       "ceil": 66.4,
-      "sim_leverage": 2.52
+      "sim_leverage": 2.1
     },
     {
       "player_name": "Shai Gilgeous-Alexander",
@@ -63,14 +63,14 @@
       "player_name": "Cooper Flagg",
       "salary": 9700,
       "proj": 50.05607618106701,
-      "ownership": 5.15,
-      "edge": 0.5632325274063058,
+      "ownership": 5.16,
+      "edge": 0.5632371595275865,
       "value": 5.1604202248522695,
       "risk_score": 30.0,
       "proj_minutes": 34.6,
       "sim90th": 69.61500000000001,
       "ceil": 62.03,
-      "sim_leverage": 0.84
+      "sim_leverage": 0.0
     }
   ],
   "leverage_plays": [
@@ -78,66 +78,66 @@
       "player_name": "Will Riley",
       "salary": 5900,
       "proj": 25.974999999999998,
-      "ownership": 1.94,
-      "edge": 0.3924256104489896,
+      "ownership": 1.95,
+      "edge": 0.39228454120058387,
       "value": 4.4025423728813555,
       "risk_score": 53.9,
       "proj_minutes": 40.0,
       "sim90th": 29.205,
       "ceil": 24.46,
-      "sim_leverage": 25.49
+      "sim_leverage": 26.61
     },
     {
       "player_name": "Derrick Jones Jr.",
       "salary": 5500,
-      "proj": 23.68368394835094,
-      "ownership": 2.12,
-      "edge": 0.39249966200565817,
-      "value": 4.306124354245625,
+      "proj": 23.368259006170362,
+      "ownership": 2.0,
+      "edge": 0.37227713416412794,
+      "value": 4.248774364758248,
       "risk_score": 30.0,
-      "proj_minutes": 32.1,
-      "sim90th": 37.735,
-      "ceil": 29.82,
-      "sim_leverage": 7.56
+      "proj_minutes": 31.8,
+      "sim90th": 37.235,
+      "ceil": 29.38,
+      "sim_leverage": 10.08
+    },
+    {
+      "player_name": "Aaron Nesmith",
+      "salary": 4900,
+      "proj": 22.138784305770656,
+      "ownership": 2.13,
+      "edge": 0.3701924930444998,
+      "value": 4.518119246075644,
+      "risk_score": 30.0,
+      "proj_minutes": 29.4,
+      "sim90th": 38.725,
+      "ceil": 30.53,
+      "sim_leverage": 9.24
     },
     {
       "player_name": "Christian Braun",
       "salary": 5600,
       "proj": 23.909847547894163,
-      "ownership": 2.25,
-      "edge": 0.37559063338477855,
+      "ownership": 2.23,
+      "edge": 0.3757819751641961,
       "value": 4.2696156335525295,
       "risk_score": 30.0,
       "proj_minutes": 33.5,
       "sim90th": 37.775,
       "ceil": 30.49,
-      "sim_leverage": 6.44
-    },
-    {
-      "player_name": "Dyson Daniels",
-      "salary": 7200,
-      "proj": 26.813656438869614,
-      "ownership": 2.36,
-      "edge": 0.38382698291017076,
-      "value": 3.724118949843002,
-      "risk_score": 35.5,
-      "proj_minutes": 30.1,
-      "sim90th": 38.325,
-      "ceil": 35.81,
-      "sim_leverage": 15.83
+      "sim_leverage": 6.72
     },
     {
       "player_name": "Chaney Johnson",
       "salary": 4500,
       "proj": 23.655,
-      "ownership": 2.28,
-      "edge": 0.3643372618211492,
+      "ownership": 2.26,
+      "edge": 0.3645263024520264,
       "value": 5.256666666666667,
       "risk_score": 46.0,
       "proj_minutes": 33.6,
       "sim90th": 29.685000000000002,
       "ceil": 22.13,
-      "sim_leverage": 10.36
+      "sim_leverage": 11.06
     }
   ],
   "value_plays": [
@@ -145,66 +145,66 @@
       "player_name": "Caleb Love",
       "salary": 3000,
       "proj": 27.425,
-      "ownership": 3.71,
-      "edge": 0.4251536235811552,
+      "ownership": 3.74,
+      "edge": 0.4250364229078026,
       "value": 9.141666666666667,
       "risk_score": 39.1,
       "proj_minutes": 39.2,
       "sim90th": 34.275,
       "ceil": 25.39,
-      "sim_leverage": 0.0
+      "sim_leverage": -0.98
     },
     {
       "player_name": "Marvin Bagley III",
       "salary": 4300,
       "proj": 35.925,
-      "ownership": 4.83,
-      "edge": 0.4715424835861243,
+      "ownership": 4.82,
+      "edge": 0.4715735931283795,
       "value": 8.354651162790697,
       "risk_score": 45.9,
       "proj_minutes": 40.0,
       "sim90th": 44.935,
       "ceil": 32.51,
-      "sim_leverage": 1.68
+      "sim_leverage": 1.4
+    },
+    {
+      "player_name": "Kobe Brown",
+      "salary": 3100,
+      "proj": 25.485000000000003,
+      "ownership": 3.08,
+      "edge": 0.4057884273544075,
+      "value": 8.220967741935485,
+      "risk_score": 39.3,
+      "proj_minutes": 34.5,
+      "sim90th": 32.025,
+      "ceil": 24.32,
+      "sim_leverage": 2.94
     },
     {
       "player_name": "Derik Queen",
       "salary": 4000,
       "proj": 32.725,
-      "ownership": 4.49,
-      "edge": 0.4464393934891487,
+      "ownership": 4.5,
+      "edge": 0.44640631268047787,
       "value": 8.18125,
       "risk_score": 43.8,
       "proj_minutes": 32.922,
       "sim90th": 41.115,
       "ceil": 29.22,
-      "sim_leverage": 1.96
+      "sim_leverage": 1.12
     },
     {
       "player_name": "Bogdan Bogdanovic",
       "salary": 3000,
       "proj": 24.025,
-      "ownership": 3.06,
-      "edge": 0.3681059042782198,
+      "ownership": 3.05,
+      "edge": 0.3681586902071522,
       "value": 8.008333333333333,
       "risk_score": 30.0,
       "proj_minutes": 34.5,
       "sim90th": 32.925000000000004,
       "ceil": 25.18,
-      "sim_leverage": -22.27
-    },
-    {
-      "player_name": "Jeremiah Fears",
-      "salary": 4300,
-      "proj": 33.775,
-      "ownership": 4.72,
-      "edge": 0.4607229601448613,
-      "value": 7.854651162790698,
-      "risk_score": 35.7,
-      "proj_minutes": 35.526,
-      "sim90th": 42.265,
-      "ceil": 30.87,
-      "sim_leverage": 0.0
+      "sim_leverage": -23.11
     }
   ],
   "fade_candidates": [
@@ -248,30 +248,30 @@
       "sim_leverage": 0.56
     },
     {
-      "player_name": "Garrett Temple",
-      "salary": 3000,
-      "proj": 5.826142536272717,
-      "ownership": 0.03,
-      "edge": 0.22705325235869434,
-      "value": 1.9420475120909055,
-      "risk_score": 58.7,
-      "proj_minutes": 3.6,
-      "sim90th": 10.125,
-      "ceil": 8.32,
-      "sim_leverage": 0.98
-    },
-    {
       "player_name": "Yang Hansen",
       "salary": 3000,
       "proj": 8.095,
-      "ownership": 0.11,
+      "ownership": 0.1,
       "edge": 0.23072219686217194,
       "value": 2.6983333333333337,
       "risk_score": 64.6,
       "proj_minutes": 11.3,
       "sim90th": 11.615,
       "ceil": 8.44,
-      "sim_leverage": -2.38
+      "sim_leverage": -1.68
+    },
+    {
+      "player_name": "Jamison Battle",
+      "salary": 3500,
+      "proj": 8.155,
+      "ownership": 0.1,
+      "edge": 0.2345738164982078,
+      "value": 2.3299999999999996,
+      "risk_score": 88.7,
+      "proj_minutes": 9.3,
+      "sim90th": 11.014999999999999,
+      "ceil": 9.88,
+      "sim_leverage": 0.56
     }
   ],
   "signals_df_path": "signals.parquet"
