@@ -713,12 +713,23 @@ def _fetch_nba_actuals_multi_day_backfill(
     return combined
 
 
-def backfill_actuals(min_coverage: float = 0.8) -> list[dict]:
+def backfill_actuals(
+    min_coverage: float = 0.8,
+    force: bool = False,
+    dry_run: bool = False,
+    dates: list[str] | None = None,
+) -> list[dict]:
     """Re-fetch actuals for archived slates with poor coverage and re-archive.
 
     SAFETY: Never regresses coverage. New actuals are merged into existing
     data, only filling NaN slots. Non-NaN actual_fp values are never
     overwritten. The archive is only updated if new coverage >= old coverage.
+
+    Flags:
+        force:   Bypass the coverage gate AND the preserve-existing guard.
+                 Re-fetches all actuals from scratch so wrong values get corrected.
+        dry_run: Show what --force would change without writing files to disk.
+        dates:   Only process archives whose slate_date is in this list.
     """
     from yak_core.slate_archive import _ARCHIVE_DIR, archive_slate
 
@@ -726,19 +737,31 @@ def backfill_actuals(min_coverage: float = 0.8) -> list[dict]:
         log.warning("No archive directory at %s", _ARCHIVE_DIR)
         return []
 
+    prefix = "[DRY RUN] " if dry_run else ""
+
     results = []
     for fname in sorted(os.listdir(_ARCHIVE_DIR)):
         if not fname.endswith(".parquet"):
             continue
+
+        slate_date = fname[:10]
+
+        # ── Dates filter: skip archives not in the requested list ────
+        if dates and slate_date not in dates:
+            continue
+
         path = os.path.join(_ARCHIVE_DIR, fname)
         df = pd.read_parquet(path)
         if "actual_fp" not in df.columns:
             continue
+
         old_coverage = df["actual_fp"].notna().mean()
-        if old_coverage >= min_coverage:
+
+        # ── Coverage gate ────────────────────────────────────────────
+        if old_coverage >= min_coverage and not force:
+            log.info("Skipping %s: %.1f%% coverage (use --force to override)", fname, old_coverage * 100)
             continue
 
-        slate_date = fname[:10]
         # Determine sport from filename
         fname_lower = fname.lower()
         if "pga" in fname_lower:
@@ -750,10 +773,13 @@ def backfill_actuals(min_coverage: float = 0.8) -> list[dict]:
         contest_type_raw = fname[11:].replace(".parquet", "")  # after "YYYY-MM-DD_"
         contest_type = contest_type_raw.replace("_", " ").title()  # e.g. "Gpp Main"
 
-        log.info(
-            "Backfilling %s (%s, coverage: %.0f%%)",
-            fname, sport, old_coverage * 100,
-        )
+        if force:
+            log.info("%sForce-rebuilding %s (bypassing coverage gate and preserve-existing guard)", prefix, fname)
+        else:
+            log.info(
+                "Backfilling %s (%s, coverage: %.0f%%)",
+                fname, sport, old_coverage * 100,
+            )
 
         try:
             if sport == "NBA":
@@ -789,32 +815,86 @@ def backfill_actuals(min_coverage: float = 0.8) -> list[dict]:
                 log.warning("No actuals returned for %s — skipping", fname)
                 continue
 
-            # ── Preserve existing actuals: only fill NaN slots ──────────
-            # Save the existing actual_fp column BEFORE the merge overwrites it.
-            existing_actuals = df["actual_fp"].copy()
+            if not force:
+                # ── Preserve existing actuals: only fill NaN slots ──────
+                # Save the existing actual_fp column BEFORE the merge overwrites it.
+                existing_actuals = df["actual_fp"].copy()
 
-            # Merge new actuals into pool using three-pass join
-            if sport == "PGA" and "dg_id" in df.columns and "dg_id" in actuals.columns:
-                df = merge_actuals_three_pass(
-                    df, actuals,
-                    pool_id_col="dg_id", actuals_id_col="dg_id",
-                )
+                # Merge new actuals into pool using three-pass join
+                if sport == "PGA" and "dg_id" in df.columns and "dg_id" in actuals.columns:
+                    df = merge_actuals_three_pass(
+                        df, actuals,
+                        pool_id_col="dg_id", actuals_id_col="dg_id",
+                    )
+                else:
+                    df = merge_actuals_three_pass(df, actuals)
+
+                # Restore existing non-NaN actuals — NEVER overwrite good data.
+                # Only fill slots that were previously NaN with new values.
+                had_value = existing_actuals.notna()
+                df.loc[had_value, "actual_fp"] = existing_actuals[had_value]
             else:
-                df = merge_actuals_three_pass(df, actuals)
+                # ── Force mode: merge new actuals, don't preserve old values ──
+                existing_actuals = df["actual_fp"].copy()
 
-            # Restore existing non-NaN actuals — NEVER overwrite good data.
-            # Only fill slots that were previously NaN with new values.
-            had_value = existing_actuals.notna()
-            df.loc[had_value, "actual_fp"] = existing_actuals[had_value]
+                if sport == "PGA" and "dg_id" in df.columns and "dg_id" in actuals.columns:
+                    df = merge_actuals_three_pass(
+                        df, actuals,
+                        pool_id_col="dg_id", actuals_id_col="dg_id",
+                    )
+                else:
+                    df = merge_actuals_three_pass(df, actuals)
+
+                new_coverage = df["actual_fp"].notna().mean()
+                log.info(
+                    "%sForce-rebuilt %s: old coverage %.1f%% -> new coverage %.1f%%",
+                    prefix, slate_date, old_coverage * 100, new_coverage * 100,
+                )
+
+                # Log changed players for visibility
+                if "player_name" in df.columns:
+                    changed_mask = (
+                        (existing_actuals.notna() & df["actual_fp"].notna()
+                         & (existing_actuals != df["actual_fp"]))
+                        | (existing_actuals.isna() & df["actual_fp"].notna())
+                    )
+                    n_changed = int(changed_mask.sum())
+                    log.info("%s  %d players changed", prefix, n_changed)
+                    if dry_run:
+                        for idx in df.index[changed_mask]:
+                            pname = df.at[idx, "player_name"]
+                            old_fp = existing_actuals.at[idx]
+                            new_fp = df.at[idx, "actual_fp"]
+                            old_str = f"{old_fp:.1f}" if pd.notna(old_fp) else "NaN"
+                            new_str = f"{new_fp:.1f}" if pd.notna(new_fp) else "NaN"
+                            log.info("[DRY RUN]   %s: %s -> %s", pname, old_str, new_str)
 
             new_coverage = df["actual_fp"].notna().mean()
-            log.info(
-                "Backfill %s: coverage %.0f%% → %.0f%%",
-                fname, old_coverage * 100, new_coverage * 100,
-            )
+
+            if not force:
+                log.info(
+                    "Backfill %s: coverage %.0f%% → %.0f%%",
+                    fname, old_coverage * 100, new_coverage * 100,
+                )
+
+            # ── Dry-run: report but don't write ─────────────────────────
+            if dry_run:
+                log.info(
+                    "[DRY RUN] %s: coverage %.1f%% -> %.1f%%",
+                    slate_date, old_coverage * 100, new_coverage * 100,
+                )
+                log.info("[DRY RUN] Would update %s (skipped - dry run)", path)
+                results.append({
+                    "file": fname,
+                    "sport": sport,
+                    "old_coverage": round(old_coverage, 3),
+                    "new_coverage": round(new_coverage, 3),
+                    "skipped": "dry_run",
+                })
+                continue
 
             # ── Safety check: never regress coverage ────────────────────
-            if new_coverage < old_coverage:
+            if new_coverage < old_coverage and not force:
                 log.warning(
                     "SKIPPING archive write for %s — new coverage (%.0f%%) < old (%.0f%%). "
                     "Would regress data.",
@@ -865,11 +945,35 @@ def main():
         action="store_true",
         help="Re-fetch actuals for archived slates with <80%% coverage.",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Bypass coverage gate and preserve-existing guard. Re-fetches all actuals from scratch.",
+    )
+    parser.add_argument(
+        "--dates",
+        nargs="+",
+        help="Specific dates to force-rebuild, e.g. --dates 2026-03-14 2026-03-15",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what --force would change without writing to disk.",
+    )
     args = parser.parse_args()
 
     if args.backfill:
-        log.info("Running backfill mode — re-fetching actuals for low-coverage archives")
-        bf_results = backfill_actuals()
+        mode_parts = ["backfill"]
+        if args.force:
+            mode_parts.append("force")
+        if args.dry_run:
+            mode_parts.append("dry-run")
+        if args.dates:
+            mode_parts.append(f"dates={','.join(args.dates)}")
+        log.info("Running %s mode", " + ".join(mode_parts))
+        bf_results = backfill_actuals(
+            force=args.force, dry_run=args.dry_run, dates=args.dates,
+        )
         archive_files = []
         for bf in bf_results:
             if "error" in bf:
@@ -889,9 +993,11 @@ def main():
         # Individual archive_slate() calls fire sync_feedback_async()
         # which can race ahead of later writes.  This catch-all ensures
         # every updated parquet reaches the repo.
-        if archive_files:
+        if archive_files and not args.dry_run:
             log.info("Final backfill sync: %d archive files", len(archive_files))
             sync_to_github([], extra_files=archive_files)
+        elif args.dry_run:
+            log.info("[DRY RUN] Would sync %d archive files (skipped - dry run)", len(archive_files))
         return
 
     slate_date = args.date

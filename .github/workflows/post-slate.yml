@@ -23,6 +23,10 @@ on:
         description: "Slate date (YYYY-MM-DD, blank = today, post-slate mode only)"
         required: false
         type: string
+      extra_args:
+        description: "Extra CLI flags for backfill mode, e.g. --force --dates 2026-03-14 2026-03-15"
+        required: false
+        type: string
 
 jobs:
   feedback:
@@ -78,5 +82,9 @@ jobs:
           DATAGOLF_API_KEY: ${{ secrets.DATAGOLF_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Running backfill for all archived slates with low actuals coverage"
-          python scripts/nightly_calibration.py --backfill
+          CMD="python scripts/nightly_calibration.py --backfill"
+          if [ -n "${{ inputs.extra_args }}" ]; then
+            CMD="$CMD ${{ inputs.extra_args }}"
+          fi
+          echo "Running: $CMD"
+          eval $CMD
