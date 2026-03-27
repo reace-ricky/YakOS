@@ -1,7 +1,9 @@
 {
   "configs": {
     "GPP Main": {
-      "overrides": {},
+      "overrides": {
+        "GPP_BUST_PENALTY": 0.12
+      },
       "ricky_weights": {
         "w_gpp": 0.3,
         "w_ceil": 0.95,
