@@ -11,7 +11,7 @@
         "GPP_MIN_PROJ_FLOOR": 1.0
       },
       "ricky_weights": {
-        "w_gpp": 0.25,
+        "w_gpp": 0.45,
         "w_ceil": 0.65,
         "w_own": 0.3
       }
