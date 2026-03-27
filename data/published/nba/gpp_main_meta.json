@@ -1,8 +1,8 @@
 {
   "contest": "GPP Main",
   "sport": "NBA",
-  "num_lineups": 10,
-  "built_at": "2026-03-26 07:35 PM ET",
+  "num_lineups": 40,
+  "built_at": "2026-03-27 02:38 PM ET",
   "lock": [],
   "exclude": [],
   "profile_name": "classic_gpp_main"
