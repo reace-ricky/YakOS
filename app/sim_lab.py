@@ -3710,9 +3710,30 @@ def render_sim_lab(sport: str) -> None:
     if _cur_ct != _prev_ct:
         st.session_state["_sim_lab_prev_contest_type"] = _cur_ct
         st.session_state["sim_lab_archetype"] = "Default"
-        # Seed sandbox with profile defaults on contest type change
+
         if not is_pga and _named_key:
-            _apply_named_profile(_named_key)
+            if not _prev_ct:
+                # Cold start — prefer disk-saved state over profile defaults
+                _disk_ovr, _disk_rw = _load_slider_state(preset_name)
+                sk = _sandbox_config_key(preset_name)
+                if _disk_ovr:
+                    st.session_state[sk] = _disk_ovr
+                else:
+                    _apply_named_profile(_named_key)
+                if _disk_rw:
+                    _rk = f"sim_lab_ricky_weights_{preset_name}"
+                    st.session_state[_rk] = _disk_rw
+                    # Also sync widget keys so sliders render correctly
+                    st.session_state[f"sl_ricky_gpp_{preset_name}"] = _disk_rw.get("w_gpp", 0.0)
+                    st.session_state[f"sl_ricky_ceil_{preset_name}"] = _disk_rw.get("w_ceil", 1.0)
+                    st.session_state[f"sl_ricky_own_{preset_name}"] = _disk_rw.get("w_own", 0.15)
+                elif not st.session_state.get(_sandbox_config_key(preset_name)):
+                    # No disk state at all — fall back to profile
+                    _apply_named_profile(_named_key)
+            else:
+                # Actual contest type change by user — apply profile defaults
+                _apply_named_profile(_named_key)
+
         if _prev_ct:  # skip initial render
             st.rerun()
     else:
