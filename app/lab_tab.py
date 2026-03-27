@@ -539,6 +539,16 @@ def render_lab_tab(sport: str) -> None:
     if set(exclude_list) != set(_saved_excl_build):
         _excl_file_build.write_text(json.dumps(exclude_list))
 
+    # Slate window filter (NBA classic only)
+    _slate_type = "All Day"
+    if not is_pga and not is_nba_showdown:
+        _slate_type = st.selectbox(
+            "Slate",
+            ["Main (7-9pm)", "Early (before 7pm)", "Late (after 9pm)", "All Day"],
+            key=f"lab_slate_type_{sport}",
+            help="Filter to games in this DraftKings slate window. Times are ET.",
+        )
+
     # ── Showdown Captain picker ──
     _sd_force_captain: str = ""
     if is_nba_showdown and showdown_teams:
@@ -643,6 +653,8 @@ def render_lab_tab(sport: str) -> None:
                         profile_overrides=_active_profile_overrides if _active_profile_overrides else None,
                         profile_name=(_profile_key_internal or ""),
                         sd_force_captain=_sd_force_captain if _sd_force_captain else None,
+                        slate_type=_slate_type,
+                        slate_date=slate_date,
                     )
                     n_built = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else 0
 
@@ -2410,12 +2422,34 @@ def _apply_dk_showdown_salaries(pool: pd.DataFrame, dk_sd_file) -> None:
     st.info(f"Showdown salaries applied: {_updated}/{len(pool)} players matched from DK CSV")
 
 
-def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None, sd_draft_group_id=None, profile_overrides=None, profile_name="", sd_force_captain=None):
+def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, out_dir, showdown_teams=None, sd_draft_group_id=None, profile_overrides=None, profile_name="", sd_force_captain=None, slate_type="All Day", slate_date=""):
     from yak_core.config import CONTEST_PRESETS, merge_config
     from yak_core.lineups import build_multiple_lineups_with_exposure, build_player_pool, build_showdown_lineups
     import re as _re
 
     pool = pd.read_parquet(out_dir / "slate_pool.parquet")
+
+    # ── Slate window filter (NBA classic only) ──
+    if sport.upper() != "PGA" and slate_type != "All Day":
+        try:
+            from yak_core.live import fetch_game_times, get_slate_teams
+            import os
+            _rk = os.environ.get("RAPIDAPI_KEY") or os.environ.get("TANK01_RAPIDAPI_KEY", "")
+            try:
+                _rk = _rk or st.secrets.get("RAPIDAPI_KEY", "") or st.secrets.get("TANK01_RAPIDAPI_KEY", "")
+            except Exception:
+                pass
+            if _rk and slate_date:
+                _gt = fetch_game_times(slate_date, {"RAPIDAPI_KEY": _rk})
+                _st_teams = get_slate_teams(_gt, slate_type=slate_type)
+                if _st_teams:
+                    _pre = len(pool)
+                    pool = pool[pool["team"].str.upper().isin(_st_teams)].copy()
+                    _dropped = _pre - len(pool)
+                    if _dropped > 0:
+                        st.info(f"Slate filter ({slate_type}): {len(pool)} players ({_dropped} excluded)")
+        except Exception as _sf_err:
+            print(f"[lab] Slate filter failed: {_sf_err}")
 
     # ── PGA: live re-check for withdrawals at build time ──
     # Catches players who withdrew AFTER the pool was loaded.
