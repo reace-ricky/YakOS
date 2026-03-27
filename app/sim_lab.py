@@ -843,11 +843,21 @@ def _run_pipeline(
             _from_archive = True
             _logger.info("Loaded archived pool for %s (%d players)", date_dash, len(pool_df))
         else:
-            api_key = _get_nba_api_key()
-            if not api_key:
-                raise ValueError("NBA API key not found. Set RAPIDAPI_KEY or TANK01_RAPIDAPI_KEY.")
-            cfg["RAPIDAPI_KEY"] = api_key
-            pool_df = fetch_live_dfs(date_key, cfg)
+            # Try ricky archive before hitting the API
+            try:
+                from yak_core.ricky_archive import load_pool_for_date as _load_ricky_pool
+                pool_df = _load_ricky_pool(date.fromisoformat(date_dash))
+                if pool_df is not None and not pool_df.empty:
+                    _from_archive = True
+                    _logger.info("Loaded ricky archive pool for %s (%d players)", date_dash, len(pool_df))
+                else:
+                    raise ValueError("Empty ricky pool")
+            except Exception:
+                api_key = _get_nba_api_key()
+                if not api_key:
+                    raise ValueError("NBA API key not found. Set RAPIDAPI_KEY or TANK01_RAPIDAPI_KEY.")
+                cfg["RAPIDAPI_KEY"] = api_key
+                pool_df = fetch_live_dfs(date_key, cfg)
     else:
         api_key = _get_pga_api_key()
         if not api_key:
@@ -3915,7 +3925,8 @@ def render_sim_lab(sport: str) -> None:
 
     if sport == "NBA":
         # --- NBA: Batch run across archive dates ---
-        rg_dates = _scan_rg_dates()
+        from yak_core.auto_calibrate import scan_archive_dates
+        rg_dates = scan_archive_dates(sport="nba")
         _run_dates: List[date] = []
 
         if rg_dates:
