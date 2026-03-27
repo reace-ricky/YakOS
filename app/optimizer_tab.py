@@ -336,6 +336,16 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
         if _cpt_pick != _NONE_CPT:
             _sd_force_captain = _cpt_pick
 
+    # Slate window filter (NBA classic only — Showdown uses its own matchup picker)
+    _slate_type = "All Day"
+    if not is_pga and not is_nba_showdown:
+        _slate_type = st.selectbox(
+            "Slate",
+            ["Main (7-9pm)", "Early (before 7pm)", "Late (after 9pm)", "All Day"],
+            key=f"opt_slate_type_{sport}",
+            help="Filter to games in this DraftKings slate window. Times are ET.",
+        )
+
     # ── Build button ──
     if st.button("Build Lineups", type="primary", key=f"opt_build_{sport}"):
         is_showdown = (
@@ -403,6 +413,29 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
                 except Exception as _sd_err:
                     print(f"[optimizer] DK Showdown salary fetch failed: {_sd_err}")
                     st.warning(f"DK Showdown salary fetch failed: {_sd_err}")
+
+        # Apply slate filter (NBA classic only)
+        if not is_pga and _slate_type != "All Day":
+            try:
+                import os as _os_sf
+                from yak_core.live import fetch_game_times, get_slate_teams
+                _build_date = meta.get("date", "")
+                if _build_date:
+                    _rapid_key = (
+                        _os_sf.environ.get("RAPIDAPI_KEY")
+                        or _os_sf.environ.get("TANK01_RAPIDAPI_KEY", "")
+                    )
+                    _build_cfg = {"RAPIDAPI_KEY": _rapid_key}
+                    _game_times = fetch_game_times(_build_date, _build_cfg)
+                    _slate_teams = get_slate_teams(_game_times, slate_type=_slate_type)
+                    if _slate_teams:
+                        _pre = len(build_pool)
+                        build_pool = build_pool[build_pool["team"].str.upper().isin(_slate_teams)].copy()
+                        _dropped = _pre - len(build_pool)
+                        if _dropped > 0:
+                            st.info(f"Slate filter ({_slate_type}): {len(build_pool)} players ({_dropped} excluded)")
+            except Exception as _sf_err:
+                st.warning(f"Slate filter failed, using full pool: {_sf_err}")
 
         cfg = _build_optimizer_cfg(preset, sport, num_lineups, max_exposure, locked, excluded)
         # Apply profile overrides into the optimizer config

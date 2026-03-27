@@ -79,16 +79,6 @@ def render_lab_tab(sport: str) -> None:
         with _up_col2:
             fp_file = st.file_uploader("FantasyPros Cheatsheet CSV (optional)", type=["csv"], key=f"lab_fp_{sport}")
 
-    # Slate type selector (NBA only)
-    _slate_type = "All Day"
-    if not is_pga:
-        _slate_type = st.selectbox(
-            "Slate",
-            ["Main (7-9pm)", "Early (before 7pm)", "Late (after 9pm)", "All Day"],
-            key=f"lab_slate_type_{sport}",
-            help="Filter player pool to games in this DraftKings slate window. Times are ET.",
-        )
-
     pool_path = out_dir / "slate_pool.parquet"
     _meta_path_check = out_dir / "slate_meta.json"
     _pool_stale = False
@@ -103,8 +93,7 @@ def render_lab_tab(sport: str) -> None:
         if _chk_meta.get("date") != slate_date:
             _pool_stale = True
             st.warning(
-                f"Pool is for {_chk_meta.get('date', '?')} "
-                f"({_chk_meta.get('slate_type', 'All Day')} slate). "
+                f"Pool is for {_chk_meta.get('date', '?')}. "
                 f"Click **Load Pool** to refresh for {slate_date}."
             )
 
@@ -157,7 +146,6 @@ def render_lab_tab(sport: str) -> None:
                     pool, meta = _load_nba_pool(
                         api_key, slate_date,
                         rg_file=rg_file, rg_auto_path=_rg_auto_path,
-                        slate_type=_slate_type,
                     )
                     # Save uploaded RG file for auto-reload next time
                     if rg_file is not None:
@@ -982,7 +970,7 @@ def _get_secret(key: str) -> str:
         return ""
 
 
-def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=None, slate_type: str = "All Day") -> tuple:
+def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=None) -> tuple:
     import requests
     from yak_core.config import DEFAULT_CONFIG, DK_LINEUP_SIZE, DK_POS_SLOTS, SALARY_CAP, merge_config
     from yak_core.live import (
@@ -1002,26 +990,6 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
     })
 
     pool = fetch_live_opt_pool(slate_date, cfg)
-
-    # ── Filter to selected slate window ──
-    _slate_teams = set()
-    _slate_excluded = set()
-    try:
-        from yak_core.live import fetch_game_times, get_slate_teams
-        _game_times = fetch_game_times(slate_date, cfg)
-        _slate_teams = get_slate_teams(_game_times, slate_type=slate_type)
-        if slate_type != "All Day" and _slate_teams:
-            _pre_filter = len(pool)
-            _all_teams = set(pool["team"].str.upper().unique()) if "team" in pool.columns else set()
-            pool = pool[pool["team"].str.upper().isin(_slate_teams)].copy()
-            _dropped = _pre_filter - len(pool)
-            _slate_excluded = _all_teams - _slate_teams
-            if _dropped > 0:
-                print(f"[_load_nba_pool] Slate filter ({slate_type}): dropped {_dropped} players ({len(pool)} remaining)")
-                print(f"[_load_nba_pool] Slate teams: {sorted(_slate_teams)}")
-                print(f"[_load_nba_pool] Excluded teams: {sorted(_slate_excluded)}")
-    except Exception as _gt_err:
-        print(f"[_load_nba_pool] Game time filter failed (non-fatal): {_gt_err}")
 
     # ── Fetch rolling game logs from Tank01 (5/10/20 game averages) ──
     # This gives proj_model real performance data so projections differ
@@ -1399,15 +1367,10 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
 
     meta = {
         "sport": "NBA", "site": "DK", "date": slate_date,
-        "slate_type": slate_type,
         "salary_cap": SALARY_CAP, "roster_slots": DK_POS_SLOTS, "lineup_size": DK_LINEUP_SIZE,
         "pool_size": len(pool), "proj_source": _rg_source_used or cfg.get("PROJ_SOURCE", "salary_implied"),
         "matchups": matchups,
     }
-    if _slate_teams:
-        meta["slate_teams"] = sorted(_slate_teams)
-    if _slate_excluded:
-        meta["excluded_teams"] = sorted(_slate_excluded)
     return pool, meta
 
 
