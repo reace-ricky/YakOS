@@ -275,6 +275,9 @@ def _append_batch_history(
         "overrides_json": json.dumps(
             batch.get("overrides", {}), sort_keys=True, default=str,
         ),
+        "ricky_weights_json": json.dumps(
+            batch.get("ricky_weights", {}), sort_keys=True, default=str,
+        ),
         "num_dates": len(successful_runs) + len(batch.get("errors", [])),
         "num_lineups": successful_runs[0].get("num_lineups", 0) if successful_runs else 0,
         "avg_actual": batch.get("avg_actual", 0.0),
@@ -301,6 +304,7 @@ def _append_batch_history(
             for col, default in [("is_baseline", False), ("removed", False),
                                   ("config_label", ""), ("overrides_json", "{}"),
                                   ("profile_name", ""),
+                                  ("ricky_weights_json", "{}"),
                                   ("min_completeness_pct", -1.0),
                                   ("has_incomplete_dates", False),
                                   ("incomplete_date_count", 0)]:
@@ -1073,6 +1077,15 @@ def _run_pipeline(
         "best": round(float(summary["total_actual"].max()), 2) if len(summary) else 0,
         "beat_proj_pct": round(beat_proj_pct, 1),
         "config_hash": chash,
+        "cfg_snapshot": {
+            k: v for k, v in cfg.items()
+            if isinstance(v, (int, float, str, bool, type(None)))
+        },
+        "ricky_weights_used": {
+            "w_gpp": ricky_w_gpp if ricky_w_gpp is not None else 0.0,
+            "w_ceil": ricky_w_ceil if ricky_w_ceil is not None else 1.0,
+            "w_own": ricky_w_own if ricky_w_own is not None else 0.15,
+        },
         "summary_df": summary,
         "player_df": scored,
         "pool_analysis_df": pool_analysis,
@@ -1357,6 +1370,11 @@ def _run_batch(
         "config_label": label,
         "profile_name": profile_name,
         "overrides": sandbox_overrides.copy(),
+        "ricky_weights": {
+            "w_gpp": ricky_w_gpp if ricky_w_gpp is not None else 0.0,
+            "w_ceil": ricky_w_ceil if ricky_w_ceil is not None else 1.0,
+            "w_own": ricky_w_own if ricky_w_own is not None else 0.15,
+        },
         "runs": runs,
         "errors": errors,
         "avg_actual": avg_actual,
@@ -1447,12 +1465,24 @@ def _render_promote_config(
 
     if st.button("Promote Config", type="primary", key="promote_config_btn"):
         from yak_core.promoted_configs import promote_config
+
+        # Use the batch's frozen config, not live sliders
+        batch_overrides = latest.get("overrides", sandbox_overrides)
+        batch_ricky = latest.get("ricky_weights", ricky_weights)
+
+        # Warn if drifted
+        if batch_overrides != sandbox_overrides or batch_ricky != ricky_weights:
+            st.warning(
+                "⚠️ Promoting the config from the batch run, not your "
+                "current slider positions."
+            )
+
         entry = promote_config(
             key=config_key.strip(),
             display_name=config_display.strip(),
             base_preset=preset_name,
-            overrides=dict(sandbox_overrides),
-            ricky_weights=dict(ricky_weights),
+            overrides=dict(batch_overrides),
+            ricky_weights=dict(batch_ricky),
             validation_stats={
                 "avg_diff": avg_diff,
                 "beat_proj_pct": beat_pct,
@@ -2655,11 +2685,21 @@ def _render_hindsight_section(
             st.caption("Select players above to run the diagnostic.")
             return
 
-        # Build config for diagnostic
+        # Build config for diagnostic — use the batch's frozen config,
+        # NOT live sliders, so hindsight analyzes the config that actually
+        # produced these results.
         from yak_core.config import CONTEST_PRESETS, merge_config
         preset = CONTEST_PRESETS[preset_name]
         cfg = merge_config(preset)
-        cfg.update(sandbox_overrides)
+        batch_overrides = latest.get("overrides", sandbox_overrides)
+        cfg.update(batch_overrides)
+
+        # Warn if live sliders have drifted from batch config
+        if batch_overrides != sandbox_overrides:
+            st.warning(
+                "⚠️ Your current slider config differs from the config that "
+                "produced this batch. Hindsight is using the batch's config."
+            )
 
         # Run diagnostic
         with st.spinner("Running hindsight diagnostic..."):
@@ -4073,8 +4113,40 @@ def render_sim_lab(sport: str) -> None:
                             w_ceil=_ricky_weights["w_ceil"],
                             w_own=_ricky_weights["w_own"],
                         )
+                # Update the batch's ricky_weights snapshot to match re-rank
+                # so hindsight/promote see the weights that produced the
+                # current rankings.
+                latest["ricky_weights"] = dict(_ricky_weights)
                 _save_slider_state(preset_name, sandbox_overrides, _ricky_weights)
                 st.toast("Lineups re-ranked with updated weights")
+
+        # ── Config drift detection ───────────────────────────────────
+        _drift_batches = st.session_state.get("sim_lab_batches", [])
+        if _drift_batches:
+            _drift_batch = _drift_batches[-1]
+            _batch_ov = _drift_batch.get("overrides", {})
+            _batch_rw = _drift_batch.get("ricky_weights", {})
+            _live_ov = sandbox_overrides
+            _live_rw = _ricky_weights
+
+            _drift_keys = []
+            for _dk in set(list(_batch_ov.keys()) + list(_live_ov.keys())):
+                if _batch_ov.get(_dk) != _live_ov.get(_dk):
+                    _drift_keys.append(_dk)
+            for _dk in set(list(_batch_rw.keys()) + list(_live_rw.keys())):
+                if _batch_rw.get(_dk) != _live_rw.get(_dk):
+                    _drift_keys.append(f"ricky_{_dk}")
+
+            if _drift_keys:
+                _drift_summary = ", ".join(_drift_keys[:5])
+                if len(_drift_keys) > 5:
+                    _drift_summary += f" +{len(_drift_keys) - 5} more"
+                st.warning(
+                    f"⚠️ Config drift: {len(_drift_keys)} param(s) changed since "
+                    f"last batch: {_drift_summary}. "
+                    "Re-run batch to update results. Hindsight and Promote "
+                    "will use the batch's frozen config."
+                )
 
         # ── Table dropdown content ────────────────────────────────────
         if _table_view == "Player Table":
