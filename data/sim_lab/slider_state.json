@@ -3,7 +3,10 @@
     "GPP Main": {
       "overrides": {
         "MIN_PLAYER_MINUTES": 15,
-        "NUM_LINEUPS": 5
+        "NUM_LINEUPS": 5,
+        "GPP_BOOM_SPREAD_WEIGHT": 0.05,
+        "GPP_EFFICIENCY_WEIGHT": 0.1,
+        "CASH_FLOOR_WEIGHT": 0.3
       },
       "ricky_weights": {
         "w_gpp": 0.2,
