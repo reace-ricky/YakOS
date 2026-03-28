@@ -9,7 +9,7 @@
         "overall_bias_correction": 7.36
       },
       "ricky_weights": {
-        "w_gpp": 0.3,
+        "w_gpp": 0.25,
         "w_ceil": 0.88,
         "w_own": 0.3
       }
