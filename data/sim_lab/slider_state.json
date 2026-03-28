@@ -9,7 +9,7 @@
         "GPP_SMASH_WEIGHT": 0.05,
         "GPP_BUST_PENALTY": 0.1,
         "MAX_EXPOSURE": 0.55,
-        "MIN_PLAYER_MINUTES": 10
+        "MIN_PLAYER_MINUTES": 9
       },
       "ricky_weights": {
         "w_gpp": 0.31,
