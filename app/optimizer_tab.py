@@ -482,6 +482,10 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
         except Exception:
             pass  # Non-fatal — optimizer can work without edge tiers
 
+        # Apply Ricky's per-player bias (proj adjustments + exposure caps)
+        from yak_core.lineups import _apply_ricky_bias
+        build_pool = _apply_ricky_bias(build_pool, cfg)
+
         # Run through the same prepare_pool the Lab uses
         build_pool = build_player_pool(build_pool, cfg)
 

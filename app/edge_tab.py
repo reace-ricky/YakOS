@@ -503,6 +503,24 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
                 f'</div>'
             )
 
+    # ── Auto-write fades to Ricky's bias ──────────────────────────────
+    # Faded players get 0% exposure so the optimizer can't use them.
+    try:
+        from yak_core.bias import save_bias
+        _bias = st.session_state.setdefault("ricky_bias", {})
+        _fade_names = []
+        if bust:
+            _fade_names.append(bust["name"])
+        if fades:
+            _fade_names.extend(f.get("player_name", "") for f in fades[:1])
+        for _fn in _fade_names:
+            if _fn:
+                _bias.setdefault(_fn, {})["max_exposure"] = 0.0
+        if _fade_names:
+            save_bias(_bias)
+    except Exception:
+        pass
+
     # Render
     if parts:
         st.markdown(
@@ -593,9 +611,70 @@ def _render_late_swap_alerts(alerts: list, sport: str, lineups: dict | None = No
         st.caption(f"Injury check complete (0 impactful changes) · Last checked {timestamp}")
 
 
+
+# ── Ricky's Manual Adjustments ──────────────────────────────────────────
+def _render_bias_panel(pool: pd.DataFrame) -> None:
+    """Render the manual projection/exposure adjustment panel."""
+    from yak_core.bias import save_bias
+
+    with st.expander("🎛️ Ricky's Manual Adjustments", expanded=False):
+        bias = st.session_state.setdefault("ricky_bias", {})
+
+        player_names = sorted(pool["player_name"].dropna().unique().tolist()) if not pool.empty else []
+        if not player_names:
+            st.caption("Load a pool first.")
+            return
+
+        col1, col2, col3, col4 = st.columns([3, 1.5, 1.5, 1])
+        with col1:
+            name = st.selectbox("Player", options=player_names, key="bias_player_select")
+        with col2:
+            existing_adj = bias.get(name, {}).get("proj_adj", 0.0) if name else 0.0
+            adj = st.number_input("Proj +/-", value=float(existing_adj), step=0.5, key="bias_proj_adj")
+        with col3:
+            existing_exp = bias.get(name, {}).get("max_exposure") if name else None
+            default_exp = int(existing_exp * 100) if existing_exp is not None else 35
+            exp = st.number_input("Max Exp %", value=default_exp, min_value=0, max_value=100, key="bias_max_exp")
+        with col4:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("Set", key="bias_set_btn"):
+                entry = {}
+                if adj != 0.0:
+                    entry["proj_adj"] = adj
+                if exp < 100:
+                    entry["max_exposure"] = exp / 100.0
+                if entry:
+                    bias[name] = entry
+                elif name in bias:
+                    del bias[name]
+                save_bias(bias)
+                st.rerun()
+
+        if bias:
+            import pandas as _pd
+            rows = []
+            for pname, settings in sorted(bias.items()):
+                rows.append({
+                    "Player": pname,
+                    "Proj +/-": settings.get("proj_adj", 0.0),
+                    "Max Exp %": f"{settings['max_exposure'] * 100:.0f}%" if "max_exposure" in settings else "—",
+                })
+            st.dataframe(_pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+        if bias and st.button("🗑️ Clear All Bias", key="bias_clear_btn"):
+            st.session_state["ricky_bias"] = {}
+            save_bias({})
+            st.rerun()
+
+
 def render_edge_tab(sport: str) -> None:
     """Render Ricky's Edge Analysis tab."""
     from app.data_loader import invalidate_published_cache, load_published_data
+
+    # Load Ricky's bias overrides into session state (persisted to disk)
+    from yak_core.bias import load_bias, save_bias
+    if "ricky_bias" not in st.session_state:
+        st.session_state["ricky_bias"] = load_bias()
 
     # Inject CSS once
     st.markdown(_CARD_CSS, unsafe_allow_html=True)
@@ -633,6 +712,9 @@ def render_edge_tab(sport: str) -> None:
 
     # ── The Board ─────────────────────────────────────────────────────
     _render_the_board(sport, pool, edge_analysis, slate_date=slate_date)
+
+    # Manual bias adjustments panel
+    _render_bias_panel(pool)
 
     st.markdown("")  # spacer
 
