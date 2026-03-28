@@ -9,7 +9,7 @@
         "MAX_EXPOSURE": 0.5,
         "MIN_PLAYER_MINUTES": 13,
         "GPP_SMASH_WEIGHT": 0.04,
-        "overall_bias_correction": 11.34
+        "overall_bias_correction": 10.16
       },
       "ricky_weights": {
         "w_gpp": 0.52,
