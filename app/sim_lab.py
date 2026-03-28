@@ -2818,10 +2818,16 @@ def _apply_hindsight_recommendations(
         else:
             st.session_state[sk][param] = val
 
+    # Sync widget keys so sliders show updated values after rerun
+    _rw_hs = st.session_state.get(ricky_key, ricky_weights)
+    st.session_state[f"sl_ricky_gpp_{preset_name}"] = _rw_hs.get("w_gpp", 0.0)
+    st.session_state[f"sl_ricky_ceil_{preset_name}"] = _rw_hs.get("w_ceil", 1.0)
+    st.session_state[f"sl_ricky_own_{preset_name}"] = _rw_hs.get("w_own", 0.15)
+
     _save_slider_state(
         preset_name,
         st.session_state[sk],
-        st.session_state.get(ricky_key, ricky_weights),
+        _rw_hs,
     )
 
 
@@ -3619,6 +3625,10 @@ def _render_auto_calibrate(
                 st.session_state[sk][key] = val
             ricky_key = f"sim_lab_ricky_weights_{preset_name}"
             st.session_state[ricky_key] = dict(result.best_ricky_weights)
+            # Sync widget keys so sliders show the new values after rerun
+            st.session_state[f"sl_ricky_gpp_{preset_name}"] = result.best_ricky_weights.get("w_gpp", 0.0)
+            st.session_state[f"sl_ricky_ceil_{preset_name}"] = result.best_ricky_weights.get("w_ceil", 1.0)
+            st.session_state[f"sl_ricky_own_{preset_name}"] = result.best_ricky_weights.get("w_own", 0.15)
             _save_slider_state(
                 preset_name,
                 st.session_state[sk],
@@ -3655,10 +3665,15 @@ def _render_auto_calibrate(
                     st.session_state[ricky_key][key] = val
                 else:
                     st.session_state[sk][key] = val
+            # Sync widget keys so sliders show the new values after rerun
+            _rw_ds = st.session_state[ricky_key]
+            st.session_state[f"sl_ricky_gpp_{preset_name}"] = _rw_ds.get("w_gpp", 0.0)
+            st.session_state[f"sl_ricky_ceil_{preset_name}"] = _rw_ds.get("w_ceil", 1.0)
+            st.session_state[f"sl_ricky_own_{preset_name}"] = _rw_ds.get("w_own", 0.15)
             _save_slider_state(
                 preset_name,
                 st.session_state[sk],
-                st.session_state[ricky_key],
+                _rw_ds,
             )
             st.success("DS Recommended parameters applied.")
             st.rerun()
