@@ -1,7 +1,7 @@
 {
   "sport": "NBA",
   "site": "DK",
-  "date": "2026-03-27",
+  "date": "2026-03-28",
   "salary_cap": 50000,
   "roster_slots": [
     "PG",
@@ -14,68 +14,44 @@
     "UTIL"
   ],
   "lineup_size": 8,
-  "pool_size": 357,
+  "pool_size": 217,
   "proj_source": "model",
   "matchups": [
     {
+      "away": "DET",
+      "home": "MIN",
+      "game_id": "20260328_DET@MIN",
+      "label": "DET @ MIN"
+    },
+    {
+      "away": "SAC",
+      "home": "ATL",
+      "game_id": "20260328_SAC@ATL",
+      "label": "SAC @ ATL"
+    },
+    {
       "away": "UTA",
-      "home": "DEN",
-      "game_id": "20260327_UTA@DEN",
-      "label": "UTA @ DEN"
-    },
-    {
-      "away": "ATL",
-      "home": "BOS",
-      "game_id": "20260327_ATL@BOS",
-      "label": "ATL @ BOS"
-    },
-    {
-      "away": "HOU",
-      "home": "MEM",
-      "game_id": "20260327_HOU@MEM",
-      "label": "HOU @ MEM"
+      "home": "PHO",
+      "game_id": "20260328_UTA@PHO",
+      "label": "UTA @ PHO"
     },
     {
       "away": "CHI",
-      "home": "OKC",
-      "game_id": "20260327_CHI@OKC",
-      "label": "CHI @ OKC"
+      "home": "MEM",
+      "game_id": "20260328_CHI@MEM",
+      "label": "CHI @ MEM"
     },
     {
-      "away": "BKN",
-      "home": "LAL",
-      "game_id": "20260327_BKN@LAL",
-      "label": "BKN @ LAL"
+      "away": "SA",
+      "home": "MIL",
+      "game_id": "20260328_SA@MIL",
+      "label": "SA @ MIL"
     },
     {
-      "away": "WAS",
-      "home": "GS",
-      "game_id": "20260327_WAS@GS",
-      "label": "WAS @ GS"
-    },
-    {
-      "away": "LAC",
-      "home": "IND",
-      "game_id": "20260327_LAC@IND",
-      "label": "LAC @ IND"
-    },
-    {
-      "away": "DAL",
-      "home": "POR",
-      "game_id": "20260327_DAL@POR",
-      "label": "DAL @ POR"
-    },
-    {
-      "away": "NO",
-      "home": "TOR",
-      "game_id": "20260327_NO@TOR",
-      "label": "NO @ TOR"
-    },
-    {
-      "away": "MIA",
-      "home": "CLE",
-      "game_id": "20260327_MIA@CLE",
-      "label": "MIA @ CLE"
+      "away": "PHI",
+      "home": "CHA",
+      "game_id": "20260328_PHI@CHA",
+      "label": "PHI @ CHA"
     }
   ],
   "game_times": {}
