@@ -1,9 +1,7 @@
 {
   "configs": {
     "GPP Main": {
-      "overrides": {
-        "GPP_PROJ_WEIGHT": 0.2
-      },
+      "overrides": {},
       "ricky_weights": {
         "w_gpp": 0.25,
         "w_ceil": 0.85,
