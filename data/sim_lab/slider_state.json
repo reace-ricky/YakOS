@@ -9,7 +9,8 @@
         "CASH_FLOOR_WEIGHT": 0.3,
         "GPP_PROJ_WEIGHT": 0.1,
         "GPP_UPSIDE_WEIGHT": 0.35,
-        "MAX_EXPOSURE": 0.5
+        "MAX_EXPOSURE": 0.5,
+        "GPP_BOOM_WEIGHT": 0.25
       },
       "ricky_weights": {
         "w_gpp": 0.2,
