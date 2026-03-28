@@ -173,94 +173,162 @@ def _render_edge_box(key: str, players: List[Dict], is_pga: bool, cleared_player
     st.markdown(box_html, unsafe_allow_html=True)
 
 
-# Rotate through varied closers so multiple picks of the same type don't repeat
-_CASCADE_LINES = [
-    "Role upgrade. Price didn't move. I'm not explaining this twice.",
-    "Injury opened the door. Ownership hasn't caught up. Act now.",
-    "More minutes, more usage, same tag. Public's asleep on this.",
-]
-_PACE_LINES = [
-    "Pace-up spot, full workload, soft ownership. Next.",
-    "Game environment is a cheat code. Salary doesn't know yet.",
-    "High total, full minutes, field looking elsewhere. Easy click.",
-]
-_CEILING_LINES = [
-    "Floor-to-ceiling gap is massive. That's the whole point of GPP.",
-    "Best case is elite, ownership is dirt cheap. Mispriced.",
-    "Ceiling screams and nobody's listening. Their loss.",
-]
-_VALUE_LINES = [
-    "Price is wrong. Production says so. Move on.",
-    "At this salary a decent game prints. Ceiling is the bonus.",
-    "Clearance rack. The sharp money already knows.",
-]
-_FALLBACK_LINES = [
-    "Numbers are clean. Ownership is soft. Done.",
-    "Model keeps flagging him. I stopped questioning it.",
-    "Obvious in hindsight. Be there first.",
-]
-_sniper_counters: Dict[str, int] = {}
+# ---------------------------------------------------------------------------
+# Signal-based play classification for The Board
+# ---------------------------------------------------------------------------
+
+# Signal IDs (each play gets exactly one)
+_SIG_USAGE = "usage"       # injury cascade / minutes bump
+_SIG_PACE = "pace"         # pace-up / blowout equity
+_SIG_CEILING = "ceiling"   # high ceiling-to-floor spread
+_SIG_VALUE = "value"       # price-to-production ratio
+
+# Role labels per signal
+_ROLE_MAP = {
+    _SIG_USAGE:  ("\U0001f512 Core", "core"),
+    _SIG_PACE:   ("\u26a1 Pivot", "pivot"),
+    _SIG_CEILING:("\U0001f3b0 GPP Dart", "dart"),
+    _SIG_VALUE:  ("\U0001f512 Core", "core"),  # value can also be Core
+}
 
 
-def _sniper_reason(p: Dict[str, Any], pool: pd.DataFrame) -> str:
-    """Generate a player-specific reason for a Ricky's Play pick.
+def _classify_signal(p: Dict[str, Any], pool: pd.DataFrame) -> tuple:
+    """Return (signal_id, reason_str) for a sniper candidate.
 
-    Each reason type has multiple templates that rotate so no two picks
-    on the same board get the same line. The seed shifts daily so the
-    same players on consecutive days get different commentary.
+    Picks the strongest applicable signal and writes a data-specific reason.
+    No two players should get the same reason string.
     """
     name = p.get("player_name", "")
     proj = p.get("proj", 0)
     ceil = p.get("ceil", 0)
-    own = p.get("own_pct", 0)
+    floor_val = p.get("floor", 0)
     sal = p.get("salary", 0)
+    own = p.get("own_pct", 0)
+    bump = p.get("injury_bump_fp", 0)
+    mins = p.get("proj_minutes", 0)
+    r5 = p.get("rolling_fp_5", 0)
 
-    def _pick(pool_key: str, lines: list) -> str:
-        # Use player name + date as seed so same player gets different line tomorrow
-        import hashlib
-        from datetime import date as _date
-        seed_str = f"{name}:{pool_key}:{_date.today().isoformat()}"
-        seed = int(hashlib.md5(seed_str.encode()).hexdigest(), 16)
-        # Also offset by counter so multiple picks of same type differ today
-        idx = _sniper_counters.get(pool_key, 0)
-        _sniper_counters[pool_key] = idx + 1
-        return lines[(seed + idx) % len(lines)]
-
-    row = None
+    # Look up pool row for vegas/spread if available
+    vegas = 0.0
+    spread = 0.0
     if not pool.empty and "player_name" in pool.columns:
         match = pool[pool["player_name"] == name]
         if not match.empty:
             row = match.iloc[0]
+            for vc in ("vegas_total", "over_under", "total"):
+                if vc in row.index:
+                    vegas = float(row.get(vc, 0) or 0)
+                    if vegas > 0:
+                        break
+            spread = abs(float(row.get("spread", 0) or 0))
 
-    if row is not None:
-        bump = float(row.get("injury_bump_fp", 0) or 0)
+    # Score each signal
+    scores = {}
+
+    # Usage/minutes signal
+    if bump > 2.0:
+        scores[_SIG_USAGE] = bump * 3.0
+    elif mins >= 32:
+        scores[_SIG_USAGE] = mins * 0.5
+
+    # Pace/matchup signal
+    if vegas >= 225 and mins >= 28:
+        scores[_SIG_PACE] = (vegas - 220) * 0.3
+    if spread >= 8 and mins >= 28:
+        scores[_SIG_PACE] = scores.get(_SIG_PACE, 0) + spread * 0.5
+
+    # Ceiling signal
+    if ceil > 0 and proj > 0:
+        ceil_spread = (ceil - proj) / proj
+        if ceil_spread > 0.30:
+            scores[_SIG_CEILING] = ceil_spread * 10
+
+    # Value signal
+    if sal > 0 and proj > 0:
+        pts_per_k = proj / (sal / 1000)
+        if pts_per_k >= 6.0:
+            scores[_SIG_VALUE] = pts_per_k
+
+    if not scores:
+        scores[_SIG_CEILING] = 1.0  # fallback
+
+    # Pick strongest signal
+    sig = max(scores, key=scores.get)
+
+    # Build data-specific reason
+    if sig == _SIG_USAGE:
         if bump > 2.0:
-            return _pick("cascade", _CASCADE_LINES)
+            reason = f"Usage spike — +{bump:.0f} FP from injury cascade. Averaging {r5:.0f} over last 5. Price hasn't moved."
+        else:
+            reason = f"{mins:.0f} projected minutes, {own:.0f}% owned. Track the game log — {r5:.0f} avg last 5."
+    elif sig == _SIG_PACE:
+        if spread >= 8:
+            reason = f"Blowout equity — {spread:.0f}-point spread. Pace-up + closing time if it's a corpse."
+        else:
+            reason = f"Pace-up spot — {vegas:.0f} total. {mins:.0f} minutes, {own:.0f}% owned. Field is looking elsewhere."
+    elif sig == _SIG_CEILING:
+        reason = f"Ceiling-to-floor spread is {ceil:.0f} vs {floor_val:.0f}. GPP-only — never in cash."
+    elif sig == _SIG_VALUE:
+        pts_per_k = proj / (sal / 1000) if sal > 0 else 0
+        reason = f"${sal:,} for {proj:.0f} projected — {pts_per_k:.1f} pts/$1K. Clearance pricing."
+    else:
+        reason = f"{own:.0f}% owned, {proj:.0f} projected. Numbers are clean."
 
-        mins = float(row.get("proj_minutes", 0) or 0)
-        vegas = float(row.get("vegas_total", 0) or 0)
-        if mins >= 30 and vegas >= 225:
-            return _pick("pace", _PACE_LINES)
+    return sig, reason
 
-        if ceil > 0 and proj > 0 and (ceil - proj) / proj > 0.35:
-            return _pick("ceiling", _CEILING_LINES)
 
-        if sal > 0 and proj > 0:
-            pts_per_k = proj / (sal / 1000)
-            if pts_per_k >= 6.5:
-                return _pick("value", _VALUE_LINES)
+def _assign_tiered_plays(snipers: list, pool: pd.DataFrame) -> list:
+    """Assign each sniper a signal-based tier. Enforce one play per signal.
 
-    return _pick("fallback", _FALLBACK_LINES)
+    Returns list of (player_dict, signal_id, role_label, reason) tuples,
+    max 3 plays, each with a unique signal.
+    """
+    candidates = []
+    for p in snipers:
+        sig, reason = _classify_signal(p, pool)
+        candidates.append((p, sig, reason))
+
+    # Dedup: one play per signal, take the first (highest priority) candidate
+    used_signals = set()
+    plays = []
+    for p, sig, reason in candidates:
+        if sig in used_signals:
+            # Try to find an alternate signal for this player
+            # If they only have one signal, skip them
+            continue
+        used_signals.add(sig)
+        role_label, role_key = _ROLE_MAP.get(sig, ("\u26a1 Pivot", "pivot"))
+
+        # If we already have a Core, downgrade subsequent usage/value to Pivot
+        if role_key == "core" and any(r == "core" for _, _, r, _ in plays):
+            role_label = "\u26a1 Pivot"
+            role_key = "pivot"
+
+        plays.append((p, sig, role_key, role_label, reason))
+        if len(plays) >= 3:
+            break
+
+    # If we have fewer than 3, allow duplicate signals from remaining candidates
+    if len(plays) < 3:
+        for p, sig, reason in candidates:
+            if any(p["player_name"] == pp["player_name"] for pp, *_ in plays):
+                continue
+            role_label = "\U0001f3b0 GPP Dart"
+            plays.append((p, sig, "dart", role_label, reason))
+            if len(plays) >= 3:
+                break
+
+    return plays
 
 
 def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, Any], slate_date: str = "") -> None:
-    """Render The Board -- tight, curated Ricky voice briefing.
+    """Render The Board -- redesigned structure:
 
-    Structure:
-      1. Last Slate: 1-2 sentences -- what hit, what missed
-      2. Slate Read: 2-3 sentences -- game environment, pace, blowouts, where upside lives
-      3. Ricky's Plays: 2-3 non-obvious edges the field won't find
-      4. The Fade: 1 chalk trap with a specific reason
+      1. Last Slate Recap (personal tone + verdict)
+      2. The Setup (sharp narrative paragraph)
+      3. Ricky's Plays (tiered: Core / Pivot / GPP Dart, signal-deduped)
+      4. The Trap Stack (public narrative fade)
+      5. Fade of the Slate (skull box)
     """
     from yak_core.board import compute_stack_targets, compute_sniper_spots, compute_fades
     from yak_core.rickys_take import generate_bust_call, generate_last_night, reset_rotator
@@ -271,7 +339,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
 
     parts: list = []
 
-    # -- 1. Last Slate (1-2 sentences) \u2014 quick recap --
+    # ── 1. Last Slate Recap ─────────────────────────────────────────────
     recap = None
     try:
         from yak_core.slate_recap import get_previous_slate_recap
@@ -289,76 +357,132 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             f'<div class="the-board-last-night">{last_night}</div>'
         )
 
-    # -- 2. Slate Read (game environment -- 2-3 sentences) --
-    slate_read_lines: list = []
+    # ── 2. The Setup (replaces Slate Read) ──────────────────────────────
+    # One sharp paragraph: dominant narrative, the trap, the edge.
+    setup_parts: list = []
 
-    # Best stack game
+    # Stack game
     stacks = compute_stack_targets(pool, edge_analysis)
     if stacks:
         s = stacks[0]
-        slate_read_lines.append(
-            f"{s['team1']}-{s['team2']} \u2014 {s['vegas_total']:.0f} total. "
-            f"Highest total on the slate. Stack or get out of the way."
+        setup_parts.append(
+            f"{s['team1']}-{s['team2']} is the highest total at {s['vegas_total']:.0f}."
         )
 
-    # Blowout risk
+    # Blowout spot
     if "spread" in pool.columns:
         _spread_col = pd.to_numeric(pool["spread"], errors="coerce").fillna(0)
-        _blowout_mask = _spread_col.abs() > 10
+        _blowout_mask = _spread_col.abs() > 8
         if _blowout_mask.any():
-            _bo_idx = _blowout_mask.idxmax()
-            _bo_team = pool.loc[_bo_idx, "team"]
-            _bo_sp = abs(_spread_col.loc[_bo_idx])
-            slate_read_lines.append(
-                f"{_bo_team} is a {_bo_sp:.0f}-point spread. "
-                f"Starters hit the bench in the 4th. Proceed accordingly."
+            _bo_rows = pool.loc[_blowout_mask].copy()
+            _bo_rows["_abs_spread"] = _spread_col[_blowout_mask].abs()
+            _bo_row = _bo_rows.nlargest(1, "_abs_spread").iloc[0]
+            _bo_team = _bo_row["team"]
+            _bo_sp = _bo_row["_abs_spread"]
+            setup_parts.append(
+                f"{_bo_team} is a {_bo_sp:.0f}-point spread — starters hit the bench in the 4th."
             )
 
-    # Injury cascade opportunity
+    # Injury cascade narrative
+    _cascade_name = ""
     if "injury_bump_fp" in pool.columns:
         _bump_col = pd.to_numeric(pool["injury_bump_fp"], errors="coerce").fillna(0)
         _bump_mask = _bump_col > 3.0
         if _bump_mask.any():
             _bumped = pool.loc[_bump_mask].nlargest(1, "injury_bump_fp").iloc[0]
-            slate_read_lines.append(
-                f"{_bumped['player_name']} inherited extra opportunity from an injury. Act before ownership catches up."
+            _cascade_name = _bumped["player_name"]
+            _bump_fp = _bump_col.loc[_bumped.name]
+            setup_parts.append(
+                f"{_cascade_name} is the real minutes beneficiary — "
+                f"+{_bump_fp:.0f} FP from the cascade. "
+                f"The public will pile into the obvious name and miss this."
             )
 
-    if slate_read_lines:
-        parts.append(
-            '<div style="margin-top:12px;margin-bottom:4px;font-weight:600;font-size:0.88rem;">'
-            'Slate Read</div>'
+    # Edge summary
+    n_core = len(edge_analysis.get("core_plays", []))
+    n_leverage = len(edge_analysis.get("leverage_plays", []))
+    if n_core + n_leverage > 0:
+        setup_parts.append(
+            f"The edge is in the {n_core} core plays and {n_leverage} leverage spots the field isn't checking."
         )
-        for line in slate_read_lines[:3]:
-            parts.append(f'<div class="the-board-edge-callout">{line}</div>')
 
-    # -- 3. Ricky's Plays (2-3 non-obvious picks) --
-    snipers = compute_sniper_spots(pool, edge_analysis)
-    if snipers:
+    if setup_parts:
+        setup_text = " ".join(setup_parts)
         parts.append(
             '<div style="margin-top:12px;margin-bottom:4px;font-weight:600;font-size:0.88rem;">'
-            'Ricky\'s Plays</div>'
+            'The Setup</div>'
+            f'<div class="the-board-edge-callout">{setup_text}</div>'
         )
-        for p in snipers[:3]:
-            reason = _sniper_reason(p, pool)
+
+    # ── 3. Ricky's Plays (tiered, signal-deduped) ──────────────────────
+    snipers = compute_sniper_spots(pool, edge_analysis)
+    tiered_plays = _assign_tiered_plays(snipers, pool) if snipers else []
+
+    if tiered_plays:
+        parts.append(
+            '<div style="margin-top:12px;margin-bottom:4px;font-weight:600;font-size:0.88rem;">'
+            "Ricky's Plays</div>"
+        )
+        for p, sig, role_key, role_label, reason in tiered_plays:
             parts.append(
                 f'<div class="the-board-edge-callout">'
-                f"<strong>{p['player_name']}</strong> ({p['team']}, ${p['salary']:,}) \u2014 {reason}"
+                f'<span style="color:rgba(240,240,240,0.5);font-size:0.8rem;">{role_label}</span> '
+                f"<strong>{p['player_name']}</strong> ({p['team']}, ${p['salary']:,}) "
+                f"\u2014 {reason}"
                 f'</div>'
             )
 
-    # -- 4. The Fade (1 chalk trap) --
-    _pos_names: set = set()
+    # ── 4. The Trap Stack ──────────────────────────────────────────────
+    # Warn about the narrative everyone else is building.
+    # Find the highest-owned non-core, non-sniper player who underperforms by model.
+    _board_names = set()
     for _tier in ("core_plays", "leverage_plays", "value_plays"):
         for _p in edge_analysis.get(_tier, []):
-            _pos_names.add(_p.get("player_name", ""))
-    # Also exclude snipers — can't recommend a player and fade them on the same board
-    if snipers:
-        for _s in snipers:
-            _pos_names.add(_s.get("player_name", ""))
-    _pos_names.discard("")
+            _board_names.add(_p.get("player_name", ""))
+    for pp, *_ in tiered_plays:
+        _board_names.add(pp.get("player_name", ""))
+    _board_names.discard("")
 
-    bust = generate_bust_call(pool, edge_analysis.get("fade_candidates"), positive_tier_names=_pos_names or None)
+    if "ownership" in pool.columns and "proj" in pool.columns:
+        _own_col = pd.to_numeric(pool.get("ownership", pool.get("own_proj", 0)), errors="coerce").fillna(0)
+        if _own_col.max() <= 1.0:
+            _own_col = _own_col * 100
+        _proj_col = pd.to_numeric(pool["proj"], errors="coerce").fillna(0)
+        _sal_col = pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0)
+        _r5_col = pd.to_numeric(pool.get("rolling_fp_5", 0), errors="coerce").fillna(0)
+
+        # Candidates: >8% owned, not on the board, and pts/$1K below 5.5
+        _trap_mask = (
+            (_own_col > 8)
+            & (~pool["player_name"].isin(_board_names))
+            & (_sal_col > 0)
+            & (_proj_col / (_sal_col / 1000) < 5.5)
+        )
+        if _trap_mask.any():
+            _trap_df = pool[_trap_mask].copy()
+            _trap_df["_own"] = _own_col[_trap_mask]
+            _trap_row = _trap_df.nlargest(1, "_own").iloc[0]
+            _trap_name = _trap_row["player_name"]
+            _trap_own = float(_trap_df.loc[_trap_row.name, "_own"])
+            _trap_proj = float(_proj_col.loc[_trap_row.name])
+            _trap_sal = int(_sal_col.loc[_trap_row.name])
+            _trap_r5 = float(_r5_col.loc[_trap_row.name])
+            _trap_ppk = _trap_proj / (_trap_sal / 1000) if _trap_sal > 0 else 0
+
+            parts.append(
+                '<div style="margin-top:12px;margin-bottom:4px;font-weight:600;font-size:0.88rem;">'
+                '\u26a0\ufe0f The Trap Stack</div>'
+                f'<div class="the-board-edge-callout">'
+                f'The field is going to talk themselves into '
+                f'<strong>{_trap_name}</strong> ({_trap_own:.0f}% owned, ${_trap_sal:,}). '
+                f'Averaging {_trap_r5:.0f} over his last 5 at {_trap_ppk:.1f} pts/$1K. '
+                f'That\'s not a leverage play \u2014 it\'s a trap.'
+                f'</div>'
+            )
+            _board_names.add(_trap_name)
+
+    # ── 5. Fade of the Slate ───────────────────────────────────────────
+    bust = generate_bust_call(pool, edge_analysis.get("fade_candidates"), positive_tier_names=_board_names or None)
     if bust:
         parts.append(
             f'<div class="the-board-bust-call">'
@@ -369,7 +493,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     else:
         fades = compute_fades(pool, edge_analysis)
         if fades:
-            fades = [f for f in fades if f.get("player_name", "") not in _pos_names]
+            fades = [f for f in fades if f.get("player_name", "") not in _board_names]
         if fades:
             f = fades[0]
             parts.append(
