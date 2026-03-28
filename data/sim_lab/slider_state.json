@@ -7,7 +7,8 @@
         "GPP_BOOM_SPREAD_WEIGHT": 0.05,
         "GPP_EFFICIENCY_WEIGHT": 0.1,
         "CASH_FLOOR_WEIGHT": 0.3,
-        "GPP_PROJ_WEIGHT": 0.1
+        "GPP_PROJ_WEIGHT": 0.1,
+        "GPP_UPSIDE_WEIGHT": 0.35
       },
       "ricky_weights": {
         "w_gpp": 0.2,
