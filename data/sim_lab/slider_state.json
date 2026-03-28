@@ -10,7 +10,7 @@
         "MAX_EXPOSURE": 0.55,
         "MIN_PLAYER_MINUTES": 10,
         "GPP_OWN_PENALTY_STRENGTH": 0.27,
-        "overall_bias_correction": 11.54
+        "overall_bias_correction": 13.24
       },
       "ricky_weights": {
         "w_gpp": 0.35,
