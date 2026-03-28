@@ -1,33 +1,31 @@
 {
   "sport": "NBA",
-  "date": "2026-03-27",
+  "date": "2026-03-28",
   "core_names": [
-    "Nikola Jokic",
-    "Donovan Clingan",
     "Jalen Johnson",
-    "Shai Gilgeous-Alexander",
-    "Cooper Flagg"
+    "Victor Wembanyama",
+    "Jalen Duren",
+    "Joel Embiid",
+    "Kyle Filipowski"
   ],
   "leverage_names": [
-    "Will Riley",
-    "Derrick Jones Jr.",
-    "Aaron Nesmith",
-    "Christian Braun",
-    "Chaney Johnson"
+    "Blake Hinson",
+    "Collin Gillespie",
+    "Quentin Grimes"
   ],
   "value_names": [
-    "Caleb Love",
-    "Marvin Bagley III",
-    "Kobe Brown",
-    "Derik Queen",
-    "Bogdan Bogdanovic"
+    "Ryan Kalkbrenner",
+    "Paul Reed",
+    "Christian Koloko",
+    "Zaccharie Risacher",
+    "Ron Holland"
   ],
   "fade_names": [
-    "Max Shulga",
+    "Zyon Pullin",
     "Caleb Houstan",
-    "Bronny James",
-    "Yang Hansen",
-    "Jamison Battle"
+    "Bismack Biyombo",
+    "Andre Jackson Jr.",
+    "Lindy Waters III"
   ],
   "calibration_slates": 28
 }
