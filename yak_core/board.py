@@ -229,14 +229,20 @@ def compute_sniper_spots(
     snipers = snipers.sort_values("_ricky_proj", ascending=False)
 
     results = []
-    for _, row in snipers.head(SNIPER_MAX).iterrows():
+    for _, row in snipers.head(SNIPER_MAX + 2).iterrows():  # extra candidates for signal dedup
+        floor_val = float(row.get("floor", row.get("sim15th", 0)) or 0)
         results.append({
             "player_name": row.get("player_name", "?"),
             "team": row.get("team", "?"),
             "salary": int(row.get("salary", 0)),
             "proj": float(row["_ricky_proj"]),
             "ceil": float(row["_ceil"]),
+            "floor": floor_val,
             "own_pct": float(row["_own"]),
+            "injury_bump_fp": float(row.get("injury_bump_fp", 0) or 0),
+            "proj_minutes": float(row.get("proj_minutes", 0) or 0),
+            "rolling_fp_5": float(row.get("rolling_fp_5", 0) or 0),
+            "breakout_score": float(row.get("breakout_score", 0) or 0),
         })
 
     return results
