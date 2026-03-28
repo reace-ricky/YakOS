@@ -3201,15 +3201,13 @@ def _apply_archetype(preset_name: str, archetype_name: str) -> None:
         # Seed overrides with archetype values
         st.session_state[sk] = dict(arch["overrides"])
 
-    # Apply archetype Ricky weights if defined
-    if "ricky_weights" in arch:
-        _rk = f"sim_lab_ricky_weights_{preset_name}"
-        st.session_state[_rk] = dict(arch["ricky_weights"])
-        # Sync widget keys so sliders pick up the new archetype values on rerun
-        st.session_state[f"sl_ricky_gpp_{preset_name}"] = arch["ricky_weights"]["w_gpp"]
-        st.session_state[f"sl_ricky_ceil_{preset_name}"] = arch["ricky_weights"]["w_ceil"]
-        st.session_state[f"sl_ricky_own_{preset_name}"] = arch["ricky_weights"]["w_own"]
-        _save_slider_state(preset_name, st.session_state[sk], arch["ricky_weights"])
+    # Ricky weights are USER-CALIBRATED — archetype changes do NOT touch them.
+    # Only save the sandbox overrides (build config) to disk.
+    _save_slider_state(
+        preset_name,
+        st.session_state[sk],
+        st.session_state.get(f"sim_lab_ricky_weights_{preset_name}", {}),
+    )
 
 
 def _apply_named_profile(profile_key: str) -> None:
@@ -3229,13 +3227,16 @@ def _apply_named_profile(profile_key: str) -> None:
     sk = _sandbox_config_key(preset_name)
     st.session_state[sk] = dict(profile["overrides"])
 
-    # Set Ricky weights
+    # Ricky weights are USER-CALIBRATED — profile changes do NOT touch them.
+    # If no ricky weights exist yet (first time ever), seed from profile.
     ricky_key = f"sim_lab_ricky_weights_{preset_name}"
-    st.session_state[ricky_key] = dict(profile["ricky_weights"])
-    # Sync widget keys so sliders pick up the new profile values on rerun
-    st.session_state[f"sl_ricky_gpp_{preset_name}"] = profile["ricky_weights"]["w_gpp"]
-    st.session_state[f"sl_ricky_ceil_{preset_name}"] = profile["ricky_weights"]["w_ceil"]
-    st.session_state[f"sl_ricky_own_{preset_name}"] = profile["ricky_weights"]["w_own"]
+    _, _existing_rw = _load_slider_state(preset_name)
+    if not _existing_rw:
+        # No saved weights on disk — seed from profile defaults
+        st.session_state[ricky_key] = dict(profile["ricky_weights"])
+        st.session_state[f"sl_ricky_gpp_{preset_name}"] = profile["ricky_weights"]["w_gpp"]
+        st.session_state[f"sl_ricky_ceil_{preset_name}"] = profile["ricky_weights"]["w_ceil"]
+        st.session_state[f"sl_ricky_own_{preset_name}"] = profile["ricky_weights"]["w_own"]
 
 
 def _render_auto_calibrate(
@@ -3716,56 +3717,35 @@ def render_sim_lab(sport: str) -> None:
         _cur_ct = _contest_display
         _prev_ct = st.session_state.get("_sim_lab_prev_contest_type", "")
 
-    # Detect contest type change → reset archetype, seed sliders
+    # ── Restore state: ALWAYS prefer disk-saved values ──────────────────
+    # Single load path — no branching on cold start vs tab switch vs rerun.
+    # Disk (slider_state.json) is the source of truth for calibrated values.
+    sk = _sandbox_config_key(preset_name)
+    _rk = f"sim_lab_ricky_weights_{preset_name}"
+    _disk_ovr, _disk_rw = _load_slider_state(preset_name)
+
+    # Sandbox overrides (build config)
+    if sk not in st.session_state:
+        if _disk_ovr:
+            st.session_state[sk] = _disk_ovr
+        elif not is_pga and _named_key:
+            _apply_named_profile(_named_key)
+
+    # Ricky weights — always restore from disk if session is empty
+    if _rk not in st.session_state:
+        if _disk_rw:
+            st.session_state[_rk] = _disk_rw
+            st.session_state[f"sl_ricky_gpp_{preset_name}"] = _disk_rw.get("w_gpp", 0.0)
+            st.session_state[f"sl_ricky_ceil_{preset_name}"] = _disk_rw.get("w_ceil", 1.0)
+            st.session_state[f"sl_ricky_own_{preset_name}"] = _disk_rw.get("w_own", 0.15)
+
+    # Track contest type for future change detection
     if _cur_ct != _prev_ct:
         st.session_state["_sim_lab_prev_contest_type"] = _cur_ct
-        st.session_state["sim_lab_archetype"] = "Default"
-
-        if not is_pga and _named_key:
-            if not _prev_ct:
-                # Cold start — prefer disk-saved state over profile defaults
-                _disk_ovr, _disk_rw = _load_slider_state(preset_name)
-                sk = _sandbox_config_key(preset_name)
-                if _disk_ovr:
-                    st.session_state[sk] = _disk_ovr
-                else:
-                    _apply_named_profile(_named_key)
-                if _disk_rw:
-                    _rk = f"sim_lab_ricky_weights_{preset_name}"
-                    st.session_state[_rk] = _disk_rw
-                    # Also sync widget keys so sliders render correctly
-                    st.session_state[f"sl_ricky_gpp_{preset_name}"] = _disk_rw.get("w_gpp", 0.0)
-                    st.session_state[f"sl_ricky_ceil_{preset_name}"] = _disk_rw.get("w_ceil", 1.0)
-                    st.session_state[f"sl_ricky_own_{preset_name}"] = _disk_rw.get("w_own", 0.15)
-                elif not st.session_state.get(_sandbox_config_key(preset_name)):
-                    # No disk state at all — fall back to profile
-                    _apply_named_profile(_named_key)
-            else:
-                # Actual contest type change by user — apply profile defaults
-                _apply_named_profile(_named_key)
-
-        if _prev_ct:  # skip initial render
+        if not is_pga:
+            st.session_state["sim_lab_archetype"] = "Default"
+        if _prev_ct:  # skip rerun on initial render
             st.rerun()
-    else:
-        # Normal render (same contest type): restore from disk if session empty
-        sk = _sandbox_config_key(preset_name)
-        _rk = f"sim_lab_ricky_weights_{preset_name}"
-        if sk not in st.session_state:
-            _disk_ovr, _disk_rw = _load_slider_state(preset_name)
-            if _disk_ovr:
-                st.session_state[sk] = _disk_ovr
-            elif not is_pga and _named_key:
-                _apply_named_profile(_named_key)
-            if _disk_rw and _rk not in st.session_state:
-                st.session_state[_rk] = _disk_rw
-        # Ricky weights: restore from disk independently of sandbox overrides.
-        # Without this, navigating away then back skips the disk load above
-        # (because sk IS in session_state) and the fallback at the slider
-        # block overwrites with hardcoded defaults.
-        if _rk not in st.session_state:
-            _, _disk_rw = _load_slider_state(preset_name)
-            if _disk_rw:
-                st.session_state[_rk] = _disk_rw
 
     # ── Sniper Metrics (always visible, not in an expander) ─────────────
     _render_sniper_metrics_table()
