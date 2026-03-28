@@ -329,15 +329,69 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
         if _cpt_pick != _NONE_CPT:
             _sd_force_captain = _cpt_pick
 
-    # Slate window filter (NBA classic only — Showdown uses its own matchup picker)
-    _slate_type = "All Day"
+    # Game selector (NBA classic only — Showdown uses its own matchup picker)
+    _selected_teams = None  # None = all teams (no filter)
     if not is_pga and not is_nba_showdown:
-        _slate_type = st.selectbox(
-            "Slate",
-            ["Main (7-9pm)", "Early (before 7pm)", "Late (after 9pm)", "All Day"],
-            key=f"opt_slate_type_{sport}",
-            help="Filter to games in this DraftKings slate window. Times are ET.",
-        )
+        _matchups = meta.get("matchups", [])
+        _game_times = meta.get("game_times", {})
+
+        if _matchups:
+            # Build game labels with tipoff times, sorted by time
+            def _parse_time_sort_key(time_str):
+                """Convert '7:00p' to a sortable float like 19.0, '10:30p' to 22.5"""
+                if not time_str:
+                    return 99.0
+                try:
+                    parts = time_str.replace("p", "").replace("a", "").split(":")
+                    hour = int(parts[0])
+                    mins = int(parts[1]) if len(parts) > 1 else 0
+                    if "p" in time_str.lower() and hour != 12:
+                        hour += 12
+                    elif "a" in time_str.lower() and hour == 12:
+                        hour = 0
+                    return hour + mins / 60.0
+                except Exception:
+                    return 99.0
+
+            _game_options = []
+            for m in _matchups:
+                away = m.get("away", "")
+                home = m.get("home", "")
+                label = m.get("label", f"{away} @ {home}")
+                # Get tipoff time from either team
+                tipoff = _game_times.get(away, _game_times.get(home, ""))
+                sort_key = _parse_time_sort_key(tipoff)
+                display = f"{tipoff} — {label}" if tipoff else label
+                _game_options.append({
+                    "display": display,
+                    "teams": [away, home],
+                    "tipoff": tipoff,
+                    "sort_key": sort_key,
+                })
+
+            # Sort by tipoff time
+            _game_options.sort(key=lambda x: x["sort_key"])
+
+            _display_labels = [g["display"] for g in _game_options]
+
+            # Default: all games selected
+            _selected_games = st.multiselect(
+                "Games",
+                options=_display_labels,
+                default=_display_labels,
+                key=f"opt_game_select_{sport}",
+                help="Select which games to include. Deselect games to exclude their players from lineups.",
+            )
+
+            # Build team set from selected games
+            if len(_selected_games) < len(_display_labels):
+                _selected_teams = set()
+                for label in _selected_games:
+                    game = next((g for g in _game_options if g["display"] == label), None)
+                    if game:
+                        _selected_teams.update(game["teams"])
+        elif not _matchups:
+            st.caption("No matchup data. Re-load the pool to see games.")
 
     # ── Build button ──
     if st.button("Build Lineups", type="primary", key=f"opt_build_{sport}"):
@@ -407,20 +461,13 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
                     print(f"[optimizer] DK Showdown salary fetch failed: {_sd_err}")
                     st.warning(f"DK Showdown salary fetch failed: {_sd_err}")
 
-        # Apply slate filter (NBA classic only)
-        if not is_pga and _slate_type != "All Day":
-            _team_game_times = meta.get("game_times", {})
-            if _team_game_times:
-                from yak_core.live import get_slate_teams
-                _slate_teams = get_slate_teams(_team_game_times, slate_type=_slate_type)
-                if _slate_teams:
-                    _pre = len(build_pool)
-                    build_pool = build_pool[build_pool["team"].str.upper().isin(_slate_teams)].copy()
-                    _dropped = _pre - len(build_pool)
-                    if _dropped > 0:
-                        st.info(f"Slate filter ({_slate_type}): {len(build_pool)} players ({_dropped} excluded)")
-            else:
-                st.warning("No game times in pool data. Re-load the pool to enable slate filtering.")
+        # Apply game filter
+        if _selected_teams is not None:
+            _pre = len(build_pool)
+            build_pool = build_pool[build_pool["team"].str.upper().isin(_selected_teams)].copy()
+            _dropped = _pre - len(build_pool)
+            if _dropped > 0:
+                st.info(f"Game filter: {len(build_pool)} players ({_dropped} excluded from deselected games)")
 
         cfg = _build_optimizer_cfg(preset, sport, num_lineups, max_exposure, locked, excluded)
         # Apply profile overrides into the optimizer config
