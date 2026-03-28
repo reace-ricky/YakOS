@@ -348,14 +348,23 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             )
 
     # -- 4. The Fade (1 chalk trap) --
+    # Build exclusion set: every player mentioned positively anywhere on The
+    # Board must be excluded from the Fade to prevent contradictions.
     _pos_names: set = set()
     for _tier in ("core_plays", "leverage_plays", "value_plays"):
         for _p in edge_analysis.get(_tier, []):
             _pos_names.add(_p.get("player_name", ""))
-    # Also exclude snipers — can't recommend a player and fade them on the same board
+    # Exclude snipers (Ricky's Plays)
     if snipers:
         for _s in snipers:
             _pos_names.add(_s.get("player_name", ""))
+    # Exclude players called out positively in the Slate Read (injury
+    # cascade beneficiaries). Without this, a player can appear as "act
+    # before ownership catches up" in Slate Read and then get faded.
+    if "injury_bump_fp" in pool.columns:
+        _bump_col = pd.to_numeric(pool["injury_bump_fp"], errors="coerce").fillna(0)
+        _slate_read_names = pool.loc[_bump_col > 3.0, "player_name"].tolist()
+        _pos_names.update(_slate_read_names)
     _pos_names.discard("")
 
     bust = generate_bust_call(pool, edge_analysis.get("fade_candidates"), positive_tier_names=_pos_names or None)
