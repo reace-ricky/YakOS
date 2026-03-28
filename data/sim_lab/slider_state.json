@@ -11,7 +11,8 @@
         "MIN_PLAYER_MINUTES": 15,
         "GPP_BOOM_SPREAD_WEIGHT": 0.1,
         "GPP_EFFICIENCY_WEIGHT": 0.1,
-        "CASH_FLOOR_WEIGHT": 0.25
+        "CASH_FLOOR_WEIGHT": 0.25,
+        "overall_bias_correction": 8.3
       },
       "ricky_weights": {
         "w_gpp": 0.2,
