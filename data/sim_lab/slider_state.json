@@ -56,7 +56,7 @@
         "GPP_OWN_PENALTY_STRENGTH": 2.92
       },
       "ricky_weights": {
-        "w_gpp": 0.2,
+        "w_gpp": 0.25,
         "w_ceil": 0.9,
         "w_own": 0.15
       }
