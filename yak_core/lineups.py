@@ -632,6 +632,56 @@ def apply_calibration_overrides(cfg: Dict[str, Any]) -> Dict[str, Any]:
     return merged
 
 
+def _apply_ricky_bias(
+    df: pd.DataFrame,
+    cfg: Dict[str, Any],
+) -> pd.DataFrame:
+    """Apply per-player projection adjustments and exposure caps from Ricky's bias.
+
+    Reads from st.session_state['ricky_bias'] (set by The Board on page load).
+    Falls back to loading from disk if session_state is empty.
+
+    Modifies df['proj'] in-place and injects per-player exposure caps into cfg.
+    Must be called BEFORE prepare_pool().
+    """
+    try:
+        import streamlit as st
+        bias = st.session_state.get("ricky_bias")
+    except Exception:
+        bias = None
+
+    if bias is None:
+        from yak_core.bias import load_bias
+        bias = load_bias()
+
+    if not bias:
+        return df
+
+    n_proj = 0
+    n_exp = 0
+    for player, settings in bias.items():
+        if not isinstance(settings, dict):
+            continue
+        mask = df["player_name"] == player
+        if not mask.any():
+            continue
+
+        adj = float(settings.get("proj_adj", 0.0))
+        if adj != 0.0:
+            df.loc[mask, "proj"] = (df.loc[mask, "proj"] + adj).clip(lower=0)
+            n_proj += 1
+
+        exp = settings.get("max_exposure")
+        if exp is not None:
+            cfg.setdefault("PLAYER_MAX_EXPOSURE", {})[player] = float(exp)
+            n_exp += 1
+
+    if n_proj or n_exp:
+        print(f"[_apply_ricky_bias] Applied {n_proj} proj adjustments, {n_exp} exposure caps")
+
+    return df
+
+
 def prepare_pool(
     df: pd.DataFrame,
     cfg: Dict[str, Any],

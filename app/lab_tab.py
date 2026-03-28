@@ -2605,6 +2605,10 @@ def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, o
         except Exception as _sim_err:
             print(f"[_build_lineups] Auto-sim failed ({_sim_err}), continuing with fallback upside estimates")
 
+    # Apply Ricky's per-player bias (proj adjustments + exposure caps)
+    from yak_core.lineups import _apply_ricky_bias
+    pool = _apply_ricky_bias(pool, cfg)
+
     player_pool = build_player_pool(pool, cfg)
     if cfg.get("captain_aware"):
         lineups_df, exposure_df = build_showdown_lineups(player_pool, cfg)
