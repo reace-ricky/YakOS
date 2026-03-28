@@ -2820,9 +2820,9 @@ def _apply_hindsight_recommendations(
 
     # Sync widget keys so sliders show updated values after rerun
     _rw_hs = st.session_state.get(ricky_key, ricky_weights)
-    st.session_state[f"sl_ricky_gpp_{preset_name}"] = _rw_hs.get("w_gpp", 0.0)
-    st.session_state[f"sl_ricky_ceil_{preset_name}"] = _rw_hs.get("w_ceil", 1.0)
-    st.session_state[f"sl_ricky_own_{preset_name}"] = _rw_hs.get("w_own", 0.15)
+    st.session_state.pop(f"sl_ricky_gpp_{preset_name}", None)
+    st.session_state.pop(f"sl_ricky_ceil_{preset_name}", None)
+    st.session_state.pop(f"sl_ricky_own_{preset_name}", None)
 
     _save_slider_state(
         preset_name,
@@ -3240,9 +3240,9 @@ def _apply_named_profile(profile_key: str) -> None:
     if not _existing_rw:
         # No saved weights on disk — seed from profile defaults
         st.session_state[ricky_key] = dict(profile["ricky_weights"])
-        st.session_state[f"sl_ricky_gpp_{preset_name}"] = profile["ricky_weights"]["w_gpp"]
-        st.session_state[f"sl_ricky_ceil_{preset_name}"] = profile["ricky_weights"]["w_ceil"]
-        st.session_state[f"sl_ricky_own_{preset_name}"] = profile["ricky_weights"]["w_own"]
+        st.session_state.pop(f"sl_ricky_gpp_{preset_name}", None)
+        st.session_state.pop(f"sl_ricky_ceil_{preset_name}", None)
+        st.session_state.pop(f"sl_ricky_own_{preset_name}", None)
 
 
 def _render_auto_calibrate(
@@ -3626,9 +3626,9 @@ def _render_auto_calibrate(
             ricky_key = f"sim_lab_ricky_weights_{preset_name}"
             st.session_state[ricky_key] = dict(result.best_ricky_weights)
             # Sync widget keys so sliders show the new values after rerun
-            st.session_state[f"sl_ricky_gpp_{preset_name}"] = result.best_ricky_weights.get("w_gpp", 0.0)
-            st.session_state[f"sl_ricky_ceil_{preset_name}"] = result.best_ricky_weights.get("w_ceil", 1.0)
-            st.session_state[f"sl_ricky_own_{preset_name}"] = result.best_ricky_weights.get("w_own", 0.15)
+            st.session_state.pop(f"sl_ricky_gpp_{preset_name}", None)
+            st.session_state.pop(f"sl_ricky_ceil_{preset_name}", None)
+            st.session_state.pop(f"sl_ricky_own_{preset_name}", None)
             _save_slider_state(
                 preset_name,
                 st.session_state[sk],
@@ -3667,9 +3667,9 @@ def _render_auto_calibrate(
                     st.session_state[sk][key] = val
             # Sync widget keys so sliders show the new values after rerun
             _rw_ds = st.session_state[ricky_key]
-            st.session_state[f"sl_ricky_gpp_{preset_name}"] = _rw_ds.get("w_gpp", 0.0)
-            st.session_state[f"sl_ricky_ceil_{preset_name}"] = _rw_ds.get("w_ceil", 1.0)
-            st.session_state[f"sl_ricky_own_{preset_name}"] = _rw_ds.get("w_own", 0.15)
+            st.session_state.pop(f"sl_ricky_gpp_{preset_name}", None)
+            st.session_state.pop(f"sl_ricky_ceil_{preset_name}", None)
+            st.session_state.pop(f"sl_ricky_own_{preset_name}", None)
             _save_slider_state(
                 preset_name,
                 st.session_state[sk],
@@ -3750,9 +3750,9 @@ def render_sim_lab(sport: str) -> None:
     if _rk not in st.session_state:
         if _disk_rw:
             st.session_state[_rk] = _disk_rw
-            st.session_state[f"sl_ricky_gpp_{preset_name}"] = _disk_rw.get("w_gpp", 0.0)
-            st.session_state[f"sl_ricky_ceil_{preset_name}"] = _disk_rw.get("w_ceil", 1.0)
-            st.session_state[f"sl_ricky_own_{preset_name}"] = _disk_rw.get("w_own", 0.15)
+            st.session_state.pop(f"sl_ricky_gpp_{preset_name}", None)
+            st.session_state.pop(f"sl_ricky_ceil_{preset_name}", None)
+            st.session_state.pop(f"sl_ricky_own_{preset_name}", None)
 
     # Track contest type for future change detection
     if _cur_ct != _prev_ct:
