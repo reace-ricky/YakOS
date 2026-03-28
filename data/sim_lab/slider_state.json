@@ -14,8 +14,8 @@
         "CASH_FLOOR_WEIGHT": 0.3
       },
       "ricky_weights": {
-        "w_gpp": 0.3,
-        "w_ceil": 1.4,
+        "w_gpp": 0.2,
+        "w_ceil": 0.85,
         "w_own": 0.3
       }
     },
