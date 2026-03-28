@@ -329,15 +329,47 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
         if _cpt_pick != _NONE_CPT:
             _sd_force_captain = _cpt_pick
 
-    # Slate window filter (NBA classic only — Showdown uses its own matchup picker)
-    _slate_type = "All Day"
+    # Game selector (NBA classic only — Showdown uses its own matchup picker)
+    _selected_teams = None  # None = all teams, no filter
     if not is_pga and not is_nba_showdown:
-        _slate_type = st.selectbox(
-            "Slate",
-            ["Main (7-9pm)", "Early (before 7pm)", "Late (after 9pm)", "All Day"],
-            key=f"opt_slate_type_{sport}",
-            help="Filter to games in this DraftKings slate window. Times are ET.",
-        )
+        _matchups = meta.get("matchups", [])
+        _game_times = meta.get("game_times", {})
+        if _matchups:
+            def _time_sort_key(ts):
+                if not ts:
+                    return 99.0
+                try:
+                    parts = ts.replace("p", "").replace("a", "").split(":")
+                    h = int(parts[0])
+                    m = int(parts[1]) if len(parts) > 1 else 0
+                    if "p" in ts.lower() and h != 12:
+                        h += 12
+                    return h + m / 60.0
+                except Exception:
+                    return 99.0
+
+            _game_opts = []
+            for _m in _matchups:
+                _aw, _hm = _m.get("away", ""), _m.get("home", "")
+                _tip = _game_times.get(_aw, _game_times.get(_hm, ""))
+                _disp = f"{_tip} — {_m.get('label', f'{_aw} @ {_hm}')}" if _tip else _m.get("label", f"{_aw} @ {_hm}")
+                _game_opts.append({"display": _disp, "teams": [_aw, _hm], "sort": _time_sort_key(_tip)})
+            _game_opts.sort(key=lambda x: x["sort"])
+            _disp_labels = [g["display"] for g in _game_opts]
+
+            _selected_games = st.multiselect(
+                "Games",
+                options=_disp_labels,
+                default=_disp_labels,
+                key=f"opt_game_select_{sport}",
+                help="Deselect games to exclude their players from lineups.",
+            )
+            if len(_selected_games) < len(_disp_labels):
+                _selected_teams = set()
+                for _lbl in _selected_games:
+                    _g = next((g for g in _game_opts if g["display"] == _lbl), None)
+                    if _g:
+                        _selected_teams.update(_g["teams"])
 
     # ── Build button ──
     if st.button("Build Lineups", type="primary", key=f"opt_build_{sport}"):
@@ -407,20 +439,13 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
                     print(f"[optimizer] DK Showdown salary fetch failed: {_sd_err}")
                     st.warning(f"DK Showdown salary fetch failed: {_sd_err}")
 
-        # Apply slate filter (NBA classic only)
-        if not is_pga and _slate_type != "All Day":
-            _team_game_times = meta.get("game_times", {})
-            if _team_game_times:
-                from yak_core.live import get_slate_teams
-                _slate_teams = get_slate_teams(_team_game_times, slate_type=_slate_type)
-                if _slate_teams:
-                    _pre = len(build_pool)
-                    build_pool = build_pool[build_pool["team"].str.upper().isin(_slate_teams)].copy()
-                    _dropped = _pre - len(build_pool)
-                    if _dropped > 0:
-                        st.info(f"Slate filter ({_slate_type}): {len(build_pool)} players ({_dropped} excluded)")
-            else:
-                st.warning("No game times in pool data. Re-load the pool to enable slate filtering.")
+        # Apply game filter
+        if _selected_teams is not None:
+            _pre = len(build_pool)
+            build_pool = build_pool[build_pool["team"].str.upper().isin(_selected_teams)].copy()
+            _dropped = _pre - len(build_pool)
+            if _dropped > 0:
+                st.info(f"Game filter: {len(build_pool)} players ({_dropped} excluded from deselected games)")
 
         cfg = _build_optimizer_cfg(preset, sport, num_lineups, max_exposure, locked, excluded)
         # Apply profile overrides into the optimizer config
