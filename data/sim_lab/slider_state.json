@@ -9,7 +9,6 @@
         "GPP_SMASH_WEIGHT": 0.2,
         "GPP_LEVERAGE_WEIGHT": 0.1,
         "GPP_BUST_PENALTY": 0.25,
-        "NUM_LINEUPS": 20,
         "MAX_EXPOSURE": 0.4
       },
       "ricky_weights": {
