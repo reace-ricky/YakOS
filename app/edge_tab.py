@@ -63,32 +63,30 @@ _CARD_CSS = """
     margin-bottom: 4px;
     font-size: 0.92rem;
 }
-/* ── The Board (accessible: 15px base, high contrast, no color-only cues) ── */
+/* ── The Board (accessible: bright headers, solid pills, high contrast) ── */
 .the-board {
-    border: 1px solid rgba(255,255,255,0.1);
+    border: 1px solid #1e293b;
     border-radius: 8px;
     padding: 22px 24px;
     margin-bottom: 16px;
-    background: rgba(255,255,255,0.02);
+    background: #0f172a;
 }
 .tb-section-label {
     text-transform: uppercase;
-    font-size: 13px;
+    font-size: 14px;
     letter-spacing: 2px;
-    color: #e2e8f0;
-    margin-top: 22px;
+    color: #f59e0b;
+    margin-top: 24px;
     margin-bottom: 10px;
     font-weight: 700;
-    border-bottom: 1px solid rgba(255,255,255,0.08);
-    padding-bottom: 4px;
 }
 .tb-recap {
-    background: #0f172a;
+    background: #1e293b;
     border: 1px solid #334155;
     border-radius: 6px;
     padding: 14px 16px;
     font-size: 15px;
-    color: #cbd5e1;
+    color: #e2e8f0;
     line-height: 1.7;
     margin-bottom: 18px;
 }
@@ -99,15 +97,17 @@ _CARD_CSS = """
     margin-bottom: 18px;
 }
 .tb-play-row {
-    margin-bottom: 10px;
+    margin-bottom: 12px;
     font-size: 15px;
     line-height: 1.6;
+    padding: 8px 12px;
+    background: #1e293b;
+    border-radius: 6px;
 }
 .tb-play-row .tb-pill {
     display: inline-block;
-    background: #1e3a1e;
-    color: #ffffff;
-    border: 1px solid #4ade80;
+    background: #f59e0b;
+    color: #000000;
     border-radius: 4px;
     padding: 3px 8px;
     font-size: 12px;
@@ -117,14 +117,12 @@ _CARD_CSS = """
     vertical-align: middle;
 }
 .tb-play-row .tb-pill-dart {
-    background: #3a1e3a;
+    background: #8b5cf6;
     color: #ffffff;
-    border-color: #c084fc;
 }
 .tb-play-row .tb-pill-pivot {
-    background: #1e2a3a;
-    color: #ffffff;
-    border-color: #60a5fa;
+    background: #14b8a6;
+    color: #000000;
 }
 .tb-play-row .tb-name {
     font-weight: 700;
@@ -132,13 +130,11 @@ _CARD_CSS = """
     font-size: 16px;
 }
 .tb-play-row .tb-meta {
-    color: #cbd5e1;
+    color: #e2e8f0;
 }
 .tb-danger-box {
-    background: #1a0000;
+    background: #1e293b;
     border-left: 4px solid #ef4444;
-    border: 1px solid #7f1d1d;
-    border-left-width: 4px;
     border-radius: 6px;
     padding: 14px 18px;
     margin-top: 18px;
@@ -147,7 +143,7 @@ _CARD_CSS = """
     line-height: 1.7;
 }
 .tb-danger-box .tb-divider {
-    border-top: 1px solid #7f1d1d;
+    border-top: 1px solid #475569;
     margin: 10px 0;
 }
 </style>
