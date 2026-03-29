@@ -63,84 +63,92 @@ _CARD_CSS = """
     margin-bottom: 4px;
     font-size: 0.92rem;
 }
-/* ── The Board ── */
+/* ── The Board (accessible: 15px base, high contrast, no color-only cues) ── */
 .the-board {
-    border: 1px solid rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.1);
     border-radius: 8px;
-    padding: 20px 22px;
+    padding: 22px 24px;
     margin-bottom: 16px;
-    background: rgba(255,255,255,0.015);
+    background: rgba(255,255,255,0.02);
 }
 .tb-section-label {
     text-transform: uppercase;
-    font-size: 11px;
+    font-size: 13px;
     letter-spacing: 2px;
-    color: #64748b;
-    margin-top: 20px;
-    margin-bottom: 8px;
+    color: #e2e8f0;
+    margin-top: 22px;
+    margin-bottom: 10px;
     font-weight: 700;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    padding-bottom: 4px;
 }
 .tb-recap {
     background: #0f172a;
-    border: 1px solid #1e293b;
+    border: 1px solid #334155;
     border-radius: 6px;
-    padding: 12px;
-    font-size: 13px;
-    color: #94a3b8;
-    line-height: 1.6;
-    margin-bottom: 16px;
+    padding: 14px 16px;
+    font-size: 15px;
+    color: #cbd5e1;
+    line-height: 1.7;
+    margin-bottom: 18px;
 }
 .tb-setup {
-    font-size: 13px;
-    color: #cbd5e1;
-    line-height: 1.6;
-    margin-bottom: 16px;
+    font-size: 15px;
+    color: #e2e8f0;
+    line-height: 1.7;
+    margin-bottom: 18px;
 }
 .tb-play-row {
-    margin-bottom: 8px;
-    font-size: 13px;
-    line-height: 1.5;
+    margin-bottom: 10px;
+    font-size: 15px;
+    line-height: 1.6;
 }
 .tb-play-row .tb-pill {
     display: inline-block;
     background: #1e3a1e;
-    color: #4ade80;
+    color: #ffffff;
+    border: 1px solid #4ade80;
     border-radius: 4px;
-    padding: 2px 6px;
-    font-size: 11px;
+    padding: 3px 8px;
+    font-size: 12px;
     font-weight: 700;
     letter-spacing: 0.5px;
-    margin-right: 6px;
+    margin-right: 8px;
     vertical-align: middle;
 }
 .tb-play-row .tb-pill-dart {
     background: #3a1e3a;
-    color: #c084fc;
+    color: #ffffff;
+    border-color: #c084fc;
 }
 .tb-play-row .tb-pill-pivot {
     background: #1e2a3a;
-    color: #60a5fa;
+    color: #ffffff;
+    border-color: #60a5fa;
 }
 .tb-play-row .tb-name {
     font-weight: 700;
-    color: #f1f5f9;
+    color: #ffffff;
+    font-size: 16px;
 }
 .tb-play-row .tb-meta {
-    color: #94a3b8;
+    color: #cbd5e1;
 }
 .tb-danger-box {
     background: #1a0000;
-    border-left: 3px solid #ef4444;
-    border-radius: 4px;
-    padding: 12px 16px;
-    margin-top: 16px;
-    font-size: 13px;
-    color: #fca5a5;
-    line-height: 1.6;
+    border-left: 4px solid #ef4444;
+    border: 1px solid #7f1d1d;
+    border-left-width: 4px;
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin-top: 18px;
+    font-size: 15px;
+    color: #fde2e2;
+    line-height: 1.7;
 }
 .tb-danger-box .tb-divider {
-    border-top: 1px solid #3f0000;
-    margin: 8px 0;
+    border-top: 1px solid #7f1d1d;
+    margin: 10px 0;
 }
 </style>
 """
