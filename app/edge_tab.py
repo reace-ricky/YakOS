@@ -63,37 +63,88 @@ _CARD_CSS = """
     margin-bottom: 4px;
     font-size: 0.92rem;
 }
+/* ── The Board: monospace, dark, structured ── */
 .the-board {
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 10px;
-    padding: 18px 20px;
-    margin-bottom: 16px;
-    background: rgba(255,255,255,0.02);
-}
-.the-board h3 {
-    margin: 0 0 14px 0;
-}
-.the-board-last-night {
-    color: rgba(240,240,240,0.65);
-    font-size: 0.9rem;
-    line-height: 1.5;
-    margin-bottom: 14px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-}
-.the-board-edge-callout {
-    font-size: 0.92rem;
-    line-height: 1.5;
-    margin-bottom: 8px;
-}
-.the-board-bust-call {
-    border: 1px solid rgba(244,67,54,0.3);
+    font-family: 'Courier New', Courier, monospace;
+    border: 1px solid rgba(255,255,255,0.08);
     border-radius: 8px;
-    padding: 12px 16px;
-    margin-top: 14px;
-    background: rgba(244,67,54,0.06);
-    font-size: 0.95rem;
+    padding: 20px 22px;
+    margin-bottom: 16px;
+    background: rgba(255,255,255,0.015);
+}
+.the-board * {
+    font-family: 'Courier New', Courier, monospace;
+}
+.tb-section-label {
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: #64748b;
+    margin-top: 20px;
+    margin-bottom: 8px;
+    font-weight: 700;
+}
+.tb-recap {
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 6px;
+    padding: 12px;
+    font-size: 13px;
+    color: #94a3b8;
+    line-height: 1.6;
+    margin-bottom: 16px;
+}
+.tb-setup {
+    font-size: 13px;
+    color: #cbd5e1;
+    line-height: 1.6;
+    margin-bottom: 16px;
+}
+.tb-play-row {
+    margin-bottom: 8px;
+    font-size: 13px;
     line-height: 1.5;
+}
+.tb-play-row .tb-pill {
+    display: inline-block;
+    background: #1e3a1e;
+    color: #4ade80;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+.tb-play-row .tb-pill-dart {
+    background: #3a1e3a;
+    color: #c084fc;
+}
+.tb-play-row .tb-pill-pivot {
+    background: #1e2a3a;
+    color: #60a5fa;
+}
+.tb-play-row .tb-name {
+    font-weight: 700;
+    color: #f1f5f9;
+}
+.tb-play-row .tb-meta {
+    color: #94a3b8;
+}
+.tb-danger-box {
+    background: #1a0000;
+    border-left: 3px solid #ef4444;
+    border-radius: 4px;
+    padding: 12px 16px;
+    margin-top: 16px;
+    font-size: 13px;
+    color: #fca5a5;
+    line-height: 1.6;
+}
+.tb-danger-box .tb-divider {
+    border-top: 1px solid #3f0000;
+    margin: 8px 0;
 }
 </style>
 """
@@ -352,24 +403,18 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
         recap_date = recap.get("slate_date", "") if recap else ""
         date_label = f" ({recap_date})" if recap_date else ""
         parts.append(
-            f'<div style="margin-bottom:8px;font-weight:600;font-size:0.88rem;'
-            f'color:rgba(240,240,240,0.5);">Last Slate{date_label}</div>'
-            f'<div class="the-board-last-night">{last_night}</div>'
+            f'<div class="tb-section-label">LAST SLATE{date_label}</div>'
+            f'<div class="tb-recap">{last_night}</div>'
         )
 
-    # ── 2. The Setup (replaces Slate Read) ──────────────────────────────
-    # One sharp paragraph: dominant narrative, the trap, the edge.
+    # ── 2. The Setup ────────────────────────────────────────────────
     setup_parts: list = []
-
-    # Stack game
     stacks = compute_stack_targets(pool, edge_analysis)
     if stacks:
         s = stacks[0]
         setup_parts.append(
             f"{s['team1']}-{s['team2']} is the highest total at {s['vegas_total']:.0f}."
         )
-
-    # Blowout spot
     if "spread" in pool.columns:
         _spread_col = pd.to_numeric(pool["spread"], errors="coerce").fillna(0)
         _blowout_mask = _spread_col.abs() > 8
@@ -377,13 +422,10 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             _bo_rows = pool.loc[_blowout_mask].copy()
             _bo_rows["_abs_spread"] = _spread_col[_blowout_mask].abs()
             _bo_row = _bo_rows.nlargest(1, "_abs_spread").iloc[0]
-            _bo_team = _bo_row["team"]
-            _bo_sp = _bo_row["_abs_spread"]
             setup_parts.append(
-                f"{_bo_team} is a {_bo_sp:.0f}-point spread — starters hit the bench in the 4th."
+                f"{_bo_row['team']} is a {_bo_row['_abs_spread']:.0f}-point spread — "
+                f"starters hit the bench in the 4th."
             )
-
-    # Injury cascade narrative
     _cascade_name = ""
     if "injury_bump_fp" in pool.columns:
         _bump_col = pd.to_numeric(pool["injury_bump_fp"], errors="coerce").fillna(0)
@@ -397,21 +439,17 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
                 f"+{_bump_fp:.0f} FP from the cascade. "
                 f"The public will pile into the obvious name and miss this."
             )
-
-    # Edge summary
     n_core = len(edge_analysis.get("core_plays", []))
     n_leverage = len(edge_analysis.get("leverage_plays", []))
     if n_core + n_leverage > 0:
         setup_parts.append(
-            f"The edge is in the {n_core} core plays and {n_leverage} leverage spots the field isn't checking."
+            f"The edge is in the {n_core} core plays and {n_leverage} leverage spots "
+            f"the field isn't checking."
         )
-
     if setup_parts:
-        setup_text = " ".join(setup_parts)
         parts.append(
-            '<div style="margin-top:12px;margin-bottom:4px;font-weight:600;font-size:0.88rem;">'
-            'The Setup</div>'
-            f'<div class="the-board-edge-callout">{setup_text}</div>'
+            '<div class="tb-section-label">THE SETUP</div>'
+            f'<div class="tb-setup">{" ".join(setup_parts)}</div>'
         )
 
     # ── 3. Ricky's Plays (tiered, signal-deduped) ──────────────────────
@@ -419,22 +457,25 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     tiered_plays = _assign_tiered_plays(snipers, pool) if snipers else []
 
     if tiered_plays:
-        parts.append(
-            '<div style="margin-top:12px;margin-bottom:4px;font-weight:600;font-size:0.88rem;">'
-            "Ricky's Plays</div>"
-        )
+        parts.append('<div class="tb-section-label">RICKY\'S PLAYS</div>')
         for p, sig, role_key, role_label, reason in tiered_plays:
+            # Map role to pill CSS class
+            pill_cls = "tb-pill"
+            if role_key == "dart":
+                pill_cls = "tb-pill tb-pill-dart"
+            elif role_key == "pivot":
+                pill_cls = "tb-pill tb-pill-pivot"
+            # Strip emoji from role_label for the pill text
+            pill_text = role_label.split(" ", 1)[-1].upper() if " " in role_label else role_label.upper()
             parts.append(
-                f'<div class="the-board-edge-callout">'
-                f'<span style="color:rgba(240,240,240,0.5);font-size:0.8rem;">{role_label}</span> '
-                f"<strong>{p['player_name']}</strong> ({p['team']}, ${p['salary']:,}) "
-                f"\u2014 {reason}"
+                f'<div class="tb-play-row">'
+                f'<span class="{pill_cls}">{pill_text}</span>'
+                f'<span class="tb-name">{p["player_name"]}</span> '
+                f'<span class="tb-meta">({p["team"]}, ${p["salary"]:,}) \u2014 {reason}</span>'
                 f'</div>'
             )
 
-    # ── 4. The Trap Stack ──────────────────────────────────────────────
-    # Warn about the narrative everyone else is building.
-    # Find the highest-owned non-core, non-sniper player who underperforms by model.
+    # ── 4+5. Merged Danger Box: Trap Stack + Fade ────────────────────
     _board_names = set()
     for _tier in ("core_plays", "leverage_plays", "value_plays"):
         for _p in edge_analysis.get(_tier, []):
@@ -443,6 +484,10 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
         _board_names.add(pp.get("player_name", ""))
     _board_names.discard("")
 
+    _trap_html = ""
+    _fade_html = ""
+
+    # Trap Stack
     if "ownership" in pool.columns and "proj" in pool.columns:
         _own_col = pd.to_numeric(pool.get("ownership", pool.get("own_proj", 0)), errors="coerce").fillna(0)
         if _own_col.max() <= 1.0:
@@ -450,8 +495,6 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
         _proj_col = pd.to_numeric(pool["proj"], errors="coerce").fillna(0)
         _sal_col = pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0)
         _r5_col = pd.to_numeric(pool.get("rolling_fp_5", 0), errors="coerce").fillna(0)
-
-        # Candidates: >8% owned, not on the board, and pts/$1K below 5.5
         _trap_mask = (
             (_own_col > 8)
             & (~pool["player_name"].isin(_board_names))
@@ -462,33 +505,27 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             _trap_df = pool[_trap_mask].copy()
             _trap_df["_own"] = _own_col[_trap_mask]
             _trap_row = _trap_df.nlargest(1, "_own").iloc[0]
-            _trap_name = _trap_row["player_name"]
-            _trap_own = float(_trap_df.loc[_trap_row.name, "_own"])
-            _trap_proj = float(_proj_col.loc[_trap_row.name])
-            _trap_sal = int(_sal_col.loc[_trap_row.name])
-            _trap_r5 = float(_r5_col.loc[_trap_row.name])
-            _trap_ppk = _trap_proj / (_trap_sal / 1000) if _trap_sal > 0 else 0
-
-            parts.append(
-                '<div style="margin-top:12px;margin-bottom:4px;font-weight:600;font-size:0.88rem;">'
-                '\u26a0\ufe0f The Trap Stack</div>'
-                f'<div class="the-board-edge-callout">'
-                f'The field is going to talk themselves into '
-                f'<strong>{_trap_name}</strong> ({_trap_own:.0f}% owned, ${_trap_sal:,}). '
-                f'Averaging {_trap_r5:.0f} over his last 5 at {_trap_ppk:.1f} pts/$1K. '
-                f'That\'s not a leverage play \u2014 it\'s a trap.'
-                f'</div>'
+            _tn = _trap_row["player_name"]
+            _to = float(_trap_df.loc[_trap_row.name, "_own"])
+            _ts = int(_sal_col.loc[_trap_row.name])
+            _tr5 = float(_r5_col.loc[_trap_row.name])
+            _tppk = float(_proj_col.loc[_trap_row.name]) / (_ts / 1000) if _ts > 0 else 0
+            _trap_html = (
+                f"\u26a0\ufe0f <strong>THE TRAP:</strong> "
+                f"The field is going to talk themselves into {_tn} "
+                f"({_to:.0f}% owned, ${_ts:,}). "
+                f"Averaging {_tr5:.0f} over his last 5 at {_tppk:.1f} pts/$1K. "
+                f"That's not a leverage play \u2014 it's a trap."
             )
-            _board_names.add(_trap_name)
+            _board_names.add(_tn)
 
-    # ── 5. Fade of the Slate ───────────────────────────────────────────
+    # Fade
     bust = generate_bust_call(pool, edge_analysis.get("fade_candidates"), positive_tier_names=_board_names or None)
+    fades = []
     if bust:
-        parts.append(
-            f'<div class="the-board-bust-call">'
-            f'<strong>\U0001f480 Fade of the slate: {bust["name"]} (${bust["salary"]:,}).</strong> '
-            f'{bust["explanation"]}'
-            f'</div>'
+        _fade_html = (
+            f"\U0001f480 <strong>FADE OF THE SLATE: {bust['name']} (${bust['salary']:,}).</strong> "
+            f"{bust['explanation']}"
         )
     else:
         fades = compute_fades(pool, edge_analysis)
@@ -496,15 +533,23 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             fades = [f for f in fades if f.get("player_name", "") not in _board_names]
         if fades:
             f = fades[0]
-            parts.append(
-                f'<div class="the-board-bust-call">'
-                f'<strong>\U0001f480 The Fade: {f["player_name"]} ({f["own_pct"]:.1f}% owned).</strong> '
-                f'{f.get("reasoning", "Model says pass.")}'
-                f'</div>'
+            _fade_html = (
+                f"\U0001f480 <strong>FADE: {f['player_name']} ({f['own_pct']:.1f}% owned).</strong> "
+                f"{f.get('reasoning', 'Model says pass.')}"
             )
 
+    # Render merged danger box
+    if _trap_html or _fade_html:
+        danger_inner = ""
+        if _trap_html:
+            danger_inner += _trap_html
+        if _trap_html and _fade_html:
+            danger_inner += '<div class="tb-divider"></div>'
+        if _fade_html:
+            danger_inner += _fade_html
+        parts.append(f'<div class="tb-danger-box">{danger_inner}</div>')
+
     # ── Auto-write fades to Ricky's bias ──────────────────────────────
-    # Faded players get 0% exposure so the optimizer can't use them.
     try:
         from yak_core.bias import save_bias
         _bias = st.session_state.setdefault("ricky_bias", {})
