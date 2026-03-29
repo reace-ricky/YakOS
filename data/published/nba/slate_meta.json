@@ -1,7 +1,7 @@
 {
   "sport": "NBA",
   "site": "DK",
-  "date": "2026-03-28",
+  "date": "2026-03-29",
   "salary_cap": 50000,
   "roster_slots": [
     "PG",
@@ -14,44 +14,62 @@
     "UTIL"
   ],
   "lineup_size": 8,
-  "pool_size": 217,
+  "pool_size": 318,
   "proj_source": "model",
   "matchups": [
     {
-      "away": "DET",
-      "home": "MIN",
-      "game_id": "20260328_DET@MIN",
-      "label": "DET @ MIN"
+      "away": "GS",
+      "home": "DEN",
+      "game_id": "20260329_GS@DEN",
+      "label": "GS @ DEN"
     },
     {
       "away": "SAC",
-      "home": "ATL",
-      "game_id": "20260328_SAC@ATL",
-      "label": "SAC @ ATL"
+      "home": "BKN",
+      "game_id": "20260329_SAC@BKN",
+      "label": "SAC @ BKN"
     },
     {
-      "away": "UTA",
-      "home": "PHO",
-      "game_id": "20260328_UTA@PHO",
-      "label": "UTA @ PHO"
+      "away": "HOU",
+      "home": "NO",
+      "game_id": "20260329_HOU@NO",
+      "label": "HOU @ NO"
     },
     {
-      "away": "CHI",
-      "home": "MEM",
-      "game_id": "20260328_CHI@MEM",
-      "label": "CHI @ MEM"
-    },
-    {
-      "away": "SA",
+      "away": "LAC",
       "home": "MIL",
-      "game_id": "20260328_SA@MIL",
-      "label": "SA @ MIL"
+      "game_id": "20260329_LAC@MIL",
+      "label": "LAC @ MIL"
     },
     {
-      "away": "PHI",
+      "away": "NY",
+      "home": "OKC",
+      "game_id": "20260329_NY@OKC",
+      "label": "NY @ OKC"
+    },
+    {
+      "away": "WAS",
+      "home": "POR",
+      "game_id": "20260329_WAS@POR",
+      "label": "WAS @ POR"
+    },
+    {
+      "away": "BOS",
       "home": "CHA",
-      "game_id": "20260328_PHI@CHA",
-      "label": "PHI @ CHA"
+      "game_id": "20260329_BOS@CHA",
+      "label": "BOS @ CHA"
+    },
+    {
+      "away": "ORL",
+      "home": "TOR",
+      "game_id": "20260329_ORL@TOR",
+      "label": "ORL @ TOR"
+    },
+    {
+      "away": "MIA",
+      "home": "IND",
+      "game_id": "20260329_MIA@IND",
+      "label": "MIA @ IND"
     }
   ],
   "game_times": {}
