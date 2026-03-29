@@ -29,6 +29,17 @@ FADE_OWN_MIN = 15.0            # must be above this ownership %
 FADE_MAX = 2                   # max fades to show
 STACK_MAX = 2                  # max stack targets
 
+_OUT_STATUSES = {"OUT", "IR", "SUSPENDED"}
+
+
+def _exclude_out(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop OUT / IR / SUSPENDED players — can't fade or snipe someone who isn't playing."""
+    if "status" in df.columns:
+        return df[
+            ~df["status"].fillna("").str.strip().str.upper().isin(_OUT_STATUSES)
+        ].copy()
+    return df
+
 
 def _safe_numeric(series: pd.Series, default: float = 0.0) -> pd.Series:
     return pd.to_numeric(series, errors="coerce").fillna(default)
@@ -171,7 +182,7 @@ def compute_sniper_spots(
         return []
 
     tier_names = _get_tier_names(edge_analysis)
-    df = pool.copy()
+    df = _exclude_out(pool.copy())
     ricky_proj = _get_ricky_proj(df)
     ceil = _get_ricky_ceil(df)
     own = _get_own(df)
@@ -264,7 +275,7 @@ def compute_fades(
         return []
 
     tier_names = _get_tier_names(edge_analysis)
-    df = pool.copy()
+    df = _exclude_out(pool.copy())
     ricky_proj = _get_ricky_proj(df)
     own = _get_own(df)
     salary = _safe_numeric(df.get("salary", pd.Series(0.0, index=df.index)))

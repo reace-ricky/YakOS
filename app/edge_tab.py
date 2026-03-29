@@ -357,6 +357,22 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             f'<div class="tb-recap">{last_night}</div>'
         )
 
+    # ── Fades / busts: build a set of names we must never praise ─────────
+    bust = generate_bust_call(
+        pool,
+        edge_analysis.get("fade_candidates"),
+        positive_tier_names=None,
+    )
+    raw_fades = compute_fades(pool, edge_analysis)
+
+    fade_names: set[str] = set()
+    if bust:
+        fade_names.add(bust["name"])
+    if raw_fades:
+        fade_names |= {f.get("player_name", "") for f in raw_fades}
+
+    fade_names.discard("")
+
     # -- 2. The Setup -------------------------------------------------------
     setup_parts: list = []
     stacks = compute_stack_targets(pool, edge_analysis)
@@ -382,11 +398,18 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             _bumped = pool.loc[_bump_mask].nlargest(1, "injury_bump_fp").iloc[0]
             _cascade_name = _bumped["player_name"]
             _bump_fp = _bump_col.loc[_bumped.name]
-            setup_parts.append(
-                f"{_cascade_name} is the real minutes beneficiary \u2014 "
-                f"+{_bump_fp:.0f} FP from the cascade. "
-                f"The public will pile into the obvious name and miss this."
-            )
+            if _cascade_name in fade_names:
+                setup_parts.append(
+                    f"{_cascade_name} is getting the real minutes bump \u2014 "
+                    f"+{_bump_fp:.0f} FP from the cascade \u2014 but it's a bad play. "
+                    "The field will chase it anyway; that's the trap."
+                )
+            else:
+                setup_parts.append(
+                    f"{_cascade_name} is the real minutes beneficiary \u2014 "
+                    f"+{_bump_fp:.0f} FP from the cascade. "
+                    "The public will pile into the obvious name and miss this."
+                )
     n_core = len(edge_analysis.get("core_plays", []))
     n_leverage = len(edge_analysis.get("leverage_plays", []))
     if n_core + n_leverage > 0:
@@ -399,9 +422,21 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             f'<div class="tb-setup">{" ".join(setup_parts)}</div>'
         )
 
-    # -- 3. Ricky's Plays ---------------------------------------------------
+    # ── 3. Ricky's Plays (tiered, signal-deduped) ──────────────────────
     snipers = compute_sniper_spots(pool, edge_analysis)
+    # never allow fades into Ricky's Plays
+    snipers = [
+        p for p in snipers
+        if p.get("player_name", "") not in fade_names
+    ]
     tiered_plays = _assign_tiered_plays(snipers, pool) if snipers else []
+
+    if tiered_plays:
+        tiered_plays = [
+            (p, sig, role_key, role_label, reason)
+            for (p, sig, role_key, role_label, reason) in tiered_plays
+            if p.get("player_name", "") not in fade_names
+        ]
 
     if tiered_plays:
         parts.append('<div class="tb-section-label">RICKY\'S PLAYS</div>')
@@ -462,15 +497,14 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             )
             _board_names.add(_tn)
 
-    bust = generate_bust_call(pool, edge_analysis.get("fade_candidates"), positive_tier_names=_board_names or None)
-    fades = []
+    # We already computed bust and raw_fades above
+    fades = raw_fades or []
     if bust:
         _fade_html = (
             f"\U0001f480 <strong>FADE: {bust['name']} (${bust['salary']:,}).</strong> "
             f"{bust['explanation']}"
         )
     else:
-        fades = compute_fades(pool, edge_analysis)
         if fades:
             fades = [f for f in fades if f.get("player_name", "") not in _board_names]
         if fades:
