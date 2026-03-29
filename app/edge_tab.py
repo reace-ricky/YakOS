@@ -340,13 +340,15 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
 
     parts: list = []
 
-    # -- 1. Last Slate Recap ------------------------------------------------
-    recap = None
-    try:
-        from yak_core.slate_recap import get_previous_slate_recap
-        recap = get_previous_slate_recap(sport)
-    except Exception:
-        pass
+    # -- 1. Last Slate Recap (cached per session to avoid API jitter) --------
+    _recap_key = f"_recap_cache_{sport}"
+    if _recap_key not in st.session_state:
+        try:
+            from yak_core.slate_recap import get_previous_slate_recap
+            st.session_state[_recap_key] = get_previous_slate_recap(sport)
+        except Exception:
+            st.session_state[_recap_key] = None
+    recap = st.session_state[_recap_key]
 
     last_night = generate_last_night(recap, sport=sport)
     if last_night:
@@ -705,6 +707,8 @@ def render_edge_tab(sport: str) -> None:
     # Manual refresh button so user can force-reload after new lineups are built
     if st.button("🔄 Refresh", key=f"edge_refresh_{sport}"):
         invalidate_published_cache()
+        # Clear cached recap so it re-fetches from API
+        st.session_state.pop(f"_recap_cache_{sport}", None)
         st.rerun()
 
     try:
@@ -736,8 +740,6 @@ def render_edge_tab(sport: str) -> None:
     # ── The Board ─────────────────────────────────────────────────────
     _render_the_board(sport, pool, edge_analysis, slate_date=slate_date)
 
-    # Manual bias adjustments panel
-    _render_bias_panel(pool)
 
     st.markdown("")  # spacer
 
