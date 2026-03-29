@@ -5,13 +5,11 @@ port = 8501
 [browser]
 gatherUsageStats = false
 
-# ── YakOS dark theme ─────────────────────────────────────────────────────
-# Dark charcoal background, bright blue primary, white text.
-# Consistent with YAKOS_BUILD_RULES.md UI/UX section.
+# ── YakOS dark theme (accessible: high contrast, bright text) ────────────
 [theme]
 base = "dark"
-primaryColor = "#1E90FF"
-backgroundColor = "#1A1D24"
-secondaryBackgroundColor = "#22262F"
-textColor = "#F0F0F0"
+primaryColor = "#f59e0b"
+backgroundColor = "#0f172a"
+secondaryBackgroundColor = "#1e293b"
+textColor = "#e2e8f0"
 font = "sans serif"

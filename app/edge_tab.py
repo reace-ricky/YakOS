@@ -19,37 +19,39 @@ import streamlit as st
 _CARD_CSS = """
 <style>
 .edge-box {
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 10px;
-    padding: 16px;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 18px;
     margin-bottom: 16px;
-    background: rgba(255,255,255,0.03);
+    background: #1e293b;
 }
 .edge-box h4 {
     margin: 0 0 12px 0;
-    font-size: 1.05rem;
+    font-size: 1.15rem;
+    color: #f59e0b;
 }
 .player-card {
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 8px;
-    padding: 10px 14px;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 12px 16px;
     margin-bottom: 8px;
-    background: rgba(255,255,255,0.02);
+    background: #0f172a;
 }
 .player-card .name {
-    font-weight: 600;
-    font-size: 0.95rem;
+    font-weight: 700;
+    font-size: 1.05rem;
+    color: #ffffff;
     margin-bottom: 4px;
 }
 .player-card .stats {
-    font-size: 0.82rem;
-    color: rgba(240,240,240,0.7);
+    font-size: 0.95rem;
+    color: #e2e8f0;
 }
 .player-card .wave-badge {
     display: inline-block;
-    padding: 1px 8px;
+    padding: 2px 8px;
     border-radius: 4px;
-    font-size: 0.75rem;
+    font-size: 0.85rem;
     font-weight: 600;
     margin-left: 6px;
 }
@@ -61,7 +63,8 @@ _CARD_CSS = """
 }
 .bullet-list li {
     margin-bottom: 4px;
-    font-size: 0.92rem;
+    font-size: 1rem;
+    color: #e2e8f0;
 }
 /* ── The Board (accessible: bright headers, solid pills, high contrast) ── */
 .the-board {
@@ -172,7 +175,7 @@ def _render_player_card_html(player: Dict[str, Any], is_pga: bool, cleared_playe
     if name in cleared:
         cleared_badge = (
             ' <span style="background:#1b5e20;color:#a5d6a7;padding:1px 6px;'
-            'border-radius:3px;font-size:0.72rem;font-weight:600;margin-left:4px;">CLEARED</span>'
+            'border-radius:3px;font-size:0.9rem;font-weight:600;margin-left:4px;">CLEARED</span>'
         )
 
     if is_pga:

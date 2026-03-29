@@ -252,7 +252,7 @@ body{{background:#0f1117;color:#c8ccd4;font-family:-apple-system,BlinkMacSystemF
 .green{{color:#22c55e}}.red{{color:#ef4444}}.amber{{color:#f59e0b}}.blue{{color:#3b82f6}}
 .charts{{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:8px}}
 .cw{{position:relative;height:260px}}
-.cw h3{{font-size:11px;color:#6b7280;margin-bottom:4px}}
+.cw h3{{font-size:14px;color:#6b7280;margin-bottom:4px}}
 .note{{font-size:9px;color:#3b3f4a;line-height:1.5}}
 </style>
 </head>
@@ -321,32 +321,32 @@ body{{background:#0f1117;color:#c8ccd4;font-family:-apple-system,BlinkMacSystemF
 .cs-item .css{{font-size:9px;color:#4b5060}}
 .green{{color:#22c55e}}.red{{color:#ef4444}}.amber{{color:#f59e0b}}
 .sidebar{{grid-row:2/4;background:#161921;border-right:1px solid #2a2d38;padding:12px;overflow-y:auto}}
-.sidebar h3{{font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}}
+.sidebar h3{{font-size:14px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}}
 .ct{{display:flex;align-items:center;gap:7px;padding:4px 6px;border-radius:4px;cursor:pointer;user-select:none;border:1px solid transparent;margin-bottom:3px}}
 .ct:hover{{background:#1e2130}}.ct.on{{border-color:#2a2d38;background:#1a1d28}}
 .ct .dot{{width:9px;height:9px;border-radius:50%;flex-shrink:0}}
-.ct .ctl{{font-size:11px;flex:1}}.ct .ctc{{font-size:10px;color:#4b5060;font-family:monospace}}
+.ct .ctl{{font-size:14px;flex:1}}.ct .ctc{{font-size:14px;color:#4b5060;font-family:monospace}}
 .divider{{height:1px;background:#2a2d38;margin:10px 0}}
 .asel{{margin-bottom:10px}}
 .asel label{{font-size:9px;color:#6b7280;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:2px}}
-.asel select{{width:100%;background:#1e2130;border:1px solid #2a2d38;color:#c8ccd4;padding:4px 6px;border-radius:4px;font-size:11px;cursor:pointer}}
+.asel select{{width:100%;background:#1e2130;border:1px solid #2a2d38;color:#c8ccd4;padding:4px 6px;border-radius:4px;font-size:14px;cursor:pointer}}
 .sl{{margin-bottom:10px}}
 .sl .slh{{display:flex;justify-content:space-between;margin-bottom:3px}}
-.sl .sll{{font-size:11px;color:#9ca3af}}.sl .slv{{font-size:10px;color:#4b5060;font-family:monospace}}
+.sl .sll{{font-size:14px;color:#9ca3af}}.sl .slv{{font-size:14px;color:#4b5060;font-family:monospace}}
 .sl input[type=range]{{width:100%;height:3px;-webkit-appearance:none;background:#2a2d38;border-radius:2px;outline:none}}
 .sl input[type=range]::-webkit-slider-thumb{{-webkit-appearance:none;width:11px;height:11px;background:#4f6df0;border-radius:50%;cursor:pointer;border:2px solid #0f1117}}
-.rbtn{{width:100%;padding:4px;background:#1e2130;border:1px solid #2a2d38;color:#6b7280;border-radius:4px;cursor:pointer;font-size:10px;margin-bottom:10px}}
+.rbtn{{width:100%;padding:4px;background:#1e2130;border:1px solid #2a2d38;color:#6b7280;border-radius:4px;cursor:pointer;font-size:14px;margin-bottom:10px}}
 .rbtn:hover{{border-color:#4f6df0;color:#4f6df0}}
 .chart-area{{position:relative;padding:6px 10px}}
 .chart-area canvas{{width:100%!important;height:100%!important}}
-.bottom{{grid-column:2;background:#161921;border-top:1px solid #2a2d38;padding:6px 16px;display:flex;align-items:center;gap:24px;font-size:11px}}
+.bottom{{grid-column:2;background:#161921;border-top:1px solid #2a2d38;padding:6px 16px;display:flex;align-items:center;gap:24px;font-size:14px}}
 .sb .sbl{{font-size:8px;color:#4b5060;text-transform:uppercase;letter-spacing:.3px}}
 .sb .sbv{{font-size:13px;font-weight:600;color:#e2e5ec}}
-.tip{{position:absolute;background:#1a1d28ee;border:1px solid #2a2d38;border-radius:6px;padding:8px 10px;font-size:10px;pointer-events:none;z-index:100;min-width:200px;box-shadow:0 4px 12px rgba(0,0,0,.5)}}
-.tip .tn{{font-size:12px;font-weight:600;margin-bottom:2px}}
+.tip{{position:absolute;background:#1a1d28ee;border:1px solid #2a2d38;border-radius:6px;padding:8px 10px;font-size:14px;pointer-events:none;z-index:100;min-width:200px;box-shadow:0 4px 12px rgba(0,0,0,.5)}}
+.tip .tn{{font-size:14px;font-weight:600;margin-bottom:2px}}
 .tip .ts{{color:#4b5060;margin-bottom:5px;font-size:9px}}
 .tip .tr{{display:flex;justify-content:space-between;gap:14px;line-height:1.6}}
-.tip .tl{{color:#6b7280}}.tip .tv{{color:#c8ccd4;font-family:monospace;font-size:10px}}
+.tip .tl{{color:#6b7280}}.tip .tv{{color:#c8ccd4;font-family:monospace;font-size:14px}}
 .tip .tag{{display:inline-block;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:600;margin-left:6px}}
 </style>
 </head>

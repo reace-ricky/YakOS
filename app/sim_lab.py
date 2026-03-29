@@ -1695,7 +1695,7 @@ def _render_persistent_trend(preset_name: str) -> None:
             "label": f"Main Config Avg ({avg_val})",
             "data": avg_pts,
             "borderColor": "#16a34a",
-            "backgroundColor": "rgba(34, 197, 94, 0.10)",
+            "backgroundColor": "rgba(34, 197, 94, 0.20)",
             "borderDash": [6, 3],
             "tension": 0,
             "pointRadius": 0,
@@ -1731,7 +1731,7 @@ def _render_persistent_trend(preset_name: str) -> None:
             "label": "Sim Lab Avg",
             "data": avg_pts,
             "borderColor": "#3b82f6",
-            "backgroundColor": "rgba(59, 130, 246, 0.12)",
+            "backgroundColor": "rgba(59, 130, 246, 0.22)",
             "tension": 0.3,
             "pointRadius": 3,
             "pointHoverRadius": 5,
@@ -2447,9 +2447,9 @@ def _render_lineup_review_table() -> None:
             styles = []
             for _ in row:
                 if rank <= 5 and actual_rank <= 5:
-                    styles.append("background-color: rgba(0,200,0,0.15)")
+                    styles.append("background-color: rgba(0,200,0,0.25)")
                 elif rank <= 5 and actual_fp < median_actual:
-                    styles.append("background-color: rgba(220,0,0,0.15)")
+                    styles.append("background-color: rgba(220,0,0,0.25)")
                 else:
                     styles.append("")
             return styles
@@ -2553,9 +2553,9 @@ def _render_player_review_table() -> None:
             styles = []
             for _ in row:
                 if actual > proj + 5:
-                    styles.append("background-color: rgba(0,200,0,0.15)")
+                    styles.append("background-color: rgba(0,200,0,0.25)")
                 elif actual < proj - 5:
-                    styles.append("background-color: rgba(220,0,0,0.15)")
+                    styles.append("background-color: rgba(220,0,0,0.25)")
                 else:
                     styles.append("")
             return styles
@@ -3953,7 +3953,7 @@ def render_sim_lab(sport: str) -> None:
     _proj_chip_text = "#00c851" if _proj_source == "Ricky's Projections" else "#4dabf7"
     st.markdown(
         f'<span style="background:{_proj_chip_color};color:{_proj_chip_text};padding:3px 10px;'
-        f'border-radius:12px;font-size:0.8rem;font-weight:600;">'
+        f'border-radius:12px;font-size:0.95rem;font-weight:600;">'
         f'📊 {_proj_source}</span>',
         unsafe_allow_html=True,
     )
