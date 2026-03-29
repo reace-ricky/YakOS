@@ -357,11 +357,19 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             f'<div class="tb-recap">{last_night}</div>'
         )
 
+    # ── Collect positive-tier names so fades/busts can never overlap ──────
+    _positive_tier_names: set[str] = set()
+    for _tier_key in ("core_plays", "leverage_plays", "value_plays"):
+        for _p in edge_analysis.get(_tier_key, []):
+            _n = _p.get("player_name", "")
+            if _n:
+                _positive_tier_names.add(_n)
+
     # ── Fades / busts: build a set of names we must never praise ─────────
     bust = generate_bust_call(
         pool,
         edge_analysis.get("fade_candidates"),
-        positive_tier_names=None,
+        positive_tier_names=_positive_tier_names or None,
     )
     raw_fades = compute_fades(pool, edge_analysis)
 
@@ -758,15 +766,23 @@ def render_edge_tab(sport: str) -> None:
                     st.caption(f"Top: {', '.join(late_top[:5])}")
             st.markdown("")
 
-    # ── 3-box dashboard ──
+    # ── 3-box dashboard (strip any fades that leaked into positive tiers) ──
     _cleared = st.session_state.get(f"cleared_players_{sport}", [])
+    _display_fades: set[str] = set()
+    if edge_analysis.get("fade_candidates"):
+        _display_fades = {f.get("player_name", "") for f in edge_analysis["fade_candidates"]}
+        _display_fades.discard("")
+
+    def _strip_fades(players: list, fades: set) -> list:
+        return [p for p in players if p.get("player_name", "") not in fades]
+
     col1, col2, col3 = st.columns(3)
     with col1:
-        _render_edge_box("core_plays", edge_analysis.get("core_plays", []), is_pga, _cleared)
+        _render_edge_box("core_plays", _strip_fades(edge_analysis.get("core_plays", []), _display_fades), is_pga, _cleared)
     with col2:
-        _render_edge_box("leverage_plays", edge_analysis.get("leverage_plays", []), is_pga, _cleared)
+        _render_edge_box("leverage_plays", _strip_fades(edge_analysis.get("leverage_plays", []), _display_fades), is_pga, _cleared)
     with col3:
-        _render_edge_box("value_plays", edge_analysis.get("value_plays", []), is_pga, _cleared)
+        _render_edge_box("value_plays", _strip_fades(edge_analysis.get("value_plays", []), _display_fades), is_pga, _cleared)
 
     # ── Published lineups ──
     if lineups:
