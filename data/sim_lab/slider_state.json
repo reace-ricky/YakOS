@@ -3,8 +3,8 @@
     "GPP Main": {
       "overrides": {
         "GPP_UPSIDE_WEIGHT": 0.3,
-        "MAX_EXPOSURE": 0.45,
-        "MIN_PLAYER_MINUTES": 12,
+        "MAX_EXPOSURE": 0.56,
+        "MIN_PLAYER_MINUTES": 7,
         "NUM_LINEUPS": 25,
         "GPP_BOOM_WEIGHT": 0.2,
         "GPP_BOOM_SPREAD_WEIGHT": 0.1,
