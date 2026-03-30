@@ -2752,7 +2752,7 @@ def _render_hindsight_section(
         st.markdown("#### 🎯 Calibrate from Hindsight")
 
         # Generate recommendations
-        recommendations = generate_calibration_recommendations(diagnostics, cfg)
+        recommendations = generate_calibration_recommendations(diagnostics, cfg, pool_df=pool_df)
         st.session_state["hindsight_recommendations"] = recommendations
         st.session_state["hindsight_diagnostics"] = diagnostics
 

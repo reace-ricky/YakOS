@@ -583,6 +583,7 @@ def run_hindsight_diagnostic(
 def generate_calibration_recommendations(
     diagnostic_results: List[Dict[str, Any]],
     cfg: Dict[str, Any],
+    pool_df: Optional[pd.DataFrame] = None,
 ) -> List[Dict[str, Any]]:
     """Produce parameter-adjustment recommendations from hindsight diagnostics.
 
@@ -711,9 +712,88 @@ def generate_calibration_recommendations(
             "n_players": n_own,
         })
 
-    # ── Gate 6: Scoring formula underweights these players ───────────
+    # ── Gate 6: Scoring formula underweights — identify WHICH signal to boost ─
     n_score = gate_counts.get(GATE_SCORE_UNDERWEIGHT, 0)
-    if n_score >= 2:
+    if n_score >= 2 and pool_df is not None and not pool_df.empty:
+        # Find the missed players in the pool and analyze their signal profile
+        missed_names = [
+            r["player"] for r in diagnostic_results
+            if r["blocking_gate"] == GATE_SCORE_UNDERWEIGHT
+        ]
+        _pool = pool_df.copy()
+        _missed_mask = _pool["player_name"].isin(missed_names)
+
+        if _missed_mask.any():
+            # Map signal columns to the GPP weight they control
+            _SIGNAL_TO_WEIGHT = {
+                "sim90th":              ("GPP_UPSIDE_WEIGHT", "ceiling/upside"),
+                "sim99th":              ("GPP_UPSIDE_WEIGHT", "ceiling/upside"),
+                "ceil":                 ("GPP_UPSIDE_WEIGHT", "ceiling/upside"),
+                "smash_prob":           ("GPP_SMASH_WEIGHT", "smash probability"),
+                "leverage":             ("GPP_LEVERAGE_WEIGHT", "ownership leverage"),
+                "recent_form":          ("GPP_FORM_WEIGHT", "recent form"),
+                "dvp_matchup_boost":    ("GPP_DVP_WEIGHT", "DvP matchup"),
+                "pop_catalyst_score":   ("GPP_CATALYST_WEIGHT", "pop catalyst"),
+                "fp_efficiency":        ("GPP_EFFICIENCY_WEIGHT", "FP efficiency"),
+                "breakout_score":       ("GPP_BOOM_SPREAD_WEIGHT", "breakout potential"),
+            }
+
+            # For each signal, compute how the missed players rank vs the pool
+            _best_signal = None
+            _best_pctile = 0.0
+            for col, (weight_key, label) in _SIGNAL_TO_WEIGHT.items():
+                if col not in _pool.columns:
+                    continue
+                _vals = pd.to_numeric(_pool[col], errors="coerce").fillna(0)
+                if _vals.max() == _vals.min():
+                    continue
+                # Percentile rank of the missed players within the full pool
+                _missed_vals = _vals[_missed_mask]
+                _pool_median = _vals.median()
+                _missed_median = _missed_vals.median()
+                if _pool_median == 0:
+                    continue
+                # How far above pool median are the missed players?
+                _pctile = float((_missed_vals > _vals.quantile(0.70)).mean())
+                if _pctile > _best_pctile:
+                    _best_pctile = _pctile
+                    _best_signal = (col, weight_key, label)
+
+            if _best_signal and _best_pctile >= 0.5:
+                _col, _weight_key, _label = _best_signal
+                _cur_w = float(cfg.get(_weight_key, 0.05))
+                _suggested_w = round(min(_cur_w + 0.05, 0.40), 2)
+                recommendations.append({
+                    "parameter": _weight_key,
+                    "current_value": _cur_w,
+                    "suggested_value": _suggested_w,
+                    "reason": (
+                        f"{n_score}/{n_total} hindsight players ranked outside top 30 "
+                        f"by GPP score but inside top 15 by actual. They shared strong "
+                        f"{_label} signal ({_best_pctile:.0%} were above 70th percentile). "
+                        f"Boosting {_weight_key} {_cur_w:.2f}→{_suggested_w:.2f} "
+                        f"would help surface these players."
+                    ),
+                    "n_players": n_score,
+                })
+            else:
+                # Fallback: generic proj weight bump
+                cur_proj_w = float(cfg.get("GPP_PROJ_WEIGHT", 0.35))
+                suggested_proj_w = round(min(cur_proj_w + 0.05, 0.60), 2)
+                recommendations.append({
+                    "parameter": "GPP_PROJ_WEIGHT",
+                    "current_value": cur_proj_w,
+                    "suggested_value": suggested_proj_w,
+                    "reason": (
+                        f"{n_score}/{n_total} hindsight players ranked outside top 30 by "
+                        "GPP score but inside top 15 by actual. No single edge signal "
+                        f"stood out — bumping projection weight "
+                        f"{cur_proj_w:.2f}→{suggested_proj_w:.2f} as a general fix."
+                    ),
+                    "n_players": n_score,
+                })
+    elif n_score >= 2:
+        # No pool_df available, fall back to generic
         cur_proj_w = float(cfg.get("GPP_PROJ_WEIGHT", 0.35))
         suggested_proj_w = round(min(cur_proj_w + 0.05, 0.60), 2)
         recommendations.append({
@@ -722,7 +802,7 @@ def generate_calibration_recommendations(
             "suggested_value": suggested_proj_w,
             "reason": (
                 f"{n_score}/{n_total} hindsight players ranked outside top 30 by "
-                "GPP score but inside top 15 by actual FPTS. Increasing projection "
+                "GPP score but inside top 15 by actual. Increasing projection "
                 f"weight {cur_proj_w:.2f}→{suggested_proj_w:.2f} could surface them."
             ),
             "n_players": n_score,
