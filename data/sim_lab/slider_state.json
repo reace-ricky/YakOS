@@ -12,7 +12,7 @@
         "GPP_BOOM_SPREAD_WEIGHT": 0.1,
         "GPP_EFFICIENCY_WEIGHT": 0.0,
         "CASH_FLOOR_WEIGHT": 0.3,
-        "overall_bias_correction": 12.88
+        "overall_bias_correction": 24.3
       },
       "ricky_weights": {
         "w_gpp": 0.25,
