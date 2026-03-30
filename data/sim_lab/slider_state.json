@@ -11,7 +11,8 @@
         "GPP_BUST_PENALTY": 0.1,
         "overall_bias_correction": 45.8,
         "GPP_BOOM_WEIGHT": 0.25,
-        "GPP_OWN_PENALTY_STRENGTH": 0.2
+        "GPP_OWN_PENALTY_STRENGTH": 0.2,
+        "NUM_LINEUPS": 25
       },
       "ricky_weights": {
         "w_gpp": 0.21,
