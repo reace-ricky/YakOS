@@ -659,6 +659,8 @@ def generate_calibration_recommendations(
         except Exception:
             pass
         _suggested_bias = round(_current_bias + avg_error * 0.5, 2)
+        # Sanity cap: bias should never exceed ±5 FP per player
+        _suggested_bias = max(-5.0, min(5.0, _suggested_bias))
         recommendations.append({
             "parameter": "overall_bias_correction",
             "current_value": _current_bias,

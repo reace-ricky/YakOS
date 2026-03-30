@@ -795,6 +795,13 @@ def prepare_pool(
         _corrections = get_correction_factors(sport=_sport)
         if _corrections.get("n_slates", 0) > 0:
             _overall_bias = float(_corrections.get("overall_bias_correction", 0.0))
+            # Sanity cap: reject obviously broken bias values
+            if abs(_overall_bias) > 5.0:
+                print(
+                    f"[AUDIT-4.1] WARNING: overall_bias_correction={_overall_bias:.2f} "
+                    f"exceeds ±5 FP cap — ignoring. Check correction_factors.json."
+                )
+                _overall_bias = 0.0
             _pos_corr = _corrections.get("by_position", {})
             _n_adjusted = 0
             _total_adj = 0.0

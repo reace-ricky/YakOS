@@ -3008,8 +3008,16 @@ def _render_reset_calibration(preset_name: str, sport: str = "NBA") -> None:
                     df = pd.read_parquet(f)
                     if "actual_fp" not in df.columns or "player_name" not in df.columns:
                         continue
-                    # Use ricky_proj if available, otherwise proj
-                    proj_col = "ricky_proj" if "ricky_proj" in df.columns else "proj"
+                    # Use raw projections (pre-correction) to avoid compounding
+                    # corrections on top of already-corrected values.
+                    if "proj_pre_correction" in df.columns:
+                        _raw = pd.to_numeric(df["proj_pre_correction"], errors="coerce").fillna(0)
+                        if (_raw > 0).any():
+                            proj_col = "proj_pre_correction"
+                        else:
+                            proj_col = "ricky_proj" if "ricky_proj" in df.columns else "proj"
+                    else:
+                        proj_col = "ricky_proj" if "ricky_proj" in df.columns else "proj"
                     if proj_col not in df.columns:
                         continue
                     df["_proj"] = pd.to_numeric(df[proj_col], errors="coerce").fillna(0)
@@ -3052,6 +3060,8 @@ def _render_reset_calibration(preset_name: str, sport: str = "NBA") -> None:
 
             overall_errors = all_errors.get("overall", [])
             new_bias = round(np.mean(overall_errors) * _CORRECTION_STRENGTH, 2) if overall_errors else 0.0
+            # Sanity cap: bias > ±5 FP per player is clearly broken data
+            new_bias = max(-5.0, min(5.0, new_bias))
 
             new_by_pos: Dict[str, float] = {}
             _VALID_POS = (
