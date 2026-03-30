@@ -3,8 +3,7 @@
     "GPP Main": {
       "overrides": {
         "GPP_PROJ_WEIGHT": 0.2,
-        "GPP_UPSIDE_WEIGHT": 0.35,
-        "GPP_BOOM_WEIGHT": 0.2,
+        "GPP_UPSIDE_WEIGHT": 0.4,
         "GPP_OWN_PENALTY_STRENGTH": 1.2,
         "GPP_SMASH_WEIGHT": 0.15,
         "GPP_LEVERAGE_WEIGHT": 0.05,
