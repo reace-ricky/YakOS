@@ -2844,7 +2844,33 @@ def _apply_hindsight_recommendations(
         param = rec["parameter"]
         val = rec["suggested_value"]
 
-        if param in _RICKY_PARAMS or param.startswith("RICKY_W_"):
+        if param == "overall_bias_correction":
+            # Write directly to correction_factors.json so the projection
+            # pipeline actually uses it (lineups.py reads from there).
+            try:
+                import json as _json
+                from pathlib import Path as _Path
+                from yak_core.config import YAKOS_ROOT
+                from yak_core.github_persistence import sync_feedback_async
+
+                _cf_path = _Path(YAKOS_ROOT) / "data" / "calibration_feedback" / "nba" / "correction_factors.json"
+                _cf = _json.loads(_cf_path.read_text()) if _cf_path.exists() else {}
+                _old_bias = _cf.get("overall_bias_correction", 0.0)
+                _cf["overall_bias_correction"] = val
+                _cf_path.write_text(_json.dumps(_cf, indent=2))
+                sync_feedback_async(
+                    files=["data/calibration_feedback/nba/correction_factors.json"],
+                    commit_message=f"Hindsight: bias {_old_bias:+.2f} → {val:+.2f}",
+                )
+                _logger.info(
+                    "Hindsight: updated correction_factors.json bias %.2f → %.2f",
+                    _old_bias, val,
+                )
+            except Exception as _e:
+                _logger.warning("Hindsight: failed to update correction_factors.json: %s", _e)
+            # Also store in sandbox so sliders reflect it
+            st.session_state[sk][param] = val
+        elif param in _RICKY_PARAMS or param.startswith("RICKY_W_"):
             st.session_state[ricky_key][param] = val
         elif param == "_MAX_BUMP_MULTIPLIER":
             # This lives in yak_core/injury_cascade.py — note it but cannot
