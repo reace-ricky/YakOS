@@ -4,15 +4,10 @@
       "overrides": {
         "GPP_PROJ_WEIGHT": 0.2,
         "GPP_UPSIDE_WEIGHT": 0.4,
-        "GPP_OWN_PENALTY_STRENGTH": 0.31,
         "GPP_SMASH_WEIGHT": 0.15,
         "GPP_LEVERAGE_WEIGHT": 0.05,
         "MAX_EXPOSURE": 0.5,
-        "MIN_PLAYER_MINUTES": 11,
-        "GPP_BOOM_SPREAD_WEIGHT": 0.1,
-        "GPP_EFFICIENCY_WEIGHT": 0.0,
-        "CASH_FLOOR_WEIGHT": 0.3,
-        "overall_bias_correction": 37.28
+        "MIN_PLAYER_MINUTES": 11
       },
       "ricky_weights": {
         "w_gpp": 0.21,
