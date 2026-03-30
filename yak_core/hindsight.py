@@ -649,14 +649,24 @@ def generate_calibration_recommendations(
             if r["blocking_gate"] == GATE_PROJ_ERROR
         ]
         avg_error = round(np.mean(errors), 2)
+        # Read the ACTUAL current bias from correction_factors.json
+        _current_bias = 0.0
+        try:
+            from yak_core.calibration_feedback import get_correction_factors
+            _sport = cfg.get("SPORT", "NBA")
+            _cf = get_correction_factors(sport=_sport)
+            _current_bias = float(_cf.get("overall_bias_correction", 0.0))
+        except Exception:
+            pass
+        _suggested_bias = round(_current_bias + avg_error * 0.5, 2)
         recommendations.append({
             "parameter": "overall_bias_correction",
-            "current_value": 0.0,  # always positive nudge
-            "suggested_value": round(avg_error * 0.5, 2),
+            "current_value": _current_bias,
+            "suggested_value": _suggested_bias,
             "reason": (
                 f"{n_underproj}/{n_total} hindsight players were systematically "
-                f"underprojected (avg error={avg_error:+.1f} FP). Calibration "
-                "bias correction could close part of this gap."
+                f"underprojected (avg error={avg_error:+.1f} FP). "
+                f"Current bias={_current_bias:+.2f}, suggested={_suggested_bias:+.2f}."
             ),
             "n_players": n_underproj,
         })
