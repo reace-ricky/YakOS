@@ -1155,9 +1155,11 @@ def _render_config_panel(preset_name: str) -> Dict[str, Any]:
             _sl("Bust Penalty", "GPP_BUST_PENALTY", 0.0, 0.50, 0.01, 0.10)
             _sl("Max Exposure", "MAX_EXPOSURE", 0.1, 1.0, 0.01, 0.6)
             _sl("Own Weight", "OWN_WEIGHT", 0.0, 1.0, 0.01, 0.0)
+            _sl("Cash Floor Weight", "CASH_FLOOR_WEIGHT", 0.0, 1.0, 0.01, 0.60)
         with c2:
             _sl("Leverage Weight", "GPP_LEVERAGE_WEIGHT", 0.0, 0.50, 0.01, 0.05)
             _sl("Smash Weight", "GPP_SMASH_WEIGHT", 0.0, 0.50, 0.01, 0.15)
+            _sl("Efficiency Weight", "GPP_EFFICIENCY_WEIGHT", 0.0, 0.50, 0.01, 0.05)
             _sl("Min Player Minutes", "MIN_PLAYER_MINUTES", 0, 30, 1, 0)
             _sl("Num Lineups", "NUM_LINEUPS", 1, 50, 1, 10)
 
