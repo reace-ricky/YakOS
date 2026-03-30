@@ -13,7 +13,8 @@
         "MIN_PLAYER_MINUTES": 3,
         "NUM_LINEUPS": 25,
         "GPP_BOOM_SPREAD_WEIGHT": 0.1,
-        "GPP_OWN_PENALTY_STRENGTH": 0.26
+        "GPP_OWN_PENALTY_STRENGTH": 0.26,
+        "GPP_UPSIDE_WEIGHT": 0.49
       },
       "ricky_weights": {
         "w_gpp": 0.31,
