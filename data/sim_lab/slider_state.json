@@ -2,11 +2,11 @@
   "configs": {
     "GPP Main": {
       "overrides": {
-        "GPP_UPSIDE_WEIGHT": 0.3,
+        "GPP_UPSIDE_WEIGHT": 0.35,
         "MAX_EXPOSURE": 0.56,
         "MIN_PLAYER_MINUTES": 7,
         "NUM_LINEUPS": 25,
-        "GPP_BOOM_WEIGHT": 0.2,
+        "GPP_BOOM_WEIGHT": 0.5,
         "GPP_BOOM_SPREAD_WEIGHT": 0.1,
         "GPP_EFFICIENCY_WEIGHT": 0.0,
         "CASH_FLOOR_WEIGHT": 0.35,
