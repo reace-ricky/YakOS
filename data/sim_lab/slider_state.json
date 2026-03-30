@@ -8,7 +8,6 @@
         "GPP_OWN_PENALTY_STRENGTH": 1.2,
         "GPP_SMASH_WEIGHT": 0.2,
         "GPP_LEVERAGE_WEIGHT": 0.05,
-        "GPP_BUST_PENALTY": 0.25,
         "MAX_EXPOSURE": 0.4
       },
       "ricky_weights": {
