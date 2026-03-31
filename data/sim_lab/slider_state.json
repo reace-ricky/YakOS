@@ -16,9 +16,9 @@
         "GPP_BOOM_SPREAD_WEIGHT": 0.05
       },
       "ricky_weights": {
-        "w_gpp": 0.2,
-        "w_ceil": 1.2,
-        "w_own": 0.3
+        "w_gpp": 0.3,
+        "w_ceil": 1.1,
+        "w_own": 0.25
       }
     },
     "Cash Main": {
