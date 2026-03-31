@@ -729,7 +729,7 @@ def build_contest_scoped_pool(
 
     # Merge DK pool + mapping
     dk_merged = dk_pool_df.merge(
-        mapping_df[["dk_player_id", "yak_player_id", "yak_name", "match_quality"]],
+        mapping_df[["dk_player_id", "yak_player_id", "yak_name", "match_quality", "dk_positions"]],
         on="dk_player_id",
         how="left",
     )
@@ -762,7 +762,7 @@ def build_contest_scoped_pool(
     out["player_id"] = (
         dk_merged.get("yak_player_id", dk_merged.get("dk_player_id", ""))
     )
-    out["pos"] = dk_merged.get("positions", dk_merged.get("positions_dk", dk_merged.get("pos_yak", dk_merged.get("pos", ""))))
+    out["pos"] = dk_merged.get("dk_positions", dk_merged.get("pos", ""))
     out["team"] = dk_merged.get("team_yak", dk_merged.get("team", dk_merged.get("team_dk", "")))
     # Use DK salary for this run
     out["salary"] = pd.to_numeric(dk_merged.get("salary_dk", dk_merged.get("salary", 0)), errors="coerce").fillna(0)
