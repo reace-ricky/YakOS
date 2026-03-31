@@ -981,6 +981,10 @@ def render_lab_tab(sport: str) -> None:
     with st.expander("Historical Replay", expanded=False):
         _render_historical_replay(sport)
 
+    st.markdown("---")
+    with st.expander("🔬 Lineup Autopsy", expanded=False):
+        _render_lineup_autopsy(sport)
+
 
 # ===============================================================
 # Internal helpers
@@ -3271,3 +3275,401 @@ def _render_historical_replay(sport: str) -> None:
 
     except Exception as e:
         st.error(f"Replay error: {e}")
+
+
+# ---------------------------------------------------------------
+# 🔬 Lineup Autopsy
+# ---------------------------------------------------------------
+
+
+def _render_lineup_autopsy(sport: str) -> None:
+    """Post-slate autopsy: diagnose why winning lineups beat our builds."""
+    from pathlib import Path as _Path
+    from yak_core.config import YAKOS_ROOT, merge_config, DEFAULT_CONFIG
+
+    st.caption(
+        "Load winning lineups (from RG results or paste manually), "
+        "then run a diagnostic against your pool to find construction gaps."
+    )
+
+    # ── 1. Collect winning lineups ──────────────────────────────────────
+    lineups_to_autopsy: list[dict] = []  # each: {date, contest, winning_score, lineup: [{player, pos, salary, fpts}]}
+
+    # 1a. Load saved RG winning lineups
+    _rg_paths = [
+        _Path(YAKOS_ROOT) / "data" / "contest_results" / "rg_winning_lineups.json",
+        _Path(YAKOS_ROOT) / "data" / "calibration" / "rg_winning_lineups.json",
+    ]
+    _saved_data: dict | list = {}
+    for _p in _rg_paths:
+        if _p.exists():
+            try:
+                _saved_data = json.loads(_p.read_text())
+                break
+            except Exception:
+                continue
+
+    # Normalize: RG file may be {key: entry} or {results: [entry]}
+    _saved_entries: list[dict] = []
+    if isinstance(_saved_data, dict):
+        if "results" in _saved_data and isinstance(_saved_data["results"], list):
+            _saved_entries = _saved_data["results"]
+        else:
+            # key → entry dict
+            for _k, _v in _saved_data.items():
+                if isinstance(_v, dict) and "lineup" in _v:
+                    _saved_entries.append(_v)
+
+    if _saved_entries:
+        _labels = []
+        for i, _e in enumerate(_saved_entries):
+            _d = _e.get("date", _e.get("slate_date", "?"))
+            _c = _e.get("contest", _e.get("contest_name", ""))
+            _s = _e.get("winning_score", 0)
+            _labels.append(f"{_d} | {_c} ({_s:.1f} pts)")
+
+        _selected_indices = st.multiselect(
+            "Load saved RG winning lineups",
+            options=list(range(len(_labels))),
+            format_func=lambda i: _labels[i],
+            key=f"autopsy_rg_select_{sport}",
+        )
+        for _idx in _selected_indices:
+            lineups_to_autopsy.append(_saved_entries[_idx])
+    else:
+        st.caption("No saved RG winning lineups found.")
+
+    # 1b. Manual paste
+    st.markdown("**Or paste winning lineups** (one per block, blank line between lineups):")
+    st.caption("Format per line: `PlayerName, Pos, Salary, FPTS`")
+    _paste = st.text_area(
+        "Paste lineups",
+        height=180,
+        key=f"autopsy_paste_{sport}",
+        placeholder="Nikola Jokic, C, 12500, 88.0\nAnthony Edwards, SG, 9500, 64.5\n...\n\n(blank line = next lineup)",
+    )
+    if _paste and _paste.strip():
+        _blocks = _paste.strip().split("\n\n")
+        for _bi, _block in enumerate(_blocks):
+            _players = []
+            for _line in _block.strip().splitlines():
+                _parts = [p.strip() for p in _line.split(",")]
+                if len(_parts) >= 4:
+                    try:
+                        _players.append({
+                            "player": _parts[0],
+                            "pos": _parts[1],
+                            "salary": int(float(_parts[2])),
+                            "fpts": float(_parts[3]),
+                        })
+                    except ValueError:
+                        continue
+                elif len(_parts) >= 2:
+                    # Minimal: name, fpts
+                    try:
+                        _players.append({
+                            "player": _parts[0],
+                            "pos": "",
+                            "salary": 0,
+                            "fpts": float(_parts[-1]),
+                        })
+                    except ValueError:
+                        continue
+            if _players:
+                lineups_to_autopsy.append({
+                    "date": "manual",
+                    "contest": f"Pasted lineup #{_bi + 1}",
+                    "winning_score": sum(p["fpts"] for p in _players),
+                    "lineup": _players,
+                })
+
+    if not lineups_to_autopsy:
+        st.info("Select saved lineups or paste winning lineups above, then click Run Autopsy.")
+        return
+
+    st.markdown(f"**{len(lineups_to_autopsy)} lineup(s) loaded for autopsy.**")
+
+    # ── 2. Run Autopsy ──────────────────────────────────────────────────
+    if not st.button("🔬 Run Autopsy", key=f"autopsy_run_{sport}"):
+        return
+
+    # Load pool from session state or published slate
+    from app.data_loader import published_dir as _pub_dir
+    _out_dir = _pub_dir(sport)
+    _pool_path = _out_dir / "slate_pool.parquet"
+    pool_df = st.session_state.get("pool")
+    if pool_df is None or (isinstance(pool_df, pd.DataFrame) and pool_df.empty):
+        if _pool_path.exists():
+            try:
+                pool_df = pd.read_parquet(_pool_path)
+            except Exception:
+                pool_df = None
+
+    if pool_df is None or (isinstance(pool_df, pd.DataFrame) and pool_df.empty):
+        st.warning("No player pool available. Load a pool first (Load Pool above).")
+        return
+
+    # Load lineups_df from published or archive
+    lineups_df = st.session_state.get("lineups_df")
+    if lineups_df is None or (isinstance(lineups_df, pd.DataFrame) and lineups_df.empty):
+        for _lp in sorted(_out_dir.glob("*_lineups.parquet")):
+            try:
+                lineups_df = pd.read_parquet(_lp)
+                break
+            except Exception:
+                continue
+
+    # Build summary_df from lineups if available
+    summary_df = None
+    if lineups_df is not None and not lineups_df.empty and "lineup_index" in lineups_df.columns:
+        _rows = []
+        for _li in sorted(lineups_df["lineup_index"].unique()):
+            _sl = lineups_df[lineups_df["lineup_index"] == _li]
+            _rows.append({
+                "lineup_index": _li,
+                "total_proj": _sl["proj"].sum() if "proj" in _sl.columns else 0,
+                "total_actual": _sl["actual_fp"].sum() if "actual_fp" in _sl.columns else 0,
+                "ricky_rank": int(_sl["ricky_rank"].iloc[0]) if "ricky_rank" in _sl.columns else _li + 1,
+            })
+        summary_df = pd.DataFrame(_rows)
+
+    cfg = merge_config(dict(DEFAULT_CONFIG))
+
+    # ── Run hindsight diagnostic for each lineup ────────────────────────
+    from yak_core.hindsight import run_hindsight_diagnostic, generate_calibration_recommendations
+
+    all_diagnostics: list[dict] = []
+    per_lineup_results: list[dict] = []  # {label, diagnostics, players, score, stacks}
+
+    for _entry in lineups_to_autopsy:
+        _lineup = _entry.get("lineup", [])
+        _player_names = [p.get("player", p.get("player_name", "")) for p in _lineup]
+        _label = f"{_entry.get('contest', 'Lineup')} ({_entry.get('date', '?')})"
+        _score = _entry.get("winning_score", sum(p.get("fpts", 0) for p in _lineup))
+
+        # Inject actuals from winning lineup into pool for diagnostic
+        _pool_with_actuals = pool_df.copy()
+        for _wp in _lineup:
+            _wname = _wp.get("player", _wp.get("player_name", ""))
+            _wfpts = float(_wp.get("fpts", 0))
+            _mask = _pool_with_actuals["player_name"].str.lower() == _wname.lower()
+            if _mask.any():
+                _pool_with_actuals.loc[_mask, "actual_fp"] = _wfpts
+            else:
+                # Player not in pool — add a stub row so diagnostic can find them
+                _stub = {
+                    "player_name": _wname,
+                    "actual_fp": _wfpts,
+                    "pos": _wp.get("pos", ""),
+                    "salary": int(_wp.get("salary", 0)),
+                    "proj": 0.0,
+                }
+                _pool_with_actuals = pd.concat(
+                    [_pool_with_actuals, pd.DataFrame([_stub])],
+                    ignore_index=True,
+                )
+
+        _diag = run_hindsight_diagnostic(
+            hindsight_players=_player_names,
+            pool_df=_pool_with_actuals,
+            lineups_df=lineups_df if lineups_df is not None else pd.DataFrame(),
+            summary_df=summary_df if summary_df is not None else pd.DataFrame(),
+            cfg=cfg,
+        )
+        all_diagnostics.extend(_diag)
+
+        # Stack analysis: group by team
+        _team_counts: dict[str, int] = {}
+        for _wp in _lineup:
+            _t = _wp.get("team", "")
+            if _t:
+                _team_counts[_t] = _team_counts.get(_t, 0) + 1
+        _stacks = {t: c for t, c in _team_counts.items() if c >= 2}
+
+        per_lineup_results.append({
+            "label": _label,
+            "diagnostics": _diag,
+            "players": _lineup,
+            "score": _score,
+            "stacks": _stacks,
+        })
+
+    # ── 3. Display per-player diagnostics ───────────────────────────────
+    st.markdown("### Per-Player Diagnostics")
+
+    for _lr in per_lineup_results:
+        st.markdown(f"**{_lr['label']}** — {_lr['score']:.1f} pts")
+        if _lr["diagnostics"]:
+            _diag_rows = []
+            for _d in _lr["diagnostics"]:
+                _diag_rows.append({
+                    "Player": _d["player"],
+                    "Proj": _d.get("proj", 0),
+                    "Actual": _d.get("actual_fp", 0),
+                    "Exposure%": _d.get("exposure_pct", 0),
+                    "Blocking Gate": _d.get("blocking_gate", "none"),
+                    "Why Missed": _format_blocking_reason(_d),
+                })
+            _diag_df = pd.DataFrame(_diag_rows)
+            st.dataframe(
+                _diag_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Proj": st.column_config.NumberColumn(format="%.1f"),
+                    "Actual": st.column_config.NumberColumn(format="%.1f"),
+                    "Exposure%": st.column_config.NumberColumn(format="%.0f%%"),
+                },
+            )
+        else:
+            st.caption("No diagnostics generated.")
+
+    # ── 4. Stack / construction gap analysis ────────────────────────────
+    st.markdown("### Stack & Construction Gaps")
+
+    # Aggregate stacks across all lineups
+    _all_stacks: dict[str, list[int]] = {}
+    for _lr in per_lineup_results:
+        for _t, _c in _lr["stacks"].items():
+            _all_stacks.setdefault(_t, []).append(_c)
+
+    if _all_stacks:
+        _stack_rows = []
+        for _t, _counts in sorted(_all_stacks.items(), key=lambda x: -max(x[1])):
+            _stack_rows.append({
+                "Team": _t,
+                "Max Stack Size": max(_counts),
+                "Avg Stack Size": round(sum(_counts) / len(_counts), 1),
+                "Appearances": len(_counts),
+            })
+        st.dataframe(
+            pd.DataFrame(_stack_rows),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        # Check if our lineups had these stacks
+        _our_stacks: dict[str, int] = {}
+        if lineups_df is not None and not lineups_df.empty and "team" in lineups_df.columns:
+            for _li in lineups_df["lineup_index"].unique() if "lineup_index" in lineups_df.columns else []:
+                _sl = lineups_df[lineups_df["lineup_index"] == _li]
+                for _t, _c in _sl["team"].value_counts().items():
+                    if _c >= 2:
+                        _our_stacks[_t] = max(_our_stacks.get(_t, 0), int(_c))
+
+        _gaps = []
+        for _t in _all_stacks:
+            _winning_max = max(_all_stacks[_t])
+            _our_max = _our_stacks.get(_t, 0)
+            if _our_max < _winning_max:
+                _gaps.append(f"**{_t}**: Winners stacked {_winning_max} players, we had {_our_max}")
+        if _gaps:
+            st.markdown("**Stacking gaps vs. winning lineups:**")
+            for _g in _gaps:
+                st.markdown(f"- {_g}")
+        else:
+            st.caption("No stacking gaps detected.")
+    else:
+        st.caption("No team stacks found in winning lineups.")
+
+    # Player overlap analysis
+    _winning_players = set()
+    for _lr in per_lineup_results:
+        for _p in _lr["players"]:
+            _winning_players.add(_p.get("player", _p.get("player_name", "")))
+
+    _our_players = set()
+    if lineups_df is not None and not lineups_df.empty and "player_name" in lineups_df.columns:
+        _our_players = set(lineups_df["player_name"].unique())
+
+    _missed_players = _winning_players - _our_players
+    _shared_players = _winning_players & _our_players
+    if _winning_players:
+        c1, c2 = st.columns(2)
+        with c1:
+            st.metric("Shared Players", f"{len(_shared_players)}/{len(_winning_players)}")
+        with c2:
+            st.metric("Missed Players", len(_missed_players))
+        if _missed_players:
+            st.caption(f"Missed: {', '.join(sorted(_missed_players))}")
+
+    # ── 5. Consensus recommendations ────────────────────────────────────
+    st.markdown("### Consensus Recommendations")
+    st.caption("Aggregated across all uploaded lineups.")
+
+    recs = generate_calibration_recommendations(
+        diagnostic_results=all_diagnostics,
+        cfg=cfg,
+        pool_df=pool_df,
+    )
+
+    if not recs:
+        st.success("No parameter changes recommended — your config looks well-tuned.")
+    else:
+        _rec_rows = []
+        for _r in recs:
+            _rec_rows.append({
+                "Parameter": _r["parameter"],
+                "Current": _r["current_value"],
+                "Suggested": _r["suggested_value"],
+                "Reason": _r["reason"],
+                "Players": _r.get("n_players", 0),
+            })
+        st.dataframe(
+            pd.DataFrame(_rec_rows),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        # ── 6. Apply recommended config changes ────────────────────────
+        if st.button("✅ Apply Recommended Changes", key=f"autopsy_apply_{sport}"):
+            _applied = 0
+            if "autopsy_applied_overrides" not in st.session_state:
+                st.session_state["autopsy_applied_overrides"] = {}
+
+            for _r in recs:
+                _param = _r["parameter"]
+                _new_val = _r["suggested_value"]
+                st.session_state["autopsy_applied_overrides"][_param] = _new_val
+                _applied += 1
+
+            # Persist bias correction to correction_factors on disk
+            _bias_rec = next(
+                (_r for _r in recs if _r["parameter"] == "overall_bias_correction"),
+                None,
+            )
+            if _bias_rec:
+                try:
+                    from yak_core.calibration_feedback import (
+                        get_correction_factors as _get_cf,
+                        record_slate_errors,
+                    )
+                    _cf = _get_cf(sport=sport.upper())
+                    _cf["overall_bias_correction"] = _bias_rec["suggested_value"]
+                    # Write via the module's internal path
+                    from yak_core.calibration_feedback import _corrections_path, _ensure_dir
+                    _ensure_dir(sport.upper())
+                    with open(_corrections_path(sport.upper()), "w") as _f:
+                        json.dump(_cf, _f, indent=2)
+                except Exception as _e:
+                    st.warning(f"Could not persist bias correction to disk: {_e}")
+
+            if _applied > 0:
+                st.success(
+                    f"✅ Applied {_applied} config change(s). "
+                    "Changes are stored in session state and will be used in the next build/sim run."
+                )
+            else:
+                st.warning("No changes were applied.")
+
+
+def _format_blocking_reason(diag: dict) -> str:
+    """Extract a human-readable reason from a hindsight diagnostic row."""
+    gate = diag.get("blocking_gate", "none")
+    if gate == "none":
+        return "✅ No blocking gate"
+    # Return the gate's detail string if it contains ❌ or ⚠️
+    detail = diag.get(gate, "")
+    if detail and detail != "—":
+        return detail
+    return gate.replace("_", " ").title()
