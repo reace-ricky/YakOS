@@ -13,7 +13,8 @@
         "GPP_EFFICIENCY_WEIGHT": 0.1,
         "MIN_PLAYER_MINUTES": 5,
         "NUM_LINEUPS": 25,
-        "GPP_PROJ_WEIGHT": 0.2
+        "GPP_PROJ_WEIGHT": 0.2,
+        "overall_bias_correction": 5.0
       },
       "ricky_weights": {
         "w_gpp": 0.3,
