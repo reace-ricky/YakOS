@@ -30,6 +30,7 @@ FADE_MAX = 2                   # max fades to show
 STACK_MAX = 2                  # max stack targets
 
 _OUT_STATUSES = {"OUT", "IR", "SUSPENDED"}
+_RISKY_STATUSES = {"DOUBTFUL", "GTD", "GAME TIME DECISION"}
 
 
 def _exclude_out(df: pd.DataFrame) -> pd.DataFrame:
@@ -37,6 +38,15 @@ def _exclude_out(df: pd.DataFrame) -> pd.DataFrame:
     if "status" in df.columns:
         return df[
             ~df["status"].fillna("").str.strip().str.upper().isin(_OUT_STATUSES)
+        ].copy()
+    return df
+
+
+def _exclude_risky(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop DOUBTFUL / GTD players from recommendation spots — too likely to DNP."""
+    if "status" in df.columns:
+        return df[
+            ~df["status"].fillna("").str.strip().str.upper().isin(_RISKY_STATUSES)
         ].copy()
     return df
 
@@ -183,6 +193,7 @@ def compute_sniper_spots(
 
     tier_names = _get_tier_names(edge_analysis)
     df = _exclude_out(pool.copy())
+    df = _exclude_risky(df)
     ricky_proj = _get_ricky_proj(df)
     ceil = _get_ricky_ceil(df)
     own = _get_own(df)

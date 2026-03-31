@@ -301,6 +301,8 @@ def _classify_signal(p: Dict[str, Any], pool: pd.DataFrame) -> tuple:
 
 
 def _assign_tiered_plays(snipers: list, pool: pd.DataFrame) -> list:
+    from yak_core.board import _RISKY_STATUSES
+    snipers = [p for p in snipers if str(p.get("status", "") or "").strip().upper() not in _RISKY_STATUSES]
     candidates = []
     for p in snipers:
         sig, reason = _classify_signal(p, pool)
