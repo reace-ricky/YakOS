@@ -1483,7 +1483,7 @@ def build_multiple_lineups_with_exposure(
             lineups_left = num_lineups - lineup_num
             for i, target in player_min_target.items():
                 still_needed = target - core_appearances.get(i, 0)
-                if still_needed > 0 and still_needed >= lineups_left - 1:
+                if still_needed > 0 and still_needed >= lineups_left * 0.6:
                     if i not in _forced_for_solve and remaining.get(i, 0) > 0:
                         _forced_for_solve.append(i)
 
