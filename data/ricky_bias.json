@@ -37,5 +37,8 @@
   },
   "Jarred Vanderbilt": {
     "min_exposure": 0.2
+  },
+  "LaMelo Ball": {
+    "max_exposure": 0.0
   }
 }
