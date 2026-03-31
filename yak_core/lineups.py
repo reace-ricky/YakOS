@@ -659,6 +659,7 @@ def _apply_ricky_bias(
 
     n_proj = 0
     n_exp = 0
+    n_min = 0
     for player, settings in bias.items():
         if not isinstance(settings, dict):
             continue
@@ -676,8 +677,13 @@ def _apply_ricky_bias(
             cfg.setdefault("PLAYER_MAX_EXPOSURE", {})[player] = float(exp)
             n_exp += 1
 
-    if n_proj or n_exp:
-        print(f"[_apply_ricky_bias] Applied {n_proj} proj adjustments, {n_exp} exposure caps")
+        min_exp = settings.get("min_exposure")
+        if min_exp is not None:
+            cfg.setdefault("PLAYER_MIN_EXPOSURE", {})[player] = float(min_exp)
+            n_min += 1
+
+    if n_proj or n_exp or n_min:
+        print(f"[_apply_ricky_bias] Applied {n_proj} proj adjustments, {n_exp} exposure caps, {n_min} exposure floors")
 
     return df
 
@@ -1198,6 +1204,8 @@ def build_multiple_lineups_with_exposure(
     tiered_exposure = cfg.get("TIERED_EXPOSURE", [])
     # Per-player exposure overrides: {player_name: max_exposure_float}
     player_max_exp = cfg.get("PLAYER_MAX_EXPOSURE", {})
+    # Per-player minimum exposure floors: {player_name: min_exposure_float}
+    player_min_exp = cfg.get("PLAYER_MIN_EXPOSURE", {})
     pos_caps = cfg.get("POS_CAPS", {})
     lock_names = [n.strip() for n in cfg.get("LOCK", [])]
     max_pair_appearances = int(cfg.get("MAX_PAIR_APPEARANCES", 0))
@@ -1367,6 +1375,16 @@ def build_multiple_lineups_with_exposure(
         for i in lock_indices:
             remaining[i] = core_max_apps
 
+    # PLAYER_MIN_EXPOSURE: ensure remaining budget allows min appearances
+    player_min_target: Dict[int, int] = {}
+    for i, p in enumerate(players):
+        pname = p["player_name"]
+        if pname in player_min_exp:
+            min_apps = max(1, int(num_lineups * float(player_min_exp[pname])))
+            player_min_target[i] = min_apps
+            remaining[i] = max(remaining.get(i, 0), min_apps)
+    core_appearances: Dict[int, int] = {i: 0 for i in player_min_target}
+
     # Build tier constraint structures
     tier_dict: Dict[str, list] = {}
     tier_min_d: Dict[str, int] = {}
@@ -1459,6 +1477,16 @@ def build_multiple_lineups_with_exposure(
             if over_games:
                 cur_game_caps = {gid: 2 for gid in over_games}
 
+        # Core exposure floor: force players who are falling behind target
+        _forced_for_solve = list(lock_indices)
+        if player_min_target:
+            lineups_left = num_lineups - lineup_num
+            for i, target in player_min_target.items():
+                still_needed = target - core_appearances.get(i, 0)
+                if still_needed > 0 and still_needed >= lineups_left - 1:
+                    if i not in _forced_for_solve and remaining.get(i, 0) > 0:
+                        _forced_for_solve.append(i)
+
         result = _build_one_lineup(
             players=players,
             pos_slots=pos_slots,
@@ -1471,7 +1499,7 @@ def build_multiple_lineups_with_exposure(
             gpp_constraints=gpp_constraints_d,
             tier_constraints=tier_constraints_d,
             not_with_pairs=extra_not_with,
-            forced_players=lock_indices,
+            forced_players=_forced_for_solve,
             excluded_players=exclude_indices,
             game_player_caps=cur_game_caps,
             prev_lineups=built_player_sets if min_uniques > 0 else None,
@@ -1502,7 +1530,7 @@ def build_multiple_lineups_with_exposure(
                     gpp_constraints=relaxed,
                     tier_constraints=tier_constraints_d,
                     not_with_pairs=extra_not_with,
-                    forced_players=lock_indices,
+                    forced_players=_forced_for_solve,
                     excluded_players=exclude_indices,
                     game_player_caps=cur_game_caps,
                     prev_lineups=built_player_sets if min_uniques > 0 else None,
@@ -1528,7 +1556,7 @@ def build_multiple_lineups_with_exposure(
                 gpp_constraints=None,
                 tier_constraints=None,
                 not_with_pairs=not_with_idx_pairs,
-                forced_players=lock_indices,
+                forced_players=_forced_for_solve,
                 excluded_players=exclude_indices,
                 game_player_caps=cur_game_caps,
                 prev_lineups=built_player_sets if min_uniques > 0 else None,
@@ -1573,6 +1601,12 @@ def build_multiple_lineups_with_exposure(
         for idx in selected_indices:
             if idx not in lock_indices:
                 remaining[idx] = max(0, remaining[idx] - 1)
+
+        # Update core play appearance counts
+        if core_appearances:
+            for idx in selected_indices:
+                if idx in core_appearances:
+                    core_appearances[idx] += 1
 
         # Update pair appearances
         if max_pair_appearances > 0:

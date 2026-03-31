@@ -538,8 +538,8 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
 
     # -- Auto-write fades to bias -------------------------------------------
     try:
-        from yak_core.bias import save_bias
-        _bias = st.session_state.setdefault("ricky_bias", {})
+        from yak_core.bias import load_bias, save_bias
+        _bias = st.session_state.setdefault("ricky_bias", load_bias())
         _fade_names = []
         if bust:
             _fade_names.append(bust["name"])
@@ -549,6 +549,26 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             if _fn:
                 _bias.setdefault(_fn, {})["max_exposure"] = 0.0
         if _fade_names:
+            save_bias(_bias)
+    except Exception:
+        pass
+
+    # -- Auto-write core plays to bias with minimum exposure floor ----------
+    try:
+        from yak_core.bias import load_bias, save_bias
+        _bias = st.session_state.setdefault("ricky_bias", load_bias())
+        _core_players = edge_analysis.get("core_plays", [])
+        _core_names = []
+        _fade_set = set(_fade_names) if '_fade_names' in dir() else set()
+        for _cp in _core_players[:5]:  # cap at 5 core plays
+            _cname = _cp.get("player_name", "")
+            if _cname and _cname not in _fade_set:
+                existing = _bias.get(_cname, {})
+                # Only set floor if not already faded/capped low
+                if existing.get("max_exposure", 1.0) > 0.40:
+                    _bias.setdefault(_cname, {})["min_exposure"] = 0.50
+                    _core_names.append(_cname)
+        if _core_names:
             save_bias(_bias)
     except Exception:
         pass
