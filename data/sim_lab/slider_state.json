@@ -18,7 +18,7 @@
       },
       "ricky_weights": {
         "w_gpp": 0.3,
-        "w_ceil": 1.09,
+        "w_ceil": 1.1,
         "w_own": 0.2
       }
     },
