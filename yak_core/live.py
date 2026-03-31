@@ -218,7 +218,7 @@ def fetch_live_opt_pool(slate_date, cfg):
     df = df[df["salary"] > 0].copy()
     # Remove players with Out/IR status
     if "status" in df.columns:
-        df = df[~df["status"].isin(["Out", "OUT", "IR", "Inactive", "INACTIVE"])].copy()
+        df = df[~df["status"].str.upper().isin(["OUT", "IR", "INACTIVE", "SUSPENDED"])].copy()
 
     # Override Tank01 positions with DK slate positions
     try:
