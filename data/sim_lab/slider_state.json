@@ -14,8 +14,7 @@
         "MIN_PLAYER_MINUTES": 5,
         "GPP_BOOM_SPREAD_WEIGHT": 0.15,
         "GPP_UPSIDE_WEIGHT": 0.5,
-        "OWN_WEIGHT": 0.05,
-        "GPP_EFFICIENCY_WEIGHT": 0.07
+        "OWN_WEIGHT": 0.05
       },
       "ricky_weights": {
         "w_gpp": 0.3,
