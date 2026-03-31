@@ -216,6 +216,22 @@ def fetch_live_opt_pool(slate_date, cfg):
     date_key = slate_date.replace("-", "")
     df = fetch_live_dfs(date_key, cfg)
     df = df[df["salary"] > 0].copy()
+# Remove players with Out/IR status
+if "status" in df.columns:
+    df = df[~df["status"].isin(["Out", "OUT", "IR", "Inactive", "INACTIVE"])].copy()
+
+# Override Tank01 positions with DK slate positions
+try:
+    from yak_core.dk_ingest import fetch_dk_lobby_contests, fetch_dk_draftables
+    _contests = fetch_dk_lobby_contests(sport="NBA")
+    if not _contests.empty:
+        _dg_id = int(_contests.iloc[0]["draft_group_id"])
+        _dk_players = fetch_dk_draftables(_dg_id)
+        if not _dk_players.empty:
+            _pos_map = dict(zip(_dk_players["name"], _dk_players["positions"]))
+            df["pos"] = df["player_name"].map(_pos_map).fillna(df["pos"])
+except Exception:
+    pass
     if df.empty:
         raise ValueError("No players with salary > 0 for live slate " + slate_date)
     if "player_id" not in df.columns or df["player_id"].isna().all():
