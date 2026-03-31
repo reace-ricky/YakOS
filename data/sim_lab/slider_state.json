@@ -11,7 +11,7 @@
         "GPP_BUST_PENALTY": 0.2,
         "MAX_EXPOSURE": 0.5,
         "GPP_SNIPER_WEIGHT": 0.15,
-        "CASH_FLOOR_WEIGHT": 0.0,
+        "CASH_FLOOR_WEIGHT": 0.02,
         "MIN_PLAYER_MINUTES": 7,
         "GPP_BOOM_SPREAD_WEIGHT": 0.0
       },
