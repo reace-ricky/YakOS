@@ -172,6 +172,29 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
                                ("value_plays", "value"), ("fade_candidates", "fade")]:
             for p in edge_analysis.get(key, []):
                 player_tag_map[p.get("player_name", "")] = _TAG_EMOJI.get(tag_name, "")
+    # Auto-write core/fade plays to ricky_bias so optimizer enforces exposure floors
+    if edge_analysis:
+        try:
+            from yak_core.bias import load_bias, save_bias
+            _bias = st.session_state.setdefault("ricky_bias", load_bias())
+            _fade_names = {p.get("player_name", "") for p in edge_analysis.get("fade_candidates", [])}
+            _written = False
+            for _cp in edge_analysis.get("core_plays", [])[:5]:
+                _cname = _cp.get("player_name", "")
+                if _cname and _cname not in _fade_names:
+                    if _bias.get(_cname, {}).get("max_exposure", 1.0) > 0.0:
+                        _bias.setdefault(_cname, {})["min_exposure"] = 0.50
+                        _written = True
+            for _lp in edge_analysis.get("leverage_plays", [])[:3]:
+                _lname = _lp.get("player_name", "")
+                if _lname and _lname not in _fade_names:
+                    if _bias.get(_lname, {}).get("max_exposure", 1.0) > 0.0:
+                        _bias.setdefault(_lname, {})["min_exposure"] = 0.20
+                        _written = True
+            if _written:
+                save_bias(_bias)
+        except Exception:
+            pass            
     if player_tag_map and "player_name" in display_df.columns:
         display_df.insert(0, "edge", display_df["player_name"].map(player_tag_map).fillna(""))
 
