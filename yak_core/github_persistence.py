@@ -16,6 +16,8 @@ Usage
 from __future__ import annotations
 
 import base64
+import datetime
+import json
 import logging
 import os
 import threading
@@ -146,6 +148,23 @@ def sync_feedback_to_github(
         abs_path = os.path.join(YAKOS_ROOT, rel_path)
         if not os.path.isfile(abs_path):
             continue
+        # Skip correction_factors.json if manually edited within last 10 minutes
+        if os.path.basename(rel_path) == "correction_factors.json":
+            try:
+                with open(abs_path, "r") as _cf:
+                    _cf_data = json.load(_cf)
+                _last_edit = _cf_data.get("last_manual_edit")
+                if _last_edit:
+                    _edit_time = datetime.datetime.fromisoformat(_last_edit)
+                    _age = (datetime.datetime.utcnow() - _edit_time).total_seconds()
+                    if _age < 600:
+                        logger.info(
+                            "Skipping %s sync — manual edit within 10 minutes",
+                            rel_path,
+                        )
+                        continue
+            except Exception:
+                pass  # If we can't read/parse, sync normally
         # Detect binary files by extension
         _, ext = os.path.splitext(rel_path)
         if ext.lower() in _BINARY_EXTENSIONS:

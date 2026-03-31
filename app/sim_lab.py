@@ -2855,10 +2855,13 @@ def _apply_hindsight_recommendations(
                 from yak_core.config import YAKOS_ROOT
                 from yak_core.github_persistence import sync_feedback_async
 
+                import datetime as _dt
                 _cf_path = _Path(YAKOS_ROOT) / "data" / "calibration_feedback" / "nba" / "correction_factors.json"
                 _cf = _json.loads(_cf_path.read_text()) if _cf_path.exists() else {}
                 _old_bias = _cf.get("overall_bias_correction", 0.0)
+                val = max(-3.0, min(3.0, val))
                 _cf["overall_bias_correction"] = val
+                _cf["last_manual_edit"] = _dt.datetime.utcnow().isoformat()
                 _cf_path.write_text(_json.dumps(_cf, indent=2))
                 sync_feedback_async(
                     files=["data/calibration_feedback/nba/correction_factors.json"],
@@ -3062,8 +3065,7 @@ def _render_reset_calibration(preset_name: str, sport: str = "NBA") -> None:
 
             overall_errors = all_errors.get("overall", [])
             new_bias = round(np.mean(overall_errors) * _CORRECTION_STRENGTH, 2) if overall_errors else 0.0
-            # Sanity cap: bias > ±5 FP per player is clearly broken data
-            new_bias = max(-5.0, min(5.0, new_bias))
+            new_bias = max(-_MAX_CORRECTION, min(_MAX_CORRECTION, new_bias))
 
             new_by_pos: Dict[str, float] = {}
             _VALID_POS = (
@@ -3087,6 +3089,7 @@ def _render_reset_calibration(preset_name: str, sport: str = "NBA") -> None:
                 )
                 new_by_sal[tier] = corr
 
+            import datetime as _dt_recalc
             new_cf = {
                 "n_slates": processed,
                 "dates_used": [f.stem.split("_")[0] for f in archive_files[:processed]],
@@ -3094,6 +3097,7 @@ def _render_reset_calibration(preset_name: str, sport: str = "NBA") -> None:
                 "by_position": new_by_pos,
                 "by_salary_tier": new_by_sal,
                 "correction_strength": _CORRECTION_STRENGTH,
+                "last_manual_edit": _dt_recalc.datetime.utcnow().isoformat(),
             }
             with open(CORRECTION_FACTORS_PATH, "w") as f_out:
                 json.dump(new_cf, f_out, indent=2)
