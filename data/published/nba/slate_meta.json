@@ -1,7 +1,7 @@
 {
   "sport": "NBA",
   "site": "DK",
-  "date": "2026-03-30",
+  "date": "2026-03-31",
   "salary_cap": 50000,
   "roster_slots": [
     "PG",
@@ -14,56 +14,50 @@
     "UTIL"
   ],
   "lineup_size": 8,
-  "pool_size": 286,
+  "pool_size": 248,
   "proj_source": "model",
   "matchups": [
     {
-      "away": "WAS",
-      "home": "LAL",
-      "game_id": "20260330_WAS@LAL",
-      "label": "WAS @ LAL"
+      "away": "PHO",
+      "home": "ORL",
+      "game_id": "20260331_PHO@ORL",
+      "label": "PHO @ ORL"
     },
     {
-      "away": "MIN",
-      "home": "DAL",
-      "game_id": "20260330_MIN@DAL",
-      "label": "MIN @ DAL"
+      "away": "TOR",
+      "home": "DET",
+      "game_id": "20260331_TOR@DET",
+      "label": "TOR @ DET"
     },
     {
-      "away": "DET",
-      "home": "OKC",
-      "game_id": "20260330_DET@OKC",
-      "label": "DET @ OKC"
+      "away": "POR",
+      "home": "LAC",
+      "game_id": "20260331_POR@LAC",
+      "label": "POR @ LAC"
     },
     {
-      "away": "PHI",
-      "home": "MIA",
-      "game_id": "20260330_PHI@MIA",
-      "label": "PHI @ MIA"
+      "away": "NY",
+      "home": "HOU",
+      "game_id": "20260331_NY@HOU",
+      "label": "NY @ HOU"
     },
     {
-      "away": "BOS",
-      "home": "ATL",
-      "game_id": "20260330_BOS@ATL",
-      "label": "BOS @ ATL"
+      "away": "CHA",
+      "home": "BKN",
+      "game_id": "20260331_CHA@BKN",
+      "label": "CHA @ BKN"
+    },
+    {
+      "away": "DAL",
+      "home": "MIL",
+      "game_id": "20260331_DAL@MIL",
+      "label": "DAL @ MIL"
     },
     {
       "away": "CLE",
-      "home": "UTA",
-      "game_id": "20260330_CLE@UTA",
-      "label": "CLE @ UTA"
-    },
-    {
-      "away": "CHI",
-      "home": "SA",
-      "game_id": "20260330_CHI@SA",
-      "label": "CHI @ SA"
-    },
-    {
-      "away": "PHO",
-      "home": "MEM",
-      "game_id": "20260330_PHO@MEM",
-      "label": "PHO @ MEM"
+      "home": "LAL",
+      "game_id": "20260331_CLE@LAL",
+      "label": "CLE @ LAL"
     }
   ],
   "game_times": {}
