@@ -3621,43 +3621,129 @@ def _render_lineup_autopsy(sport: str) -> None:
             hide_index=True,
         )
 
-        # ── 6. Apply recommended config changes ────────────────────────
+        # ── 6. Apply recommended config changes (persisted to disk) ───
         if st.button("✅ Apply Recommended Changes", key=f"autopsy_apply_{sport}"):
+            from app.calibration_persistence import (
+                save_active_config as _save_cfg,
+                get_active_slider_values as _get_slider_vals,
+                append_config_history as _append_hist,
+                apply_config_to_optimizer as _apply_to_opt,
+            )
+
+            # Reverse map: optimizer config key → slider key
+            _OPT_TO_SLIDER: dict[str, str] = {
+                "GPP_PROJ_WEIGHT": "proj_weight",
+                "GPP_UPSIDE_WEIGHT": "upside_weight",
+                "GPP_BOOM_WEIGHT": "boom_weight",
+                "GPP_OWN_PENALTY_STRENGTH": "own_penalty_strength",
+                "GPP_OWN_LOW_BOOST": "low_own_boost",
+                "GPP_MAX_PUNT_PLAYERS": "max_punt_players",
+                "GPP_MIN_MID_PLAYERS": "min_mid_players",
+                "MAX_GAME_STACK_RATE": "game_diversity_pct",
+                "TIERED_EXPOSURE_STUD": "stud_exposure",
+                "TIERED_EXPOSURE_MID": "mid_exposure",
+                "TIERED_EXPOSURE_VALUE": "value_exposure",
+                "GPP_SMASH_WEIGHT": "edge_smash_weight",
+                "GPP_LEVERAGE_WEIGHT": "edge_leverage_weight",
+                "GPP_FORM_WEIGHT": "edge_form_weight",
+                "GPP_DVP_WEIGHT": "edge_dvp_weight",
+                "GPP_CATALYST_WEIGHT": "edge_catalyst_weight",
+                "GPP_BUST_PENALTY": "edge_bust_penalty",
+                "GPP_EFFICIENCY_WEIGHT": "edge_efficiency_weight",
+            }
+            # Exposure slider keys expect 0-100 (percentages), but
+            # hindsight recommendations return 0-1 decimals.
+            _EXPOSURE_SLIDER_KEYS = {"stud_exposure", "mid_exposure", "value_exposure"}
+
+            _contest_type = "classic_gpp_main"
+            _old_slider_vals = _get_slider_vals(_contest_type) or {}
+            _new_slider_vals = dict(_old_slider_vals)
+
             _applied = 0
-            if "autopsy_applied_overrides" not in st.session_state:
-                st.session_state["autopsy_applied_overrides"] = {}
+            _direct_optimizer_overrides: dict[str, Any] = {}
 
             for _r in recs:
                 _param = _r["parameter"]
                 _new_val = _r["suggested_value"]
-                st.session_state["autopsy_applied_overrides"][_param] = _new_val
+
+                # 1. Bias correction → persist via calibration_feedback
+                if _param == "overall_bias_correction":
+                    try:
+                        from yak_core.calibration_feedback import (
+                            get_correction_factors as _get_cf,
+                        )
+                        from yak_core.calibration_feedback import _corrections_path, _ensure_dir
+                        _cf = _get_cf(sport=sport.upper())
+                        _cf["overall_bias_correction"] = _new_val
+                        _ensure_dir(sport.upper())
+                        with open(_corrections_path(sport.upper()), "w") as _f:
+                            json.dump(_cf, _f, indent=2)
+                        _applied += 1
+                    except Exception as _e:
+                        st.warning(f"Could not persist bias correction: {_e}")
+                    continue
+
+                # 2. Param maps to a slider key → update slider values
+                _slider_key = _OPT_TO_SLIDER.get(_param)
+                if _slider_key:
+                    _slider_val = _new_val
+                    # Convert 0-1 decimals to 0-100 for exposure sliders
+                    if _slider_key in _EXPOSURE_SLIDER_KEYS and 0 < _new_val <= 1:
+                        _slider_val = round(_new_val * 100, 1)
+                    # game_diversity_pct: hindsight unlikely to recommend this,
+                    # but if it does, convert 0-1 → 0-100
+                    if _slider_key == "game_diversity_pct" and 0 < _new_val <= 1:
+                        _slider_val = round(_new_val * 100, 1)
+                    _new_slider_vals[_slider_key] = _slider_val
+                    _applied += 1
+                    continue
+
+                # 3. Param does not map to slider → apply as direct
+                #    optimizer override (e.g., GPP_MIN_PROJ_FLOOR,
+                #    _MAX_BUMP_MULTIPLIER, RICKY_W_CEIL)
+                _direct_optimizer_overrides[_param] = _new_val
                 _applied += 1
 
-            # Persist bias correction to correction_factors on disk
-            _bias_rec = next(
-                (_r for _r in recs if _r["parameter"] == "overall_bias_correction"),
-                None,
-            )
-            if _bias_rec:
-                try:
-                    from yak_core.calibration_feedback import (
-                        get_correction_factors as _get_cf,
-                        record_slate_errors,
-                    )
-                    _cf = _get_cf(sport=sport.upper())
-                    _cf["overall_bias_correction"] = _bias_rec["suggested_value"]
-                    # Write via the module's internal path
-                    from yak_core.calibration_feedback import _corrections_path, _ensure_dir
-                    _ensure_dir(sport.upper())
-                    with open(_corrections_path(sport.upper()), "w") as _f:
-                        json.dump(_cf, _f, indent=2)
-                except Exception as _e:
-                    st.warning(f"Could not persist bias correction to disk: {_e}")
-
             if _applied > 0:
+                # Persist slider values to active_config.json
+                _save_cfg(
+                    values=_new_slider_vals,
+                    contest_type=_contest_type,
+                    name="Autopsy Recommendation",
+                )
+
+                # Log the change with audit trail
+                _append_hist(
+                    action="apply_autopsy_recommendations",
+                    values=_new_slider_vals,
+                    old_values=_old_slider_vals,
+                    contest_type=_contest_type,
+                )
+
+                # Write optimizer overrides so the next build picks them up
+                _apply_to_opt(
+                    values=_new_slider_vals,
+                    contest_type=_contest_type,
+                )
+
+                # Apply any direct optimizer overrides that don't map to sliders
+                if _direct_optimizer_overrides:
+                    from app.calibration_persistence import OPTIMIZER_OVERRIDES_PATH, CALIBRATION_DIR
+                    _existing: dict = {}
+                    if OPTIMIZER_OVERRIDES_PATH.exists():
+                        try:
+                            _existing = json.loads(OPTIMIZER_OVERRIDES_PATH.read_text())
+                        except Exception:
+                            pass
+                    _ct_overrides = _existing.get(_contest_type, {})
+                    _ct_overrides.update(_direct_optimizer_overrides)
+                    _existing[_contest_type] = _ct_overrides
+                    CALIBRATION_DIR.mkdir(parents=True, exist_ok=True)
+                    OPTIMIZER_OVERRIDES_PATH.write_text(json.dumps(_existing, indent=2))
+
                 st.success(
-                    f"✅ Applied {_applied} config change(s). "
-                    "Changes are stored in session state and will be used in the next build/sim run."
+                    f"✅ Applied {_applied} config change(s) and persisted to disk. "
+                    "The next build will use the updated parameters automatically."
                 )
             else:
                 st.warning("No changes were applied.")
