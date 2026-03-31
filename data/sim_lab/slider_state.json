@@ -13,7 +13,8 @@
         "CASH_FLOOR_WEIGHT": 0.0,
         "GPP_EFFICIENCY_WEIGHT": 0.1,
         "MIN_PLAYER_MINUTES": 5,
-        "NUM_LINEUPS": 25
+        "NUM_LINEUPS": 25,
+        "GPP_PROJ_WEIGHT": 0.2
       },
       "ricky_weights": {
         "w_gpp": 0.3,
