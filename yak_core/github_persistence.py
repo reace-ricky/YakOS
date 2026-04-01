@@ -62,10 +62,11 @@ _FEEDBACK_FILES = [
     "data/calibration_feedback/nba/reset_log.json",
     "data/sim_lab/hindsight_history.parquet",
     "data/ricky_bias.json",
+    "yakos.db",
 ]
 
 # Binary file extensions that need base64 encoding directly from bytes
-_BINARY_EXTENSIONS = {".parquet", ".pkl", ".joblib", ".npy"}
+_BINARY_EXTENSIONS = {".parquet", ".pkl", ".joblib", ".npy", ".db"}
 
 # Serialize all pushes so concurrent calls don't race on the ref
 _push_lock = threading.Lock()
