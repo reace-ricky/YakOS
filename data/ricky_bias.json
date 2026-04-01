@@ -1,7 +1,5 @@
 {
-  "Kristaps Porzingis": {
-    "max_exposure": 0.0
-  },
+  "Kristaps Porzingis": {},
   "Luka Doncic": {
     "min_exposure": 0.5
   },
@@ -50,13 +48,7 @@
   "Pelle Larsson": {
     "min_exposure": 0.2
   },
-  "Jalen Suggs": {
-    "max_exposure": 0.0
-  },
-  "DeMar DeRozan": {
-    "max_exposure": 0.0
-  },
-  "Josh Giddey": {
-    "max_exposure": 0.0
-  }
+  "Jalen Suggs": {},
+  "DeMar DeRozan": {},
+  "Josh Giddey": {}
 }
