@@ -308,6 +308,10 @@ def render_lab_tab(sport: str) -> None:
     if pool_path.exists():
         pool = pd.read_parquet(pool_path)
 
+        bias = load_bias()
+        already_faded = [name for name, entry in bias.items() if entry.get("max_exposure", 1.0) == 0.0]
+        st.session_state.setdefault("pool_fades", already_faded)
+
         if pool.empty:
             st.info("No pool data loaded. Click Load Pool above.")
         else:
