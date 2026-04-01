@@ -347,7 +347,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     if _recap_key not in st.session_state:
         try:
             from yak_core.slate_recap import get_previous_slate_recap
-            st.session_state[_recap_key] = get_previous_slate_recap(sport)
+            st.session_state[_recap_key] = get_previous_slate_recap(sport, use_frozen=True)
         except Exception:
             st.session_state[_recap_key] = None
     recap = st.session_state[_recap_key]
@@ -434,46 +434,70 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             f'<div class="tb-setup">{" ".join(setup_parts)}</div>'
         )
 
-    # ── 3. Ricky's Plays (tiered, signal-deduped) ──────────────────────
-    snipers = compute_sniper_spots(pool, edge_analysis)
-    # never allow fades into Ricky's Plays
-    snipers = [
-        p for p in snipers
-        if p.get("player_name", "") not in fade_names
-    ]
-    tiered_plays = _assign_tiered_plays(snipers, pool) if snipers else []
-
-    if tiered_plays:
-        tiered_plays = [
-            (p, sig, role_key, role_label, reason)
-            for (p, sig, role_key, role_label, reason) in tiered_plays
-            if p.get("player_name", "") not in fade_names
-        ]
-
-    if tiered_plays:
-        parts.append('<div class="tb-section-label">RICKY\'S PLAYS</div>')
-        for p, sig, role_key, role_label, reason in tiered_plays:
-            pill_cls = "tb-pill"
-            if role_key == "dart":
-                pill_cls = "tb-pill tb-pill-dart"
-            elif role_key == "pivot":
-                pill_cls = "tb-pill tb-pill-pivot"
-            pill_text = role_label.split(" ", 1)[-1].upper() if " " in role_label else role_label.upper()
+    # ── 3a. Stack Targets (max 2) ────────────────────────────────────
+    board_stacks = compute_stack_targets(pool, edge_analysis)
+    parts.append('<div class="tb-section-label">STACK TARGETS</div>')
+    if board_stacks:
+        for s in board_stacks:
             parts.append(
                 f'<div class="tb-play-row">'
-                f'<span class="{pill_cls}">{pill_text}</span>'
+                f'<span class="tb-pill">STACK</span>'
+                f'<span class="tb-name">{s["team1"]} vs {s["team2"]}</span> '
+                f'<span class="tb-meta">'
+                f'Total {s["vegas_total"]:.0f} \u00b7 '
+                f'{s["top_player1"]} + {s["top_player2"]} \u00b7 '
+                f'Combined ceil {s["combined_ceil"]:.0f}'
+                f'</span></div>'
+            )
+    else:
+        parts.append('<div class="tb-setup">No strong stack targets on this slate.</div>')
+
+    # ── 3b. Sniper Spots (max 3) ──────────────────────────────────────
+    board_snipers = compute_sniper_spots(pool, edge_analysis)
+    # never allow fades into sniper spots
+    board_snipers = [
+        p for p in board_snipers
+        if p.get("player_name", "") not in fade_names
+    ]
+    parts.append('<div class="tb-section-label">SNIPER SPOTS</div>')
+    if board_snipers:
+        for p in board_snipers[:3]:
+            parts.append(
+                f'<div class="tb-play-row">'
+                f'<span class="tb-pill tb-pill-pivot">SNIPER</span>'
                 f'<span class="tb-name">{p["player_name"]}</span> '
-                f'<span class="tb-meta">({p["team"]}, ${p["salary"]:,}) \u2014 {reason}</span>'
+                f'<span class="tb-meta">'
+                f'({p["team"]}, ${p["salary"]:,}) \u00b7 '
+                f'Proj {p["proj"]:.1f} \u00b7 '
+                f'Own {p["own_pct"]:.1f}% \u00b7 '
+                f'Ceil {p["ceil"]:.0f}'
+                f'</span></div>'
+            )
+    else:
+        parts.append('<div class="tb-setup">No sniper spots on this slate.</div>')
+
+    # ── 3c. The Fade (max 2) ──────────────────────────────────────────
+    board_fades = compute_fades(pool, edge_analysis)
+    parts.append('<div class="tb-section-label">THE FADE</div>')
+    if board_fades:
+        for f in board_fades:
+            parts.append(
+                f'<div class="tb-danger-box">'
+                f'\U0001f480 <strong>{f["player_name"]}</strong> '
+                f'({f["own_pct"]:.1f}% owned, ${f["salary"]:,}) \u2014 '
+                f'{f["reasoning"]}'
                 f'</div>'
             )
+    else:
+        parts.append('<div class="tb-setup">No strong fades on this slate.</div>')
 
-    # -- 4+5. Merged Danger Box: Trap Stack + Fade -------------------------
+    # -- 4+5. Merged Danger Box: Trap + Bust ───────────────────────────
     _board_names = set()
     for _tier in ("core_plays", "leverage_plays", "value_plays"):
         for _p in edge_analysis.get(_tier, []):
             _board_names.add(_p.get("player_name", ""))
-    for pp, *_ in tiered_plays:
-        _board_names.add(pp.get("player_name", ""))
+    for _snp in board_snipers:
+        _board_names.add(_snp.get("player_name", ""))
     _board_names.discard("")
 
     _trap_html = ""
