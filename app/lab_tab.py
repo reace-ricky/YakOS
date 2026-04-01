@@ -365,8 +365,37 @@ def render_lab_tab(sport: str) -> None:
                     if _excl_not_in_pool:
                         st.caption(f"\u2139\ufe0f Also excluded (not in this pool): {', '.join(_excl_not_in_pool)}")
                 else:
-                    st.markdown(f"**Current pool:** {len(display_pool)} players")
-                    st.dataframe(display_pool, use_container_width=True, hide_index=True, height=400)
+                    from yak_core.bias import load_bias, save_bias
+
+                    _saved_fades: list[str] = st.session_state.get("pool_fades", [])
+                    display_pool.insert(0, "overvalued", False)
+                    display_pool.insert(0, "fade", display_pool["player_name"].isin(_saved_fades))
+                    st.markdown(f"**Current pool:** {len(display_pool)} players \u2014 check to fade/overvalued")
+                    edited = st.data_editor(
+                        display_pool,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=400,
+                        column_config={
+                            "fade": st.column_config.CheckboxColumn("Fade", default=False),
+                            "overvalued": st.column_config.CheckboxColumn("Overvalued", default=False),
+                        },
+                        disabled=[c for c in avail],
+                        key=f"lab_pool_editor_{sport}",
+                    )
+                    faded_players = edited[edited["fade"]]["player_name"].tolist()
+                    unfaded_players = [p for p in _saved_fades if p not in faded_players]
+                    st.session_state["pool_fades"] = faded_players
+                    if faded_players or unfaded_players:
+                        bias = load_bias()
+                        for pname in faded_players:
+                            bias.setdefault(pname, {})["max_exposure"] = 0.0
+                        for pname in unfaded_players:
+                            if pname in bias:
+                                bias[pname].pop("max_exposure", None)
+                        save_bias(bias)
+                    if faded_players:
+                        st.caption(f"\U0001f6ab {len(faded_players)} player(s) faded (0% exposure)")
 
             sal_col = pd.to_numeric(pool.get("salary", pd.Series(dtype=float)), errors="coerce")
             proj_col = pd.to_numeric(pool.get("proj", pd.Series(dtype=float)), errors="coerce")
