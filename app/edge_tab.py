@@ -500,7 +500,8 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
                 f'</div>'
             )
     else:
-        parts.append('<div class="tb-setup">No strong fades on this slate.</div>')
+    parts.append('<div class="tb-setup">No strong fades on this slate.</div>')
+    # _trap_html gets appended here after it's computed below — move it up
 
     # -- 4+5. Merged Danger Box: Trap + Bust ───────────────────────────
     _board_names = set()
