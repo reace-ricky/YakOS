@@ -22,6 +22,7 @@ from typing import Any, Dict
 
 import pandas as pd
 import streamlit as st
+from yak_core.bias import load_bias, save_bias
 
 # DK ↔ Pool team abbreviation mapping
 _POOL_TO_DK_TEAM = {"SA": "SAS", "GS": "GSW", "PHO": "PHX", "NO": "NOP"}
@@ -365,8 +366,31 @@ def render_lab_tab(sport: str) -> None:
                     if _excl_not_in_pool:
                         st.caption(f"\u2139\ufe0f Also excluded (not in this pool): {', '.join(_excl_not_in_pool)}")
                 else:
-                    st.markdown(f"**Current pool:** {len(display_pool)} players")
-                    st.dataframe(display_pool, use_container_width=True, hide_index=True, height=400)
+                    st.markdown(f"**Current pool:** {len(display_pool)} players \u2014 check to fade or flag overvalued")
+                    display_pool.insert(0, "overvalued", False)
+                    display_pool.insert(0, "fade", False)
+                    edited = st.data_editor(
+                        display_pool,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=400,
+                        column_config={
+                            "fade": st.column_config.CheckboxColumn("Fade", default=False),
+                            "overvalued": st.column_config.CheckboxColumn("Overvalued", default=False),
+                        },
+                        disabled=avail,
+                        key=f"lab_pool_editor_{sport}",
+                    )
+                    faded_players = edited[edited["fade"]]["player_name"].tolist()
+                    prev_fades = st.session_state.get("pool_fades", [])
+                    st.session_state["pool_fades"] = faded_players
+                    if set(faded_players) != set(prev_fades) and faded_players:
+                        bias = load_bias()
+                        for name in faded_players:
+                            entry = bias.get(name, {})
+                            entry["max_exposure"] = 0.0
+                            bias[name] = entry
+                        save_bias(bias)
 
             sal_col = pd.to_numeric(pool.get("salary", pd.Series(dtype=float)), errors="coerce")
             proj_col = pd.to_numeric(pool.get("proj", pd.Series(dtype=float)), errors="coerce")
