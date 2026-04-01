@@ -61,5 +61,8 @@
   },
   "Gary Trent Jr.": {
     "min_exposure": 0.2
+  },
+  "Carlton Carrington": {
+    "max_exposure": 0.0
   }
 }
