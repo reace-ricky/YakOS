@@ -62,10 +62,6 @@ _FEEDBACK_FILES = [
     "data/calibration_feedback/nba/reset_log.json",
     "data/sim_lab/hindsight_history.parquet",
     "data/ricky_bias.json",
-    "data/published/nba/slate_meta.json",
-    "data/published/pga/slate_meta.json",
-    "data/published/nba/slate_pool.parquet",
-    "data/published/pga/slate_pool.parquet",
 ]
 
 # Binary file extensions that need base64 encoding directly from bytes
