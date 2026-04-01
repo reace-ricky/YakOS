@@ -369,6 +369,32 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             if _n:
                 _positive_tier_names.add(_n)
 
+    # ── Inject manual pool fades from Slate Hub pool table ───────────────
+    _pool_fades: list[str] = st.session_state.get("pool_fades", [])
+    if _pool_fades and not pool.empty:
+        _manual_fade_entries: list[dict] = []
+        for _pf_name in _pool_fades:
+            _pf_rows = pool[pool["player_name"] == _pf_name]
+            if _pf_rows.empty:
+                continue
+            _pf_row = _pf_rows.iloc[0]
+            _pf_salary = int(_pf_row.get("salary", 0)) if "salary" in pool.columns else 0
+            _raw_own = _pf_row.get("ownership", 0) if "ownership" in pool.columns else 0
+            try:
+                _raw_own = float(_raw_own)
+            except (TypeError, ValueError):
+                _raw_own = 0.0
+            # Normalize: values ≤ 1.0 are decimal fractions → convert to %
+            _pf_own_pct = _raw_own * 100.0 if _raw_own <= 1.0 else _raw_own
+            _manual_fade_entries.append({
+                "player_name": _pf_name,
+                "salary": _pf_salary,
+                "own_pct": _pf_own_pct,
+                "reasoning": "Manual fade — RG overvalued flag set pre-slate.",
+            })
+        if _manual_fade_entries:
+            edge_analysis.setdefault("fade_candidates", []).extend(_manual_fade_entries)
+
     # ── Fades / busts: build a set of names we must never praise ─────────
     bust = generate_bust_call(
         pool,
