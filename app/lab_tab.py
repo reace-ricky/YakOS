@@ -256,6 +256,15 @@ def render_lab_tab(sport: str) -> None:
                 except Exception:
                     pool["breakout_score"] = 0.0
 
+                # Filter OUT/IR/Suspended players before publishing
+                from yak_core.config import INELIGIBLE_STATUSES
+                if "status" in pool.columns:
+                    _pre_filter = len(pool)
+                    pool = pool[~pool["status"].fillna("").str.strip().str.upper().isin(INELIGIBLE_STATUSES)].reset_index(drop=True)
+                    _filtered = _pre_filter - len(pool)
+                    if _filtered:
+                        print(f"[publish] Filtered {_filtered} OUT/IR/Suspended player(s) from published pool")
+
                 pool.to_parquet(str(out_dir / "slate_pool.parquet"), index=False)
                 with open(out_dir / "slate_meta.json", "w") as f:
                     json.dump(meta, f, indent=2, default=str)
@@ -659,6 +668,16 @@ def render_lab_tab(sport: str) -> None:
                             pool_fresh["breakout_score"] = score_player_breakout(pool_fresh)
                         except Exception:
                             pool_fresh["breakout_score"] = 0.0
+
+                        # Filter OUT/IR/Suspended players before publishing
+                        from yak_core.config import INELIGIBLE_STATUSES
+                        if "status" in pool_fresh.columns:
+                            _pre_f = len(pool_fresh)
+                            pool_fresh = pool_fresh[~pool_fresh["status"].fillna("").str.strip().str.upper().isin(INELIGIBLE_STATUSES)].reset_index(drop=True)
+                            _filt = _pre_f - len(pool_fresh)
+                            if _filt:
+                                print(f"[publish] Filtered {_filt} OUT/IR/Suspended player(s) from refreshed pool")
+
                         pool_fresh.to_parquet(str(out_dir / "slate_pool.parquet"), index=False)
                         with open(out_dir / "slate_meta.json", "w") as f:
                             json.dump(meta_fresh, f, indent=2, default=str)
