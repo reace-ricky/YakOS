@@ -22,6 +22,7 @@ from typing import Any, Dict
 
 import pandas as pd
 import streamlit as st
+from yak_core.bias import load_bias, save_bias
 
 # DK ↔ Pool team abbreviation mapping
 _POOL_TO_DK_TEAM = {"SA": "SAS", "GS": "GSW", "PHO": "PHX", "NO": "NOP"}
@@ -365,14 +366,12 @@ def render_lab_tab(sport: str) -> None:
                     if _excl_not_in_pool:
                         st.caption(f"\u2139\ufe0f Also excluded (not in this pool): {', '.join(_excl_not_in_pool)}")
                 else:
-                    from yak_core.bias import load_bias, save_bias
-
-                    _saved_fades: list[str] = st.session_state.get("pool_fades", [])
-                    display_pool.insert(0, "overvalued", False)
-                    display_pool.insert(0, "fade", display_pool["player_name"].isin(_saved_fades))
-                    st.markdown(f"**Current pool:** {len(display_pool)} players \u2014 check to fade/overvalued")
+                    st.markdown(f"**Current pool:** {len(display_pool)} players — check to fade / mark overvalued")
+                    _editor_pool = display_pool.copy()
+                    _editor_pool.insert(0, "fade", False)
+                    _editor_pool.insert(1, "overvalued", False)
                     edited = st.data_editor(
-                        display_pool,
+                        _editor_pool,
                         use_container_width=True,
                         hide_index=True,
                         height=400,
@@ -384,18 +383,20 @@ def render_lab_tab(sport: str) -> None:
                         key=f"lab_pool_editor_{sport}",
                     )
                     faded_players = edited[edited["fade"]]["player_name"].tolist()
-                    unfaded_players = [p for p in _saved_fades if p not in faded_players]
+                    prev_fades = st.session_state.get("pool_fades", [])
                     st.session_state["pool_fades"] = faded_players
-                    if faded_players or unfaded_players:
+                    if set(faded_players) != set(prev_fades):
                         bias = load_bias()
-                        for pname in faded_players:
-                            bias.setdefault(pname, {})["max_exposure"] = 0.0
-                        for pname in unfaded_players:
-                            if pname in bias:
+                        # Remove max_exposure cap for players who are no longer faded
+                        for pname in prev_fades:
+                            if pname not in faded_players and pname in bias:
                                 bias[pname].pop("max_exposure", None)
+                        # Set max_exposure=0.0 for newly faded players
+                        for pname in faded_players:
+                            if pname not in bias:
+                                bias[pname] = {}
+                            bias[pname]["max_exposure"] = 0.0
                         save_bias(bias)
-                    if faded_players:
-                        st.caption(f"\U0001f6ab {len(faded_players)} player(s) faded (0% exposure)")
 
             sal_col = pd.to_numeric(pool.get("salary", pd.Series(dtype=float)), errors="coerce")
             proj_col = pd.to_numeric(pool.get("proj", pd.Series(dtype=float)), errors="coerce")
