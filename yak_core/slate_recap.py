@@ -213,9 +213,34 @@ def _classify_result(projected: float, actual: float) -> Tuple[str, str]:
         return ("💀", "bust")
 
 
+def _frozen_recap_path(sport: str, date_str: str) -> Path:
+    """Return the path for a frozen last-slate recap JSON."""
+    return _PUBLISHED_DIR / sport.lower() / f"last_slate_recap_{date_str}.json"
+
+
+def freeze_slate_recap(date_str: str, sport: str) -> None:
+    """Snapshot the last-slate recap to a frozen JSON at publish time.
+
+    Writes to data/published/{sport}/last_slate_recap_{date_str}.json so that
+    subsequent calibration runs cannot mutate the recap displayed on the Edge tab.
+    """
+    import json as _json
+
+    recap = get_previous_slate_recap(sport, use_frozen=False)
+    if recap is None:
+        return
+
+    out_path = _frozen_recap_path(sport, date_str)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(_json.dumps(recap, default=str))
+    print(f"[freeze_slate_recap] Wrote {out_path}")
+
+
 def get_previous_slate_recap(
     sport: str,
     today: Optional[date] = None,
+    *,
+    use_frozen: bool = True,
 ) -> Optional[Dict[str, Any]]:
     """Build a recap of the previous slate's projection accuracy.
 
@@ -225,6 +250,10 @@ def get_previous_slate_recap(
         Sport code (e.g. "nba").
     today : date, optional
         Reference date (defaults to today).
+    use_frozen : bool
+        When True (default), check for a frozen JSON written at publish time
+        before falling through to the parquet-based computation.  Pass False
+        when *creating* the frozen snapshot (avoids circular read).
 
     Returns
     -------
@@ -256,6 +285,16 @@ def get_previous_slate_recap(
     if today is None:
         today = date.today()
 
+    # ── Try frozen JSON first (written at publish time) ──────────────
+    if use_frozen:
+        import json as _json
+
+        frozen_path = _frozen_recap_path(sport, today.isoformat())
+        if frozen_path.exists():
+            try:
+                return _json.loads(frozen_path.read_text())
+            except Exception:
+                pass  # fall through to live computation
     # Step 1: Find the previous slate archive
     prev_slate = _find_previous_slate(sport, today)
     if prev_slate is None:

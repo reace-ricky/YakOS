@@ -2670,15 +2670,6 @@ def _publish_to_github(sport: str, out_dir: Path) -> dict:
     #    doesn't already exist (or exists but has no actuals yet).
     _snapshot_on_publish(sport, out_dir)
 
-    # Collect all files in the published directory as repo-relative paths
-    files: list[str] = []
-    for fname in sorted(os.listdir(out_dir)):
-        abs_path = os.path.join(out_dir, fname)
-        if os.path.isfile(abs_path):
-            files.append(os.path.relpath(abs_path, YAKOS_ROOT))
-    if not files:
-        return {"status": "skipped", "reason": "No files to publish"}
-
     # Use the actual slate date from meta, not today's date
     _publish_date = date.today().isoformat()
     _meta_path = out_dir / "slate_meta.json"
@@ -2688,6 +2679,23 @@ def _publish_to_github(sport: str, out_dir: Path) -> dict:
             _publish_date = _meta.get("date", _publish_date)
         except Exception:
             pass
+
+    # ── Freeze the last-slate recap so calibration can't mutate it ──
+    try:
+        from yak_core.slate_recap import freeze_slate_recap
+        freeze_slate_recap(_publish_date, sport)
+    except Exception as _freeze_err:
+        print(f"[publish] freeze_slate_recap warning: {_freeze_err}")
+
+    # Collect all files in the published directory as repo-relative paths
+    # (after freeze so the frozen recap JSON is included in the commit)
+    files: list[str] = []
+    for fname in sorted(os.listdir(out_dir)):
+        abs_path = os.path.join(out_dir, fname)
+        if os.path.isfile(abs_path):
+            files.append(os.path.relpath(abs_path, YAKOS_ROOT))
+    if not files:
+        return {"status": "skipped", "reason": "No files to publish"}
 
     result = sync_feedback_to_github(
         files=files,
