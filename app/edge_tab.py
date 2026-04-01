@@ -562,15 +562,24 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
                 f"{f0.get('reasoning', 'Model says pass.')}"
             )
 
-    if _trap_html or _fade_html:
-        danger_inner = ""
-        if _trap_html:
-            danger_inner += _trap_html
-        if _trap_html and _fade_html:
-            danger_inner += '<div class="tb-divider"></div>'
-        if _fade_html:
-            danger_inner += _fade_html
-        parts.append(f'<div class="tb-danger-box">{danger_inner}</div>')
+        if traphtml or fadehtml:
+            dangerinner = ""
+            if traphtml:
+                dangerinner += traphtml
+            if traphtml and fadehtml:
+                dangerinner += '<div class="tb-divider"></div>'
+            if fadehtml:
+                dangerinner += fadehtml
+            # Inject trap/bust into THE FADE section instead of floating standalone
+            if board_fades:
+                # Already rendered fades — append trap as addendum inside same danger box
+                parts.append(f'<div class="tb-danger-box">{dangerinner}</div>')
+            else:
+                # Replace "No strong fades" with the actual trap/bust content
+                # Pop the last parts entry (the "No strong fades" div) and replace it
+            if parts and 'No strong fades' in parts[-1]:
+                parts.pop()
+            parts.append(f'<div class="tb-danger-box">{dangerinner}</div>')
 
     # -- Auto-write fades to bias -------------------------------------------
     try:
