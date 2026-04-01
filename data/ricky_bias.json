@@ -60,22 +60,12 @@
     "max_exposure": 0.0
   },
   "Gary Trent Jr.": {
-    "min_exposure": 0.2,
-    "max_exposure": 0.0
+    "min_exposure": 0.2
   },
   "Carlton Carrington": {
     "max_exposure": 0.0
   },
   "CJ McCollum": {
-    "max_exposure": 0.0
-  },
-  "Jaylen Brown": {
-    "max_exposure": 0.0
-  },
-  "Desmond Bane": {
-    "max_exposure": 0.0
-  },
-  "Derrick White": {
     "max_exposure": 0.0
   }
 }
