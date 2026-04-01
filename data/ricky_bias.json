@@ -58,5 +58,8 @@
   },
   "Josh Giddey": {
     "max_exposure": 0.0
+  },
+  "Gary Trent Jr.": {
+    "min_exposure": 0.2
   }
 }
