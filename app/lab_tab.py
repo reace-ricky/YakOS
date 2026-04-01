@@ -265,6 +265,10 @@ def render_lab_tab(sport: str) -> None:
                     if _filtered:
                         print(f"[publish] Filtered {_filtered} OUT/IR/Suspended player(s) from published pool")
 
+                # Ensure odds columns exist before saving — odds fetch runs after
+                # this early publish step, so these default to 0.0 (treated as
+                # "not available"; downstream comparisons use >= thresholds so
+                # 0.0 safely opts out of odds-gated logic).
                 if "vegas_total" not in pool.columns:
                     pool["vegas_total"] = 0.0
                 if "spread" not in pool.columns:
