@@ -40,5 +40,14 @@
   },
   "LaMelo Ball": {
     "max_exposure": 0.0
+  },
+  "Donovan Clingan": {
+    "min_exposure": 0.5
+  },
+  "Gradey Dick": {
+    "min_exposure": 0.2
+  },
+  "Ben Saraf": {
+    "min_exposure": 0.2
   }
 }
