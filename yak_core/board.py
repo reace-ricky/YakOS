@@ -107,7 +107,7 @@ def compute_stack_targets(
 
     # Determine vegas total per game
     vegas_col = None
-    for col in ("over_under", "vegas_total", "total"):
+    for col in ("over_under", "vegas_total", "total", "ou", "game_total"):
         if col in df.columns and df[col].notna().any():
             vegas_col = col
             break
@@ -132,6 +132,10 @@ def compute_stack_targets(
         vegas_total=("_vegas", "first"),
     ).reset_index()
     eligible_games = games[games["vegas_total"] >= VEGAS_TOTAL_THRESHOLD][game_col].tolist()
+
+    # Fallback: if no games clear 225, try 220
+    if not eligible_games:
+        eligible_games = games[games["vegas_total"] >= 220.0][game_col].tolist()
 
     if not eligible_games:
         return []
@@ -205,16 +209,6 @@ def compute_sniper_spots(
     # Exclude Core/Leverage/Value players
     if tier_names:
         df = df[~df["player_name"].isin(tier_names)].copy()
-
-    if df.empty:
-        return []
-
-    # Exclude top-15 by salary — those are the obvious plays everyone sees.
-    # Ricky's Plays should surface non-obvious edges.
-    if "salary" in df.columns and len(df) > 20:
-        sal = pd.to_numeric(df["salary"], errors="coerce").fillna(0)
-        top_sal_idx = sal.nlargest(15).index
-        df = df.drop(index=top_sal_idx).copy()
 
     if df.empty:
         return []

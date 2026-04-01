@@ -452,6 +452,17 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     else:
         parts.append('<div class="tb-setup">No strong stack targets on this slate.</div>')
 
+    # ── 3a+. Optimizer Notes (only if present) ─────────────────────
+    _opt_notes = edge_analysis.get("optimizer_notes", [])
+    if _opt_notes:
+        parts.append('<div class="tb-section-label">OPTIMIZER NOTES</div>')
+        for _note in _opt_notes:
+            parts.append(
+                f'<div class="tb-play-row">'
+                f'<span class="tb-meta">{_note}</span>'
+                f'</div>'
+            )
+
     # ── 3b. Sniper Spots (max 3) ──────────────────────────────────────
     board_snipers = compute_sniper_spots(pool, edge_analysis)
     # never allow fades into sniper spots
@@ -738,6 +749,79 @@ def _render_bias_panel(pool: pd.DataFrame) -> None:
             st.rerun()
 
 
+def _compute_optimizer_notes(lineups: dict | None) -> List[str]:
+    """Derive up to 3 optimizer insight strings from published lineups."""
+    if not lineups:
+        return []
+
+    # Combine all lineup DataFrames
+    all_rows = []
+    for _slug, ldf in lineups.items():
+        if isinstance(ldf, pd.DataFrame) and not ldf.empty:
+            all_rows.append(ldf)
+    if not all_rows:
+        return []
+
+    combined = pd.concat(all_rows, ignore_index=True)
+    if "player_name" not in combined.columns or "lineup_index" not in combined.columns:
+        return []
+
+    n_lineups = combined["lineup_index"].nunique()
+    if n_lineups == 0:
+        return []
+
+    notes: List[str] = []
+
+    # 1. Most-used game stack (team pair appearing together most)
+    if "team" in combined.columns:
+        try:
+            teams_per_lu = combined.groupby("lineup_index")["team"].apply(
+                lambda t: tuple(sorted(t.value_counts().nlargest(2).index))
+            )
+            pairs = teams_per_lu[teams_per_lu.apply(len) >= 2]
+            if not pairs.empty:
+                top_pair = pairs.value_counts().idxmax()
+                pair_pct = pairs.value_counts().iloc[0] / n_lineups * 100
+                notes.append(
+                    f"Most-used stack: {top_pair[0]}-{top_pair[1]} "
+                    f"({pair_pct:.0f}% of lineups)"
+                )
+        except Exception:
+            pass
+
+    # 2. Highest-exposure player
+    try:
+        player_counts = combined.groupby("player_name")["lineup_index"].nunique()
+        top_player = player_counts.idxmax()
+        top_exposure = player_counts.max() / n_lineups * 100
+        notes.append(
+            f"Highest exposure: {top_player} ({top_exposure:.0f}%)"
+        )
+    except Exception:
+        pass
+
+    # 3. Salary-heavy or punt-heavy (avg salary of bottom 2 slots)
+    if "salary" in combined.columns:
+        try:
+            sal = pd.to_numeric(combined["salary"], errors="coerce").fillna(0)
+            combined["_sal"] = sal
+            bottom2_avg = combined.groupby("lineup_index")["_sal"].apply(
+                lambda s: s.nsmallest(2).mean()
+            ).mean()
+            if bottom2_avg >= 4500:
+                notes.append(
+                    f"Salary-heavy builds (bottom-2 avg ${bottom2_avg:,.0f})"
+                )
+            else:
+                notes.append(
+                    f"Punt-heavy builds (bottom-2 avg ${bottom2_avg:,.0f})"
+                )
+        except Exception:
+            pass
+
+    return notes[:3]
+
+
 def render_edge_tab(sport: str) -> None:
     """Render Ricky's Edge Analysis tab."""
     from app.data_loader import invalidate_published_cache, load_published_data
@@ -782,6 +866,9 @@ def render_edge_tab(sport: str) -> None:
     # ── Late Swap Alerts (above The Board) ────────────────────────────
     _late_swap = edge_analysis.get("late_swap_alerts", [])
     _render_late_swap_alerts(_late_swap, sport, lineups)
+
+    # ── Compute optimizer notes from lineups ────────────────────────
+    edge_analysis["optimizer_notes"] = _compute_optimizer_notes(lineups)
 
     # ── The Board ─────────────────────────────────────────────────────
     _render_the_board(sport, pool, edge_analysis, slate_date=slate_date)
