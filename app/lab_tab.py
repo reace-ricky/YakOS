@@ -265,6 +265,10 @@ def render_lab_tab(sport: str) -> None:
                     if _filtered:
                         print(f"[publish] Filtered {_filtered} OUT/IR/Suspended player(s) from published pool")
 
+                if "vegas_total" not in pool.columns:
+                    pool["vegas_total"] = 0.0
+                if "spread" not in pool.columns:
+                    pool["spread"] = 0.0
                 pool.to_parquet(str(out_dir / "slate_pool.parquet"), index=False)
                 with open(out_dir / "slate_meta.json", "w") as f:
                     json.dump(meta, f, indent=2, default=str)
