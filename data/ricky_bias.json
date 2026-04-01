@@ -1,0 +1,29 @@
+{
+  "Kristaps Porzingis": {
+    "max_exposure": 0.0
+  },
+  "Luka Doncic": {
+    "min_exposure": 0.5
+  },
+  "Deni Avdija": {
+    "min_exposure": 0.5
+  },
+  "Brandon Miller": {
+    "min_exposure": 0.5
+  },
+  "Cooper Flagg": {
+    "min_exposure": 0.5
+  },
+  "Kawhi Leonard": {
+    "min_exposure": 0.5
+  },
+  "Caris LeVert": {
+    "min_exposure": 0.2
+  },
+  "Jake LaRavia": {
+    "min_exposure": 0.2
+  },
+  "Jarred Vanderbilt": {
+    "min_exposure": 0.2
+  }
+}
