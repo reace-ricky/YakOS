@@ -50,5 +50,37 @@
   "Pelle Larsson": {
     "min_exposure": 0.2
   },
-  "Jalen Suggs": {}
+  "Jalen Suggs": {
+    "max_exposure": 0.0
+  },
+  "Jaylen Brown": {
+    "max_exposure": 0.0
+  },
+  "Josh Giddey": {
+    "max_exposure": 0.0
+  },
+  "Paolo Banchero": {
+    "max_exposure": 0.0
+  },
+  "Alperen Sengun": {
+    "max_exposure": 0.0
+  },
+  "Nickeil Alexander-Walker": {
+    "max_exposure": 0.0
+  },
+  "CJ McCollum": {
+    "max_exposure": 0.0
+  },
+  "Mikal Bridges": {
+    "max_exposure": 0.0
+  },
+  "Ja'Kobe Walter": {
+    "max_exposure": 0.0
+  },
+  "Adem Bona": {
+    "max_exposure": 0.0
+  },
+  "Micah Potter": {
+    "max_exposure": 0.0
+  }
 }
