@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import tempfile
 from datetime import date, datetime, timezone
 try:
@@ -397,6 +398,24 @@ def render_lab_tab(sport: str) -> None:
                                 bias[pname] = {}
                             bias[pname]["max_exposure"] = 0.0
                         save_bias(bias)
+
+                    if st.button("💾 Save Pre-Slate Intel", key=f"save_pre_slate_{sport}"):
+                        rows = edited[(edited["fade"]) | (edited["overvalued"])].copy()
+                        if rows.empty:
+                            st.warning("No players flagged (fade or overvalued). Nothing to save.")
+                        else:
+                            rows["slate_date"] = slate_date
+                            rows["busted"] = None
+                            rows["actual_pts"] = None
+                            _db_path = Path(__file__).parent.parent / "yakos.db"
+                            try:
+                                with sqlite3.connect(str(_db_path)) as _conn:
+                                    rows.to_sql("rg_overvalued", _conn, if_exists="append", index=False)
+                                from yak_core.github_persistence import sync_feedback_async
+                                sync_feedback_async(["yakos.db"])
+                                st.success(f"✅ Saved {len(rows)} players to archive.")
+                            except Exception as _db_err:
+                                st.error(f"❌ Failed to save to archive: {_db_err}")
 
             sal_col = pd.to_numeric(pool.get("salary", pd.Series(dtype=float)), errors="coerce")
             proj_col = pd.to_numeric(pool.get("proj", pd.Series(dtype=float)), errors="coerce")
