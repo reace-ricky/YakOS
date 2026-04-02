@@ -372,8 +372,10 @@ def render_lab_tab(sport: str) -> None:
                         st.caption(f"\u2139\ufe0f Also excluded (not in this pool): {', '.join(_excl_not_in_pool)}")
                 else:
                     st.markdown(f"**Current pool:** {len(display_pool)} players — check to fade / mark overvalued")
+                    bias = load_bias()
+                    already_faded = [n for n, v in bias.items() if v.get("max_exposure", 1.0) == 0.0]
                     _editor_pool = display_pool.copy()
-                    _editor_pool.insert(0, "fade", False)
+                    _editor_pool.insert(0, "fade", _editor_pool["player_name"].isin(already_faded))
                     _editor_pool.insert(1, "overvalued", False)
                     edited = st.data_editor(
                         _editor_pool,
