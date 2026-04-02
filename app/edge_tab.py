@@ -510,7 +510,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
                 f'<span class="tb-meta">'
                 f'({p["team"]}, ${p["salary"]:,}) \u00b7 '
                 f'Proj {p["proj"]:.1f} \u00b7 '
-                f'Own {p["own_pct"]:.1f}% \u00b7 '
+                f'Own {p.get("own_pct", p.get("ownership", 0)):.1f}% \u00b7 '
                 f'Ceil {p["ceil"]:.0f}'
                 f'</span></div>'
             )
@@ -530,7 +530,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             parts.append(
                 f'<div class="tb-danger-box">'
                 f'\U0001f480 <strong>{f["player_name"]}</strong> '
-                f'({f["own_pct"]:.1f}% owned, ${f["salary"]:,}) \u2014 '
+                f'({f.get("own_pct", f.get("ownership", 0)):.1f}% owned, ${f["salary"]:,}) \u2014 '
                 f'{f["reasoning"]}'
                 f'</div>'
             )
@@ -591,7 +591,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
         if fades:
             f0 = fades[0]
             _fade_html = (
-                f"\U0001f480 <strong>FADE: {f0['player_name']} ({f0['own_pct']:.1f}% owned).</strong> "
+                f"\U0001f480 <strong>FADE: {f0['player_name']} ({f0.get('own_pct', f0.get('ownership', 0)):.1f}% owned).</strong> "
                 f"{f0.get('reasoning', 'Model says pass.')}"
             )
 

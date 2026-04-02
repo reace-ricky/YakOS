@@ -96,18 +96,22 @@ def _classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
     def _to_list(frame, tag: str = ""):
         out = []
         for _, row in frame.iterrows():
+            _own_val = round(float(row.get("_own", 0)), 1)
             entry = {
                 "player_name": row.get("player_name", ""),
                 "tag": tag,
                 "proj": round(float(row.get("proj", 0)), 1),
                 "salary": int(row.get("salary", 0)),
-                "ownership": round(float(row.get("_own", 0)), 1),
+                "ownership": _own_val,
+                "own_pct": _own_val,  # alias required by edge_tab rendering
                 "edge": round(float(row.get("_edge", 0)), 2),
                 "value": round(float(row.get("_val", 0)), 2),
                 "proj_minutes": round(float(row.get("proj_minutes", 0)), 1),
                 "sim90th": round(float(row.get("sim90th", 0)), 1),
                 "risk_score": round(float(row.get("risk_score", 0)), 1),
             }
+            if tag == "fade":
+                entry.setdefault("reasoning", "High ownership, weak edge")
             # PGA wave data
             if is_pga:
                 wave = row.get("early_late_wave")
