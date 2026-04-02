@@ -779,12 +779,24 @@ def render_lab_tab(sport: str) -> None:
                     )
                     n_built = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else 0
 
-                    st.success(f"Built {n_built} lineups for {contest_label}")
+                    if n_built == 0:
+                        st.error(
+                            f"⚠️ No lineups built for **{contest_label}**. "
+                            "The optimizer could not find a valid lineup. "
+                            "Check: pool is loaded, salary cap isn't too tight, and your lock/exclude list isn't over-constrained."
+                        )
+                    else:
+                        st.success(f"Built {n_built} lineups for {contest_label}")
 
                     # ── Ricky SE Ranking ─────────────────────────────────────
                     # Rank lineups and tag top 3 as SE Core / Spicy / Alt
+                    # Only attempt ranking when lineups were actually built
+                    _can_rank = n_built > 0 and "lineup_index" in lineups_df.columns
                     try:
                         from yak_core.ricky_rank import rank_lineups_for_se, RICKY_W_GPP, RICKY_W_CEIL, RICKY_W_OWN
+                        if not _can_rank:
+                            # Error already shown above; skip silently
+                            raise StopIteration
                         # Get Ricky weights from auto-wired profile, or use defaults
                         _ricky_w = {"w_gpp": RICKY_W_GPP, "w_ceil": RICKY_W_CEIL, "w_own": RICKY_W_OWN}
                         if _active_profile:
@@ -921,6 +933,8 @@ def render_lab_tab(sport: str) -> None:
                                 }),
                                 use_container_width=True, hide_index=True,
                             )
+                    except StopIteration:
+                        pass  # no lineups built — error already shown above
                     except Exception as _rank_err:
                         st.warning(f"Ricky ranking failed: {_rank_err}")
 

@@ -445,6 +445,15 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     parts.append('<div class="tb-section-label">STACK TARGETS</div>')
     if board_stacks:
         for s in board_stacks:
+            # Use combined_ceil when available; fall back to combined_proj with a "Proj" label
+            _s_ceil = s.get("combined_ceil", 0)
+            _s_proj = s.get("combined_proj", 0)
+            if _s_ceil > 0:
+                _metric_str = f"Combined ceil {_s_ceil:.0f}"
+            elif _s_proj > 0:
+                _metric_str = f"Combined proj {_s_proj:.0f}"
+            else:
+                _metric_str = "Proj N/A"
             parts.append(
                 f'<div class="tb-play-row">'
                 f'<span class="tb-pill">STACK</span>'
@@ -452,7 +461,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
                 f'<span class="tb-meta">'
                 f'Total {s["vegas_total"]:.0f} \u00b7 '
                 f'{s["top_player1"]} + {s["top_player2"]} \u00b7 '
-                f'Combined ceil {s["combined_ceil"]:.0f}'
+                f'{_metric_str}'
                 f'</span></div>'
             )
     else:
