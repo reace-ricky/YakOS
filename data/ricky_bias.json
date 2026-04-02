@@ -1,5 +1,7 @@
 {
-  "Kristaps Porzingis": {},
+  "Kristaps Porzingis": {
+    "max_exposure": 0.0
+  },
   "Luka Doncic": {
     "min_exposure": 0.5
   },
@@ -54,7 +56,9 @@
   "DeMar DeRozan": {
     "max_exposure": 0.0
   },
-  "Josh Giddey": {},
+  "Josh Giddey": {
+    "max_exposure": 0.0
+  },
   "Gary Trent Jr.": {
     "min_exposure": 0.2
   },
@@ -71,6 +75,15 @@
     "min_exposure": 0.2
   },
   "Kyle Filipowski": {
+    "max_exposure": 0.0
+  },
+  "Paolo Banchero": {
+    "max_exposure": 0.0
+  },
+  "Alperen Sengun": {
+    "max_exposure": 0.0
+  },
+  "Scottie Barnes": {
     "max_exposure": 0.0
   }
 }
