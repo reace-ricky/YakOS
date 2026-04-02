@@ -790,7 +790,10 @@ def render_lab_tab(sport: str) -> None:
 
                     # ── Ricky SE Ranking ─────────────────────────────────────
                     # Rank lineups and tag top 3 as SE Core / Spicy / Alt
-                    # Only attempt ranking when lineups were actually built
+                    # Only attempt ranking when lineups were actually built.
+                    # _lu_ranked is initialized to None so the archive section
+                    # below can guard itself against the 0-lineups case.
+                    _lu_ranked = None
                     _can_rank = n_built > 0 and "lineup_index" in lineups_df.columns
                     try:
                         from yak_core.ricky_rank import rank_lineups_for_se, RICKY_W_GPP, RICKY_W_CEIL, RICKY_W_OWN
@@ -955,65 +958,67 @@ def render_lab_tab(sport: str) -> None:
                     # Shows all lineups with checkbox column; top 3 by
                     # ricky_score pre-checked.  "Send to Archive" stores the
                     # full population with ricky_selected flags.
-                    st.markdown("---")
-                    st.markdown("#### Send to Archive")
-                    try:
-                        # Build a per-lineup summary for the data_editor
-                        _all_lu = _lu_ranked.sort_values("ricky_score", ascending=False).reset_index(drop=True).copy()
-                        # Pre-check top 3
-                        _all_lu.insert(
-                            0, "\u2713 Send",
-                            [True] * min(3, len(_all_lu)) + [False] * max(0, len(_all_lu) - 3),
-                        )
-                        _editor_cols = [
-                            "\u2713 Send", "lineup_index", "ricky_rank", "ricky_tag",
-                            "ricky_score", "total_gpp_score", "total_ceil",
-                            "total_proj", "avg_own_pct", "total_salary",
-                        ]
-                        _editor_avail = [c for c in _editor_cols if c in _all_lu.columns]
-                        _edited = st.data_editor(
-                            _all_lu[_editor_avail],
-                            column_config={
-                                "\u2713 Send": st.column_config.CheckboxColumn(
-                                    "\u2713 Send", default=False,
-                                ),
-                            },
-                            hide_index=True,
-                            use_container_width=True,
-                            key=f"lab_archive_editor_{sport}",
-                        )
-
-                        _n_checked = int(_edited["\u2713 Send"].sum())
-                        st.caption(f"{_n_checked} of {len(_edited)} lineups selected as Ricky picks")
-
-                        if st.button(
-                            f"\U0001f4e5 Send {len(_all_lu)} lineups to Archive",
-                            type="primary",
-                            key=f"lab_send_archive_{sport}",
-                        ):
-                            from utils.archive import append_to_archive
-                            # Expand player-level rows for the full population
-                            _full_lineups = st.session_state.get(
-                                f"lab_full_lineups_{sport}", lineups_df
+                    # Guard: only show when lineups were built and ranked.
+                    if _lu_ranked is not None:
+                        st.markdown("---")
+                        st.markdown("#### Send to Archive")
+                        try:
+                            # Build a per-lineup summary for the data_editor
+                            _all_lu = _lu_ranked.sort_values("ricky_score", ascending=False).reset_index(drop=True).copy()
+                            # Pre-check top 3
+                            _all_lu.insert(
+                                0, "\u2713 Send",
+                                [True] * min(3, len(_all_lu)) + [False] * max(0, len(_all_lu) - 3),
                             )
-                            # Map ricky_selected from the checkbox editor
-                            _selected_idxs = set(
-                                _edited.loc[_edited["\u2713 Send"], "lineup_index"].tolist()
+                            _editor_cols = [
+                                "\u2713 Send", "lineup_index", "ricky_rank", "ricky_tag",
+                                "ricky_score", "total_gpp_score", "total_ceil",
+                                "total_proj", "avg_own_pct", "total_salary",
+                            ]
+                            _editor_avail = [c for c in _editor_cols if c in _all_lu.columns]
+                            _edited = st.data_editor(
+                                _all_lu[_editor_avail],
+                                column_config={
+                                    "\u2713 Send": st.column_config.CheckboxColumn(
+                                        "\u2713 Send", default=False,
+                                    ),
+                                },
+                                hide_index=True,
+                                use_container_width=True,
+                                key=f"lab_archive_editor_{sport}",
                             )
-                            _archive_rows = _full_lineups.copy()
-                            _archive_rows["ricky_selected"] = _archive_rows["lineup_index"].isin(_selected_idxs)
-                            _archive_rows["archived_at"] = pd.Timestamp.now().isoformat()
-                            _archive_rows["contest_type"] = _contest_display
-                            _archive_rows["slate_date"] = slate_date
-                            _archive_rows["profile_name"] = (_profile_key_internal or "")
 
-                            _archive_path = append_to_archive(_archive_rows)
-                            st.success(
-                                f"{len(_archive_rows)} lineup rows archived — "
-                                f"{_n_checked} flagged as Ricky picks."
-                            )
-                    except Exception as _archive_err:
-                        st.warning(f"Archive UI error: {_archive_err}")
+                            _n_checked = int(_edited["\u2713 Send"].sum())
+                            st.caption(f"{_n_checked} of {len(_edited)} lineups selected as Ricky picks")
+
+                            if st.button(
+                                f"\U0001f4e5 Send {len(_all_lu)} lineups to Archive",
+                                type="primary",
+                                key=f"lab_send_archive_{sport}",
+                            ):
+                                from utils.archive import append_to_archive
+                                # Expand player-level rows for the full population
+                                _full_lineups = st.session_state.get(
+                                    f"lab_full_lineups_{sport}", lineups_df
+                                )
+                                # Map ricky_selected from the checkbox editor
+                                _selected_idxs = set(
+                                    _edited.loc[_edited["\u2713 Send"], "lineup_index"].tolist()
+                                )
+                                _archive_rows = _full_lineups.copy()
+                                _archive_rows["ricky_selected"] = _archive_rows["lineup_index"].isin(_selected_idxs)
+                                _archive_rows["archived_at"] = pd.Timestamp.now().isoformat()
+                                _archive_rows["contest_type"] = _contest_display
+                                _archive_rows["slate_date"] = slate_date
+                                _archive_rows["profile_name"] = (_profile_key_internal or "")
+
+                                _archive_path = append_to_archive(_archive_rows)
+                                st.success(
+                                    f"{len(_archive_rows)} lineup rows archived — "
+                                    f"{_n_checked} flagged as Ricky picks."
+                                )
+                        except Exception as _archive_err:
+                            st.warning(f"Archive UI error: {_archive_err}")
 
                 except Exception as e:
                     st.error(f"Build lineups error: {e}")
