@@ -14,6 +14,8 @@ from typing import Any, Dict, List
 import pandas as pd
 import streamlit as st
 
+from yak_core.bias import load_bias
+
 
 # ── Styled card CSS ─────────────────────────────────────────────────────────
 _CARD_CSS = """
@@ -369,11 +371,12 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             if _n:
                 _positive_tier_names.add(_n)
 
-    # ── Inject manual pool fades from Slate Hub pool table ───────────────
-    _pool_fades: list[str] = st.session_state.get("pool_fades", [])
-    if _pool_fades and not pool.empty:
+    # ── Inject manual fades from bias (max_exposure == 0.0) ─────────────
+    bias = load_bias()
+    manual_fades = [n for n, v in bias.items() if v.get("max_exposure", 1.0) == 0.0]
+    if manual_fades and not pool.empty:
         _manual_fade_entries: list[dict] = []
-        for _pf_name in _pool_fades:
+        for _pf_name in manual_fades:
             _pf_rows = pool[pool["player_name"] == _pf_name]
             if _pf_rows.empty:
                 continue
@@ -390,7 +393,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
                 "player_name": _pf_name,
                 "salary": _pf_salary,
                 "own_pct": _pf_own_pct,
-                "reasoning": "Manual fade — RG overvalued flag set pre-slate.",
+                "reasoning": "Manual fade",
             })
         if _manual_fade_entries:
             edge_analysis.setdefault("fade_candidates", []).extend(_manual_fade_entries)
