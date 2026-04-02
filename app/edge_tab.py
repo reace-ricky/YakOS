@@ -334,9 +334,7 @@ def _assign_tiered_plays(snipers: list, pool: pd.DataFrame) -> list:
 
 
 def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, Any], slate_date: str = "") -> None:
-    bias = load_bias()
-    manual_fades = [n for n, v in bias.items() if v.get("max_exposure", 1.0) == 0.0]
-    from yak_core.board import compute_stack_targets, compute_sniper_spots, compute_fades
+    from yak_core.board import compute_stack_targets, compute_sniper_spots
     from yak_core.rickys_take import generate_bust_call, generate_last_night, reset_rotator
 
     reset_rotator(slate_date=slate_date or None)
@@ -372,40 +370,13 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             if _n:
                 _positive_tier_names.add(_n)
 
-    # ── Inject manual fades from bias (max_exposure == 0.0) ─────────────
-    bias = load_bias()
-    manual_fades = [n for n, v in bias.items() if v.get("max_exposure", 1.0) == 0.0]
-    if manual_fades and not pool.empty:
-        _manual_fade_entries: list[dict] = []
-        for _pf_name in manual_fades:
-            _pf_rows = pool[pool["player_name"] == _pf_name]
-            if _pf_rows.empty:
-                continue
-            _pf_row = _pf_rows.iloc[0]
-            _pf_salary = int(_pf_row.get("salary", 0)) if "salary" in pool.columns else 0
-            _raw_own = _pf_row.get("ownership", 0) if "ownership" in pool.columns else 0
-            try:
-                _raw_own = float(_raw_own)
-            except (TypeError, ValueError):
-                _raw_own = 0.0
-            # Normalize: values ≤ 1.0 are decimal fractions → convert to %
-            _pf_own_pct = _raw_own * 100.0 if _raw_own <= 1.0 else _raw_own
-            _manual_fade_entries.append({
-                "player_name": _pf_name,
-                "salary": _pf_salary,
-                "own_pct": _pf_own_pct,
-                "reasoning": "Manual fade",
-            })
-        if _manual_fade_entries:
-            edge_analysis.setdefault("fade_candidates", []).extend(_manual_fade_entries)
-
     # ── Fades / busts: build a set of names we must never praise ─────────
     bust = generate_bust_call(
         pool,
         edge_analysis.get("fade_candidates"),
         positive_tier_names=_positive_tier_names or None,
     )
-    raw_fades = compute_fades(pool, edge_analysis)
+    raw_fades = edge_analysis.get("fade_candidates", [])
 
     fade_names: set[str] = set()
     if bust:
@@ -518,12 +489,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
         parts.append('<div class="tb-setup">No sniper spots on this slate.</div>')
 
     # ── 3c. The Fade (max 2) ──────────────────────────────────────────
-    board_fades = compute_fades(pool, edge_analysis)
-    # Merge manual bias fades that aren't already in board_fades
-    _board_fade_names = {f.get("player_name", "") for f in board_fades}
-    for _mf in edge_analysis.get("fade_candidates", []):
-        if _mf.get("player_name", "") not in _board_fade_names and _mf.get("reasoning") == "Manual fade":
-            board_fades.append(_mf)
+    board_fades = edge_analysis.get("fade_candidates", [])[:2]
     parts.append('<div class="tb-section-label">THE FADE</div>')
     if board_fades:
         for f in board_fades:
