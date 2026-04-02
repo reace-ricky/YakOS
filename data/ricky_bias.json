@@ -93,5 +93,8 @@
   },
   "Javonte Green": {
     "min_exposure": 0.2
+  },
+  "De'Aaron Fox": {
+    "max_exposure": 0.0
   }
 }
