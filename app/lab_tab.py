@@ -302,7 +302,9 @@ def render_lab_tab(sport: str) -> None:
                 st.session_state[_flash_key] = True
                 st.rerun()
             except Exception as e:
-                st.error(f"Load pool error: {e}")
+                import traceback
+                st.error(f"Edge analysis error: {e}")
+                st.code(traceback.format_exc())  
                 return
 
     if pool_path.exists():
