@@ -1784,13 +1784,22 @@ def _run_edge(sport: str, slate_date: str, out_dir: Path) -> tuple:
                         pname = row.get("player_name", "")
                         if not pname:
                             continue
+                        _mf_own = float(own_series.loc[row.name])
+                        _mf_ceil = float(row.get("ceil") or row.get("sim90th", 0))
                         manual_fades.append(
                             {
                                 "player_name": pname,
                                 "team": row.get("team", "?"),
                                 "salary": int(sal_series.loc[row.name]),
                                 "proj": float(row.get("proj", 0.0)),
-                                "own_pct": float(own_series.loc[row.name]),
+                                "own_pct": _mf_own,
+                                "ownership": _mf_own,  # keep both keys for rendering compatibility
+                                "ceil": round(_mf_ceil, 1),
+                                "edge": float(row.get("edge_score", row.get("edge", 0.0))),
+                                "value": float(row.get("value", 0.0)),
+                                "risk_score": float(row.get("risk_score", 0.0)),
+                                "proj_minutes": float(row.get("proj_minutes", 0.0)),
+                                "sim90th": float(row.get("sim90th", 0.0)),
                                 "reasoning": "Manual fade",
                             }
                         )
