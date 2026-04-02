@@ -1761,6 +1761,44 @@ def _run_edge(sport: str, slate_date: str, out_dir: Path) -> tuple:
             "late_players": late_df.nlargest(5, "proj")["player_name"].tolist(),
         }
     edge_analysis = {"bullets": bullets, "recommendation": recommendation, **classified, "signals_df_path": "signals.parquet"}
+    # --- Inject manual fades from bias into edge_analysis ---
+    try:
+        from yak_core.bias import load_bias
+        bias = load_bias()
+        manual_fades = []
+        if isinstance(bias, dict):
+            # players with max_exposure == 0.0 are manual fades
+            faded_names = {name for name, cfg in bias.items()
+                           if isinstance(cfg, dict) and cfg.get("max_exposure", 1.0) == 0.0}
+            if faded_names:
+                # restrict to players actually in this slate's edge_df
+                in_slate = edge_df[edge_df["player_name"].isin(faded_names)].copy()
+                if not in_slate.empty:
+                    own_col = "ownership" if "ownership" in in_slate.columns and in_slate["ownership"].notna().any() else "own_pct"
+                    own_series = pd.to_numeric(in_slate.get(own_col, 0), errors="coerce").fillna(0)
+                    if own_series.max() <= 1.0:
+                        own_series = own_series * 100
+                    sal_series = pd.to_numeric(in_slate.get("salary", 0), errors="coerce").fillna(0)
+
+                    for _, row in in_slate.iterrows():
+                        pname = row.get("player_name", "")
+                        if not pname:
+                            continue
+                        manual_fades.append(
+                            {
+                                "player_name": pname,
+                                "team": row.get("team", "?"),
+                                "salary": int(sal_series.loc[row.name]),
+                                "proj": float(row.get("proj", 0.0)),
+                                "own_pct": float(own_series.loc[row.name]),
+                                "reasoning": "Manual fade",
+                            }
+                        )
+        if manual_fades:
+            existing = edge_analysis.get("fade_candidates", [])
+            edge_analysis["fade_candidates"] = existing + manual_fades
+    except Exception as _mf_err:
+        print(f"[run_edge] manual fade wiring failed: {_mf_err}")
     # Attach late swap alerts so they persist in edge_analysis.json
     if late_swap_alerts:
         edge_analysis["late_swap_alerts"] = late_swap_alerts
