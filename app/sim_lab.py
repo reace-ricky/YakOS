@@ -524,7 +524,7 @@ def _render_history_table() -> None:
     # Remove selected rows
     if st.button("\U0001f5d1\ufe0f Remove Selected", key="remove_batch_rows"):
         to_delete = edited[edited["\U0001f5d1\ufe0f"] == True]  # noqa: E712
-        if not to_delete.empty:
+        if isinstance(to_delete, (pd.DataFrame, pd.Series)) and not to_delete.empty:
             # Soft-delete by marking rows as removed in the parquet
             full_history = _load_batch_history()
             # Match on timestamp (unique per row)
@@ -1673,7 +1673,7 @@ def _render_persistent_trend(preset_name: str) -> None:
     ))
 
     # ---- Main Config: flat reference band (dashed, green) ----
-    if not main_df.empty:
+    if isinstance(main_df, (pd.DataFrame, pd.Series)) and not main_df.empty:
         bl = main_df.iloc[-1]  # latest baseline
         avg_val = round(float(bl.get("avg_actual", 0)), 1)
         best_val = round(float(bl.get("best_slate", 0)), 1)
@@ -1706,7 +1706,7 @@ def _render_persistent_trend(preset_name: str) -> None:
         })
 
     # ---- Sim Lab: EMA cloud (solid, blue) ----
-    if not lab_df.empty:
+    if isinstance(lab_df, (pd.DataFrame, pd.Series)) and not lab_df.empty:
         ts_labels = [_ts_label(r["timestamp"]) for _, r in lab_df.iterrows()]
         avg_raw = [float(r.get("avg_actual", 0)) for _, r in lab_df.iterrows()]
         best_raw = [float(r.get("best_slate", 0)) for _, r in lab_df.iterrows()]

@@ -265,7 +265,7 @@ def _classify_signal(p: Dict[str, Any], pool: pd.DataFrame) -> tuple:
     spread = 0.0
     if not pool.empty and "player_name" in pool.columns:
         match = pool[pool["player_name"] == name]
-        if not match.empty:
+        if isinstance(match, (pd.DataFrame, pd.Series)) and not match.empty:
             row = match.iloc[0]
             for vc in ("vegas_total", "over_under", "total"):
                 if vc in row.index and row[vc]:
@@ -814,7 +814,7 @@ def _compute_optimizer_notes(lineups: dict | None) -> List[str]:
                 lambda t: tuple(sorted(t.value_counts().nlargest(2).index))
             )
             pairs = teams_per_lu[teams_per_lu.apply(len) >= 2]
-            if not pairs.empty:
+            if isinstance(pairs, (pd.DataFrame, pd.Series)) and not pairs.empty:
                 top_pair = pairs.value_counts().idxmax()
                 pair_pct = pairs.value_counts().iloc[0] / n_lineups * 100
                 notes.append(

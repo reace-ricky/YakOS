@@ -249,7 +249,7 @@ class TestE2EPipeline:
         # Players with injury bumps should rank higher (if cascade ran)
         if "injury_bump_fp" in signals.columns:
             bumped = signals[signals["injury_bump_fp"] > 0]
-            if not bumped.empty:
+            if isinstance(bumped, (pd.DataFrame, pd.Series)) and not bumped.empty:
                 # Average rank of bumped players should be in top half
                 avg_rank = bumped["edge_rank"].mean()
                 assert avg_rank <= len(signals) * 0.75, "Injury cascade beneficiaries should trend higher"

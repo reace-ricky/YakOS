@@ -671,7 +671,7 @@ def render_lab_tab(sport: str) -> None:
                 _matchup_pool = _mp[_mp["team"].isin(showdown_teams)].sort_values("salary", ascending=False)
             except Exception:
                 pass
-        if not _matchup_pool.empty:
+        if isinstance(_matchup_pool, (pd.DataFrame, pd.Series)) and not _matchup_pool.empty:
             _NONE_CPT = "(Let optimizer choose)"
             _cpt_options = [_NONE_CPT] + _matchup_pool["player_name"].tolist()
 
@@ -820,7 +820,7 @@ def render_lab_tab(sport: str) -> None:
 
                         # Show SE tagged lineups first
                         _tagged = _lu_ranked[_lu_ranked["ricky_tag"] != ""].copy()
-                        if not _tagged.empty:
+                        if isinstance(_tagged, (pd.DataFrame, pd.Series)) and not _tagged.empty:
                             st.markdown("#### \U0001f3af Ricky SE Picks")
                             _tag_display = _tagged[[
                                 "lineup_index", "ricky_tag", "ricky_score",
@@ -859,7 +859,7 @@ def render_lab_tab(sport: str) -> None:
                         # ── Overwrite lineups parquet with ONLY SE picks ──
                         # Build 40, rank, save only the top 3 tagged lineups
                         # so Edge Analysis / Publish shows just SE picks.
-                        if not _tagged.empty:
+                        if isinstance(_tagged, (pd.DataFrame, pd.Series)) and not _tagged.empty:
                             _tagged_idxs = _tagged["lineup_index"].tolist()
                             _se_only = lineups_df[lineups_df["lineup_index"].isin(_tagged_idxs)].copy()
                             _idx_map = {old: new for new, old in enumerate(_tagged_idxs)}
@@ -1137,7 +1137,7 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
             player_id_map=id_map,
             api_key=api_key,
         )
-        if not game_logs.empty:
+        if isinstance(game_logs, (pd.DataFrame, pd.Series)) and not game_logs.empty:
             pool = pool.merge(game_logs, on="player_name", how="left")
             _n_with = pool["rolling_fp_5"].notna().sum() if "rolling_fp_5" in pool.columns else 0
             print(f"[_load_nba_pool] Merged rolling game logs for {_n_with}/{len(pool)} players")
@@ -2114,7 +2114,7 @@ def _build_late_swap_alerts(
                 & (~pool_after["status"].fillna("Active").str.strip().str.upper().isin(_OUT_STATUSES))
             ].copy() if "team" in pool_after.columns else pd.DataFrame()
 
-            if not teammates.empty:
+            if isinstance(teammates, (pd.DataFrame, pd.Series)) and not teammates.empty:
                 # Positional overlap: same position group gets most minutes
                 pos_primary = pos.split("/")[0] if "/" in pos else pos
                 _POS_GROUPS = {
@@ -2163,7 +2163,7 @@ def _build_late_swap_alerts(
                 & (pool_after["player_name"] != player_name)
             ].copy() if "pos" in pool_after.columns else pd.DataFrame()
 
-            if not candidates.empty:
+            if isinstance(candidates, (pd.DataFrame, pd.Series)) and not candidates.empty:
                 own_col = "ownership" if "ownership" in candidates.columns and candidates["ownership"].notna().any() else "own_pct"
                 cand_own = pd.to_numeric(candidates.get(own_col, 0), errors="coerce").fillna(0)
                 cand_proj = pd.to_numeric(candidates.get("proj", 0), errors="coerce").fillna(0)
@@ -2177,7 +2177,7 @@ def _build_late_swap_alerts(
                     & (cand_proj > 0)
                 )
                 cash_cands = candidates[cash_mask]
-                if not cash_cands.empty:
+                if isinstance(cash_cands, (pd.DataFrame, pd.Series)) and not cash_cands.empty:
                     best_cash = cash_cands.loc[pd.to_numeric(cash_cands["proj"], errors="coerce").idxmax()]
                     cash_pivot = {
                         "name": str(best_cash.get("player_name", "")),
@@ -2196,7 +2196,7 @@ def _build_late_swap_alerts(
                     & (cand_proj > 15)
                 )
                 gpp_cands = candidates[gpp_mask]
-                if not gpp_cands.empty:
+                if isinstance(gpp_cands, (pd.DataFrame, pd.Series)) and not gpp_cands.empty:
                     # Prefer best edge, then lowest ownership
                     if edge_col in gpp_cands.columns and pd.to_numeric(gpp_cands[edge_col], errors="coerce").abs().sum() > 0:
                         best_gpp = gpp_cands.loc[pd.to_numeric(gpp_cands[edge_col], errors="coerce").idxmax()]
@@ -2936,7 +2936,7 @@ def _fetch_pga_actuals(api_key: str, slate_date: str = "") -> pd.DataFrame:
         # is closest to (and <= ) the slate date
         events["_date_str"] = events["date"].astype(str)
         candidates = events[events["_date_str"] <= slate_date]
-        if not candidates.empty:
+        if isinstance(candidates, (pd.DataFrame, pd.Series)) and not candidates.empty:
             latest = candidates.iloc[0]  # most recent event on or before slate_date
         else:
             latest = events.iloc[0]  # fallback: most recent overall

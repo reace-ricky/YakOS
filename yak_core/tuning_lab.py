@@ -355,7 +355,7 @@ class TuningLabStore:
             return None
         if "is_active" in df.columns:
             active = df[df["is_active"].eq(True)]
-            if not active.empty:
+            if isinstance(active, (pd.DataFrame, pd.Series)) and not active.empty:
                 return active.sort_values("timestamp", ascending=False).iloc[0]
         # Fall back to most recent row
         return df.sort_values("timestamp", ascending=False).iloc[0]

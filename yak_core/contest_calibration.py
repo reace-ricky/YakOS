@@ -182,7 +182,7 @@ def diagnose_miss(
         if "actual_fp" in lu.columns and "proj" in lu.columns:
             lu["miss"] = lu["actual_fp"] - lu["proj"]
             big_misses = lu[lu["miss"] < -10]
-            if not big_misses.empty:
+            if isinstance(big_misses, (pd.DataFrame, pd.Series)) and not big_misses.empty:
                 for _, row in big_misses.iterrows():
                     reasons.append({
                         "type": "projection_miss",

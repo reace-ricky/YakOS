@@ -244,7 +244,7 @@ class TestComputePopCatalyst:
         result = compute_pop_catalyst(pool)
         # Player_5 has proj=7.0 (above threshold) but Player with proj < 5 should be 0
         low_proj = result[result["proj"] < _MIN_PROJ_FOR_POP]
-        if not low_proj.empty:
+        if isinstance(low_proj, (pd.DataFrame, pd.Series)) and not low_proj.empty:
             assert (low_proj["pop_catalyst_score"] == 0.0).all()
 
     def test_tag_blank_for_low_scores(self):
@@ -390,7 +390,7 @@ class TestEdgeIntegration:
         result = compute_edge_metrics(pool)
 
         hendricks = result[result["player_name"] == "Taylor Hendricks"]
-        if not hendricks.empty:
+        if isinstance(hendricks, (pd.DataFrame, pd.Series)) and not hendricks.empty:
             label = hendricks.iloc[0]["edge_label"]
             # Hendricks should have rocket emoji from pop catalyst
             assert "🚀" in label or hendricks.iloc[0]["pop_catalyst_score"] < 0.15

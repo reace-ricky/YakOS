@@ -720,7 +720,7 @@ def compute_tiered_stack_alerts(
         # If we didn't get game_ou from vegas, try to compute from opponent proj
         if game_ou == 0.0 and opponent:
             opp_rows = df[df["team"].fillna("").str.upper() == str(opponent).upper()]
-            if not opp_rows.empty:
+            if isinstance(opp_rows, (pd.DataFrame, pd.Series)) and not opp_rows.empty:
                 opp_implied = float(opp_rows.nlargest(3, "proj")["proj"].sum())
                 game_ou = round(implied_total + opp_implied, 1)
 
@@ -1516,14 +1516,14 @@ def generate_pga_slate_overview(
     # Value plays
     if not signals_df.empty and "sig_value" in signals_df.columns:
         val_plays = signals_df[signals_df["sig_value"]].head(3)
-        if not val_plays.empty:
+        if isinstance(val_plays, (pd.DataFrame, pd.Series)) and not val_plays.empty:
             names = ", ".join(val_plays["player_name"].tolist())
             bullets.append(f"\U0001f4b0 **Value Breakouts**: {names}")
 
     # Leverage spots
     if not signals_df.empty and "sig_leverage" in signals_df.columns:
         lev_plays = signals_df[signals_df["sig_leverage"]].head(3)
-        if not lev_plays.empty:
+        if isinstance(lev_plays, (pd.DataFrame, pd.Series)) and not lev_plays.empty:
             names = ", ".join(lev_plays["player_name"].tolist())
             bullets.append(f"\U0001f50d **Leverage Spots**: {names}")
 

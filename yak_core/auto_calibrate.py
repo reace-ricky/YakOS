@@ -388,7 +388,7 @@ def check_slate_completeness(
     if (pool_df is None or pool_df.empty) and not actuals_col_available:
         # Try the fat RickyArchive (works even when slate_archive is empty)
         ricky_pool = _load_ricky_pool_for_date(selected_date)
-        if not ricky_pool.empty:
+        if isinstance(ricky_pool, (pd.DataFrame, pd.Series)) and not ricky_pool.empty:
             pool_df = ricky_pool
             actuals_col_available = True  # archive has actual_fp column
 
@@ -1036,7 +1036,7 @@ def compute_sniper_metrics(per_date_results: List[Dict[str, Any]]) -> Dict[str, 
         # SE Core actual
         if "ricky_tag" in summary.columns:
             se_core = summary.loc[summary["ricky_tag"] == "SE Core", "total_actual"]
-            if not se_core.empty:
+            if isinstance(se_core, (pd.DataFrame, pd.Series)) and not se_core.empty:
                 all_se_core.append(float(se_core.iloc[0]))
 
         # 300+ and 350+ counts

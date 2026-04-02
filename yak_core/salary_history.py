@@ -257,7 +257,7 @@ class SalaryHistoryClient:
         time.sleep(_API_SLEEP_SECONDS)
         df = self.get_draftables(primary["draft_group_id"])
 
-        if not df.empty:
+        if isinstance(df, (pd.DataFrame, pd.Series)) and not df.empty:
             self._save_cache(date, df)
 
         # Attach the selected draft_group_id as metadata so callers can log it.
