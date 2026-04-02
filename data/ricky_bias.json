@@ -73,7 +73,9 @@
   "Kyle Filipowski": {
     "max_exposure": 0.0
   },
-  "Donovan Clingan": {},
+  "Donovan Clingan": {
+    "max_exposure": 0.0
+  },
   "Shai Gilgeous-Alexander": {
     "min_exposure": 0.5
   },
@@ -91,5 +93,8 @@
   },
   "Javonte Green": {
     "min_exposure": 0.2
+  },
+  "Daniss Jenkins": {
+    "max_exposure": 0.0
   }
 }
