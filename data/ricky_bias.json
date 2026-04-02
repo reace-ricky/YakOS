@@ -68,16 +68,10 @@
   "CJ McCollum": {
     "max_exposure": 0.0
   },
-  "Alperen Sengun": {
-    "max_exposure": 0.0
+  "Jaylen Brown": {
+    "min_exposure": 0.5
   },
-  "Mikal Bridges": {
-    "max_exposure": 0.0
-  },
-  "Adem Bona": {
-    "max_exposure": 0.0
-  },
-  "Micah Potter": {
-    "max_exposure": 0.0
+  "Payton Pritchard": {
+    "min_exposure": 0.2
   }
 }
