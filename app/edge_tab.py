@@ -10,6 +10,7 @@ Displays the pre-computed edge analysis from data/published/{sport}/:
 from __future__ import annotations
 
 from typing import Any, Dict, List
+from yak_core.bias import load_bias
 
 import pandas as pd
 import streamlit as st
@@ -335,6 +336,8 @@ def _assign_tiered_plays(snipers: list, pool: pd.DataFrame) -> list:
 
 
 def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, Any], slate_date: str = "") -> None:
+    bias = load_bias()
+    manual_fades = [n for n, v in bias.items() if v.get("max_exposure", 1.0) == 0.0]
     from yak_core.board import compute_stack_targets, compute_sniper_spots, compute_fades
     from yak_core.rickys_take import generate_bust_call, generate_last_night, reset_rotator
 
