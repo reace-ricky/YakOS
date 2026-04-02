@@ -169,10 +169,12 @@ def _render_player_card_html(player: Dict[str, Any], is_pga: bool, cleared_playe
     sal = player.get("salary", 0)
     proj = player.get("proj", 0)
     edge = player.get("edge", 0)
-    own = player.get("ownership", 0)
+    # Support both "ownership" and "own_pct" key names for compatibility
+    own = player.get("ownership", player.get("own_pct", 0))
     risk = player.get("risk_score", 0)
     mins = player.get("proj_minutes", 0)
-    ceil_val = player.get("ceil", 0)
+    # Fall back to sim90th when "ceil" is absent or zero
+    ceil_val = player.get("ceil") or player.get("sim90th", 0)
 
     cleared = cleared_players or []
     cleared_badge = ""
