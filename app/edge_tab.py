@@ -531,8 +531,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             )
     else:
         parts.append('<div class="tb-setup">No strong fades on this slate.</div>')
-    parts.append(f'<div class="tb-setup">DEBUG: board_fades={len(board_fades)} | bust={bust is not None} | raw_fades={len(raw_fades)}</div>')
-    # -- 4+5. Merged Danger Box: Trap + Bust ───────────────────────────
+       # -- 4+5. Merged Danger Box: Trap + Bust ───────────────────────────
     _board_names = set()
     for _tier in ("core_plays", "leverage_plays", "value_plays"):
         for _p in edge_analysis.get(_tier, []):
