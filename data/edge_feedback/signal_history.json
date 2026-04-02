@@ -781,5 +781,75 @@
         "avg_proj": null
       }
     }
+  },
+  "2026-04-01": {
+    "slate_date": "2026-04-01",
+    "contest_type": "GPP Main",
+    "n_players": 171,
+    "signals": {
+      "high_leverage": {
+        "n_flagged": 47,
+        "n_hit": 25,
+        "hit_rate": 0.532,
+        "avg_actual": 24.45,
+        "avg_proj": 22.03
+      },
+      "salary_value": {
+        "n_flagged": 38,
+        "n_hit": 8,
+        "hit_rate": 0.211,
+        "avg_actual": 23.62,
+        "avg_proj": 28.34
+      },
+      "opt_smash_prob": {
+        "n_flagged": 48,
+        "n_hit": 29,
+        "hit_rate": 0.604,
+        "avg_actual": 24.34,
+        "avg_proj": 21.71
+      },
+      "opt_leverage": {
+        "n_flagged": 47,
+        "n_hit": 28,
+        "hit_rate": 0.596,
+        "avg_actual": 24.45,
+        "avg_proj": 22.03
+      },
+      "opt_form": {
+        "n_flagged": 85,
+        "n_hit": 45,
+        "hit_rate": 0.529,
+        "avg_actual": 32.58,
+        "avg_proj": 31.11
+      },
+      "opt_dvp_boost": {
+        "n_flagged": 0,
+        "n_hit": 0,
+        "hit_rate": null,
+        "avg_actual": null,
+        "avg_proj": null
+      },
+      "opt_catalyst": {
+        "n_flagged": 85,
+        "n_hit": 37,
+        "hit_rate": 0.435,
+        "avg_actual": 27.35,
+        "avg_proj": 28.76
+      },
+      "opt_bust_prob": {
+        "n_flagged": 48,
+        "n_hit": 29,
+        "hit_rate": 0.604,
+        "avg_actual": 24.34,
+        "avg_proj": 21.71
+      },
+      "opt_fp_efficiency": {
+        "n_flagged": 0,
+        "n_hit": 0,
+        "hit_rate": null,
+        "avg_actual": null,
+        "avg_proj": null
+      }
+    }
   }
 }
