@@ -145,11 +145,61 @@ def _classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
         _fade_sal = _fade_pool[_fade_pool["_sal"] >= 5000]
         fades = _fade_sal.nsmallest(5, "_edge") if not _fade_sal.empty else _fade_pool.nsmallest(5, "_edge")
 
+    # ── Unified fade consolidation: user selections (bias) take priority, cap at 2 ──
+    _algo_fades = _to_list(fades, tag="fade")
+    _final_fades: list[dict] = []
+    try:
+        import os as _os2
+        import sys as _sys2
+        _sys2.path.insert(0, _os2.path.dirname(_os2.path.dirname(_os2.path.abspath(__file__))))
+        from yak_core.bias import load_bias as _load_bias
+        _bias = _load_bias()
+        _user_fade_names = [n for n, v in _bias.items() if v.get("max_exposure", 1.0) == 0.0]
+        # Only include user fades that exist in the current pool
+        _pool_names = set(df["player_name"].tolist())
+        _user_fade_names = [n for n in _user_fade_names if n in _pool_names]
+        # Build entries for user-selected fades (priority slots)
+        for _uf_name in _user_fade_names:
+            if len(_final_fades) >= 2:
+                break
+            _uf_rows = df[df["player_name"] == _uf_name]
+            if _uf_rows.empty:
+                continue
+            _uf_row = _uf_rows.iloc[0]
+            _raw_own = float(_uf_row.get("_own", 0))
+            _final_fades.append({
+                "player_name": _uf_name,
+                "tag": "fade",
+                "proj": round(float(_uf_row.get("_proj", 0)), 1),
+                "salary": int(_uf_row.get("_sal", 0)),
+                "ownership": round(_raw_own, 1),
+                "own_pct": round(_raw_own, 1),
+                "edge": round(float(_uf_row.get("_edge", 0)), 2),
+                "value": round(float(_uf_row.get("_val", 0)), 2),
+                "proj_minutes": round(float(_uf_row.get("proj_minutes", 0)), 1),
+                "sim90th": round(float(_uf_row.get("sim90th", 0)), 1),
+                "risk_score": round(float(_uf_row.get("risk_score", 0)), 1),
+                "reasoning": "Manual fade",
+            })
+    except Exception as _ef:
+        print(f"[_classify_plays] bias load skipped: {_ef}")
+        _user_fade_names = []
+    # Fill remaining slots with algorithmic fades (deduped against user picks)
+    _seen_names = {e["player_name"] for e in _final_fades}
+    for _af in _algo_fades:
+        if len(_final_fades) >= 2:
+            break
+        if _af.get("player_name", "") not in _seen_names:
+            _af = dict(_af)
+            _af.setdefault("own_pct", _af.get("ownership", 0))
+            _af.setdefault("reasoning", "High ownership, weak edge")
+            _final_fades.append(_af)
+
     return {
         "core_plays": _to_list(core, tag="core"),
         "leverage_plays": _to_list(leverage, tag="leverage"),
         "value_plays": _to_list(value, tag="value"),
-        "fade_candidates": _to_list(fades, tag="fade"),
+        "fade_candidates": _final_fades,
     }
 
 
