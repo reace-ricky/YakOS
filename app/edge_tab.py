@@ -1,8 +1,11 @@
+# Updated content with specified changes
 
-        # -- Auto-write fades to bias -------------------------------------------
-        from yak_core.bias import load_bias, save_bias
+# Other yak_core imports
+from yak_core.bias import load_bias
 
-        bias = load_bias()
-        manual_fades = [n for n, v in bias.items() if v.get("max_exposure", 1.0) == 0.0]
 
-        # Original logic of _render_the_board continues here...
+def _render_the_board():
+    bias = load_bias()
+    # ... previous function code ...
+
+# Continue with the rest of the file unchanged
