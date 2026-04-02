@@ -591,14 +591,14 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
                 f"{f0.get('reasoning', 'Model says pass.')}"
             )
 
-        if traphtml or fadehtml:
-            dangerinner = ""
-            if traphtml:
-                dangerinner += traphtml
-            if traphtml and fadehtml:
+        dangerinner = ""
+        if _trap_html or _fade_html:
+            if _trap_html:
+                dangerinner += _trap_html
+            if _trap_html and _fade_html:
                 dangerinner += '<div class="tb-divider"></div>'
-            if fadehtml:
-                dangerinner += fadehtml
+            if _fade_html:
+                dangerinner += _fade_html
         if board_fades:
             parts.append(f'<div class="tb-danger-box">{dangerinner}</div>')
         else:
