@@ -519,6 +519,11 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
 
     # ── 3c. The Fade (max 2) ──────────────────────────────────────────
     board_fades = compute_fades(pool, edge_analysis)
+    # Merge manual bias fades that aren't already in board_fades
+    _board_fade_names = {f.get("player_name", "") for f in board_fades}
+    for _mf in edge_analysis.get("fade_candidates", []):
+        if _mf.get("player_name", "") not in _board_fade_names and _mf.get("reasoning") == "Manual fade":
+            board_fades.append(_mf)
     parts.append('<div class="tb-section-label">THE FADE</div>')
     if board_fades:
         for f in board_fades:
