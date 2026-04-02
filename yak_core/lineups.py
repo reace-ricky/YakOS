@@ -1375,12 +1375,18 @@ def build_multiple_lineups_with_exposure(
         for i in lock_indices:
             remaining[i] = core_max_apps
 
-    # PLAYER_MIN_EXPOSURE: ensure remaining budget allows min appearances
+    # PLAYER_MIN_EXPOSURE: ensure remaining budget allows min appearances.
+    # Use plain int() — no max(1,...) — so building 1 lineup with min_exposure=0.2
+    # correctly yields min_apps=0 (not forced).  max(1,...) would force every
+    # min_exposure player into every lineup regardless of lineup count, making
+    # small builds (e.g. 1 lineup) infeasible when many players have floors set.
     player_min_target: Dict[int, int] = {}
     for i, p in enumerate(players):
         pname = p["player_name"]
         if pname in player_min_exp:
-            min_apps = max(1, int(num_lineups * float(player_min_exp[pname])))
+            min_apps = int(num_lineups * float(player_min_exp[pname]))
+            if min_apps <= 0:
+                continue
             player_min_target[i] = min_apps
             remaining[i] = max(remaining.get(i, 0), min_apps)
     core_appearances: Dict[int, int] = {i: 0 for i in player_min_target}
