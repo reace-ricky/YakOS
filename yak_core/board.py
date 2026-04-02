@@ -309,7 +309,7 @@ def compute_fades(
 
     # Merge ranks back into popular
     popular = popular.merge(
-        all_df[["player_name", "_ricky_rank", "_salary_rank"]].drop_duplicates("player_name"),
+        all_df[["player_name", "_ricky_rank", "_salary_rank", "_own"]].drop_duplicates("player_name"),
         on="player_name",
         how="left",
         suffixes=("", "_dup"),
