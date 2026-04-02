@@ -41,7 +41,7 @@ def load_published_data(sport: str) -> Tuple[
     if pool_path.exists():
         pool = pd.read_parquet(pool_path)
         # Safety net: ensure ownership is valid even if parquet was saved with None values
-        if not pool.empty:
+        if isinstance(pool, (pd.DataFrame, pd.Series)) and not pool.empty:
             try:
                 from yak_core.ownership_guard import ensure_ownership
                 pool = ensure_ownership(pool, sport=sport)
@@ -73,7 +73,7 @@ def load_fresh_pool(sport: str) -> pd.DataFrame:
     pool_path = DATA_DIR / sport.lower() / "slate_pool.parquet"
     if pool_path.exists():
         pool = pd.read_parquet(pool_path)
-        if not pool.empty:
+        if isinstance(pool, (pd.DataFrame, pd.Series)) and not pool.empty:
             try:
                 from yak_core.ownership_guard import ensure_ownership
                 pool = ensure_ownership(pool, sport=sport)

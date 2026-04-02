@@ -116,7 +116,7 @@ def main() -> None:
 
     own_df = estimate_ownership_from_field(field_lineups)
     print(f"[calc_field_ownership] Estimated own_proj for {len(own_df)} players")
-    if not own_df.empty:
+    if isinstance(own_df, (pd.DataFrame, pd.Series)) and not own_df.empty:
         print(f"  Top 5:\n{own_df.head(5).to_string(index=False)}")
 
     # ── 4. Persist ────────────────────────────────────────────────────────────

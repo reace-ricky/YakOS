@@ -468,7 +468,7 @@ def _salary_map_from_parquet(path: str) -> dict[str, float]:
     # If roster_position exists, keep only UTIL/FLEX rows
     if "roster_position" in df.columns:
         flex = df[df["roster_position"].str.upper().isin({"UTIL", "FLEX"})]
-        if not flex.empty:
+        if isinstance(flex, (pd.DataFrame, pd.Series)) and not flex.empty:
             df = flex
         else:
             # Old format: two rows per player, keep the lower salary (FLEX)

@@ -391,7 +391,7 @@ class TestBuildContestScopedPool:
         result = dk.build_contest_scoped_pool(100, yak, dk_pool)
         # LeBron: DK salary = 10200, YakOS salary = 10000
         lebron_row = result[result["player_name"] == "LeBron James"]
-        if not lebron_row.empty:
+        if isinstance(lebron_row, (pd.DataFrame, pd.Series)) and not lebron_row.empty:
             assert float(lebron_row.iloc[0]["salary"]) == 10200.0
 
     def test_unmapped_column_present(self):
@@ -405,7 +405,7 @@ class TestBuildContestScopedPool:
         dk_pool = _make_dk_pool()
         result = dk.build_contest_scoped_pool(100, yak, dk_pool)
         unknown_row = result[result["player_name"] == "Unknown Player"]
-        if not unknown_row.empty:
+        if isinstance(unknown_row, (pd.DataFrame, pd.Series)) and not unknown_row.empty:
             assert bool(unknown_row.iloc[0]["_unmapped"]) is True
 
     def test_mapped_players_have_yak_projections(self):
@@ -413,7 +413,7 @@ class TestBuildContestScopedPool:
         dk_pool = _make_dk_pool()
         result = dk.build_contest_scoped_pool(100, yak, dk_pool)
         lebron_row = result[result["player_name"] == "LeBron James"]
-        if not lebron_row.empty:
+        if isinstance(lebron_row, (pd.DataFrame, pd.Series)) and not lebron_row.empty:
             assert float(lebron_row.iloc[0]["proj"]) == 55.0
 
     def test_empty_dk_pool_falls_back_to_yak_pool(self):

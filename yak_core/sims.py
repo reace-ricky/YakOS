@@ -660,7 +660,7 @@ def compute_player_anomaly_table(
     # For backward compatibility, fall back to "ownership" alias when own_proj absent.
     _pool_sim_cols = ("name", "proj", "salary", "own%", "ceil", "floor")
     pool_lookup: dict = {}
-    if not pool_df.empty:
+    if isinstance(pool_df, (pd.DataFrame, pd.Series)) and not pool_df.empty:
         pool = pool_df.copy()
         if "player_name" in pool.columns and "name" not in pool.columns:
             pool = pool.rename(columns={"player_name": "name"})
@@ -710,7 +710,7 @@ def compute_player_anomaly_table(
 
         # PGA: check if pool has DataGolf std_dev for per-player variance
         _pat_dg_std = None
-        if not pool_df.empty:
+        if isinstance(pool_df, (pd.DataFrame, pd.Series)) and not pool_df.empty:
             _std_col = pool_df.get("std_dev")
             if _std_col is not None:
                 _std_vals = pd.to_numeric(_std_col, errors="coerce").fillna(0)

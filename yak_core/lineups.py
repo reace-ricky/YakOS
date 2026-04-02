@@ -1714,7 +1714,7 @@ def build_multiple_lineups_with_exposure(
         )
 
     # Exposure report
-    if not lineups_df.empty:
+    if isinstance(lineups_df, (pd.DataFrame, pd.Series)) and not lineups_df.empty:
         n_built = lineups_df["lineup_index"].nunique()
         exp_rows = []
         for pname, idx in name_to_idx.items():
@@ -2476,7 +2476,7 @@ def to_dk_showdown_upload_format(lineups_df: pd.DataFrame) -> pd.DataFrame:
         row: dict = {"Entry ID": "", "Contest Name": "", "Contest ID": "", "Entry Fee": ""}
         cpt_rows = lu[lu["slot"] == "CPT"]
         flex_rows = lu[lu["slot"] == "FLEX"]
-        if not cpt_rows.empty:
+        if isinstance(cpt_rows, (pd.DataFrame, pd.Series)) and not cpt_rows.empty:
             row["CPT"] = cpt_rows.iloc[0]["player_name"]
         for i, (_, fr) in enumerate(flex_rows.iterrows()):
             row[f"FLEX{i + 1}"] = fr["player_name"]

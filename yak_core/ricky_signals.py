@@ -423,12 +423,12 @@ def generate_slate_overview(
     _studs = signals_df[_stud_mask]
     if _has_edge and not _studs.empty:
         _studs = _studs.nlargest(3, _edge_col)
-    elif not _studs.empty:
+    elif isinstance(_studs, (pd.DataFrame, pd.Series)) and not _studs.empty:
         _studs = _studs.nlargest(3, "proj")
     else:
         _studs = pd.DataFrame()
 
-    if not _studs.empty:
+    if isinstance(_studs, (pd.DataFrame, pd.Series)) and not _studs.empty:
         parts = []
         for _, r in _studs.iterrows():
             name = r.get("player_name", "?")
@@ -447,7 +447,7 @@ def generate_slate_overview(
     _vals = signals_df[_val_mask]
     if _has_edge and not _vals.empty:
         _vals = _vals.nlargest(10, _edge_col)  # grab extra so we can filter
-    elif not _vals.empty:
+    elif isinstance(_vals, (pd.DataFrame, pd.Series)) and not _vals.empty:
         _vals = _vals.nlargest(10, "proj")
 
     # Prefer players with pop catalyst or leverage signals
@@ -458,7 +458,7 @@ def generate_slate_overview(
         )
     _vals = _vals[~_vals["player_name"].isin(_used_names)].head(3)
 
-    if not _vals.empty:
+    if isinstance(_vals, (pd.DataFrame, pd.Series)) and not _vals.empty:
         parts = []
         for _, r in _vals.iterrows():
             name = r.get("player_name", "?")
@@ -491,7 +491,7 @@ def generate_slate_overview(
         chalk = signals_df[(own >= 25) & ~signals_df["player_name"].isin(_used_names)]
         chalk = chalk.nlargest(2, _own_col if _own_col in chalk.columns else "proj")
 
-        if not _fades.empty:
+        if isinstance(_fades, (pd.DataFrame, pd.Series)) and not _fades.empty:
             fade_parts = []
             for _, r in _fades.iterrows():
                 name = r.get("player_name", "?")
@@ -500,7 +500,7 @@ def generate_slate_overview(
                 _used_names.add(name)
             top_fades = _fades["player_name"].tolist()
             bullets.append(f"Fade candidates: {', '.join(fade_parts)} — chalk without edge")
-        elif not chalk.empty:
+        elif isinstance(chalk, (pd.DataFrame, pd.Series)) and not chalk.empty:
             chalk_parts = []
             for _, r in chalk.iterrows():
                 name = r.get("player_name", "?")

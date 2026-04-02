@@ -255,7 +255,7 @@ def render_premium_lineup_card(
     )
 
     # PLAYER ROWS
-    if not lu.empty:
+    if isinstance(lu, (pd.DataFrame, pd.Series)) and not lu.empty:
         for i, (_, row) in enumerate(lu.iterrows()):
             bg = _ROW_DARK if i % 2 == 0 else _ROW_LIGHT
             slot = str(row.get("slot", row.get("pos", "")))
@@ -402,14 +402,14 @@ def render_premium_cards_paged(
     sim_metrics: Dict[str, Any] = {}
     if sim_results_df is not None and not sim_results_df.empty and "lineup_index" in sim_results_df.columns:
         match = sim_results_df[sim_results_df["lineup_index"] == actual_idx]
-        if not match.empty:
+        if isinstance(match, (pd.DataFrame, pd.Series)) and not match.empty:
             sim_metrics = match.iloc[0].to_dict()
 
     # Resolve boom/bust row
     bb_row: Optional[Dict[str, Any]] = None
     if boom_bust_df is not None and not boom_bust_df.empty and "lineup_index" in boom_bust_df.columns:
         bb_match = boom_bust_df[boom_bust_df["lineup_index"] == actual_idx]
-        if not bb_match.empty:
+        if isinstance(bb_match, (pd.DataFrame, pd.Series)) and not bb_match.empty:
             bb_row = bb_match.iloc[0].to_dict()
 
     render_premium_lineup_card(
@@ -540,7 +540,7 @@ def render_lineup_card(
         st.metric("Salary", f"${total_salary:,}")
 
     # ── Body ─────────────────────────────────────────────────────────────
-    if not lu.empty:
+    if isinstance(lu, (pd.DataFrame, pd.Series)) and not lu.empty:
         show_cols = [c for c in ["slot", "player_name", "pos", "team", "matchup", "salary", "proj", "ownership"]
                      if c in lu.columns]
         # Rename for display
@@ -669,14 +669,14 @@ def render_lineup_cards_paged(
     sim_metrics: Dict[str, Any] = {}
     if sim_results_df is not None and not sim_results_df.empty and "lineup_index" in sim_results_df.columns:
         match = sim_results_df[sim_results_df["lineup_index"] == actual_idx]
-        if not match.empty:
+        if isinstance(match, (pd.DataFrame, pd.Series)) and not match.empty:
             sim_metrics = match.iloc[0].to_dict()
 
     # Resolve boom/bust row for this lineup
     bb_row: Optional[Dict[str, Any]] = None
     if boom_bust_df is not None and not boom_bust_df.empty and "lineup_index" in boom_bust_df.columns:
         bb_match = boom_bust_df[boom_bust_df["lineup_index"] == actual_idx]
-        if not bb_match.empty:
+        if isinstance(bb_match, (pd.DataFrame, pd.Series)) and not bb_match.empty:
             bb_row = bb_match.iloc[0].to_dict()
 
     render_lineup_card(

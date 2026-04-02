@@ -94,7 +94,7 @@ def summarize_sim_lab(
 
     if tag_col:
         tagged = lineups[lineups[tag_col].fillna("").str.strip().ne("")].copy()
-        if not tagged.empty:
+        if isinstance(tagged, (pd.DataFrame, pd.Series)) and not tagged.empty:
             _tag_agg = {}
             for col, ops in [
                 ("diff", ["count", "mean", "median"]),
