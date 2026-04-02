@@ -1,5 +1,7 @@
 {
-  "Kristaps Porzingis": {},
+  "Kristaps Porzingis": {
+    "max_exposure": 0.0
+  },
   "Luka Doncic": {
     "min_exposure": 0.5
   },
