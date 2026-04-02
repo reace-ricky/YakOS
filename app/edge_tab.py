@@ -9,6 +9,7 @@ Displays the pre-computed edge analysis from data/published/{sport}/:
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List
 from yak_core.bias import load_bias
 
@@ -159,6 +160,8 @@ _BOX_CONFIG = {
     "leverage_plays": {"title": "Leverage Plays", "emoji": "\U0001f48e", "color": "#FF9800"},
     "value_plays": {"title": "Value Plays", "emoji": "\U0001f4b0", "color": "#4CAF50"},
 }
+
+_FADE_DEFAULT_REASON = "Model says pass."
 
 
 def _render_player_card_html(player: Dict[str, Any], is_pga: bool, cleared_players: list | None = None) -> str:
@@ -474,6 +477,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     parts.append('<div class="tb-section-label">SNIPER SPOTS</div>')
     if board_snipers:
         for p in board_snipers[:3]:
+            _p_own = float(p.get("own_pct", p.get("ownership", 0)) or 0)
             parts.append(
                 f'<div class="tb-play-row">'
                 f'<span class="tb-pill tb-pill-pivot">SNIPER</span>'
@@ -481,7 +485,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
                 f'<span class="tb-meta">'
                 f'({p["team"]}, ${p["salary"]:,}) \u00b7 '
                 f'Proj {p["proj"]:.1f} \u00b7 '
-                f'Own {p["own_pct"]:.1f}% \u00b7 '
+                f'Own {_p_own:.1f}% \u00b7 '
                 f'Ceil {p["ceil"]:.0f}'
                 f'</span></div>'
             )
@@ -493,11 +497,16 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     parts.append('<div class="tb-section-label">THE FADE</div>')
     if board_fades:
         for f in board_fades:
+            _f_own = float(f.get("own_pct", f.get("ownership", 0)) or 0)
+            _f_salary = int(f.get("salary", 0))
+            if not f.get("player_name"):
+                logging.warning("[_render_the_board] fade_candidate missing player_name")
+                continue
             parts.append(
                 f'<div class="tb-danger-box">'
                 f'\U0001f480 <strong>{f["player_name"]}</strong> '
-                f'({f["own_pct"]:.1f}% owned, ${f["salary"]:,}) \u2014 '
-                f'{f["reasoning"]}'
+                f'({_f_own:.1f}% owned, ${_f_salary:,}) \u2014 '
+                f'{f.get("reasoning", _FADE_DEFAULT_REASON)}'
                 f'</div>'
             )
     else:
@@ -556,9 +565,10 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             fades = [f for f in fades if f.get("player_name", "") not in _board_names]
         if fades:
             f0 = fades[0]
+            _f0_own = float(f0.get("own_pct", f0.get("ownership", 0)) or 0)
             _fade_html = (
-                f"\U0001f480 <strong>FADE: {f0['player_name']} ({f0['own_pct']:.1f}% owned).</strong> "
-                f"{f0.get('reasoning', 'Model says pass.')}"
+                f"\U0001f480 <strong>FADE: {f0['player_name']} ({_f0_own:.1f}% owned).</strong> "
+                f"{f0.get('reasoning', _FADE_DEFAULT_REASON)}"
             )
 
         dangerinner = ""
