@@ -138,7 +138,7 @@ def compute_stack_targets(
         eligible_games = games[games["vegas_total"] >= 220.0][game_col].tolist()
 
     if not eligible_games:
-        return []
+        eligible_games = games[game_col].tolist()
 
     results = []
     for game in eligible_games:
