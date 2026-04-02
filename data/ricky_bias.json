@@ -1,7 +1,5 @@
 {
-  "Kristaps Porzingis": {
-    "max_exposure": 0.0
-  },
+  "Kristaps Porzingis": {},
   "Luka Doncic": {
     "min_exposure": 0.5
   },
@@ -56,9 +54,7 @@
   "DeMar DeRozan": {
     "max_exposure": 0.0
   },
-  "Josh Giddey": {
-    "max_exposure": 0.0
-  },
+  "Josh Giddey": {},
   "Gary Trent Jr.": {
     "min_exposure": 0.2
   },
