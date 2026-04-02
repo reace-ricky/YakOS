@@ -15,8 +15,6 @@ from yak_core.bias import load_bias
 import pandas as pd
 import streamlit as st
 
-from yak_core.bias import load_bias
-
 
 # ── Styled card CSS ─────────────────────────────────────────────────────────
 _CARD_CSS = """
