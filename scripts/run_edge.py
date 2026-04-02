@@ -96,12 +96,18 @@ def _classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
     def _to_list(frame, tag: str = ""):
         out = []
         for _, row in frame.iterrows():
+            _own_val = round(float(row.get("_own", 0)), 1)
+            # Fall back to sim90th if ceil is missing or zero
+            _ceil_val = round(float(row.get("ceil") or row.get("sim90th", 0)), 1)
             entry = {
                 "player_name": row.get("player_name", ""),
+                "team": str(row.get("team", "")),
                 "tag": tag,
                 "proj": round(float(row.get("proj", 0)), 1),
                 "salary": int(row.get("salary", 0)),
-                "ownership": round(float(row.get("_own", 0)), 1),
+                "ownership": _own_val,
+                "own_pct": _own_val,  # alias so both keys are always present
+                "ceil": _ceil_val,
                 "edge": round(float(row.get("_edge", 0)), 2),
                 "value": round(float(row.get("_val", 0)), 2),
                 "proj_minutes": round(float(row.get("proj_minutes", 0)), 1),
@@ -167,13 +173,16 @@ def _classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
                 continue
             _uf_row = _uf_rows.iloc[0]
             _raw_own = float(_uf_row.get("_own", 0))
+            _uf_ceil = round(float(_uf_row.get("ceil") or _uf_row.get("sim90th", 0)), 1)
             _final_fades.append({
                 "player_name": _uf_name,
+                "team": str(_uf_row.get("team", "")),
                 "tag": "fade",
                 "proj": round(float(_uf_row.get("_proj", 0)), 1),
                 "salary": int(_uf_row.get("_sal", 0)),
                 "ownership": round(_raw_own, 1),
                 "own_pct": round(_raw_own, 1),
+                "ceil": _uf_ceil,
                 "edge": round(float(_uf_row.get("_edge", 0)), 2),
                 "value": round(float(_uf_row.get("_val", 0)), 2),
                 "proj_minutes": round(float(_uf_row.get("proj_minutes", 0)), 1),
