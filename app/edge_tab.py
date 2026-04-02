@@ -610,7 +610,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
 
     # -- Auto-write fades to bias -------------------------------------------
     try:
-        from yak_core.bias import load_bias, save_bias
+        from yak_core.bias import save_bias
         _bias = st.session_state.setdefault("ricky_bias", load_bias())
         _fade_names = []
         if bust:
@@ -627,7 +627,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
 
     # -- Auto-write core plays to bias with minimum exposure floor ----------
     try:
-        from yak_core.bias import load_bias, save_bias
+        from yak_core.bias import save_bias
         _bias = st.session_state.setdefault("ricky_bias", load_bias())
         _core_players = edge_analysis.get("core_plays", [])
         _core_names = []
@@ -864,7 +864,7 @@ def render_edge_tab(sport: str) -> None:
     from app.data_loader import invalidate_published_cache, load_published_data
 
     # Load Ricky's bias overrides into session state (persisted to disk)
-    from yak_core.bias import load_bias, save_bias
+    from yak_core.bias import save_bias
     if "ricky_bias" not in st.session_state:
         st.session_state["ricky_bias"] = load_bias()
 
