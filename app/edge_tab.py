@@ -878,6 +878,8 @@ def render_edge_tab(sport: str) -> None:
 
     try:
         meta, pool, edge_analysis, edge_state, lineups = load_published_data(sport)
+        if isinstance(pool, dict):
+            pool = pd.DataFrame(pool)
     except Exception as e:
         st.error(f"Could not load {sport} data: {e}")
         return
