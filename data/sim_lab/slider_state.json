@@ -13,7 +13,8 @@
         "GPP_SNIPER_WEIGHT": 0.15,
         "CASH_FLOOR_WEIGHT": 0.0,
         "MIN_PLAYER_MINUTES": 3,
-        "NUM_LINEUPS": 25
+        "NUM_LINEUPS": 25,
+        "overall_bias_correction": 3.0
       },
       "ricky_weights": {
         "w_gpp": 0.4,
