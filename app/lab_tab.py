@@ -743,6 +743,12 @@ def render_lab_tab(sport: str) -> None:
                             if _filt:
                                 print(f"[publish] Filtered {_filt} OUT/IR/Suspended player(s) from refreshed pool")
 
+                        # Ensure vegas/spread columns exist even before odds load
+                        if "vegas_total" not in pool_fresh.columns:
+                            pool_fresh["vegas_total"] = 0.0
+                        if "spread" not in pool_fresh.columns:
+                            pool_fresh["spread"] = 0.0
+
                         pool_fresh.to_parquet(str(out_dir / "slate_pool.parquet"), index=False)
                         with open(out_dir / "slate_meta.json", "w") as f:
                             json.dump(meta_fresh, f, indent=2, default=str)
