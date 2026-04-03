@@ -72,7 +72,9 @@
   "Payton Pritchard": {
     "min_exposure": 0.2
   },
-  "Kyle Filipowski": {},
+  "Kyle Filipowski": {
+    "max_exposure": 0.0
+  },
   "Donovan Clingan": {
     "max_exposure": 0.0
   },
