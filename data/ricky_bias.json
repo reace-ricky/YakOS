@@ -50,31 +50,21 @@
   "Pelle Larsson": {
     "min_exposure": 0.2
   },
-  "Jalen Suggs": {
-    "max_exposure": 0.0
-  },
-  "DeMar DeRozan": {
-    "max_exposure": 0.0
-  },
+  "Jalen Suggs": {},
+  "DeMar DeRozan": {},
   "Josh Giddey": {},
   "Gary Trent Jr.": {
     "min_exposure": 0.2
   },
-  "Carlton Carrington": {
-    "max_exposure": 0.0
-  },
-  "CJ McCollum": {
-    "max_exposure": 0.0
-  },
+  "Carlton Carrington": {},
+  "CJ McCollum": {},
   "Jaylen Brown": {
     "min_exposure": 0.5
   },
   "Payton Pritchard": {
     "min_exposure": 0.2
   },
-  "Kyle Filipowski": {
-    "max_exposure": 0.0
-  },
+  "Kyle Filipowski": {},
   "Donovan Clingan": {
     "max_exposure": 0.0
   },
