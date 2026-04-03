@@ -244,6 +244,38 @@ def fetch_live_opt_pool(slate_date, cfg):
     df.loc[df["tank01_proj"] == 0.0, "tank01_proj"] = float("nan")
     # Note: players with proj == 0.0 are left for the ensemble / ricky_proj fallback.
     df["proj_source"] = "tank01"
+
+    # Merge Vegas odds (vegas_total, spread) into the live pool so that
+    # compute_stack_targets() and compute_tiered_stack_alerts() can use them.
+    # Tank01 betting-odds endpoint may return different abbreviations than the
+    # DFS endpoint (e.g. "SAS"/"GSW"/"PHX"/"NOP" vs "SA"/"GS"/"PHO"/"NO").
+    _ODDS_TO_POOL = {"SAS": "SA", "GSW": "GS", "PHX": "PHO", "NOP": "NO"}
+    try:
+        api_key = _get_rapidapi_key(cfg)
+        odds_df = fetch_betting_odds(date_key, api_key)
+        if not odds_df.empty and "team" in df.columns:
+            vegas_total_map: dict = {}
+            spread_map: dict = {}
+            for _, row in odds_df.iterrows():
+                home = _ODDS_TO_POOL.get(str(row.get("home_team", "")).upper(),
+                                         str(row.get("home_team", "")).upper())
+                away = _ODDS_TO_POOL.get(str(row.get("away_team", "")).upper(),
+                                         str(row.get("away_team", "")).upper())
+                total = float(row.get("vegas_total", 0) or 0)
+                spread = float(row.get("spread", 0) or 0)
+                for team in (home, away):
+                    if team:
+                        vegas_total_map[team] = total
+                        spread_map[team] = abs(spread)
+            df["vegas_total"] = df["team"].map(vegas_total_map).fillna(0.0)
+            df["spread"] = df["team"].map(spread_map).fillna(0.0)
+            n_mapped = (df["vegas_total"] > 0).sum()
+            print(f"[fetch_live_opt_pool] Vegas odds merged: {n_mapped}/{len(df)} players have vegas_total")
+        else:
+            print("[fetch_live_opt_pool] No betting odds available — vegas_total will be missing")
+    except Exception as exc:
+        print(f"[fetch_live_opt_pool] Betting odds fetch failed (non-fatal): {exc}")
+
     print("[fetch_live_opt_pool] Live pool: " + str(len(df)) + " players for " + slate_date)
     return df
 
