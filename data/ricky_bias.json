@@ -116,5 +116,8 @@
   },
   "Baylor Scheierman": {
     "min_exposure": 0.2
+  },
+  "Anthony Edwards": {
+    "min_exposure": 0.5
   }
 }
