@@ -1,17 +1,5 @@
 {
-  "Josh Giddey": {
-    "max_exposure": 0.0
-  },
-  "Kyle Filipowski": {
-    "max_exposure": 0.0
-  },
   "Kristaps Porzingis": {
-    "max_exposure": 0.0
-  },
-  "Kel'el Ware": {
-    "max_exposure": 0.0
-  },
-  "Daniel Gafford": {
     "max_exposure": 0.0
   },
   "Luka Doncic": {
@@ -38,16 +26,98 @@
   "Jarred Vanderbilt": {
     "min_exposure": 0.2
   },
-  "LaMelo Ball": {
+  "Nikola Jokic": {
+    "min_exposure": 0.5
+  },
+  "Jalen Johnson": {
+    "min_exposure": 0.5
+  },
+  "Victor Wembanyama": {
+    "min_exposure": 0.5
+  },
+  "Jayson Tatum": {
+    "min_exposure": 0.5
+  },
+  "Pascal Siakam": {
+    "min_exposure": 0.5
+  },
+  "Daeqwon Plowden": {
+    "min_exposure": 0.2
+  },
+  "Jaden Hardy": {
+    "min_exposure": 0.2
+  },
+  "Pelle Larsson": {
+    "min_exposure": 0.2
+  },
+  "Jalen Suggs": {
+    "max_exposure": 0.0
+  },
+  "DeMar DeRozan": {
+    "max_exposure": 0.0
+  },
+  "Josh Giddey": {},
+  "Gary Trent Jr.": {
+    "min_exposure": 0.2
+  },
+  "Carlton Carrington": {
+    "max_exposure": 0.0
+  },
+  "CJ McCollum": {
+    "max_exposure": 0.0
+  },
+  "Jaylen Brown": {
+    "min_exposure": 0.5
+  },
+  "Payton Pritchard": {
+    "min_exposure": 0.2
+  },
+  "Kyle Filipowski": {
     "max_exposure": 0.0
   },
   "Donovan Clingan": {
+    "max_exposure": 0.0
+  },
+  "Shai Gilgeous-Alexander": {
     "min_exposure": 0.5
   },
-  "Gradey Dick": {
+  "Donovan Mitchell": {
+    "min_exposure": 0.5
+  },
+  "Jalen Duren": {
+    "min_exposure": 0.5
+  },
+  "Dylan Harper": {
     "min_exposure": 0.2
   },
-  "Ben Saraf": {
+  "Isaiah Hartenstein": {
     "min_exposure": 0.2
+  },
+  "Javonte Green": {
+    "min_exposure": 0.2
+  },
+  "Yang Hansen": {
+    "max_exposure": 0.0
+  },
+  "Royce O'Neale": {
+    "min_exposure": 0.2
+  },
+  "Max Shulga": {
+    "max_exposure": 0.0
+  },
+  "Precious Achiuwa": {
+    "min_exposure": 0.5
+  },
+  "Tyler Smith": {
+    "min_exposure": 0.2
+  },
+  "Cormac Ryan": {
+    "min_exposure": 0.2
+  },
+  "Baylor Scheierman": {
+    "min_exposure": 0.2
+  },
+  "Anthony Edwards": {
+    "min_exposure": 0.5
   }
 }

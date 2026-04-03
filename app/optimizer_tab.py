@@ -649,7 +649,7 @@ def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
         _publish_idxs: list = []  # lineup indices selected for publishing
         if _lu_ranked_df is not None and not _lu_ranked_df.empty:
             _tagged = _lu_ranked_df[_lu_ranked_df["ricky_tag"] != ""].copy()
-            if not _tagged.empty:
+            if isinstance(_tagged, (pd.DataFrame, pd.Series)) and not _tagged.empty:
                 st.markdown("#### \U0001f3af Ricky's Picks")
                 if is_admin:
                     _tag_display = _tagged[[

@@ -923,7 +923,7 @@ def _find_game_environment_edges(pool: pd.DataFrame, mentioned: set = None) -> L
     # Find games with highest over/under
     if "game_id" in df.columns:
         game_ous = df.groupby("game_id")["over_under"].first().nlargest(1)
-        if not game_ous.empty:
+        if isinstance(game_ous, (pd.DataFrame, pd.Series)) and not game_ous.empty:
             top_game = game_ous.index[0]
             ou = game_ous.iloc[0]
             if ou >= 232:

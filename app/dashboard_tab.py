@@ -1109,7 +1109,7 @@ def _run_post_slate(sport: str, slate_date: str) -> Dict[str, Any]:
             if "date" in events.columns:
                 events["_date_str"] = events["date"].astype(str)
                 candidates = events[events["_date_str"] <= slate_date]
-                if not candidates.empty:
+                if isinstance(candidates, (pd.DataFrame, pd.Series)) and not candidates.empty:
                     latest = candidates.iloc[0]
                 else:
                     latest = events.iloc[0]

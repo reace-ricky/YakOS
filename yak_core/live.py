@@ -224,10 +224,10 @@ def fetch_live_opt_pool(slate_date, cfg):
     try:
         from yak_core.dk_ingest import fetch_dk_lobby_contests, fetch_dk_draftables
         _contests = fetch_dk_lobby_contests(sport="NBA")
-        if not _contests.empty:
+        if isinstance(_contests, (pd.DataFrame, pd.Series)) and not _contests.empty:
             _dg_id = int(_contests.iloc[0]["draft_group_id"])
             _dk_players = fetch_dk_draftables(_dg_id)
-            if not _dk_players.empty:
+            if isinstance(_dk_players, (pd.DataFrame, pd.Series)) and not _dk_players.empty:
                 _pos_map = dict(zip(_dk_players["name"], _dk_players["positions"]))
                 df["pos"] = df["player_name"].map(_pos_map).fillna(df["pos"])
     except Exception:
@@ -244,6 +244,41 @@ def fetch_live_opt_pool(slate_date, cfg):
     df.loc[df["tank01_proj"] == 0.0, "tank01_proj"] = float("nan")
     # Note: players with proj == 0.0 are left for the ensemble / ricky_proj fallback.
     df["proj_source"] = "tank01"
+
+    # Merge Vegas odds (vegas_total, spread) into the live pool so that
+    # compute_stack_targets() and compute_tiered_stack_alerts() can use them.
+    # Tank01 betting-odds endpoint may return different abbreviations than the
+    # DFS endpoint (e.g. "SAS"/"GSW"/"PHX"/"NOP" vs "SA"/"GS"/"PHO"/"NO").
+    _ODDS_TO_POOL = {"SAS": "SA", "GSW": "GS", "PHX": "PHO", "NOP": "NO"}
+
+    def _norm_team(raw: str) -> str:
+        upper = str(raw).upper()
+        return _ODDS_TO_POOL.get(upper, upper)
+
+    try:
+        api_key = _get_rapidapi_key(cfg)
+        odds_df = fetch_betting_odds(date_key, api_key)
+        if not odds_df.empty and "team" in df.columns:
+            vegas_total_map: Dict[str, float] = {}
+            spread_map: Dict[str, float] = {}
+            for _, row in odds_df.iterrows():
+                home = _norm_team(row.get("home_team", ""))
+                away = _norm_team(row.get("away_team", ""))
+                total = float(row.get("vegas_total", 0) or 0)
+                spread = abs(float(row.get("spread", 0) or 0))
+                for team in (home, away):
+                    if team:
+                        vegas_total_map[team] = total
+                        spread_map[team] = spread
+            df["vegas_total"] = df["team"].map(vegas_total_map).fillna(0.0)
+            df["spread"] = df["team"].map(spread_map).fillna(0.0)
+            n_mapped = (df["vegas_total"] > 0).sum()
+            print(f"[fetch_live_opt_pool] Vegas odds merged: {n_mapped}/{len(df)} players have vegas_total")
+        else:
+            print("[fetch_live_opt_pool] No betting odds available — vegas_total will be missing")
+    except Exception as exc:
+        print(f"[fetch_live_opt_pool] Betting odds fetch failed (non-fatal): {exc}")
+
     print("[fetch_live_opt_pool] Live pool: " + str(len(df)) + " players for " + slate_date)
     return df
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import tempfile
 from datetime import date, datetime, timezone
 try:
@@ -22,6 +23,7 @@ from typing import Any, Dict
 
 import pandas as pd
 import streamlit as st
+from yak_core.bias import load_bias, save_bias
 
 # DK ↔ Pool team abbreviation mapping
 _POOL_TO_DK_TEAM = {"SA": "SAS", "GS": "GSW", "PHO": "PHX", "NO": "NOP"}
@@ -265,12 +267,14 @@ def render_lab_tab(sport: str) -> None:
                     if _filtered:
                         print(f"[publish] Filtered {_filtered} OUT/IR/Suspended player(s) from published pool")
 
-                # Ensure vegas/spread columns exist even before odds load
+                # Ensure odds columns exist before saving — odds fetch runs after
+                # this early publish step, so these default to 0.0 (treated as
+                # "not available"; downstream comparisons use >= thresholds so
+                # 0.0 safely opts out of odds-gated logic).
                 if "vegas_total" not in pool.columns:
                     pool["vegas_total"] = 0.0
                 if "spread" not in pool.columns:
                     pool["spread"] = 0.0
-
                 pool.to_parquet(str(out_dir / "slate_pool.parquet"), index=False)
                 with open(out_dir / "slate_meta.json", "w") as f:
                     json.dump(meta, f, indent=2, default=str)
@@ -298,11 +302,17 @@ def render_lab_tab(sport: str) -> None:
                 st.session_state[_flash_key] = True
                 st.rerun()
             except Exception as e:
-                st.error(f"Load pool error: {e}")
+                import traceback
+                st.error(f"Edge analysis error: {e}")
+                st.code(traceback.format_exc())  
                 return
 
     if pool_path.exists():
         pool = pd.read_parquet(pool_path)
+
+        bias = load_bias()
+        already_faded = [name for name, entry in bias.items() if entry.get("max_exposure", 1.0) == 0.0]
+        st.session_state.setdefault("pool_fades", already_faded)
 
         if pool.empty:
             st.info("No pool data loaded. Click Load Pool above.")
@@ -363,8 +373,57 @@ def render_lab_tab(sport: str) -> None:
                     if _excl_not_in_pool:
                         st.caption(f"\u2139\ufe0f Also excluded (not in this pool): {', '.join(_excl_not_in_pool)}")
                 else:
-                    st.markdown(f"**Current pool:** {len(display_pool)} players")
-                    st.dataframe(display_pool, use_container_width=True, hide_index=True, height=400)
+                    st.markdown(f"**Current pool:** {len(display_pool)} players — check to fade / mark overvalued")
+                    bias = load_bias()
+                    already_faded = [n for n, v in bias.items() if v.get("max_exposure", 1.0) == 0.0]
+                    _editor_pool = display_pool.copy()
+                    _editor_pool.insert(0, "fade", _editor_pool["player_name"].isin(already_faded))
+                    _editor_pool.insert(1, "overvalued", False)
+                    edited = st.data_editor(
+                        _editor_pool,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=400,
+                        column_config={
+                            "fade": st.column_config.CheckboxColumn("Fade", default=False),
+                            "overvalued": st.column_config.CheckboxColumn("Overvalued", default=False),
+                        },
+                        disabled=[c for c in avail],
+                        key=f"lab_pool_editor_{sport}",
+                    )
+                    faded_players = edited[edited["fade"]]["player_name"].tolist()
+                    prev_fades = st.session_state.get("pool_fades", [])
+                    st.session_state["pool_fades"] = faded_players
+                    if set(faded_players) != set(prev_fades):
+                        bias = load_bias()
+                        # Remove max_exposure cap for players who are no longer faded
+                        for pname in prev_fades:
+                            if pname not in faded_players and pname in bias:
+                                bias[pname].pop("max_exposure", None)
+                        # Set max_exposure=0.0 for newly faded players
+                        for pname in faded_players:
+                            if pname not in bias:
+                                bias[pname] = {}
+                            bias[pname]["max_exposure"] = 0.0
+                        save_bias(bias)
+
+                    if st.button("💾 Save Pre-Slate Intel", key=f"save_pre_slate_{sport}"):
+                        rows = edited[(edited["fade"]) | (edited["overvalued"])].copy()
+                        if rows.empty:
+                            st.warning("No players flagged (fade or overvalued). Nothing to save.")
+                        else:
+                            rows["slate_date"] = slate_date
+                            rows["busted"] = None
+                            rows["actual_pts"] = None
+                            _db_path = Path(__file__).parent.parent / "yakos.db"
+                            try:
+                                with sqlite3.connect(str(_db_path)) as _conn:
+                                    rows.to_sql("rg_overvalued", _conn, if_exists="append", index=False)
+                                from yak_core.github_persistence import sync_feedback_async
+                                sync_feedback_async(["yakos.db"])
+                                st.success(f"✅ Saved {len(rows)} players to archive.")
+                            except Exception as _db_err:
+                                st.error(f"❌ Failed to save to archive: {_db_err}")
 
             sal_col = pd.to_numeric(pool.get("salary", pd.Series(dtype=float)), errors="coerce")
             proj_col = pd.to_numeric(pool.get("proj", pd.Series(dtype=float)), errors="coerce")
@@ -614,7 +673,7 @@ def render_lab_tab(sport: str) -> None:
                 _matchup_pool = _mp[_mp["team"].isin(showdown_teams)].sort_values("salary", ascending=False)
             except Exception:
                 pass
-        if not _matchup_pool.empty:
+        if isinstance(_matchup_pool, (pd.DataFrame, pd.Series)) and not _matchup_pool.empty:
             _NONE_CPT = "(Let optimizer choose)"
             _cpt_options = [_NONE_CPT] + _matchup_pool["player_name"].tolist()
 
@@ -726,12 +785,27 @@ def render_lab_tab(sport: str) -> None:
                     )
                     n_built = lineups_df["lineup_index"].nunique() if "lineup_index" in lineups_df.columns else 0
 
-                    st.success(f"Built {n_built} lineups for {contest_label}")
+                    if n_built == 0:
+                        st.error(
+                            f"⚠️ No lineups built for **{contest_label}**. "
+                            "The optimizer could not find a valid lineup. "
+                            "Check: pool is loaded, salary cap isn't too tight, and your lock/exclude list isn't over-constrained."
+                        )
+                    else:
+                        st.success(f"Built {n_built} lineups for {contest_label}")
 
                     # ── Ricky SE Ranking ─────────────────────────────────────
                     # Rank lineups and tag top 3 as SE Core / Spicy / Alt
+                    # Only attempt ranking when lineups were actually built.
+                    # _lu_ranked is initialized to None so the archive section
+                    # below can guard itself against the 0-lineups case.
+                    _lu_ranked = None
+                    _can_rank = n_built > 0 and "lineup_index" in lineups_df.columns
                     try:
                         from yak_core.ricky_rank import rank_lineups_for_se, RICKY_W_GPP, RICKY_W_CEIL, RICKY_W_OWN
+                        if not _can_rank:
+                            # Error already shown above; skip silently
+                            raise StopIteration
                         # Get Ricky weights from auto-wired profile, or use defaults
                         _ricky_w = {"w_gpp": RICKY_W_GPP, "w_ceil": RICKY_W_CEIL, "w_own": RICKY_W_OWN}
                         if _active_profile:
@@ -769,7 +843,7 @@ def render_lab_tab(sport: str) -> None:
 
                         # Show SE tagged lineups first
                         _tagged = _lu_ranked[_lu_ranked["ricky_tag"] != ""].copy()
-                        if not _tagged.empty:
+                        if isinstance(_tagged, (pd.DataFrame, pd.Series)) and not _tagged.empty:
                             st.markdown("#### \U0001f3af Ricky SE Picks")
                             _tag_display = _tagged[[
                                 "lineup_index", "ricky_tag", "ricky_score",
@@ -808,7 +882,7 @@ def render_lab_tab(sport: str) -> None:
                         # ── Overwrite lineups parquet with ONLY SE picks ──
                         # Build 40, rank, save only the top 3 tagged lineups
                         # so Edge Analysis / Publish shows just SE picks.
-                        if not _tagged.empty:
+                        if isinstance(_tagged, (pd.DataFrame, pd.Series)) and not _tagged.empty:
                             _tagged_idxs = _tagged["lineup_index"].tolist()
                             _se_only = lineups_df[lineups_df["lineup_index"].isin(_tagged_idxs)].copy()
                             _idx_map = {old: new for new, old in enumerate(_tagged_idxs)}
@@ -868,6 +942,8 @@ def render_lab_tab(sport: str) -> None:
                                 }),
                                 use_container_width=True, hide_index=True,
                             )
+                    except StopIteration:
+                        pass  # no lineups built — error already shown above
                     except Exception as _rank_err:
                         st.warning(f"Ricky ranking failed: {_rank_err}")
 
@@ -888,65 +964,67 @@ def render_lab_tab(sport: str) -> None:
                     # Shows all lineups with checkbox column; top 3 by
                     # ricky_score pre-checked.  "Send to Archive" stores the
                     # full population with ricky_selected flags.
-                    st.markdown("---")
-                    st.markdown("#### Send to Archive")
-                    try:
-                        # Build a per-lineup summary for the data_editor
-                        _all_lu = _lu_ranked.sort_values("ricky_score", ascending=False).reset_index(drop=True).copy()
-                        # Pre-check top 3
-                        _all_lu.insert(
-                            0, "\u2713 Send",
-                            [True] * min(3, len(_all_lu)) + [False] * max(0, len(_all_lu) - 3),
-                        )
-                        _editor_cols = [
-                            "\u2713 Send", "lineup_index", "ricky_rank", "ricky_tag",
-                            "ricky_score", "total_gpp_score", "total_ceil",
-                            "total_proj", "avg_own_pct", "total_salary",
-                        ]
-                        _editor_avail = [c for c in _editor_cols if c in _all_lu.columns]
-                        _edited = st.data_editor(
-                            _all_lu[_editor_avail],
-                            column_config={
-                                "\u2713 Send": st.column_config.CheckboxColumn(
-                                    "\u2713 Send", default=False,
-                                ),
-                            },
-                            hide_index=True,
-                            use_container_width=True,
-                            key=f"lab_archive_editor_{sport}",
-                        )
-
-                        _n_checked = int(_edited["\u2713 Send"].sum())
-                        st.caption(f"{_n_checked} of {len(_edited)} lineups selected as Ricky picks")
-
-                        if st.button(
-                            f"\U0001f4e5 Send {len(_all_lu)} lineups to Archive",
-                            type="primary",
-                            key=f"lab_send_archive_{sport}",
-                        ):
-                            from utils.archive import append_to_archive
-                            # Expand player-level rows for the full population
-                            _full_lineups = st.session_state.get(
-                                f"lab_full_lineups_{sport}", lineups_df
+                    # Guard: only show when lineups were built and ranked.
+                    if _lu_ranked is not None:
+                        st.markdown("---")
+                        st.markdown("#### Send to Archive")
+                        try:
+                            # Build a per-lineup summary for the data_editor
+                            _all_lu = _lu_ranked.sort_values("ricky_score", ascending=False).reset_index(drop=True).copy()
+                            # Pre-check top 3
+                            _all_lu.insert(
+                                0, "\u2713 Send",
+                                [True] * min(3, len(_all_lu)) + [False] * max(0, len(_all_lu) - 3),
                             )
-                            # Map ricky_selected from the checkbox editor
-                            _selected_idxs = set(
-                                _edited.loc[_edited["\u2713 Send"], "lineup_index"].tolist()
+                            _editor_cols = [
+                                "\u2713 Send", "lineup_index", "ricky_rank", "ricky_tag",
+                                "ricky_score", "total_gpp_score", "total_ceil",
+                                "total_proj", "avg_own_pct", "total_salary",
+                            ]
+                            _editor_avail = [c for c in _editor_cols if c in _all_lu.columns]
+                            _edited = st.data_editor(
+                                _all_lu[_editor_avail],
+                                column_config={
+                                    "\u2713 Send": st.column_config.CheckboxColumn(
+                                        "\u2713 Send", default=False,
+                                    ),
+                                },
+                                hide_index=True,
+                                use_container_width=True,
+                                key=f"lab_archive_editor_{sport}",
                             )
-                            _archive_rows = _full_lineups.copy()
-                            _archive_rows["ricky_selected"] = _archive_rows["lineup_index"].isin(_selected_idxs)
-                            _archive_rows["archived_at"] = pd.Timestamp.now().isoformat()
-                            _archive_rows["contest_type"] = _contest_display
-                            _archive_rows["slate_date"] = slate_date
-                            _archive_rows["profile_name"] = (_profile_key_internal or "")
 
-                            _archive_path = append_to_archive(_archive_rows)
-                            st.success(
-                                f"{len(_archive_rows)} lineup rows archived — "
-                                f"{_n_checked} flagged as Ricky picks."
-                            )
-                    except Exception as _archive_err:
-                        st.warning(f"Archive UI error: {_archive_err}")
+                            _n_checked = int(_edited["\u2713 Send"].sum())
+                            st.caption(f"{_n_checked} of {len(_edited)} lineups selected as Ricky picks")
+
+                            if st.button(
+                                f"\U0001f4e5 Send {len(_all_lu)} lineups to Archive",
+                                type="primary",
+                                key=f"lab_send_archive_{sport}",
+                            ):
+                                from utils.archive import append_to_archive
+                                # Expand player-level rows for the full population
+                                _full_lineups = st.session_state.get(
+                                    f"lab_full_lineups_{sport}", lineups_df
+                                )
+                                # Map ricky_selected from the checkbox editor
+                                _selected_idxs = set(
+                                    _edited.loc[_edited["\u2713 Send"], "lineup_index"].tolist()
+                                )
+                                _archive_rows = _full_lineups.copy()
+                                _archive_rows["ricky_selected"] = _archive_rows["lineup_index"].isin(_selected_idxs)
+                                _archive_rows["archived_at"] = pd.Timestamp.now().isoformat()
+                                _archive_rows["contest_type"] = _contest_display
+                                _archive_rows["slate_date"] = slate_date
+                                _archive_rows["profile_name"] = (_profile_key_internal or "")
+
+                                _archive_path = append_to_archive(_archive_rows)
+                                st.success(
+                                    f"{len(_archive_rows)} lineup rows archived — "
+                                    f"{_n_checked} flagged as Ricky picks."
+                                )
+                        except Exception as _archive_err:
+                            st.warning(f"Archive UI error: {_archive_err}")
 
                 except Exception as e:
                     st.error(f"Build lineups error: {e}")
@@ -1086,7 +1164,7 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
             player_id_map=id_map,
             api_key=api_key,
         )
-        if not game_logs.empty:
+        if isinstance(game_logs, (pd.DataFrame, pd.Series)) and not game_logs.empty:
             pool = pool.merge(game_logs, on="player_name", how="left")
             _n_with = pool["rolling_fp_5"].notna().sum() if "rolling_fp_5" in pool.columns else 0
             print(f"[_load_nba_pool] Merged rolling game logs for {_n_with}/{len(pool)} players")
@@ -1708,6 +1786,53 @@ def _run_edge(sport: str, slate_date: str, out_dir: Path) -> tuple:
             "late_players": late_df.nlargest(5, "proj")["player_name"].tolist(),
         }
     edge_analysis = {"bullets": bullets, "recommendation": recommendation, **classified, "signals_df_path": "signals.parquet"}
+    # --- Inject manual fades from bias into edge_analysis ---
+    try:
+        from yak_core.bias import load_bias
+        bias = load_bias()
+        manual_fades = []
+        if isinstance(bias, dict):
+            # players with max_exposure == 0.0 are manual fades
+            faded_names = {name for name, cfg in bias.items()
+                           if isinstance(cfg, dict) and cfg.get("max_exposure", 1.0) == 0.0}
+            if faded_names:
+                # restrict to players actually in this slate's edge_df
+                in_slate = edge_df[edge_df["player_name"].isin(faded_names)].copy()
+                if not in_slate.empty:
+                    own_col = "ownership" if "ownership" in in_slate.columns and in_slate["ownership"].notna().any() else "own_pct"
+                    own_series = pd.to_numeric(in_slate.get(own_col, 0), errors="coerce").fillna(0)
+                    if own_series.max() <= 1.0:
+                        own_series = own_series * 100
+                    sal_series = pd.to_numeric(in_slate.get("salary", 0), errors="coerce").fillna(0)
+
+                    for _, row in in_slate.iterrows():
+                        pname = row.get("player_name", "")
+                        if not pname:
+                            continue
+                        _mf_own = float(own_series.loc[row.name])
+                        _mf_ceil = float(row.get("ceil") or row.get("sim90th", 0))
+                        manual_fades.append(
+                            {
+                                "player_name": pname,
+                                "team": row.get("team", "?"),
+                                "salary": int(sal_series.loc[row.name]),
+                                "proj": float(row.get("proj", 0.0)),
+                                "own_pct": _mf_own,
+                                "ownership": _mf_own,  # keep both keys for rendering compatibility
+                                "ceil": round(_mf_ceil, 1),
+                                "edge": float(row.get("edge_score", row.get("edge", 0.0))),
+                                "value": float(row.get("value", 0.0)),
+                                "risk_score": float(row.get("risk_score", 0.0)),
+                                "proj_minutes": float(row.get("proj_minutes", 0.0)),
+                                "sim90th": float(row.get("sim90th", 0.0)),
+                                "reasoning": "Manual fade",
+                            }
+                        )
+        if manual_fades:
+            existing = edge_analysis.get("fade_candidates", [])
+            edge_analysis["fade_candidates"] = existing + manual_fades
+    except Exception as _mf_err:
+        print(f"[run_edge] manual fade wiring failed: {_mf_err}")
     # Attach late swap alerts so they persist in edge_analysis.json
     if late_swap_alerts:
         edge_analysis["late_swap_alerts"] = late_swap_alerts
@@ -2063,7 +2188,7 @@ def _build_late_swap_alerts(
                 & (~pool_after["status"].fillna("Active").str.strip().str.upper().isin(_OUT_STATUSES))
             ].copy() if "team" in pool_after.columns else pd.DataFrame()
 
-            if not teammates.empty:
+            if isinstance(teammates, (pd.DataFrame, pd.Series)) and not teammates.empty:
                 # Positional overlap: same position group gets most minutes
                 pos_primary = pos.split("/")[0] if "/" in pos else pos
                 _POS_GROUPS = {
@@ -2112,7 +2237,7 @@ def _build_late_swap_alerts(
                 & (pool_after["player_name"] != player_name)
             ].copy() if "pos" in pool_after.columns else pd.DataFrame()
 
-            if not candidates.empty:
+            if isinstance(candidates, (pd.DataFrame, pd.Series)) and not candidates.empty:
                 own_col = "ownership" if "ownership" in candidates.columns and candidates["ownership"].notna().any() else "own_pct"
                 cand_own = pd.to_numeric(candidates.get(own_col, 0), errors="coerce").fillna(0)
                 cand_proj = pd.to_numeric(candidates.get("proj", 0), errors="coerce").fillna(0)
@@ -2126,7 +2251,7 @@ def _build_late_swap_alerts(
                     & (cand_proj > 0)
                 )
                 cash_cands = candidates[cash_mask]
-                if not cash_cands.empty:
+                if isinstance(cash_cands, (pd.DataFrame, pd.Series)) and not cash_cands.empty:
                     best_cash = cash_cands.loc[pd.to_numeric(cash_cands["proj"], errors="coerce").idxmax()]
                     cash_pivot = {
                         "name": str(best_cash.get("player_name", "")),
@@ -2145,7 +2270,7 @@ def _build_late_swap_alerts(
                     & (cand_proj > 15)
                 )
                 gpp_cands = candidates[gpp_mask]
-                if not gpp_cands.empty:
+                if isinstance(gpp_cands, (pd.DataFrame, pd.Series)) and not gpp_cands.empty:
                     # Prefer best edge, then lowest ownership
                     if edge_col in gpp_cands.columns and pd.to_numeric(gpp_cands[edge_col], errors="coerce").abs().sum() > 0:
                         best_gpp = gpp_cands.loc[pd.to_numeric(gpp_cands[edge_col], errors="coerce").idxmax()]
@@ -2885,7 +3010,7 @@ def _fetch_pga_actuals(api_key: str, slate_date: str = "") -> pd.DataFrame:
         # is closest to (and <= ) the slate date
         events["_date_str"] = events["date"].astype(str)
         candidates = events[events["_date_str"] <= slate_date]
-        if not candidates.empty:
+        if isinstance(candidates, (pd.DataFrame, pd.Series)) and not candidates.empty:
             latest = candidates.iloc[0]  # most recent event on or before slate_date
         else:
             latest = events.iloc[0]  # fallback: most recent overall

@@ -77,7 +77,7 @@ def build_pga_pool(
     # ── 3. Pre-Tournament Predictions ────────────────────────────────
     try:
         preds_df = dg.get_pre_tournament_preds()
-        if not preds_df.empty:
+        if isinstance(preds_df, (pd.DataFrame, pd.Series)) and not preds_df.empty:
             pred_cols = {
                 "win": "win_prob",
                 "top_5": "top5_prob",
@@ -107,7 +107,7 @@ def build_pga_pool(
     # ── 4. Skill Decompositions (Course Fit) ─────────────────────────
     try:
         decomp_df = dg.get_decompositions()
-        if not decomp_df.empty:
+        if isinstance(decomp_df, (pd.DataFrame, pd.Series)) and not decomp_df.empty:
             decomp_cols = {
                 "baseline_pred": "sg_baseline",
                 "final_pred": "sg_final",
@@ -140,7 +140,7 @@ def build_pga_pool(
     # ── 5. Skill Ratings (SG categories) ─────────────────────────────
     try:
         skill_df = dg.get_skill_ratings()
-        if not skill_df.empty:
+        if isinstance(skill_df, (pd.DataFrame, pd.Series)) and not skill_df.empty:
             sg_cols = ["dg_id", "sg_total", "sg_ott", "sg_app", "sg_arg", "sg_putt",
                        "driving_acc", "driving_dist"]
             sg_cols = [c for c in sg_cols if c in skill_df.columns]
@@ -156,7 +156,7 @@ def build_pga_pool(
     # ── 6. Field Updates (WDs, rankings, tee times) ────────────────────
     try:
         field_df = dg.get_field()
-        if not field_df.empty:
+        if isinstance(field_df, (pd.DataFrame, pd.Series)) and not field_df.empty:
             field_cols = ["dg_id", "dg_rank"]
             # Pick up tee-time columns under any name the API uses
             _tt_candidates = ["teetimes", "r1_teetime", "round_1_teetime", "tee_time"]
@@ -361,7 +361,7 @@ def build_pga_pool(
             ]
             if _match.empty:
                 _match = schedule_df.head(1)  # fallback
-            if not _match.empty:
+            if isinstance(_match, (pd.DataFrame, pd.Series)) and not _match.empty:
                 _row = _match.iloc[0]
                 # Column names vary — try common variants
                 lat = float(_row.get("latitude", _row.get("lat", 0)))
@@ -402,7 +402,7 @@ def build_pga_pool(
                 _sd_preds["make_cut"] = pool["make_cut_prob"]
                 _sd_preds = _sd_preds.dropna(subset=["win", "top_5", "top_10", "top_20", "make_cut"])
 
-                if not _sd_preds.empty:
+                if isinstance(_sd_preds, (pd.DataFrame, pd.Series)) and not _sd_preds.empty:
                     _sd_result = _derive_round_projections(_sd_preds)
                     # Merge single-round proj/ceil/floor back into pool
                     _sd_merge = _sd_result[["dg_id", "proj", "ceil", "floor"]].rename(

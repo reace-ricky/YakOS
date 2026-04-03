@@ -9,7 +9,9 @@ Displays the pre-computed edge analysis from data/published/{sport}/:
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List
+from yak_core.bias import load_bias
 
 import pandas as pd
 import streamlit as st
@@ -159,16 +161,20 @@ _BOX_CONFIG = {
     "value_plays": {"title": "Value Plays", "emoji": "\U0001f4b0", "color": "#4CAF50"},
 }
 
+_FADE_DEFAULT_REASON = "Model says pass."
+
 
 def _render_player_card_html(player: Dict[str, Any], is_pga: bool, cleared_players: list | None = None) -> str:
     name = player.get("player_name", "?")
     sal = player.get("salary", 0)
     proj = player.get("proj", 0)
     edge = player.get("edge", 0)
-    own = player.get("ownership", 0)
+    # Support both "ownership" and "own_pct" key names for compatibility
+    own = player.get("ownership", player.get("own_pct", 0))
     risk = player.get("risk_score", 0)
     mins = player.get("proj_minutes", 0)
-    ceil_val = player.get("ceil", 0)
+    # Fall back to sim90th when "ceil" is absent or zero
+    ceil_val = player.get("ceil") or player.get("sim90th", 0)
 
     cleared = cleared_players or []
     cleared_badge = ""
@@ -264,7 +270,7 @@ def _classify_signal(p: Dict[str, Any], pool: pd.DataFrame) -> tuple:
     spread = 0.0
     if not pool.empty and "player_name" in pool.columns:
         match = pool[pool["player_name"] == name]
-        if not match.empty:
+        if isinstance(match, (pd.DataFrame, pd.Series)) and not match.empty:
             row = match.iloc[0]
             for vc in ("vegas_total", "over_under", "total"):
                 if vc in row.index and row[vc]:
@@ -333,7 +339,7 @@ def _assign_tiered_plays(snipers: list, pool: pd.DataFrame) -> list:
 
 
 def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, Any], slate_date: str = "") -> None:
-    from yak_core.board import compute_stack_targets, compute_sniper_spots, compute_fades
+    from yak_core.board import compute_stack_targets, compute_sniper_spots
     from yak_core.rickys_take import generate_bust_call, generate_last_night, reset_rotator
 
     reset_rotator(slate_date=slate_date or None)
@@ -375,7 +381,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
         edge_analysis.get("fade_candidates"),
         positive_tier_names=_positive_tier_names or None,
     )
-    raw_fades = compute_fades(pool, edge_analysis)
+    raw_fades = edge_analysis.get("fade_candidates", [])
 
     fade_names: set[str] = set()
     if bust:
@@ -439,6 +445,15 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     parts.append('<div class="tb-section-label">STACK TARGETS</div>')
     if board_stacks:
         for s in board_stacks:
+            # Use combined_ceil when available; fall back to combined_proj with a "Proj" label
+            _s_ceil = s.get("combined_ceil", 0)
+            _s_proj = s.get("combined_proj", 0)
+            if _s_ceil > 0:
+                _metric_str = f"Combined ceil {_s_ceil:.0f}"
+            elif _s_proj > 0:
+                _metric_str = f"Combined proj {_s_proj:.0f}"
+            else:
+                _metric_str = "Proj N/A"
             parts.append(
                 f'<div class="tb-play-row">'
                 f'<span class="tb-pill">STACK</span>'
@@ -446,7 +461,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
                 f'<span class="tb-meta">'
                 f'Total {s["vegas_total"]:.0f} \u00b7 '
                 f'{s["top_player1"]} + {s["top_player2"]} \u00b7 '
-                f'Combined ceil {s["combined_ceil"]:.0f}'
+                f'{_metric_str}'
                 f'</span></div>'
             )
     else:
@@ -473,6 +488,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     parts.append('<div class="tb-section-label">SNIPER SPOTS</div>')
     if board_snipers:
         for p in board_snipers[:3]:
+            _p_own = float(p.get("own_pct", p.get("ownership", 0)) or 0)
             parts.append(
                 f'<div class="tb-play-row">'
                 f'<span class="tb-pill tb-pill-pivot">SNIPER</span>'
@@ -480,7 +496,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
                 f'<span class="tb-meta">'
                 f'({p["team"]}, ${p["salary"]:,}) \u00b7 '
                 f'Proj {p["proj"]:.1f} \u00b7 '
-                f'Own {p["own_pct"]:.1f}% \u00b7 '
+                f'Own {_p_own:.1f}% \u00b7 '
                 f'Ceil {p["ceil"]:.0f}'
                 f'</span></div>'
             )
@@ -488,21 +504,25 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
         parts.append('<div class="tb-setup">No sniper spots on this slate.</div>')
 
     # ── 3c. The Fade (max 2) ──────────────────────────────────────────
-    board_fades = compute_fades(pool, edge_analysis)
+    board_fades = edge_analysis.get("fade_candidates", [])[:2]
     parts.append('<div class="tb-section-label">THE FADE</div>')
     if board_fades:
         for f in board_fades:
+            _f_own = float(f.get("own_pct", f.get("ownership", 0)) or 0)
+            _f_salary = int(f.get("salary", 0))
+            if not f.get("player_name"):
+                logging.warning("[_render_the_board] fade_candidate missing player_name")
+                continue
             parts.append(
                 f'<div class="tb-danger-box">'
                 f'\U0001f480 <strong>{f["player_name"]}</strong> '
-                f'({f["own_pct"]:.1f}% owned, ${f["salary"]:,}) \u2014 '
-                f'{f["reasoning"]}'
+                f'({_f_own:.1f}% owned, ${_f_salary:,}) \u2014 '
+                f'{f.get("reasoning", _FADE_DEFAULT_REASON)}'
                 f'</div>'
             )
     else:
         parts.append('<div class="tb-setup">No strong fades on this slate.</div>')
-
-    # -- 4+5. Merged Danger Box: Trap + Bust ───────────────────────────
+       # -- 4+5. Merged Danger Box: Trap + Bust ───────────────────────────
     _board_names = set()
     for _tier in ("core_plays", "leverage_plays", "value_plays"):
         for _p in edge_analysis.get(_tier, []):
@@ -556,24 +576,30 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             fades = [f for f in fades if f.get("player_name", "") not in _board_names]
         if fades:
             f0 = fades[0]
+            _f0_own = float(f0.get("own_pct", f0.get("ownership", 0)) or 0)
             _fade_html = (
-                f"\U0001f480 <strong>FADE: {f0['player_name']} ({f0['own_pct']:.1f}% owned).</strong> "
-                f"{f0.get('reasoning', 'Model says pass.')}"
+                f"\U0001f480 <strong>FADE: {f0['player_name']} ({_f0_own:.1f}% owned).</strong> "
+                f"{f0.get('reasoning', _FADE_DEFAULT_REASON)}"
             )
 
-    if _trap_html or _fade_html:
-        danger_inner = ""
-        if _trap_html:
-            danger_inner += _trap_html
-        if _trap_html and _fade_html:
-            danger_inner += '<div class="tb-divider"></div>'
-        if _fade_html:
-            danger_inner += _fade_html
-        parts.append(f'<div class="tb-danger-box">{danger_inner}</div>')
+        dangerinner = ""
+        if _trap_html or _fade_html:
+            if _trap_html:
+                dangerinner += _trap_html
+            if _trap_html and _fade_html:
+                dangerinner += '<div class="tb-divider"></div>'
+            if _fade_html:
+                dangerinner += _fade_html
+        if board_fades:
+            parts.append(f'<div class="tb-danger-box">{dangerinner}</div>')
+        else:
+            if parts and 'No strong fades' in parts[-1]:
+                parts.pop()
+            parts.append(f'<div class="tb-danger-box">{dangerinner}</div>')
 
     # -- Auto-write fades to bias -------------------------------------------
     try:
-        from yak_core.bias import load_bias, save_bias
+        from yak_core.bias import save_bias
         _bias = st.session_state.setdefault("ricky_bias", load_bias())
         _fade_names = []
         if bust:
@@ -590,7 +616,7 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
 
     # -- Auto-write core plays to bias with minimum exposure floor ----------
     try:
-        from yak_core.bias import load_bias, save_bias
+        from yak_core.bias import save_bias
         _bias = st.session_state.setdefault("ricky_bias", load_bias())
         _core_players = edge_analysis.get("core_plays", [])
         _core_names = []
@@ -702,7 +728,7 @@ def _render_bias_panel(pool: pd.DataFrame) -> None:
     with st.expander("🎛️ Ricky's Manual Adjustments", expanded=False):
         bias = st.session_state.setdefault("ricky_bias", {})
 
-        player_names = sorted(pool["player_name"].dropna().unique().tolist()) if not pool.empty else []
+        player_names = sorted(pool["player_name"].dropna().unique().tolist()) if isinstance(pool, pd.DataFrame) and not pool.empty else []
         if not player_names:
             st.caption("Load a pool first.")
             return
@@ -779,7 +805,7 @@ def _compute_optimizer_notes(lineups: dict | None) -> List[str]:
                 lambda t: tuple(sorted(t.value_counts().nlargest(2).index))
             )
             pairs = teams_per_lu[teams_per_lu.apply(len) >= 2]
-            if not pairs.empty:
+            if isinstance(pairs, (pd.DataFrame, pd.Series)) and not pairs.empty:
                 top_pair = pairs.value_counts().idxmax()
                 pair_pct = pairs.value_counts().iloc[0] / n_lineups * 100
                 notes.append(
@@ -827,7 +853,7 @@ def render_edge_tab(sport: str) -> None:
     from app.data_loader import invalidate_published_cache, load_published_data
 
     # Load Ricky's bias overrides into session state (persisted to disk)
-    from yak_core.bias import load_bias, save_bias
+    from yak_core.bias import save_bias
     if "ricky_bias" not in st.session_state:
         st.session_state["ricky_bias"] = load_bias()
 
@@ -843,6 +869,8 @@ def render_edge_tab(sport: str) -> None:
 
     try:
         meta, pool, edge_analysis, edge_state, lineups = load_published_data(sport)
+        if isinstance(pool, dict):
+            pool = pd.DataFrame(pool)
     except Exception as e:
         st.error(f"Could not load {sport} data: {e}")
         return

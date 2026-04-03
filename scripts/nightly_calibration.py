@@ -294,7 +294,7 @@ def run_nba_calibration(slate_date: str) -> dict:
     # Breakout accuracy
     if "breakout_score" in pool.columns and "actual_fp" in pool.columns:
         bo_pool = pool[pool["actual_fp"].notna() & (pool["actual_fp"] > 0)].copy()
-        if not bo_pool.empty:
+        if isinstance(bo_pool, (pd.DataFrame, pd.Series)) and not bo_pool.empty:
             predicted_breakout = bo_pool["breakout_score"] >= 60
             ceil_vals = pd.to_numeric(bo_pool.get("ceil", 0), errors="coerce").fillna(0)
             sal_vals = pd.to_numeric(bo_pool.get("salary", 0), errors="coerce").fillna(0)

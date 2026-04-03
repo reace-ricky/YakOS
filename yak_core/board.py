@@ -96,14 +96,19 @@ def compute_stack_targets(
     """Find game stacks with highest combined ceiling, gated by vegas_total.
 
     Returns up to STACK_MAX entries, each with:
-      game_id, team1, team2, vegas_total, top_player1, top_player2, combined_ceil
+      game_id, team1, team2, vegas_total, top_player1, top_player2,
+      combined_ceil, combined_proj
     """
     if pool is None or pool.empty:
         return []
 
     df = pool.copy()
     ceil = _get_ricky_ceil(df)
-    df["_ceil"] = ceil
+    proj = _get_ricky_proj(df)
+    # If ceil is uniformly zero (missing or not yet computed), rank by proj instead
+    use_proj_fallback = ceil.sum() == 0
+    df["_ceil"] = proj if use_proj_fallback else ceil
+    df["_proj"] = proj
 
     # Determine vegas total per game
     vegas_col = None
@@ -138,7 +143,7 @@ def compute_stack_targets(
         eligible_games = games[games["vegas_total"] >= 220.0][game_col].tolist()
 
     if not eligible_games:
-        return []
+        eligible_games = games[game_col].tolist()
 
     results = []
     for game in eligible_games:
@@ -156,7 +161,7 @@ def compute_stack_targets(
         team1 = teams[0] if len(teams) > 0 else "?"
         team2 = teams[1] if len(teams) > 1 else "?"
 
-        # Top 2 players by ceiling in this game
+        # Top 2 players by ceiling (or proj fallback) in this game
         top = game_players.nlargest(2, "_ceil")
         if len(top) < 2:
             continue
@@ -164,6 +169,7 @@ def compute_stack_targets(
         p1 = top.iloc[0]
         p2 = top.iloc[1]
         combined_ceil = float(p1["_ceil"]) + float(p2["_ceil"])
+        combined_proj = float(p1["_proj"]) + float(p2["_proj"])
 
         results.append({
             "game_id": game,
@@ -173,6 +179,9 @@ def compute_stack_targets(
             "top_player1": p1.get("player_name", "?"),
             "top_player2": p2.get("player_name", "?"),
             "combined_ceil": combined_ceil,
+            "combined_proj": combined_proj,
+            # Flag so display layer knows which metric was used for sorting
+            "ceil_is_proj_fallback": use_proj_fallback,
         })
 
     # Sort by combined ceiling descending, take top STACK_MAX
@@ -309,7 +318,7 @@ def compute_fades(
 
     # Merge ranks back into popular
     popular = popular.merge(
-        all_df[["player_name", "_ricky_rank", "_salary_rank"]].drop_duplicates("player_name"),
+        all_df[["player_name", "_ricky_rank", "_salary_rank", "_own"]].drop_duplicates("player_name"),
         on="player_name",
         how="left",
         suffixes=("", "_dup"),
