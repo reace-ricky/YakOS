@@ -1,7 +1,5 @@
 {
-  "Kristaps Porzingis": {
-    "max_exposure": 0.0
-  },
+  "Kristaps Porzingis": {},
   "Luka Doncic": {
     "min_exposure": 0.5
   },
@@ -60,9 +58,7 @@
   "Gary Trent Jr.": {
     "min_exposure": 0.2
   },
-  "Carlton Carrington": {
-    "max_exposure": 0.0
-  },
+  "Carlton Carrington": {},
   "CJ McCollum": {
     "max_exposure": 0.0
   },
@@ -75,9 +71,7 @@
   "Kyle Filipowski": {
     "max_exposure": 0.0
   },
-  "Donovan Clingan": {
-    "max_exposure": 0.0
-  },
+  "Donovan Clingan": {},
   "Shai Gilgeous-Alexander": {
     "min_exposure": 0.5
   },
@@ -96,9 +90,7 @@
   "Javonte Green": {
     "min_exposure": 0.2
   },
-  "Yang Hansen": {
-    "max_exposure": 0.0
-  },
+  "Yang Hansen": {},
   "Royce O'Neale": {
     "min_exposure": 0.2
   },
