@@ -1,7 +1,7 @@
 {
   "sport": "NBA",
   "site": "DK",
-  "date": "2026-04-02",
+  "date": "2026-04-03",
   "salary_cap": 50000,
   "roster_slots": [
     "PG",
@@ -14,44 +14,62 @@
     "UTIL"
   ],
   "lineup_size": 8,
-  "pool_size": 214,
+  "pool_size": 320,
   "proj_source": "model",
   "matchups": [
     {
-      "away": "MIN",
-      "home": "DET",
-      "game_id": "20260402_MIN@DET",
-      "label": "MIN @ DET"
+      "away": "UTA",
+      "home": "HOU",
+      "game_id": "20260403_UTA@HOU",
+      "label": "UTA @ HOU"
     },
     {
-      "away": "SA",
-      "home": "LAC",
-      "game_id": "20260402_SA@LAC",
-      "label": "SA @ LAC"
-    },
-    {
-      "away": "LAL",
-      "home": "OKC",
-      "game_id": "20260402_LAL@OKC",
-      "label": "LAL @ OKC"
+      "away": "ATL",
+      "home": "BKN",
+      "game_id": "20260403_ATL@BKN",
+      "label": "ATL @ BKN"
     },
     {
       "away": "NO",
-      "home": "POR",
-      "game_id": "20260402_NO@POR",
-      "label": "NO @ POR"
+      "home": "SAC",
+      "game_id": "20260403_NO@SAC",
+      "label": "NO @ SAC"
     },
     {
-      "away": "PHO",
+      "away": "ORL",
+      "home": "DAL",
+      "game_id": "20260403_ORL@DAL",
+      "label": "ORL @ DAL"
+    },
+    {
+      "away": "CHI",
+      "home": "NY",
+      "game_id": "20260403_CHI@NY",
+      "label": "CHI @ NY"
+    },
+    {
+      "away": "MIN",
+      "home": "PHI",
+      "game_id": "20260403_MIN@PHI",
+      "label": "MIN @ PHI"
+    },
+    {
+      "away": "IND",
       "home": "CHA",
-      "game_id": "20260402_PHO@CHA",
-      "label": "PHO @ CHA"
+      "game_id": "20260403_IND@CHA",
+      "label": "IND @ CHA"
     },
     {
-      "away": "CLE",
-      "home": "GS",
-      "game_id": "20260402_CLE@GS",
-      "label": "CLE @ GS"
+      "away": "TOR",
+      "home": "MEM",
+      "game_id": "20260403_TOR@MEM",
+      "label": "TOR @ MEM"
+    },
+    {
+      "away": "BOS",
+      "home": "MIL",
+      "game_id": "20260403_BOS@MIL",
+      "label": "BOS @ MIL"
     }
   ],
   "game_times": {}
