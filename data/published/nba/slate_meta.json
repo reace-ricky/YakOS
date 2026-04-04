@@ -1,7 +1,7 @@
 {
   "sport": "NBA",
   "site": "DK",
-  "date": "2026-04-03",
+  "date": "2026-04-04",
   "salary_cap": 50000,
   "roster_slots": [
     "PG",
@@ -14,62 +14,26 @@
     "UTIL"
   ],
   "lineup_size": 8,
-  "pool_size": 320,
+  "pool_size": 106,
   "proj_source": "model",
   "matchups": [
     {
-      "away": "UTA",
-      "home": "HOU",
-      "game_id": "20260403_UTA@HOU",
-      "label": "UTA @ HOU"
+      "away": "WAS",
+      "home": "MIA",
+      "game_id": "20260404_WAS@MIA",
+      "label": "WAS @ MIA"
     },
     {
-      "away": "ATL",
-      "home": "BKN",
-      "game_id": "20260403_ATL@BKN",
-      "label": "ATL @ BKN"
+      "away": "SA",
+      "home": "DEN",
+      "game_id": "20260404_SA@DEN",
+      "label": "SA @ DEN"
     },
     {
-      "away": "NO",
-      "home": "SAC",
-      "game_id": "20260403_NO@SAC",
-      "label": "NO @ SAC"
-    },
-    {
-      "away": "ORL",
-      "home": "DAL",
-      "game_id": "20260403_ORL@DAL",
-      "label": "ORL @ DAL"
-    },
-    {
-      "away": "CHI",
-      "home": "NY",
-      "game_id": "20260403_CHI@NY",
-      "label": "CHI @ NY"
-    },
-    {
-      "away": "MIN",
+      "away": "DET",
       "home": "PHI",
-      "game_id": "20260403_MIN@PHI",
-      "label": "MIN @ PHI"
-    },
-    {
-      "away": "IND",
-      "home": "CHA",
-      "game_id": "20260403_IND@CHA",
-      "label": "IND @ CHA"
-    },
-    {
-      "away": "TOR",
-      "home": "MEM",
-      "game_id": "20260403_TOR@MEM",
-      "label": "TOR @ MEM"
-    },
-    {
-      "away": "BOS",
-      "home": "MIL",
-      "game_id": "20260403_BOS@MIL",
-      "label": "BOS @ MIL"
+      "game_id": "20260404_DET@PHI",
+      "label": "DET @ PHI"
     }
   ],
   "game_times": {}

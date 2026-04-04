@@ -1,5 +1,7 @@
 {
-  "Kristaps Porzingis": {},
+  "Kristaps Porzingis": {
+    "max_exposure": 0.0
+  },
   "Luka Doncic": {
     "min_exposure": 0.5
   },
@@ -48,30 +50,26 @@
   "Pelle Larsson": {
     "min_exposure": 0.2
   },
-  "Jalen Suggs": {
-    "max_exposure": 0.0
-  },
-  "DeMar DeRozan": {
-    "max_exposure": 0.0
-  },
+  "Jalen Suggs": {},
+  "DeMar DeRozan": {},
   "Josh Giddey": {},
   "Gary Trent Jr.": {
     "min_exposure": 0.2
   },
-  "Carlton Carrington": {},
-  "CJ McCollum": {
+  "Carlton Carrington": {
     "max_exposure": 0.0
   },
+  "CJ McCollum": {},
   "Jaylen Brown": {
     "min_exposure": 0.5
   },
   "Payton Pritchard": {
     "min_exposure": 0.2
   },
-  "Kyle Filipowski": {
+  "Kyle Filipowski": {},
+  "Donovan Clingan": {
     "max_exposure": 0.0
   },
-  "Donovan Clingan": {},
   "Shai Gilgeous-Alexander": {
     "min_exposure": 0.5
   },
@@ -90,13 +88,13 @@
   "Javonte Green": {
     "min_exposure": 0.2
   },
-  "Yang Hansen": {},
+  "Yang Hansen": {
+    "max_exposure": 0.0
+  },
   "Royce O'Neale": {
     "min_exposure": 0.2
   },
-  "Max Shulga": {
-    "max_exposure": 0.0
-  },
+  "Max Shulga": {},
   "Precious Achiuwa": {
     "min_exposure": 0.5
   },
