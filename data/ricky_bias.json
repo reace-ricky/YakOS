@@ -50,8 +50,12 @@
   "Pelle Larsson": {
     "min_exposure": 0.2
   },
-  "Jalen Suggs": {},
-  "DeMar DeRozan": {},
+  "Jalen Suggs": {
+    "max_exposure": 0.0
+  },
+  "DeMar DeRozan": {
+    "max_exposure": 0.0
+  },
   "Josh Giddey": {},
   "Gary Trent Jr.": {
     "min_exposure": 0.2
@@ -59,14 +63,18 @@
   "Carlton Carrington": {
     "max_exposure": 0.0
   },
-  "CJ McCollum": {},
+  "CJ McCollum": {
+    "max_exposure": 0.0
+  },
   "Jaylen Brown": {
     "min_exposure": 0.5
   },
   "Payton Pritchard": {
     "min_exposure": 0.2
   },
-  "Kyle Filipowski": {},
+  "Kyle Filipowski": {
+    "max_exposure": 0.0
+  },
   "Donovan Clingan": {
     "max_exposure": 0.0
   },
@@ -94,7 +102,9 @@
   "Royce O'Neale": {
     "min_exposure": 0.2
   },
-  "Max Shulga": {},
+  "Max Shulga": {
+    "max_exposure": 0.0
+  },
   "Precious Achiuwa": {
     "min_exposure": 0.5
   },
@@ -109,5 +119,23 @@
   },
   "Anthony Edwards": {
     "min_exposure": 0.5
+  },
+  "Curtis Jones": {
+    "max_exposure": 0.0
+  },
+  "Tyrese Maxey": {
+    "min_exposure": 0.5
+  },
+  "Joel Embiid": {
+    "min_exposure": 0.5
+  },
+  "Marcus Sasser": {
+    "min_exposure": 0.2
+  },
+  "Quentin Grimes": {
+    "min_exposure": 0.2
+  },
+  "Cameron Johnson": {
+    "min_exposure": 0.2
   }
 }
