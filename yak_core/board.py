@@ -110,10 +110,12 @@ def compute_stack_targets(
     df["_ceil"] = proj if use_proj_fallback else ceil
     df["_proj"] = proj
 
-    # Determine vegas total per game
+    # Determine vegas total per game — require at least one positive value so
+    # that a column filled with 0.0 (the "odds unavailable" sentinel written by
+    # lab_tab.py) is NOT treated as valid data and doesn't produce "Total 0".
     vegas_col = None
     for col in ("over_under", "vegas_total", "total", "ou", "game_total"):
-        if col in df.columns and df[col].notna().any():
+        if col in df.columns and (pd.to_numeric(df[col], errors="coerce") > 0).any():
             vegas_col = col
             break
 

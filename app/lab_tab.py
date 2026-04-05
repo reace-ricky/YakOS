@@ -1338,6 +1338,7 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
 
         opp_map = {}
         game_id_map = {}  # team -> game_id (for optimizer stacking)
+        _games_vegas_map: dict = {}  # team -> O/U total extracted from game dicts
         for g in games_list:
             if not isinstance(g, dict):
                 continue
@@ -1352,6 +1353,23 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
                     game_id_map[home] = str(game_id)
                 matchups.append({"away": away, "home": home, "game_id": game_id, "label": f"{away} @ {home}"})
 
+            # Try to extract O/U total that Tank01 sometimes embeds in game dicts
+            _ou_raw = (
+                g.get("overUnder")
+                or g.get("totalScore")
+                or g.get("total")
+                or g.get("ou")
+                or g.get("over_under")
+            )
+            if _ou_raw:
+                try:
+                    _ou_val = float(_ou_raw)
+                    if _ou_val > 0 and away and home:
+                        _games_vegas_map[away] = _ou_val
+                        _games_vegas_map[home] = _ou_val
+                except (ValueError, TypeError):
+                    pass
+
         if opp_map and "team" in pool.columns:
             pool["opponent"] = pool["team"].map(opp_map).fillna(pool.get("opponent", ""))
         # Map game_id to each player so the optimizer can enforce game stacks
@@ -1359,6 +1377,12 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
             pool["game_id"] = pool["team"].map(game_id_map).fillna("")
             _n_with_gid = (pool["game_id"] != "").sum()
             print(f"[_load_nba_pool] Mapped game_id for {_n_with_gid}/{len(pool)} players ({len(game_id_map)//2} games)")
+
+        # Apply vegas totals extracted from the games endpoint if available
+        if _games_vegas_map and "team" in pool.columns:
+            pool["vegas_total"] = pool["team"].map(_games_vegas_map).fillna(0.0)
+            _n_vt = (pool["vegas_total"] > 0).sum()
+            print(f"[_load_nba_pool] vegas_total from getNBAGamesForDate: {_n_vt}/{len(pool)} players")
 
         # Track which teams are home
         home_teams = set()
@@ -1372,6 +1396,9 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
         pass
 
     # ── Fetch betting odds and apply blowout-risk minute adjustments ──
+    # fetch_betting_odds uses the Tank01 getNBABettingOdds endpoint which may not
+    # be available on all API plans.  If it returns data it takes precedence over
+    # the O/U values already extracted from getNBAGamesForDate above.
     try:
         odds_df = fetch_betting_odds(slate_date, api_key)
         if not odds_df.empty and "team" in pool.columns:
@@ -1416,7 +1443,9 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
                 spread_map[away] = sp
             pool["spread"] = pool["team"].map(spread_map).fillna(0.0)
 
-            # Map vegas_total to each player
+            # Map vegas_total to each player — only when the odds endpoint
+            # returned real values (> 0) so we don't overwrite the totals
+            # already extracted from getNBAGamesForDate.
             vegas_total_map = {}
             for _, row in odds_df.iterrows():
                 home = str(row.get("home_team", "")).upper()
@@ -1424,9 +1453,15 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
                 home = _DK_TO_POOL.get(home, home)
                 away = _DK_TO_POOL.get(away, away)
                 total = float(row.get("vegas_total", 0))
-                vegas_total_map[home] = total
-                vegas_total_map[away] = total
-            pool["vegas_total"] = pool["team"].map(vegas_total_map).fillna(0.0)
+                if total > 0:
+                    vegas_total_map[home] = total
+                    vegas_total_map[away] = total
+            if vegas_total_map:
+                pool["vegas_total"] = pool["team"].map(vegas_total_map).fillna(
+                    pool.get("vegas_total", pd.Series(0.0, index=pool.index))
+                )
+                _n_vt2 = (pool["vegas_total"] > 0).sum()
+                print(f"[_load_nba_pool] vegas_total from getNBABettingOdds: {_n_vt2}/{len(pool)} players")
     except Exception as exc:
         print(f"[_load_nba_pool] betting odds / blowout cascade failed (non-fatal): {exc}")
 

@@ -1112,6 +1112,13 @@ def fetch_betting_odds(game_date: str, api_key: str) -> pd.DataFrame:
 
     try:
         resp = requests.get(url, headers=hdrs, params=params, timeout=30)
+        if resp.status_code != 200:
+            print(
+                f"[fetch_betting_odds] HTTP {resp.status_code} for {game_date} "
+                f"— endpoint may not be available on this Tank01 plan. "
+                f"Response: {resp.text[:300]}"
+            )
+            return empty
         resp.raise_for_status()
         data = resp.json()
         body = data.get("body", data) if isinstance(data, dict) else data
@@ -1127,7 +1134,11 @@ def fetch_betting_odds(game_date: str, api_key: str) -> pd.DataFrame:
                 body = list_vals[0] if list_vals else []
 
         if not isinstance(body, list) or not body:
-            print(f"[fetch_betting_odds] No odds data returned for {game_date}.")
+            _keys = list(data.keys()) if isinstance(data, dict) else type(data).__name__
+            print(
+                f"[fetch_betting_odds] No odds data returned for {game_date}. "
+                f"Response top-level keys: {_keys}"
+            )
             return empty
 
         rows: List[dict] = []
