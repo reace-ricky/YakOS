@@ -1,4 +1,74 @@
 {
+  "2026-04-04": {
+    "slate_date": "2026-04-04",
+    "contest_type": "GPP Main",
+    "n_players": 60,
+    "signals": {
+      "high_leverage": {
+        "n_flagged": 11,
+        "n_hit": 1,
+        "hit_rate": 0.091,
+        "avg_actual": 15.91,
+        "avg_proj": 23.06
+      },
+      "salary_value": {
+        "n_flagged": 10,
+        "n_hit": 2,
+        "hit_rate": 0.2,
+        "avg_actual": 25.5,
+        "avg_proj": 25.59
+      },
+      "opt_smash_prob": {
+        "n_flagged": 12,
+        "n_hit": 2,
+        "hit_rate": 0.167,
+        "avg_actual": 14.69,
+        "avg_proj": 21.6
+      },
+      "opt_leverage": {
+        "n_flagged": 11,
+        "n_hit": 2,
+        "hit_rate": 0.182,
+        "avg_actual": 15.91,
+        "avg_proj": 23.06
+      },
+      "opt_form": {
+        "n_flagged": 30,
+        "n_hit": 19,
+        "hit_rate": 0.633,
+        "avg_actual": 34.59,
+        "avg_proj": 30.06
+      },
+      "opt_dvp_boost": {
+        "n_flagged": 0,
+        "n_hit": 0,
+        "hit_rate": null,
+        "avg_actual": null,
+        "avg_proj": null
+      },
+      "opt_catalyst": {
+        "n_flagged": 30,
+        "n_hit": 15,
+        "hit_rate": 0.5,
+        "avg_actual": 27.07,
+        "avg_proj": 24.59
+      },
+      "opt_bust_prob": {
+        "n_flagged": 12,
+        "n_hit": 2,
+        "hit_rate": 0.167,
+        "avg_actual": 14.69,
+        "avg_proj": 21.6
+      },
+      "opt_fp_efficiency": {
+        "n_flagged": 0,
+        "n_hit": 0,
+        "hit_rate": null,
+        "avg_actual": null,
+        "avg_proj": null
+      }
+    }
+  },
   "2026-04-03": {
     "slate_date": "2026-04-03",
     "contest_type": "GPP Main",
@@ -926,27 +996,6 @@
         "hit_rate": 0.5,
         "avg_actual": 30.38,
         "avg_proj": 31.88
-      }
-    }
-  },
-  "2026-02-01": {
-    "slate_date": "2026-02-01",
-    "contest_type": "GPP Main",
-    "n_players": 131,
-    "signals": {
-      "high_leverage": {
-        "n_flagged": 102,
-        "n_hit": 24,
-        "hit_rate": 0.235,
-        "avg_actual": 22.9,
-        "avg_proj": 25.21
-      },
-      "salary_value": {
-        "n_flagged": 6,
-        "n_hit": 1,
-        "hit_rate": 0.167,
-        "avg_actual": 23.0,
-        "avg_proj": 28.15
       }
     }
   }

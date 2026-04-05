@@ -295,5 +295,14 @@
     "n_correct": 3,
     "precision": 0.273,
     "recall": 0.033
+  },
+  "2026-04-04_NBA": {
+    "slate_date": "2026-04-04",
+    "sport": "NBA",
+    "n_predicted": 6,
+    "n_actual": 30,
+    "n_correct": 0,
+    "precision": 0.0,
+    "recall": 0.0
   }
 }
