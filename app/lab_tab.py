@@ -1353,7 +1353,9 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
                     game_id_map[home] = str(game_id)
                 matchups.append({"away": away, "home": home, "game_id": game_id, "label": f"{away} @ {home}"})
 
-            # Try to extract O/U total that Tank01 sometimes embeds in game dicts
+            # Try to extract O/U total that Tank01 may embed directly in game dicts.
+            # Field name varies by API version: "overUnder" is most common; "totalScore"
+            # appears in some v2 responses; the others are aliases seen in older payloads.
             _ou_raw = (
                 g.get("overUnder")
                 or g.get("totalScore")
@@ -1458,7 +1460,7 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
                     vegas_total_map[away] = total
             if vegas_total_map:
                 pool["vegas_total"] = pool["team"].map(vegas_total_map).fillna(
-                    pool.get("vegas_total", pd.Series(0.0, index=pool.index))
+                    pool.get("vegas_total", 0.0)
                 )
                 _n_vt2 = (pool["vegas_total"] > 0).sum()
                 print(f"[_load_nba_pool] vegas_total from getNBABettingOdds: {_n_vt2}/{len(pool)} players")
