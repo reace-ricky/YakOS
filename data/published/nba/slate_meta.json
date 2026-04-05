@@ -1,7 +1,7 @@
 {
   "sport": "NBA",
   "site": "DK",
-  "date": "2026-04-04",
+  "date": "2026-04-05",
   "salary_cap": 50000,
   "roster_slots": [
     "PG",
@@ -14,26 +14,74 @@
     "UTIL"
   ],
   "lineup_size": 8,
-  "pool_size": 106,
+  "pool_size": 355,
   "proj_source": "model",
   "matchups": [
     {
+      "away": "UTA",
+      "home": "OKC",
+      "game_id": "20260405_UTA@OKC",
+      "label": "UTA @ OKC"
+    },
+    {
+      "away": "IND",
+      "home": "CLE",
+      "game_id": "20260405_IND@CLE",
+      "label": "IND @ CLE"
+    },
+    {
+      "away": "MEM",
+      "home": "MIL",
+      "game_id": "20260405_MEM@MIL",
+      "label": "MEM @ MIL"
+    },
+    {
+      "away": "LAC",
+      "home": "SAC",
+      "game_id": "20260405_LAC@SAC",
+      "label": "LAC @ SAC"
+    },
+    {
+      "away": "CHA",
+      "home": "MIN",
+      "game_id": "20260405_CHA@MIN",
+      "label": "CHA @ MIN"
+    },
+    {
+      "away": "LAL",
+      "home": "DAL",
+      "game_id": "20260405_LAL@DAL",
+      "label": "LAL @ DAL"
+    },
+    {
       "away": "WAS",
-      "home": "MIA",
-      "game_id": "20260404_WAS@MIA",
-      "label": "WAS @ MIA"
+      "home": "BKN",
+      "game_id": "20260405_WAS@BKN",
+      "label": "WAS @ BKN"
     },
     {
-      "away": "SA",
-      "home": "DEN",
-      "game_id": "20260404_SA@DEN",
-      "label": "SA @ DEN"
+      "away": "PHO",
+      "home": "CHI",
+      "game_id": "20260405_PHO@CHI",
+      "label": "PHO @ CHI"
     },
     {
-      "away": "DET",
-      "home": "PHI",
-      "game_id": "20260404_DET@PHI",
-      "label": "DET @ PHI"
+      "away": "ORL",
+      "home": "NO",
+      "game_id": "20260405_ORL@NO",
+      "label": "ORL @ NO"
+    },
+    {
+      "away": "TOR",
+      "home": "BOS",
+      "game_id": "20260405_TOR@BOS",
+      "label": "TOR @ BOS"
+    },
+    {
+      "away": "HOU",
+      "home": "GS",
+      "game_id": "20260405_HOU@GS",
+      "label": "HOU @ GS"
     }
   ],
   "game_times": {}
