@@ -64,7 +64,9 @@
   "Payton Pritchard": {
     "min_exposure": 0.2
   },
-  "Kyle Filipowski": {},
+  "Kyle Filipowski": {
+    "min_exposure": 0.5
+  },
   "Donovan Clingan": {},
   "Shai Gilgeous-Alexander": {
     "min_exposure": 0.5
@@ -88,7 +90,9 @@
   "Royce O'Neale": {
     "min_exposure": 0.2
   },
-  "Max Shulga": {},
+  "Max Shulga": {
+    "max_exposure": 0.0
+  },
   "Precious Achiuwa": {
     "min_exposure": 0.5
   },
