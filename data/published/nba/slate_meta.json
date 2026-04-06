@@ -1,7 +1,7 @@
 {
   "sport": "NBA",
   "site": "DK",
-  "date": "2026-04-05",
+  "date": "2026-04-06",
   "salary_cap": 50000,
   "roster_slots": [
     "PG",
@@ -14,74 +14,38 @@
     "UTIL"
   ],
   "lineup_size": 8,
-  "pool_size": 355,
+  "pool_size": 179,
   "proj_source": "model",
   "matchups": [
     {
-      "away": "UTA",
-      "home": "OKC",
-      "game_id": "20260405_UTA@OKC",
-      "label": "UTA @ OKC"
+      "away": "NY",
+      "home": "ATL",
+      "game_id": "20260406_NY@ATL",
+      "label": "NY @ ATL"
     },
     {
-      "away": "IND",
-      "home": "CLE",
-      "game_id": "20260405_IND@CLE",
-      "label": "IND @ CLE"
+      "away": "DET",
+      "home": "ORL",
+      "game_id": "20260406_DET@ORL",
+      "label": "DET @ ORL"
     },
     {
-      "away": "MEM",
-      "home": "MIL",
-      "game_id": "20260405_MEM@MIL",
-      "label": "MEM @ MIL"
+      "away": "CLE",
+      "home": "MEM",
+      "game_id": "20260406_CLE@MEM",
+      "label": "CLE @ MEM"
     },
     {
-      "away": "LAC",
-      "home": "SAC",
-      "game_id": "20260405_LAC@SAC",
-      "label": "LAC @ SAC"
+      "away": "PHI",
+      "home": "SA",
+      "game_id": "20260406_PHI@SA",
+      "label": "PHI @ SA"
     },
     {
-      "away": "CHA",
-      "home": "MIN",
-      "game_id": "20260405_CHA@MIN",
-      "label": "CHA @ MIN"
-    },
-    {
-      "away": "LAL",
-      "home": "DAL",
-      "game_id": "20260405_LAL@DAL",
-      "label": "LAL @ DAL"
-    },
-    {
-      "away": "WAS",
-      "home": "BKN",
-      "game_id": "20260405_WAS@BKN",
-      "label": "WAS @ BKN"
-    },
-    {
-      "away": "PHO",
-      "home": "CHI",
-      "game_id": "20260405_PHO@CHI",
-      "label": "PHO @ CHI"
-    },
-    {
-      "away": "ORL",
-      "home": "NO",
-      "game_id": "20260405_ORL@NO",
-      "label": "ORL @ NO"
-    },
-    {
-      "away": "TOR",
-      "home": "BOS",
-      "game_id": "20260405_TOR@BOS",
-      "label": "TOR @ BOS"
-    },
-    {
-      "away": "HOU",
-      "home": "GS",
-      "game_id": "20260405_HOU@GS",
-      "label": "HOU @ GS"
+      "away": "POR",
+      "home": "DEN",
+      "game_id": "20260406_POR@DEN",
+      "label": "POR @ DEN"
     }
   ],
   "game_times": {}
