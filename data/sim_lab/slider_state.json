@@ -15,12 +15,13 @@
         "MIN_PLAYER_MINUTES": 5,
         "NUM_LINEUPS": 25,
         "GPP_PROJ_WEIGHT": 0.25,
-        "GPP_EFFICIENCY_WEIGHT": 0.1
+        "GPP_EFFICIENCY_WEIGHT": 0.1,
+        "GPP_BOOM_SPREAD_WEIGHT": 0.05
       },
       "ricky_weights": {
-        "w_gpp": 0.55,
-        "w_ceil": 0.7,
-        "w_own": 0.15
+        "w_gpp": 0.2,
+        "w_ceil": 0.8,
+        "w_own": 0.35
       }
     },
     "Cash Main": {
