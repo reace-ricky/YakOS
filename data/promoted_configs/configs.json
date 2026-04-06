@@ -100,32 +100,39 @@
     "display_name": "Stars & Scrubs Ceiling",
     "base_preset": "GPP Main",
     "overrides": {
-      "GPP_PROJ_WEIGHT": 0.2,
-      "GPP_UPSIDE_WEIGHT": 0.35,
-      "GPP_BOOM_WEIGHT": 0.25,
-      "GPP_SMASH_WEIGHT": 0.05,
-      "GPP_BUST_PENALTY": 0.1,
+      "GPP_PROJ_WEIGHT": 0.1,
+      "GPP_UPSIDE_WEIGHT": 0.6,
+      "GPP_BOOM_WEIGHT": 0.4,
+      "GPP_OWN_PENALTY_STRENGTH": 0.2,
+      "GPP_SMASH_WEIGHT": 0.1,
+      "GPP_LEVERAGE_WEIGHT": 0.05,
+      "GPP_BUST_PENALTY": 0.2,
       "MAX_EXPOSURE": 0.55,
-      "MIN_PLAYER_MINUTES": 10,
-      "GPP_OWN_PENALTY_STRENGTH": 0.22,
-      "overall_bias_correction": 13.32
+      "GPP_SNIPER_WEIGHT": 0.15,
+      "CASH_FLOOR_WEIGHT": 0.0,
+      "MIN_PLAYER_MINUTES": 3,
+      "NUM_LINEUPS": 25,
+      "GPP_BOOM_SPREAD_WEIGHT": 0.05
     },
     "ricky_weights": {
-      "w_gpp": 0.31,
-      "w_ceil": 0.85,
-      "w_own": 0.2
+      "w_gpp": 0.4,
+      "w_ceil": 0.8,
+      "w_own": 0.25
     },
     "validation_stats": {
-      "avg_diff": 54.56,
-      "beat_proj_pct": 95.0,
-      "sample_size": 3,
+      "avg_diff": 50.15,
+      "beat_proj_pct": 92.7,
+      "sample_size": 6,
       "dates_tested": [
-        "2026-03-11",
-        "2026-03-14",
-        "2026-03-15"
+        "2026-03-31",
+        "2026-04-01",
+        "2026-04-02",
+        "2026-04-03",
+        "2026-04-04",
+        "2026-04-05"
       ]
     },
-    "promoted_at": "2026-03-28T22:02:39.586833",
-    "description": "3.28v3"
+    "promoted_at": "2026-04-06T16:43:09.445591",
+    "description": "4/5/2026"
   }
 ]
