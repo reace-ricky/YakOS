@@ -109,9 +109,7 @@
   "Anthony Edwards": {
     "min_exposure": 0.5
   },
-  "Curtis Jones": {
-    "max_exposure": 0.0
-  },
+  "Curtis Jones": {},
   "Tyrese Maxey": {
     "min_exposure": 0.5
   },
@@ -127,9 +125,7 @@
   "Cameron Johnson": {
     "min_exposure": 0.2
   },
-  "Bam Adebayo": {
-    "max_exposure": 0.0
-  },
+  "Bam Adebayo": {},
   "Duncan Robinson": {
     "min_exposure": 0.2
   },
