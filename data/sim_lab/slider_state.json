@@ -13,7 +13,8 @@
         "GPP_SNIPER_WEIGHT": 0.15,
         "MIN_PLAYER_MINUTES": 3,
         "NUM_LINEUPS": 25,
-        "GPP_EFFICIENCY_WEIGHT": 0.1
+        "GPP_EFFICIENCY_WEIGHT": 0.1,
+        "OWN_WEIGHT": 0.15
       },
       "ricky_weights": {
         "w_gpp": 0.55,
