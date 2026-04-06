@@ -54,7 +54,9 @@
   "Gary Trent Jr.": {
     "min_exposure": 0.2
   },
-  "Carlton Carrington": {},
+  "Carlton Carrington": {
+    "max_exposure": 0.0
+  },
   "CJ McCollum": {},
   "Jaylen Brown": {
     "min_exposure": 0.5
@@ -63,7 +65,8 @@
     "min_exposure": 0.2
   },
   "Kyle Filipowski": {
-    "min_exposure": 0.5
+    "min_exposure": 0.5,
+    "max_exposure": 0.0
   },
   "Donovan Clingan": {},
   "Shai Gilgeous-Alexander": {
@@ -88,7 +91,9 @@
   "Royce O'Neale": {
     "min_exposure": 0.2
   },
-  "Max Shulga": {},
+  "Max Shulga": {
+    "max_exposure": 0.0
+  },
   "Precious Achiuwa": {
     "min_exposure": 0.5
   },
@@ -135,6 +140,21 @@
     "min_exposure": 0.2
   },
   "Bones Hyland": {
+    "min_exposure": 0.2
+  },
+  "Jarrett Allen": {
+    "max_exposure": 0.0
+  },
+  "Chaz Lanier": {
+    "max_exposure": 0.0
+  },
+  "Gregory Jackson": {
+    "min_exposure": 0.5
+  },
+  "Toumani Camara": {
+    "min_exposure": 0.2
+  },
+  "Jalen Pickett": {
     "min_exposure": 0.2
   }
 }
