@@ -9,7 +9,7 @@
         "GPP_LEVERAGE_WEIGHT": 0.1,
         "GPP_BUST_PENALTY": 0.25,
         "MAX_EXPOSURE": 0.4,
-        "GPP_SNIPER_WEIGHT": 0.15,
+        "GPP_SNIPER_WEIGHT": 0.1,
         "MIN_PLAYER_MINUTES": 3,
         "NUM_LINEUPS": 25,
         "GPP_EFFICIENCY_WEIGHT": 0.1,
