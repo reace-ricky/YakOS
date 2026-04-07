@@ -961,8 +961,11 @@ def render_edge_tab(sport: str) -> None:
             _fc_val     = float(_fc.get("value", 0))
             _fc_reason  = _fc.get("reasoning", "High ownership, weak edge")
             _fc_score   = _fc.get("fade_score")
+            _fc_team    = _fc.get("team", "")
             _header     = (
-                f"💀 **{_fc_name}** — {_fc_own:.1f}% owned, ${_fc_sal:,}"
+                f"💀 **{_fc_name}**"
+                + (f" ({_fc_team})" if _fc_team else "")
+                + f" — {_fc_own:.1f}% owned, ${_fc_sal:,}"
             )
             with st.expander(_header, expanded=False):
                 _detail_cols = st.columns(3)

@@ -13,6 +13,10 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+# Maximum number of fade candidates returned by classify_plays().
+# User-selected manual fades fill the first slots; algorithmic fades fill the rest.
+MAX_FADE_CANDIDATES = 2
+
 
 # ---------------------------------------------------------------------------
 # FadeScorer
@@ -82,13 +86,13 @@ class FadeScorer:
         # Value: pts per $1K salary
         _val = np.where(_sal > 0, _proj / (_sal / 1000.0), 0.0)
 
-        # Ceiling gap: (proj - ceil) / proj
+        # Ceiling gap ratio: (proj - ceil) / proj
         # Positive → limited upside (more fadeable); negative → good upside (less fadeable)
-        _ceil_gap = (_proj - _ceil.clip(lower=1)) / _proj.clip(lower=1)
+        _ceil_gap_ratio = (_proj - _ceil.clip(lower=1)) / _proj.clip(lower=1)
 
         # Z-scores
         own_z   = self._zscore(_own)
-        ceil_z  = self._zscore(_ceil_gap)
+        ceil_z  = self._zscore(_ceil_gap_ratio)
         value_z = self._zscore(pd.Series(_val, index=result.index))
 
         fade_score = self.w_own * own_z + self.w_ceil * ceil_z - self.w_val * value_z
@@ -357,20 +361,20 @@ def classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
         # Fallback: score all remaining players (avoids cheap-salary bias)
         fades = _fade_scored.nlargest(5, "fade_score")
 
-    # ── User bias fades (priority slots, capped at 2) ─────────────────────
+    # ── User bias fades (priority slots, capped at MAX_FADE_CANDIDATES) ──────
     _algo_fades = _to_list_with_reasoning(fades, tag="fade")
     _final_fades: list[dict] = []
     try:
-        import os as _os2
-        import sys as _sys2
-        _sys2.path.insert(0, _os2.path.dirname(_os2.path.dirname(_os2.path.abspath(__file__))))
+        import os
+        import sys
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from yak_core.bias import load_bias as _load_bias
         _bias = _load_bias()
         _user_fade_names = [n for n, v in _bias.items() if v.get("max_exposure", 1.0) == 0.0]
         _pool_names = set(df["player_name"].tolist())
         _user_fade_names = [n for n in _user_fade_names if n in _pool_names]
         for _uf_name in _user_fade_names:
-            if len(_final_fades) >= 2:
+            if len(_final_fades) >= MAX_FADE_CANDIDATES:
                 break
             # Try scored pool first; fall back to full df
             _uf_rows = _fade_scored[_fade_scored["player_name"] == _uf_name]
@@ -405,7 +409,7 @@ def classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
     # Fill remaining slots with algorithmic fades (deduped)
     _seen_names = {e["player_name"] for e in _final_fades}
     for _af in _algo_fades:
-        if len(_final_fades) >= 2:
+        if len(_final_fades) >= MAX_FADE_CANDIDATES:
             break
         if _af.get("player_name", "") not in _seen_names:
             _af = dict(_af)
