@@ -2191,10 +2191,10 @@ def _run_edge(sport: str, slate_date: str, out_dir: Path) -> tuple:
                 in_slate = edge_df[edge_df["player_name"].isin(faded_names)].copy()
                 if not in_slate.empty:
                     own_col = "ownership" if "ownership" in in_slate.columns and in_slate["ownership"].notna().any() else "own_pct"
-                    own_series = pd.to_numeric(in_slate.get(own_col, 0), errors="coerce").fillna(0)
+                    own_series = pd.to_numeric(in_slate.get(own_col, pd.Series(0, index=in_slate.index)), errors="coerce").fillna(0)
                     if own_series.max() <= 1.0:
                         own_series = own_series * 100
-                    sal_series = pd.to_numeric(in_slate.get("salary", 0), errors="coerce").fillna(0)
+                    sal_series = pd.to_numeric(in_slate.get("salary", pd.Series(0, index=in_slate.index)), errors="coerce").fillna(0)
 
                     for _, row in in_slate.iterrows():
                         pname = row.get("player_name", "")
