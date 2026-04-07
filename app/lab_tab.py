@@ -311,7 +311,7 @@ def render_lab_tab(sport: str) -> None:
                 st.rerun()
             except Exception as e:
                 import traceback
-                st.error(f"Edge analysis error: {e}")
+                st.error(f"Pool load error: {e}")
                 st.code(traceback.format_exc())  
                 return
 
