@@ -947,6 +947,35 @@ def render_edge_tab(sport: str) -> None:
     with col3:
         _render_edge_box("value_plays", _strip_fades(edge_analysis.get("value_plays", []), _display_fades), is_pga, _cleared)
 
+    # ── Fade candidates with per-player reasoning ──────────────────────────
+    _all_fades = edge_analysis.get("fade_candidates", [])
+    if _all_fades:
+        st.markdown("---")
+        st.markdown("#### 🚫 Fade Candidates")
+        for _fc in _all_fades:
+            _fc_name    = _fc.get("player_name", "Unknown")
+            _fc_own     = float(_fc.get("own_pct", _fc.get("ownership", 0)) or 0)
+            _fc_sal     = int(_fc.get("salary", 0))
+            _fc_proj    = float(_fc.get("proj", 0))
+            _fc_ceil    = float(_fc.get("ceil", 0) or _fc.get("sim90th", 0))
+            _fc_val     = float(_fc.get("value", 0))
+            _fc_reason  = _fc.get("reasoning", "High ownership, weak edge")
+            _fc_score   = _fc.get("fade_score")
+            _header     = (
+                f"💀 **{_fc_name}** — {_fc_own:.1f}% owned, ${_fc_sal:,}"
+            )
+            with st.expander(_header, expanded=False):
+                _detail_cols = st.columns(3)
+                with _detail_cols[0]:
+                    st.metric("Proj", f"{_fc_proj:.1f}")
+                with _detail_cols[1]:
+                    st.metric("Ceiling", f"{_fc_ceil:.0f}")
+                with _detail_cols[2]:
+                    st.metric("Value", f"{_fc_val:.1f} pts/$1K")
+                st.markdown(f"**Why fade:** {_fc_reason}")
+                if _fc_score is not None:
+                    st.caption(f"Fade score: {_fc_score:.3f}")
+
     # ── Published lineups ──
     if lineups:
         st.markdown("---")
