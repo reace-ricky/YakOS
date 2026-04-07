@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import tempfile
 from datetime import date, datetime, timezone
@@ -83,13 +84,15 @@ def render_lab_tab(sport: str) -> None:
             fp_file = st.file_uploader("FantasyPros Cheatsheet CSV (optional)", type=["csv"], key=f"lab_fp_{sport}")
 
     # Check whether a saved RG file is available for the selected date
+    # Sanitize slate_date to prevent path traversal (strip anything but digits and hyphens)
+    _safe_slate_date = re.sub(r"[^0-9\-]", "", slate_date)[:10]
     _rg_auto_path_preview = os.path.join(
         str(Path(__file__).resolve().parent.parent),
-        "data", "rg_uploads", f"rg_{slate_date}.csv"
+        "data", "rg_uploads", f"rg_{_safe_slate_date}.csv"
     )
     _rg_archive_preview = os.path.join(
         str(Path(__file__).resolve().parent.parent),
-        "data", "rg_archive", "nba", f"rg_{slate_date}.csv"
+        "data", "rg_archive", "nba", f"rg_{_safe_slate_date}.csv"
     )
     if not is_pga and rg_file is None:
         if os.path.isfile(_rg_auto_path_preview):
@@ -1799,7 +1802,7 @@ def _rg_csv_to_pool(rg_file) -> pd.DataFrame:
             "ceil": ceil_ if ceil_ > 0 else float("nan"),
             "ownership": pown,
             "own_proj": pown,
-            "proj_source": "rotogrinders",
+            "proj_source": "RotoGrinders",
             "pos": "",
             "team": "",
             "opponent": "",
@@ -1838,15 +1841,18 @@ def _load_nba_pool_from_rg(rg_file, rg_auto_path: str, slate_date: str) -> tuple
     from yak_core.live import apply_manual_injury_overrides_to_pool
     from yak_core.injury_cascade import apply_injury_cascade
 
+    # Sanitize slate_date to prevent path traversal
+    slate_date = re.sub(r"[^0-9\-]", "", slate_date)[:10]
+
     # ── Step 1: Build base pool from RG CSV ──────────────────────────────
     _rg_source = None
     _raw_rg = None
     if rg_file is not None:
         _raw_rg = rg_file
-        _rg_source = "rotogrinders (uploaded)"
+        _rg_source = "RotoGrinders (uploaded)"
     elif rg_auto_path and os.path.isfile(rg_auto_path):
         _raw_rg = rg_auto_path
-        _rg_source = "rotogrinders (saved)"
+        _rg_source = "RotoGrinders (saved)"
     else:
         _rg_archive_fallback = os.path.join(
             str(Path(__file__).resolve().parent.parent),
@@ -1854,7 +1860,7 @@ def _load_nba_pool_from_rg(rg_file, rg_auto_path: str, slate_date: str) -> tuple
         )
         if os.path.isfile(_rg_archive_fallback):
             _raw_rg = _rg_archive_fallback
-            _rg_source = "rotogrinders (archive)"
+            _rg_source = "RotoGrinders (archive)"
 
     if _raw_rg is None:
         raise ValueError(
@@ -1905,13 +1911,14 @@ def _load_nba_pool_from_rg(rg_file, rg_auto_path: str, slate_date: str) -> tuple
                         pool.at[idx, "dk_player_id"] = str(dk_row["dk_player_id"])
                         pool.at[idx, "player_id"] = str(dk_row["dk_player_id"])
                     # Salary fallback: use DK salary if RG didn't provide one
-                    if (pool.at[idx, "salary"] == 0):
+                    if pool.at[idx, "salary"] == 0:
                         dk_sal = float(dk_row.get("salary") or 0)
                         if dk_sal > 0:
                             pool.at[idx, "salary"] = int(dk_sal)
                     # DK status (Out/IR players)
                     pool.at[idx, "status"] = str(dk_row.get("status") or "Active")
-                    # game_id derived from sorted team abbrs in game_info
+                    # game_id: sort team abbrs so HOU@SAS and SAS@HOU
+                    # produce the same key regardless of home/away ordering.
                     game_info = str(dk_row.get("game_info") or "")
                     if "@" in game_info:
                         parts = sorted(t.strip().upper() for t in game_info.split("@"))
