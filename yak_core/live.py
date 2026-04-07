@@ -515,7 +515,11 @@ def fetch_actuals_from_api(date_key: str, cfg: dict) -> pd.DataFrame:
     RuntimeError
         If the box-score API call fails.
     """
-    date_key_clean = date_key.replace("-", "")
+    import re as _re
+
+    # Sanitize: accept YYYY-MM-DD or YYYYMMDD; strip any trailing slug/contest suffix
+    _m = _re.match(r"(\d{4}-?\d{2}-?\d{2})", date_key)
+    date_key_clean = _m.group(1).replace("-", "") if _m else date_key.replace("-", "")
 
     try:
         df = _fetch_actuals_from_box_scores(date_key_clean, cfg)
@@ -570,7 +574,11 @@ def fetch_actuals_multi_day(
     pd.DataFrame
         Combined actuals (``player_name``, ``actual_fp``, etc.).
     """
-    date_clean = slate_date.replace("-", "")
+    import re as _re
+
+    # Sanitize: accept YYYY-MM-DD or YYYYMMDD; strip any trailing slug/contest suffix
+    _m = _re.match(r"(\d{4}-?\d{2}-?\d{2})", slate_date)
+    date_clean = _m.group(1).replace("-", "") if _m else slate_date.replace("-", "")
 
     # Detect multiple game dates from the pool
     game_dates = _extract_game_dates_from_pool(pool) if pool is not None else []

@@ -3128,13 +3128,13 @@ def _render_historical_replay(sport: str) -> None:
     _archive_dir = _Path(__file__).resolve().parent.parent / "data" / "lineup_archive"
     if _archive_dir.is_dir():
         for af in sorted(_archive_dir.glob("*_all_lineups.parquet")):
-            # Filename: {date}_{contest_slug}_all_lineups.parquet
+            # Filename: {YYYY-MM-DD}_{contest_slug}_all_lineups.parquet
             _stem = af.stem.replace("_all_lineups", "")
-            # Extract date + contest from stem
-            _parts = _stem.split("_", 3)  # e.g. ["2026", "03", "20", "gpp_main"]
-            if len(_parts) >= 4:
-                _date_str = "-".join(_parts[:3])
-                _contest_slug = "_".join(_parts[3:])
+            # Extract date + contest from stem (date uses dashes, separated from slug by _)
+            _parts = _stem.split("_", 1)  # e.g. ["2026-03-28", "gpp_main"]
+            if len(_parts) >= 2:
+                _date_str = _parts[0]
+                _contest_slug = _parts[1]
                 _meta_a = af.parent / f"{_stem}_all_meta.json"
                 _contest_display = _display_from_slug(_contest_slug, _meta_a)
                 _label = f"{_contest_display} — {_date_str} (full archive)"
@@ -3177,11 +3177,12 @@ def _render_historical_replay(sport: str) -> None:
     # ── Read slate date: from archive filename or from slate_meta.json ──
     _slate_date_from_meta = ""
     if _is_archive:
-        # Archive filename: {YYYY}_{MM}_{DD}_{contest}_all_lineups.parquet
+        # Archive filename: {YYYY-MM-DD}_{contest_slug}_all_lineups.parquet
+        # Date uses dashes internally; a single underscore separates it from the slug.
         _ar_stem = replay_lineups_path.stem.replace("_all_lineups", "")
-        _ar_parts = _ar_stem.split("_", 3)
-        if len(_ar_parts) >= 3:
-            _slate_date_from_meta = "-".join(_ar_parts[:3])
+        _ar_parts = _ar_stem.split("_", 1)  # ["2026-03-28", "gpp_main"]
+        if _ar_parts:
+            _slate_date_from_meta = _ar_parts[0]  # "2026-03-28"
         # For archive replay, derive the date from the column if present
         if not _slate_date_from_meta and "slate_date" in replay_lineups.columns:
             _slate_date_from_meta = str(replay_lineups["slate_date"].iloc[0])
