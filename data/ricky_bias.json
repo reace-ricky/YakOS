@@ -225,5 +225,23 @@
   },
   "Harry Hall": {
     "min_exposure": 0.2
+  },
+  "Corey Conners": {
+    "max_exposure": 0.0
+  },
+  "Jon Rahm": {
+    "min_exposure": 0.5
+  },
+  "Rory McIlroy": {
+    "min_exposure": 0.5
+  },
+  "Cameron Young": {
+    "min_exposure": 0.5
+  },
+  "Andrew Novak": {
+    "min_exposure": 0.2
+  },
+  "Wyndham Clark": {
+    "min_exposure": 0.2
   }
 }
