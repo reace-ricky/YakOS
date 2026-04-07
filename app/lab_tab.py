@@ -311,12 +311,9 @@ def render_lab_tab(sport: str) -> None:
                 st.rerun()
             except Exception as e:
                 import traceback
-                st.error(f"Edge analysis error: {e}")
+                st.error(f"Pool load error: {e}")
                 st.code(traceback.format_exc())  
                 return
-
-    if pool_path.exists():
-        pool = pd.read_parquet(pool_path)
 
         bias = load_bias()
         already_faded = [name for name, entry in bias.items() if entry.get("max_exposure", 1.0) == 0.0]

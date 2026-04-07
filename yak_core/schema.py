@@ -357,7 +357,22 @@ def normalize_pool(
         return df if df is not None else pd.DataFrame(), all_errors
 
     # 1. Rename aliased columns (only rename, don't drop unknown columns)
-    rename_map = {col: _PLAYER_ALIASES[col] for col in df.columns if col in _PLAYER_ALIASES}
+    # If the canonical column already exists, drop the alias instead of renaming
+    # to avoid creating duplicate columns (which would make df[col] return a
+    # DataFrame rather than a Series and crash subsequent boolean indexing).
+    existing_cols = set(df.columns)
+    rename_map = {}
+    drop_aliases = []
+    for col in df.columns:
+        if col in _PLAYER_ALIASES:
+            canonical = _PLAYER_ALIASES[col]
+            if canonical in existing_cols:
+                drop_aliases.append(col)
+            else:
+                rename_map[col] = canonical
+                existing_cols.add(canonical)
+    if drop_aliases:
+        df = df.drop(columns=drop_aliases)
     if rename_map:
         df = df.rename(columns=rename_map)
 
