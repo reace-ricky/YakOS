@@ -40,7 +40,13 @@ from typing import Any, Callable
 import streamlit as st
 
 # ── Logging setup ──────────────────────────────────────────────────────────
-_LOG_DIR = Path(__file__).resolve().parents[2] / "logs"
+# Derive the project root as the directory containing streamlit_app.py so the
+# log directory stays correct even if this module is moved within the tree.
+_PROJECT_ROOT = next(
+    (p for p in Path(__file__).resolve().parents if (p / "streamlit_app.py").exists()),
+    Path(__file__).resolve().parents[2],
+)
+_LOG_DIR = _PROJECT_ROOT / "logs"
 
 
 def _ensure_log_dir() -> Path:
@@ -204,7 +210,8 @@ def safe_render(fn: Callable[..., None], *args: Any, **kwargs: Any) -> None:
 
     try:
         fn(*args, **kwargs)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # KeyboardInterrupt/SystemExit inherit from BaseException, not Exception,
+        # so they propagate normally and are not swallowed here.
         log_error_event(component=component, sport=sport, exc=exc)
 
         # ── User-facing error UI ───────────────────────────────────────────
@@ -223,6 +230,13 @@ def safe_render(fn: Callable[..., None], *args: Any, **kwargs: Any) -> None:
                 st.rerun()
         with col_clear:
             if st.button("🗑️ Clear state", key=f"clear_{component}"):
+                # Preserve authentication and preference keys across error recovery.
+                _preserve = {
+                    k: v
+                    for k, v in st.session_state.items()
+                    if k.startswith(("admin_", "auth_", "sport_"))
+                }
                 for key in list(st.session_state.keys()):
                     del st.session_state[key]
+                st.session_state.update(_preserve)
                 st.rerun()
