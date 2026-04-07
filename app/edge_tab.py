@@ -535,12 +535,13 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     _fade_html = ""
 
     if "ownership" in pool.columns and "proj" in pool.columns:
-        _own_col = pd.to_numeric(pool.get("ownership", pool.get("own_proj", 0)), errors="coerce").fillna(0)
+        _zero_series = pd.Series(0, index=pool.index)
+        _own_col = pd.to_numeric(pool.get("ownership", pool.get("own_proj", _zero_series)), errors="coerce").fillna(0)
         if _own_col.max() <= 1.0:
             _own_col = _own_col * 100
         _proj_col = pd.to_numeric(pool["proj"], errors="coerce").fillna(0)
-        _sal_col = pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0)
-        _r5_col = pd.to_numeric(pool.get("rolling_fp_5", 0), errors="coerce").fillna(0)
+        _sal_col = pd.to_numeric(pool.get("salary", _zero_series), errors="coerce").fillna(0)
+        _r5_col = pd.to_numeric(pool.get("rolling_fp_5", _zero_series), errors="coerce").fillna(0)
         _trap_mask = (
             (_own_col > 8)
             & (~pool["player_name"].isin(_board_names))
