@@ -142,8 +142,12 @@
   "Bones Hyland": {
     "min_exposure": 0.2
   },
-  "Jarrett Allen": {},
-  "Chaz Lanier": {},
+  "Jarrett Allen": {
+    "max_exposure": 0.0
+  },
+  "Chaz Lanier": {
+    "max_exposure": 0.0
+  },
   "Gregory Jackson": {
     "min_exposure": 0.5
   },
