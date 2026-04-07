@@ -55,7 +55,7 @@
     "PGA GPP": {
       "overrides": {
         "GPP_BOOM_SPREAD_WEIGHT": 0.0,
-        "CASH_FLOOR_WEIGHT": 0.25,
+        "CASH_FLOOR_WEIGHT": 0.0,
         "MAX_EXPOSURE": 0.5,
         "GPP_OWN_PENALTY_STRENGTH": 2.92,
         "NUM_LINEUPS": 10
