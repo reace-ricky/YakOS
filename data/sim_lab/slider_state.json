@@ -57,7 +57,7 @@
         "GPP_BOOM_SPREAD_WEIGHT": 0.1,
         "CASH_FLOOR_WEIGHT": 0.0,
         "MAX_EXPOSURE": 0.5,
-        "GPP_OWN_PENALTY_STRENGTH": 2.92,
+        "GPP_OWN_PENALTY_STRENGTH": 0.16,
         "NUM_LINEUPS": 10
       },
       "ricky_weights": {
