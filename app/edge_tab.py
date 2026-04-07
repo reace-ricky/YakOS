@@ -879,6 +879,33 @@ def render_edge_tab(sport: str) -> None:
         st.info(f"No published {sport} data found. Run the pipeline first.")
         return
 
+    # ── Schema normalization (catches null/missing fields early) ──────
+    from yak_core.schema import normalize_pool, normalize_edge_analysis
+
+    try:
+        pool, pool_errors = normalize_pool(pool, sport=sport)
+    except Exception as _norm_exc:
+        st.error(f"Pool normalization failed ({sport}): {_norm_exc}")
+        logging.exception("[edge_tab] normalize_pool raised")
+        pool_errors = []
+
+    if pool_errors:
+        with st.expander(f"⚠️ {len(pool_errors)} pool data warning(s)", expanded=False):
+            for _e in pool_errors:
+                st.warning(_e)
+
+    try:
+        edge_analysis, ea_errors = normalize_edge_analysis(edge_analysis, sport=sport)
+    except Exception as _ea_exc:
+        st.error(f"Edge analysis normalization failed ({sport}): {_ea_exc}")
+        logging.exception("[edge_tab] normalize_edge_analysis raised")
+        ea_errors = []
+
+    if ea_errors:
+        with st.expander(f"⚠️ {len(ea_errors)} edge analysis warning(s)", expanded=False):
+            for _e in ea_errors:
+                st.warning(_e)
+
     is_pga = sport.upper() == "PGA"
     slate_date = meta.get("date", "")
     pool_size = len(pool)  # actual filtered pool, not raw DK draftables
