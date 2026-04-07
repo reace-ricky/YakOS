@@ -171,5 +171,35 @@
   },
   "Ron Harper": {
     "max_exposure": 0.0
+  },
+  "Marco Penge": {
+    "max_exposure": 0.0
+  },
+  "Davis Riley": {
+    "max_exposure": 0.0
+  },
+  "Matt Fitzpatrick": {
+    "min_exposure": 0.5
+  },
+  "Aaron Rai": {
+    "min_exposure": 0.5
+  },
+  "Christiaan Bezuidenhout": {
+    "min_exposure": 0.5
+  },
+  "Max McGreevy": {
+    "min_exposure": 0.5
+  },
+  "J.J. Spaun": {
+    "min_exposure": 0.5
+  },
+  "Brandt Snedeker": {
+    "min_exposure": 0.2
+  },
+  "Dylan Wu": {
+    "min_exposure": 0.2
+  },
+  "Davis Chatfield": {
+    "min_exposure": 0.2
   }
 }
