@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import tempfile
 from datetime import date, datetime, timezone
@@ -55,15 +56,16 @@ def render_lab_tab(sport: str) -> None:
             st.error("Missing DATAGOLF_API_KEY. Set it in Streamlit secrets or environment.")
             return
     else:
+        # RAPIDAPI_KEY is no longer required for pool loading (RG CSV is the
+        # source of truth).  Still read it so Tank01-dependent features (late-swap
+        # injury re-check in _run_edge) can use it if present.
         api_key = (
             os.environ.get("RAPIDAPI_KEY")
             or os.environ.get("TANK01_RAPIDAPI_KEY")
             or _get_secret("RAPIDAPI_KEY")
             or _get_secret("TANK01_RAPIDAPI_KEY")
+            or ""
         )
-        if not api_key:
-            st.error("Missing RAPIDAPI_KEY. Set it in Streamlit secrets or environment.")
-            return
 
     _ss_key = f"lab_date_{sport}"
     _existing = st.session_state.get(_ss_key, "")
@@ -77,9 +79,31 @@ def render_lab_tab(sport: str) -> None:
     if not is_pga:
         _up_col1, _up_col2 = st.columns(2)
         with _up_col1:
-            rg_file = st.file_uploader("RotoGrinders CSV (optional)", type=["csv"], key=f"lab_rg_{sport}")
+            rg_file = st.file_uploader("RotoGrinders CSV *(required)*", type=["csv"], key=f"lab_rg_{sport}")
         with _up_col2:
             fp_file = st.file_uploader("FantasyPros Cheatsheet CSV (optional)", type=["csv"], key=f"lab_fp_{sport}")
+
+    # Check whether a saved RG file is available for the selected date
+    # Sanitize slate_date to prevent path traversal (strip anything but digits and hyphens)
+    _safe_slate_date = re.sub(r"[^0-9\-]", "", slate_date)[:10]
+    _rg_auto_path_preview = os.path.join(
+        str(Path(__file__).resolve().parent.parent),
+        "data", "rg_uploads", f"rg_{_safe_slate_date}.csv"
+    )
+    _rg_archive_preview = os.path.join(
+        str(Path(__file__).resolve().parent.parent),
+        "data", "rg_archive", "nba", f"rg_{_safe_slate_date}.csv"
+    )
+    if not is_pga and rg_file is None:
+        if os.path.isfile(_rg_auto_path_preview):
+            st.info("✅ Saved RG CSV will be used automatically (no upload needed).")
+        elif os.path.isfile(_rg_archive_preview):
+            st.info("✅ RG archive CSV found and will be used automatically.")
+        else:
+            st.warning(
+                "⚠️ Upload the **RotoGrinders CSV** before clicking Load Pool. "
+                "Pool loading requires RG projections."
+            )
 
     pool_path = out_dir / "slate_pool.parquet"
     _meta_path_check = out_dir / "slate_meta.json"
@@ -122,10 +146,9 @@ def render_lab_tab(sport: str) -> None:
                     or os.environ.get("TANK01_RAPIDAPI_KEY")
                     or _get_secret("RAPIDAPI_KEY")
                     or _get_secret("TANK01_RAPIDAPI_KEY")
+                    or ""
                 )
-                if not api_key:
-                    st.error("Missing RAPIDAPI_KEY. Set it in Streamlit secrets or environment.")
-                    return
+                # RAPIDAPI_KEY is now optional for NBA pool loading
         pga_slate = "main"
         with st.spinner("Loading pool..."):
             try:
@@ -139,17 +162,14 @@ def render_lab_tab(sport: str) -> None:
                         )
                         return
                 else:
-                    # RG merge now happens INSIDE _load_nba_pool() before
-                    # the injury cascade, so cascade bumps are not overwritten.
+                    # RG CSV is the primary pool source. Save uploaded file
+                    # for auto-reload on subsequent visits.
                     _rg_auto_path = os.path.join(
                         str(Path(__file__).resolve().parent.parent),
                         "data", "rg_uploads", f"rg_{slate_date}.csv"
                     )
-                    pool, meta = _load_nba_pool(
-                        api_key, slate_date,
-                        rg_file=rg_file, rg_auto_path=_rg_auto_path,
-                    )
-                    # Save uploaded RG file for auto-reload next time
+                    # Save uploaded RG file before loading (so auto-reload works
+                    # even if we need to seek back for parsing)
                     if rg_file is not None:
                         try:
                             _rg_save_dir = os.path.join(
@@ -160,6 +180,7 @@ def render_lab_tab(sport: str) -> None:
                             rg_file.seek(0)
                             with open(_rg_auto_path, "wb") as _f:
                                 _f.write(rg_file.read())
+                            rg_file.seek(0)
                         except Exception:
                             pass
                         # Also archive for ownership model training
@@ -176,23 +197,16 @@ def render_lab_tab(sport: str) -> None:
                                 rg_file.seek(0)
                                 with open(_rg_archive_path, "wb") as _f:
                                     _f.write(rg_file.read())
+                                rg_file.seek(0)
                         except Exception:
                             pass
 
-                    # After RG merge, drop players with no RG projection.
-                    # The RG file defines the real player pool — unmatched
-                    # players are deep bench / DNPs with salary-implied projections.
-                    if "rg_proj" in pool.columns:
-                        pre_filter = len(pool)
-                        pool = pool[pool["rg_proj"].notna() & (pool["rg_proj"] > 0)].copy()
-                        dropped = pre_filter - len(pool)
-                        if dropped > 0:
-                            st.info(
-                                f"Filtered pool: dropped {dropped} players with no RG projection "
-                                f"({len(pool)} remaining)"
-                            )
+                    pool, meta = _load_nba_pool_from_rg(
+                        rg_file=rg_file, rg_auto_path=_rg_auto_path,
+                        slate_date=slate_date,
+                    )
 
-                    # Apply calibration AFTER RG merge so corrections aren't overwritten
+                    # Apply calibration corrections on top of RG projections
                     from yak_core.calibration_feedback import get_correction_factors, apply_corrections
                     corrections = get_correction_factors(sport="NBA")
                     if corrections.get("n_slates", 0) > 0:
@@ -1734,6 +1748,338 @@ def _merge_rg_csv(pool, rg_file):
             "YakOS model values instead of RotoGrinders."
         )
     return pool
+
+
+def _rg_csv_to_pool(rg_file) -> pd.DataFrame:
+    """Parse an RG CSV into a pool-shaped DataFrame (no Tank01 required).
+
+    Returns a DataFrame with columns: player_name, proj, rg_proj, salary,
+    floor, ceil, ownership, own_proj, pos (empty), team (empty), opp (empty),
+    plus any sim percentile / smash columns present in the file.
+    """
+    try:
+        rg = pd.read_csv(rg_file, encoding="utf-8-sig")
+    except Exception:
+        try:
+            if hasattr(rg_file, "seek"):
+                rg_file.seek(0)
+            rg = pd.read_csv(rg_file, encoding="latin-1")
+        except Exception:
+            if hasattr(rg_file, "seek"):
+                rg_file.seek(0)
+            rg = pd.read_csv(rg_file, sep=None, engine="python")
+
+    rg.columns = [c.strip().upper() for c in rg.columns]
+    rg = rg.loc[:, ~rg.columns.duplicated()]
+
+    if "PLAYER" not in rg.columns:
+        raise ValueError(
+            f"RG CSV missing PLAYER column. Found: {', '.join(rg.columns[:10])}"
+        )
+
+    rows = []
+    for _, r in rg.iterrows():
+        name = str(r.get("PLAYER", "")).strip()
+        if not name:
+            continue
+        fpts = float(r.get("FPTS", 0) or 0)
+        sal_raw = r.get("SALARY")
+        sal = float(sal_raw) if sal_raw is not None and not pd.isna(sal_raw) else 0.0
+        floor_ = float(r.get("FLOOR", 0) or 0)
+        ceil_ = float(r.get("CEIL", 0) or 0)
+        pown_str = str(r.get("POWN", "0%")).replace("%", "").strip()
+        try:
+            pown = float(pown_str)
+        except (ValueError, TypeError):
+            pown = 0.0
+
+        row: dict = {
+            "player_name": name,
+            "proj": fpts if fpts > 0 else float("nan"),
+            "rg_proj": fpts if fpts > 0 else float("nan"),
+            "salary": int(sal) if sal > 0 else 0,
+            "floor": floor_ if floor_ > 0 else float("nan"),
+            "ceil": ceil_ if ceil_ > 0 else float("nan"),
+            "ownership": pown,
+            "own_proj": pown,
+            "proj_source": "RotoGrinders",
+            "pos": "",
+            "team": "",
+            "opponent": "",
+            "opp": "",
+        }
+        for sim_col in ["SIM15TH", "SIM33RD", "SIM50TH", "SIM66TH", "SIM85TH", "SIM90TH", "SIM99TH"]:
+            val = r.get(sim_col)
+            if val is not None and not pd.isna(val):
+                row[sim_col.lower()] = float(val)
+        smash = r.get("SMASH")
+        if smash is not None and not pd.isna(smash):
+            row["smash_prob"] = float(smash)
+        rows.append(row)
+
+    pool = pd.DataFrame(rows)
+    print(f"[_rg_csv_to_pool] Built pool with {len(pool)} players from RG CSV")
+    return pool
+
+
+def _load_nba_pool_from_rg(rg_file, rg_auto_path: str, slate_date: str) -> tuple:
+    """Build NBA optimizer pool using RG CSV as the source (no Tank01 API calls).
+
+    Flow:
+      1. Parse RG CSV → base pool (proj, salary, floor, ceil, ownership)
+      2. Fetch DK draftables → enrich with pos, team, opp, dk_player_id
+      3. Apply manual injury overrides
+      4. Run injury cascade
+      5. Pop Catalyst signals
+      6. Ownership guard
+      7. Post-cascade recompute of floor/ceil/sims
+      8. Sim eligibility
+
+    Returns (pool DataFrame, meta dict).
+    """
+    from yak_core.config import DK_LINEUP_SIZE, DK_POS_SLOTS, SALARY_CAP
+    from yak_core.live import apply_manual_injury_overrides_to_pool
+    from yak_core.injury_cascade import apply_injury_cascade
+
+    # Sanitize slate_date to prevent path traversal
+    slate_date = re.sub(r"[^0-9\-]", "", slate_date)[:10]
+
+    # ── Step 1: Build base pool from RG CSV ──────────────────────────────
+    _rg_source = None
+    _raw_rg = None
+    if rg_file is not None:
+        _raw_rg = rg_file
+        _rg_source = "RotoGrinders (uploaded)"
+    elif rg_auto_path and os.path.isfile(rg_auto_path):
+        _raw_rg = rg_auto_path
+        _rg_source = "RotoGrinders (saved)"
+    else:
+        _rg_archive_fallback = os.path.join(
+            str(Path(__file__).resolve().parent.parent),
+            "data", "rg_archive", "nba", f"rg_{slate_date}.csv"
+        )
+        if os.path.isfile(_rg_archive_fallback):
+            _raw_rg = _rg_archive_fallback
+            _rg_source = "RotoGrinders (archive)"
+
+    if _raw_rg is None:
+        raise ValueError(
+            "No RotoGrinders CSV found. Please upload the RG projections CSV to load the pool."
+        )
+
+    pool = _rg_csv_to_pool(_raw_rg)
+    if hasattr(_raw_rg, "seek"):
+        _raw_rg.seek(0)
+
+    st.info(
+        f"RG pool: {len(pool)} players loaded from CSV · "
+        f"FPTS range {pool['proj'].min():.0f}–{pool['proj'].max():.0f}"
+        if "proj" in pool.columns and pool["proj"].notna().any()
+        else f"RG pool: {len(pool)} players loaded from CSV"
+    )
+
+    # ── Step 2: Enrich with DK draftables (pos, team, opp, player IDs) ──
+    matchups = []
+    try:
+        from yak_core.dk_ingest import fetch_dk_lobby_contests, fetch_dk_draftables
+        _contests = fetch_dk_lobby_contests(sport="NBA")
+        if isinstance(_contests, pd.DataFrame) and not _contests.empty:
+            _dg_id = int(_contests.iloc[0]["draft_group_id"])
+            _dk_players = fetch_dk_draftables(_dg_id)
+            if isinstance(_dk_players, pd.DataFrame) and not _dk_players.empty:
+                _dk_players["_jn"] = _dk_players["name"].str.strip().str.lower()
+                pool["_jn"] = pool["player_name"].str.strip().str.lower()
+                _dk_lookup = _dk_players.set_index("_jn")
+
+                n_enriched = 0
+                for idx, row in pool.iterrows():
+                    jn = row["_jn"]
+                    if jn not in _dk_lookup.index:
+                        continue
+                    dk_row = _dk_lookup.loc[jn]
+                    if isinstance(dk_row, pd.DataFrame):
+                        dk_row = dk_row.iloc[0]
+
+                    if dk_row.get("positions"):
+                        pool.at[idx, "pos"] = str(dk_row["positions"])
+                    if dk_row.get("team"):
+                        pool.at[idx, "team"] = str(dk_row["team"]).upper()
+                    if dk_row.get("opp"):
+                        pool.at[idx, "opponent"] = str(dk_row["opp"]).upper()
+                        pool.at[idx, "opp"] = str(dk_row["opp"]).upper()
+                    if dk_row.get("dk_player_id"):
+                        pool.at[idx, "dk_player_id"] = str(dk_row["dk_player_id"])
+                        pool.at[idx, "player_id"] = str(dk_row["dk_player_id"])
+                    # Salary fallback: use DK salary if RG didn't provide one
+                    if pool.at[idx, "salary"] == 0:
+                        dk_sal = float(dk_row.get("salary") or 0)
+                        if dk_sal > 0:
+                            pool.at[idx, "salary"] = int(dk_sal)
+                    # DK status (Out/IR players)
+                    pool.at[idx, "status"] = str(dk_row.get("status") or "Active")
+                    # game_id: sort team abbrs so HOU@SAS and SAS@HOU
+                    # produce the same key regardless of home/away ordering.
+                    game_info = str(dk_row.get("game_info") or "")
+                    if "@" in game_info:
+                        parts = sorted(t.strip().upper() for t in game_info.split("@"))
+                        pool.at[idx, "game_id"] = "_".join(parts)
+                    if dk_row.get("game_time"):
+                        pool.at[idx, "game_time"] = str(dk_row["game_time"])
+                    n_enriched += 1
+
+                pool.drop(columns=["_jn"], inplace=True)
+
+                # Filter players flagged Out/IR by DK
+                if "status" in pool.columns:
+                    pre_status = len(pool)
+                    pool = pool[
+                        ~pool["status"].str.upper().isin(["OUT", "IR", "INACTIVE", "SUSPENDED"])
+                    ].copy()
+                    if len(pool) < pre_status:
+                        print(
+                            f"[_load_nba_pool_from_rg] Dropped {pre_status - len(pool)} "
+                            "Out/IR players per DK status"
+                        )
+
+                # Build matchups list from unique game_info entries
+                _seen_games: set = set()
+                for _, dk_row in _dk_players.iterrows():
+                    gi = str(dk_row.get("game_info") or "")
+                    if gi and gi not in _seen_games and "@" in gi:
+                        _seen_games.add(gi)
+                        parts = [t.strip() for t in gi.split("@")]
+                        if len(parts) == 2:
+                            away, home = parts[0].upper(), parts[1].upper()
+                            matchups.append({
+                                "away": away, "home": home,
+                                "label": gi,
+                            })
+
+                print(
+                    f"[_load_nba_pool_from_rg] DK enriched {n_enriched}/{len(pool)} players, "
+                    f"{len(matchups)} matchups"
+                )
+    except Exception as exc:
+        print(f"[_load_nba_pool_from_rg] DK draftables enrichment failed (non-fatal): {exc}")
+
+    # ── Step 3: Stub required columns ────────────────────────────────────
+    pool["b2b"] = False
+    if "player_id" not in pool.columns:
+        pool["player_id"] = pool["player_name"].str.lower().str.replace(" ", "_")
+    if "dk_player_id" not in pool.columns:
+        pool["dk_player_id"] = pool["player_id"]
+    if "game_id" not in pool.columns:
+        pool["game_id"] = ""
+    if "proj_minutes" not in pool.columns:
+        # Rough estimate: $6 000 salary ≈ 20 minutes
+        pool["proj_minutes"] = (
+            pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0) / 300.0
+        ).clip(upper=38)
+
+    # ── Step 4: Manual injury overrides ──────────────────────────────────
+    try:
+        pool = apply_manual_injury_overrides_to_pool(pool)
+    except Exception as exc:
+        print(f"[_load_nba_pool_from_rg] manual injury overrides failed (non-fatal): {exc}")
+
+    # ── Step 5: Injury cascade ────────────────────────────────────────────
+    try:
+        pool, _ = apply_injury_cascade(pool)
+        _n_bumped = int(
+            (pool.get("injury_bump_fp", pd.Series(0, index=pool.index)) > 0).sum()
+        )
+        if _n_bumped:
+            print(f"[_load_nba_pool_from_rg] Injury cascade boosted {_n_bumped} player(s)")
+    except Exception as exc:
+        print(f"[_load_nba_pool_from_rg] apply_injury_cascade failed (non-fatal): {exc}")
+
+    # ── Step 6: Pop Catalyst ──────────────────────────────────────────────
+    try:
+        from yak_core.pop_catalyst import compute_pop_catalyst
+        pool = compute_pop_catalyst(pool)
+    except Exception as exc:
+        print(f"[_load_nba_pool_from_rg] compute_pop_catalyst failed (non-fatal): {exc}")
+
+    # ── Step 7: Ownership guard ───────────────────────────────────────────
+    try:
+        from yak_core.ownership_guard import ensure_ownership
+        pool = ensure_ownership(pool, sport="NBA")
+    except Exception:
+        if "own_proj" in pool.columns and "ownership" not in pool.columns:
+            pool["ownership"] = pool["own_proj"]
+        if "ownership" not in pool.columns:
+            pool["ownership"] = 0.0
+
+    # ── Step 8: Post-cascade recompute floor/ceil/sims ────────────────────
+    try:
+        import numpy as np
+        from yak_core.edge import compute_empirical_std
+
+        _final_proj = pd.to_numeric(pool.get("proj", 0), errors="coerce").fillna(0).clip(lower=0)
+        _final_sal = pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0)
+
+        _sal_k = (_final_sal / 1000.0).clip(lower=3.0)
+        _spread_mult = (0.65 - _sal_k * 0.03).clip(lower=0.25, upper=0.55)
+        _new_floor = (_final_proj * (1.0 - _spread_mult)).round(2)
+        _new_ceil = (_final_proj * (1.0 + _spread_mult)).round(2)
+
+        # Only fill floor/ceil gaps — RG values take precedence where present
+        if "floor" not in pool.columns or pool["floor"].isna().all():
+            pool["floor"] = _new_floor
+        else:
+            pool["floor"] = pool["floor"].fillna(_new_floor)
+        if "ceil" not in pool.columns or pool["ceil"].isna().all():
+            pool["ceil"] = _new_ceil
+        else:
+            pool["ceil"] = pool["ceil"].fillna(_new_ceil)
+
+        # Recompute sim percentiles if RG CSV didn't provide them
+        _sim_cols = ["sim15th", "sim33rd", "sim50th", "sim66th", "sim85th", "sim90th", "sim99th"]
+        _needs_sims = any(
+            c not in pool.columns or pool[c].isna().all() for c in _sim_cols
+        )
+        if _needs_sims:
+            _std = compute_empirical_std(_final_proj.values, _final_sal.values, variance_mult=1.0)
+            _n_sims = 5000
+            _rng = np.random.default_rng(42)
+            _sim_matrix = _rng.normal(
+                loc=_final_proj.values[None, :],
+                scale=_std[None, :],
+                size=(_n_sims, len(_final_proj)),
+            )
+            _sim_matrix = np.maximum(_sim_matrix, 0.0)
+            for _pct, _col in [
+                (15, "sim15th"), (33, "sim33rd"), (50, "sim50th"),
+                (66, "sim66th"), (85, "sim85th"), (90, "sim90th"), (99, "sim99th"),
+            ]:
+                if _col not in pool.columns or pool[_col].isna().all():
+                    pool[_col] = np.percentile(_sim_matrix, _pct, axis=0).round(2)
+
+        print(
+            f"[_load_nba_pool_from_rg] Post-cascade recompute done for {len(pool)} players"
+        )
+    except Exception as exc:
+        print(f"[_load_nba_pool_from_rg] post-cascade recompute failed (non-fatal): {exc}")
+
+    # ── Step 9: Sim eligibility ───────────────────────────────────────────
+    try:
+        from yak_core.sims import compute_sim_eligible
+        pool = compute_sim_eligible(pool)
+    except Exception as exc:
+        print(f"[_load_nba_pool_from_rg] compute_sim_eligible failed (non-fatal): {exc}")
+
+    # Alias opponent → opp for archive compatibility
+    if "opponent" in pool.columns and "opp" not in pool.columns:
+        pool["opp"] = pool["opponent"]
+
+    meta = {
+        "sport": "NBA", "site": "DK", "date": slate_date,
+        "salary_cap": SALARY_CAP, "roster_slots": DK_POS_SLOTS, "lineup_size": DK_LINEUP_SIZE,
+        "pool_size": len(pool), "proj_source": _rg_source,
+        "matchups": matchups,
+        "game_times": {},
+    }
+    return pool, meta
 
 
 def _run_edge(sport: str, slate_date: str, out_dir: Path) -> tuple:
