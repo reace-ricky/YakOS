@@ -54,7 +54,9 @@
   "Gary Trent Jr.": {
     "min_exposure": 0.2
   },
-  "Carlton Carrington": {},
+  "Carlton Carrington": {
+    "max_exposure": 0.0
+  },
   "CJ McCollum": {},
   "Jaylen Brown": {
     "min_exposure": 0.5
@@ -63,7 +65,8 @@
     "min_exposure": 0.2
   },
   "Kyle Filipowski": {
-    "min_exposure": 0.5
+    "min_exposure": 0.5,
+    "max_exposure": 0.0
   },
   "Donovan Clingan": {},
   "Shai Gilgeous-Alexander": {
@@ -88,7 +91,9 @@
   "Royce O'Neale": {
     "min_exposure": 0.2
   },
-  "Max Shulga": {},
+  "Max Shulga": {
+    "max_exposure": 0.0
+  },
   "Precious Achiuwa": {
     "min_exposure": 0.5
   },
@@ -104,7 +109,9 @@
   "Anthony Edwards": {
     "min_exposure": 0.5
   },
-  "Curtis Jones": {},
+  "Curtis Jones": {
+    "max_exposure": 0.0
+  },
   "Tyrese Maxey": {
     "min_exposure": 0.5
   },
@@ -120,7 +127,9 @@
   "Cameron Johnson": {
     "min_exposure": 0.2
   },
-  "Bam Adebayo": {},
+  "Bam Adebayo": {
+    "max_exposure": 0.0
+  },
   "Duncan Robinson": {
     "min_exposure": 0.2
   },
