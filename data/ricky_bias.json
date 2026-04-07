@@ -134,7 +134,7 @@
     "min_exposure": 0.2
   },
   "Kevin Durant": {
-    "min_exposure": 0.5
+    "min_exposure": 0.2
   },
   "AJ Green": {
     "min_exposure": 0.2
@@ -155,6 +155,15 @@
     "min_exposure": 0.2
   },
   "Jalen Pickett": {
+    "min_exposure": 0.2
+  },
+  "Jeremiah Fears": {
+    "min_exposure": 0.5
+  },
+  "Alperen Sengun": {
+    "min_exposure": 0.2
+  },
+  "Devin Booker": {
     "min_exposure": 0.2
   }
 }
