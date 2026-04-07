@@ -91,7 +91,9 @@
   "Royce O'Neale": {
     "min_exposure": 0.2
   },
-  "Max Shulga": {},
+  "Max Shulga": {
+    "max_exposure": 0.0
+  },
   "Precious Achiuwa": {
     "min_exposure": 0.5
   },
@@ -107,7 +109,9 @@
   "Anthony Edwards": {
     "min_exposure": 0.5
   },
-  "Curtis Jones": {},
+  "Curtis Jones": {
+    "max_exposure": 0.0
+  },
   "Tyrese Maxey": {
     "min_exposure": 0.5
   },
@@ -138,8 +142,12 @@
   "Bones Hyland": {
     "min_exposure": 0.2
   },
-  "Jarrett Allen": {},
-  "Chaz Lanier": {},
+  "Jarrett Allen": {
+    "max_exposure": 0.0
+  },
+  "Chaz Lanier": {
+    "max_exposure": 0.0
+  },
   "Gregory Jackson": {
     "min_exposure": 0.5
   },
