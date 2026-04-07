@@ -1310,11 +1310,10 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
     # Uses salary-tier spread multiplier (same formula as old _enrich_pool)
     if "floor" not in pool.columns or pool["floor"].isna().all():
         import numpy as np
-        _sal = pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0)
+        _sal = pd.to_numeric(pool.get("salary", pd.Series(0, index=pool.index)), errors="coerce").fillna(0)
         _sal_k = (_sal / 1000.0).clip(lower=3.0)
         _spread_mult = (0.65 - _sal_k * 0.03).clip(lower=0.25, upper=0.55)
-        _proj = pd.to_numeric(pool.get("proj", 0), errors="coerce").fillna(0).clip(lower=0)
-        # Blend with rolling variance when available
+        _proj = pd.to_numeric(pool.get("proj", pd.Series(0, index=pool.index)), errors="coerce").fillna(0).clip(lower=0)
         if "rolling_fp_5" in pool.columns and "rolling_fp_10" in pool.columns:
             _fp5 = pd.to_numeric(pool["rolling_fp_5"], errors="coerce")
             _fp10 = pd.to_numeric(pool["rolling_fp_10"], errors="coerce")
@@ -1329,11 +1328,10 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
         pool["ceil"] = (_proj * (1.0 + _spread_mult)).round(2)
     elif "ceil" not in pool.columns or pool["ceil"].isna().all():
         import numpy as np
-        _sal = pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0)
+        _sal = pd.to_numeric(pool.get("salary", pd.Series(0, index=pool.index)), errors="coerce").fillna(0)
         _sal_k = (_sal / 1000.0).clip(lower=3.0)
         _spread_mult = (0.65 - _sal_k * 0.03).clip(lower=0.25, upper=0.55)
-        _proj = pd.to_numeric(pool.get("proj", 0), errors="coerce").fillna(0).clip(lower=0)
-        pool["ceil"] = (_proj * (1.0 + _spread_mult)).round(2)
+        _proj = pd.to_numeric(pool.get("proj", pd.Series(0, index=pool.index)), errors="coerce").fillna(0).clip(lower=0)
 
     # NOTE: RG merge now runs inside _load_nba_pool() BEFORE the injury
     # cascade, so cascade bumps are computed on top of RG FPTS.  Calibration
@@ -1518,8 +1516,8 @@ def _load_nba_pool(api_key: str, slate_date: str, rg_file=None, rg_auto_path=Non
         import numpy as np
         from yak_core.edge import compute_empirical_std
 
-        _final_proj = pd.to_numeric(pool.get("proj", 0), errors="coerce").fillna(0).clip(lower=0)
-        _final_sal = pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0)
+        _final_proj = pd.to_numeric(pool.get("proj", pd.Series(0, index=pool.index)), errors="coerce").fillna(0).clip(lower=0)
+        _final_sal = pd.to_numeric(pool.get("salary", pd.Series(0, index=pool.index)), errors="coerce").fillna(0)
 
         # Use pre-cascade (original) projections as the sim base so cascade
         # bumps don't triple-inflate through gpp_score's upside/boom components.
@@ -1973,7 +1971,7 @@ def _load_nba_pool_from_rg(rg_file, rg_auto_path: str, slate_date: str) -> tuple
     if "proj_minutes" not in pool.columns:
         # Rough estimate: $6 000 salary ≈ 20 minutes
         pool["proj_minutes"] = (
-            pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0) / 300.0
+            pd.to_numeric(pool.get("salary", pd.Series(0, index=pool.index)), errors="coerce").fillna(0) / 300.0
         ).clip(upper=38)
 
     # ── Step 4: Manual injury overrides ──────────────────────────────────
@@ -2015,8 +2013,8 @@ def _load_nba_pool_from_rg(rg_file, rg_auto_path: str, slate_date: str) -> tuple
         import numpy as np
         from yak_core.edge import compute_empirical_std
 
-        _final_proj = pd.to_numeric(pool.get("proj", 0), errors="coerce").fillna(0).clip(lower=0)
-        _final_sal = pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0)
+        _final_proj = pd.to_numeric(pool.get("proj", pd.Series(0, index=pool.index)), errors="coerce").fillna(0).clip(lower=0)
+        _final_sal = pd.to_numeric(pool.get("salary", pd.Series(0, index=pool.index)), errors="coerce").fillna(0)
 
         _sal_k = (_final_sal / 1000.0).clip(lower=3.0)
         _spread_mult = (0.65 - _sal_k * 0.03).clip(lower=0.25, upper=0.55)
@@ -2119,7 +2117,10 @@ def _run_edge(sport: str, slate_date: str, out_dir: Path) -> tuple:
             except Exception:
                 pass
 
-        late_swap_alerts = _build_late_swap_alerts(pool_before_status, pool, _pub_lineups or None)
+        try:
+            late_swap_alerts = _build_late_swap_alerts(pool_before_status, pool, _pub_lineups or None)
+        except Exception as _lsa_err:
+            print(f"[_run_edge] late_swap_alerts failed (non-fatal): {_lsa_err}")
 
         # Re-save updated pool so edge metrics compute on fresh data
         pool.to_parquet(str(out_dir / "slate_pool.parquet"), index=False)
@@ -2630,9 +2631,9 @@ def _build_late_swap_alerts(
 
             if isinstance(candidates, (pd.DataFrame, pd.Series)) and not candidates.empty:
                 own_col = "ownership" if "ownership" in candidates.columns and candidates["ownership"].notna().any() else "own_pct"
-                cand_own = pd.to_numeric(candidates.get(own_col, 0), errors="coerce").fillna(0)
-                cand_proj = pd.to_numeric(candidates.get("proj", 0), errors="coerce").fillna(0)
-                cand_sal = pd.to_numeric(candidates.get("salary", 0), errors="coerce").fillna(0)
+                cand_own = pd.to_numeric(candidates.get(own_col, pd.Series(0, index=candidates.index)), errors="coerce").fillna(0)
+                cand_proj = pd.to_numeric(candidates.get("proj", pd.Series(0, index=candidates.index)), errors="coerce").fillna(0)
+                cand_sal = pd.to_numeric(candidates.get("salary", pd.Series(0, index=candidates.index)), errors="coerce").fillna(0)
 
                 # Cash pivot: within ±$800, highest proj, ownership > 5%
                 cash_mask = (
@@ -2653,7 +2654,7 @@ def _build_late_swap_alerts(
 
                 # GPP pivot: within ±$1200, proj > 15, lowest own or best edge, own < 5%
                 edge_col = "edge_score" if "edge_score" in candidates.columns else "edge"
-                cand_edge = pd.to_numeric(candidates.get(edge_col, 0), errors="coerce").fillna(0)
+                cand_edge = pd.to_numeric(candidates.get(edge_col, pd.Series(0, index=candidates.index)), errors="coerce").fillna(0)
                 gpp_mask = (
                     (cand_sal >= salary - 1200)
                     & (cand_sal <= salary + 1200)
