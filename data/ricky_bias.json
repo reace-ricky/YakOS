@@ -165,5 +165,8 @@
   },
   "Devin Booker": {
     "min_exposure": 0.2
+  },
+  "Myron Gardner": {
+    "max_exposure": 0.0
   }
 }
