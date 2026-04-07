@@ -201,5 +201,29 @@
   },
   "Davis Chatfield": {
     "min_exposure": 0.2
+  },
+  "Brooks Koepka": {
+    "max_exposure": 0.0
+  },
+  "Min Woo Lee": {
+    "min_exposure": 0.5
+  },
+  "Jake Knapp": {
+    "min_exposure": 0.5
+  },
+  "Nicolai Hojgaard": {
+    "min_exposure": 0.5
+  },
+  "Chris Gotterup": {
+    "min_exposure": 0.5
+  },
+  "Kristoffer Reitan": {
+    "min_exposure": 0.2
+  },
+  "Sam Stevens": {
+    "min_exposure": 0.2
+  },
+  "Harry Hall": {
+    "min_exposure": 0.2
   }
 }
