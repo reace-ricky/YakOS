@@ -2120,6 +2120,7 @@ def _run_edge(sport: str, slate_date: str, out_dir: Path) -> tuple:
         try:
             late_swap_alerts = _build_late_swap_alerts(pool_before_status, pool, _pub_lineups or None)
         except Exception as _lsa_err:
+            late_swap_alerts = []
             print(f"[_run_edge] late_swap_alerts failed (non-fatal): {_lsa_err}")
 
         # Re-save updated pool so edge metrics compute on fresh data
