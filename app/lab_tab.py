@@ -298,6 +298,14 @@ def render_lab_tab(sport: str) -> None:
                 except Exception:
                     pass
 
+                # Invalidate the Edge tab cache so it picks up the new pool immediately
+                # rather than serving stale data for up to 5 minutes.
+                try:
+                    from app.data_loader import invalidate_published_cache
+                    invalidate_published_cache()
+                except Exception:
+                    pass
+
                 # Flash success and rerun so the stale-pool banner disappears
                 st.session_state[_flash_key] = True
                 st.rerun()
