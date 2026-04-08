@@ -1,5 +1,5 @@
 {
-  "computed_at": "2026-04-06T08:10:19.344834+00:00",
+  "computed_at": "2026-04-08T07:59:23.824644+00:00",
   "correction_factors_used": {
     "nba": {
       "n_slates": 15,
@@ -40,8 +40,9 @@
       "correction_strength": 0.5
     },
     "pga": {
-      "n_slates": 5,
+      "n_slates": 6,
       "dates_used": [
+        "2026-04-07",
         "2026-03-11",
         "2026-03-04",
         "2026-02-08",
@@ -55,7 +56,7 @@
       "by_salary_tier": {
         "<6.5K": 3.0,
         "6.5-7.5K": 3.0,
-        "7.5-8.5K": 3.0,
+        "7.5-8.5K": 2.68,
         "8.5-9.5K": 3.0
       },
       "correction_strength": 0.5
@@ -94,12 +95,12 @@
       "contest": "pga_gpp",
       "n_players": 79,
       "raw_mae": 22.5,
-      "corrected_mae": 22.14,
+      "corrected_mae": 22.15,
       "raw_bias": 2.94,
-      "corrected_bias": -4.52,
-      "improvement": 0.37,
-      "rmse": 25.91,
-      "correlation": 0.2002
+      "corrected_bias": -4.5,
+      "improvement": 0.35,
+      "rmse": 25.92,
+      "correlation": 0.1985
     },
     {
       "date": "2026-02-01",
@@ -172,12 +173,12 @@
       "contest": "pga_gpp",
       "n_players": 79,
       "raw_mae": 22.5,
-      "corrected_mae": 22.14,
+      "corrected_mae": 22.15,
       "raw_bias": 2.94,
-      "corrected_bias": -4.52,
-      "improvement": 0.37,
-      "rmse": 25.91,
-      "correlation": 0.2002
+      "corrected_bias": -4.5,
+      "improvement": 0.35,
+      "rmse": 25.92,
+      "correlation": 0.1985
     },
     {
       "date": "2026-02-08",
@@ -198,12 +199,12 @@
       "contest": "pga_gpp",
       "n_players": 79,
       "raw_mae": 22.5,
-      "corrected_mae": 22.14,
+      "corrected_mae": 22.15,
       "raw_bias": 2.94,
-      "corrected_bias": -4.52,
-      "improvement": 0.37,
-      "rmse": 25.91,
-      "correlation": 0.2002
+      "corrected_bias": -4.5,
+      "improvement": 0.35,
+      "rmse": 25.92,
+      "correlation": 0.1985
     },
     {
       "date": "2026-02-12",
@@ -211,12 +212,12 @@
       "contest": "pga_gpp",
       "n_players": 79,
       "raw_mae": 22.5,
-      "corrected_mae": 22.14,
+      "corrected_mae": 22.15,
       "raw_bias": 2.94,
-      "corrected_bias": -4.52,
-      "improvement": 0.37,
-      "rmse": 25.91,
-      "correlation": 0.2002
+      "corrected_bias": -4.5,
+      "improvement": 0.35,
+      "rmse": 25.92,
+      "correlation": 0.1985
     },
     {
       "date": "2026-02-20",
@@ -393,12 +394,12 @@
       "contest": "pga_gpp",
       "n_players": 79,
       "raw_mae": 22.5,
-      "corrected_mae": 22.14,
+      "corrected_mae": 22.15,
       "raw_bias": 2.94,
-      "corrected_bias": -4.52,
-      "improvement": 0.37,
-      "rmse": 25.91,
-      "correlation": 0.2002
+      "corrected_bias": -4.5,
+      "improvement": 0.35,
+      "rmse": 25.92,
+      "correlation": 0.1985
     },
     {
       "date": "2026-03-05",
@@ -432,12 +433,12 @@
       "contest": "pga_gpp",
       "n_players": 79,
       "raw_mae": 22.5,
-      "corrected_mae": 22.14,
+      "corrected_mae": 22.15,
       "raw_bias": 2.94,
-      "corrected_bias": -4.52,
-      "improvement": 0.37,
-      "rmse": 25.91,
-      "correlation": 0.2002
+      "corrected_bias": -4.5,
+      "improvement": 0.35,
+      "rmse": 25.92,
+      "correlation": 0.1985
     },
     {
       "date": "2026-03-06",
@@ -601,12 +602,12 @@
       "contest": "pga_gpp",
       "n_players": 79,
       "raw_mae": 22.5,
-      "corrected_mae": 22.14,
+      "corrected_mae": 22.15,
       "raw_bias": 2.94,
-      "corrected_bias": -4.52,
-      "improvement": 0.37,
-      "rmse": 25.91,
-      "correlation": 0.2002
+      "corrected_bias": -4.5,
+      "improvement": 0.35,
+      "rmse": 25.92,
+      "correlation": 0.1985
     },
     {
       "date": "2026-03-12",
@@ -614,12 +615,12 @@
       "contest": "pga_gpp",
       "n_players": 79,
       "raw_mae": 22.5,
-      "corrected_mae": 22.14,
+      "corrected_mae": 22.15,
       "raw_bias": 2.94,
-      "corrected_bias": -4.52,
-      "improvement": 0.37,
-      "rmse": 25.91,
-      "correlation": 0.2002
+      "corrected_bias": -4.5,
+      "improvement": 0.35,
+      "rmse": 25.92,
+      "correlation": 0.1985
     },
     {
       "date": "2026-03-14",
@@ -789,6 +790,19 @@
       "improvement": 0.3,
       "rmse": 11.13,
       "correlation": 0.6376
+    },
+    {
+      "date": "2026-04-07",
+      "sport": "PGA",
+      "contest": "pga_gpp",
+      "n_players": 22,
+      "raw_mae": 27.22,
+      "corrected_mae": 24.14,
+      "raw_bias": 15.87,
+      "corrected_bias": 8.56,
+      "improvement": 3.08,
+      "rmse": 28.65,
+      "correlation": 0.2403
     }
   ],
   "summary": {
@@ -802,13 +816,13 @@
       "improvement": -0.01
     },
     "pga": {
-      "n_slates": 8,
-      "n_players_total": 632,
-      "raw_mae": 22.5,
-      "corrected_mae": 22.14,
-      "raw_bias": 2.94,
-      "corrected_bias": -4.52,
-      "improvement": 0.36
+      "n_slates": 9,
+      "n_players_total": 654,
+      "raw_mae": 22.66,
+      "corrected_mae": 22.22,
+      "raw_bias": 3.37,
+      "corrected_bias": -4.06,
+      "improvement": 0.44
     }
   }
 }
