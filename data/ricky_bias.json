@@ -230,5 +230,23 @@
   },
   "John Konchar": {
     "min_exposure": 0.5
+  },
+  "Naz Reid": {
+    "max_exposure": 0.0
+  },
+  "Jaylen Clark": {
+    "max_exposure": 0.0
+  },
+  "Cade Cunningham": {
+    "min_exposure": 0.5
+  },
+  "Ryan Rollins": {
+    "min_exposure": 0.2
+  },
+  "Jalen Williams": {
+    "min_exposure": 0.2
+  },
+  "Ajay Mitchell": {
+    "min_exposure": 0.2
   }
 }
