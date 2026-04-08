@@ -14,38 +14,28 @@
     "UTIL"
   ],
   "lineup_size": 8,
-  "pool_size": 228,
-  "proj_source": "RotoGrinders (uploaded)",
+  "pool_size": 224,
+  "proj_source": "RotoGrinders (saved)",
   "matchups": [
     {
-      "away": "MIL",
-      "home": "BKN",
-      "label": "MIL @ BKN"
+      "away": "OKC",
+      "home": "LAL",
+      "label": "OKC @ LAL"
     },
     {
-      "away": "CHA",
-      "home": "BOS",
-      "label": "CHA @ BOS"
+      "away": "DAL",
+      "home": "LAC",
+      "label": "DAL @ LAC"
     },
     {
-      "away": "CHI",
-      "home": "WAS",
-      "label": "CHI @ WAS"
+      "away": "HOU",
+      "home": "PHX",
+      "label": "HOU @ PHX"
     },
     {
-      "away": "MIA",
-      "home": "TOR",
-      "label": "MIA @ TOR"
-    },
-    {
-      "away": "MIN",
-      "home": "IND",
-      "label": "MIN @ IND"
-    },
-    {
-      "away": "UTA",
-      "home": "NOP",
-      "label": "UTA @ NOP"
+      "away": "SAC",
+      "home": "GSW",
+      "label": "SAC @ GSW"
     }
   ],
   "game_times": {}
