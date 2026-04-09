@@ -1,7 +1,7 @@
 {
   "sport": "NBA",
   "site": "DK",
-  "date": "2026-04-08",
+  "date": "2026-04-09",
   "salary_cap": 50000,
   "roster_slots": [
     "PG",
@@ -14,18 +14,33 @@
     "UTIL"
   ],
   "lineup_size": 8,
-  "pool_size": 169,
+  "pool_size": 129,
   "proj_source": "RotoGrinders (uploaded)",
   "matchups": [
     {
-      "away": "OKC",
-      "home": "LAC",
-      "label": "OKC @ LAC"
+      "away": "BOS",
+      "home": "NYK",
+      "label": "BOS @ NYK"
     },
     {
-      "away": "DAL",
-      "home": "PHX",
-      "label": "DAL @ PHX"
+      "away": "PHI",
+      "home": "HOU",
+      "label": "PHI @ HOU"
+    },
+    {
+      "away": "CHI",
+      "home": "WAS",
+      "label": "CHI @ WAS"
+    },
+    {
+      "away": "MIA",
+      "home": "TOR",
+      "label": "MIA @ TOR"
+    },
+    {
+      "away": "IND",
+      "home": "BKN",
+      "label": "IND @ BKN"
     }
   ],
   "game_times": {}
