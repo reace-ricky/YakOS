@@ -212,7 +212,9 @@
   "Harry Hall": {
     "min_exposure": 0.2
   },
-  "Corey Conners": {},
+  "Corey Conners": {
+    "max_exposure": 0.0
+  },
   "Jon Rahm": {
     "min_exposure": 0.5
   },
