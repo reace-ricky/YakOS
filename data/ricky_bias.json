@@ -54,9 +54,7 @@
   "Gary Trent Jr.": {
     "min_exposure": 0.2
   },
-  "Carlton Carrington": {
-    "max_exposure": 0.0
-  },
+  "Carlton Carrington": {},
   "CJ McCollum": {},
   "Jaylen Brown": {
     "min_exposure": 0.5
@@ -65,8 +63,7 @@
     "min_exposure": 0.2
   },
   "Kyle Filipowski": {
-    "min_exposure": 0.5,
-    "max_exposure": 0.0
+    "min_exposure": 0.5
   },
   "Donovan Clingan": {},
   "Shai Gilgeous-Alexander": {
@@ -123,9 +120,7 @@
   "Cameron Johnson": {
     "min_exposure": 0.2
   },
-  "Bam Adebayo": {
-    "max_exposure": 0.0
-  },
+  "Bam Adebayo": {},
   "Duncan Robinson": {
     "min_exposure": 0.2
   },
@@ -158,12 +153,8 @@
   "Devin Booker": {
     "min_exposure": 0.2
   },
-  "Myron Gardner": {
-    "max_exposure": 0.0
-  },
-  "Ron Harper": {
-    "max_exposure": 0.0
-  },
+  "Myron Gardner": {},
+  "Ron Harper": {},
   "Marco Penge": {},
   "Davis Riley": {},
   "Matt Fitzpatrick": {
@@ -212,9 +203,7 @@
   "Harry Hall": {
     "min_exposure": 0.2
   },
-  "Corey Conners": {
-    "max_exposure": 0.0
-  },
+  "Corey Conners": {},
   "Jon Rahm": {
     "min_exposure": 0.5
   },
