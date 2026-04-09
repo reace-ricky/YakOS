@@ -130,7 +130,7 @@
     "min_exposure": 0.2
   },
   "Kevin Durant": {
-    "min_exposure": 0.2
+    "min_exposure": 0.5
   },
   "AJ Green": {
     "min_exposure": 0.2
@@ -233,8 +233,12 @@
   "John Konchar": {
     "min_exposure": 0.5
   },
-  "Naz Reid": {},
-  "Jaylen Clark": {},
+  "Naz Reid": {
+    "max_exposure": 0.0
+  },
+  "Jaylen Clark": {
+    "max_exposure": 0.0
+  },
   "Cade Cunningham": {
     "min_exposure": 0.5
   },
@@ -252,5 +256,20 @@
   },
   "Julian Reese": {
     "max_exposure": 0.0
+  },
+  "Yuki Kawamura": {
+    "max_exposure": 0.0
+  },
+  "LeBron James": {
+    "min_exposure": 0.5
+  },
+  "Reed Sheppard": {
+    "min_exposure": 0.2
+  },
+  "Jakob Poeltl": {
+    "min_exposure": 0.2
+  },
+  "Brandin Podziemski": {
+    "min_exposure": 0.2
   }
 }
