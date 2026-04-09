@@ -1,27 +1,27 @@
 {
   "sport": "NBA",
-  "date": "2026-04-07",
+  "date": "2026-04-09",
   "core_names": [
-    "Jeremiah Fears",
     "Jayson Tatum",
-    "Kawhi Leonard",
-    "Shai Gilgeous-Alexander",
-    "Cooper Flagg"
+    "LeBron James",
+    "Tyrese Maxey",
+    "Kevin Durant",
+    "Bam Adebayo"
   ],
   "leverage_names": [
-    "Kevin Durant",
-    "Alperen Sengun",
-    "Devin Booker",
-    "Stephen Curry",
-    "Jalen Green"
+    "Reed Sheppard",
+    "Jakob Poeltl",
+    "Brandin Podziemski",
+    "Immanuel Quickley",
+    "Kelly Oubre"
   ],
   "value_names": [],
   "fade_names": [
-    "Myron Gardner",
-    "Ron Harper",
-    "Hugo Gonzalez",
-    "A.J. Lawson",
-    "Simone Fontecchio"
+    "Yuki Kawamura",
+    "Lachlan Olbrich",
+    "Tre Scott",
+    "Tyson Etienne",
+    "Robert Dillingham"
   ],
   "calibration_slates": 15
 }
