@@ -1,5 +1,5 @@
 {
-  "computed_at": "2026-04-08T07:59:23.824644+00:00",
+  "computed_at": "2026-04-10T08:07:40.275562+00:00",
   "correction_factors_used": {
     "nba": {
       "n_slates": 15,
@@ -803,6 +803,19 @@
       "improvement": 3.08,
       "rmse": 28.65,
       "correlation": 0.2403
+    },
+    {
+      "date": "2026-04-09",
+      "sport": "PGA",
+      "contest": "pga_gpp",
+      "n_players": 22,
+      "raw_mae": 49.98,
+      "corrected_mae": 43.19,
+      "raw_bias": 49.98,
+      "corrected_bias": 42.67,
+      "improvement": 6.79,
+      "rmse": 51.0,
+      "correlation": 0.1988
     }
   ],
   "summary": {
@@ -816,13 +829,13 @@
       "improvement": -0.01
     },
     "pga": {
-      "n_slates": 9,
-      "n_players_total": 654,
-      "raw_mae": 22.66,
-      "corrected_mae": 22.22,
-      "raw_bias": 3.37,
-      "corrected_bias": -4.06,
-      "improvement": 0.44
+      "n_slates": 10,
+      "n_players_total": 676,
+      "raw_mae": 23.55,
+      "corrected_mae": 22.9,
+      "raw_bias": 4.89,
+      "corrected_bias": -2.54,
+      "improvement": 0.65
     }
   }
 }
