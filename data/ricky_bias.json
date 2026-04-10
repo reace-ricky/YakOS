@@ -65,8 +65,7 @@
     "min_exposure": 0.2
   },
   "Kyle Filipowski": {
-    "min_exposure": 0.5,
-    "max_exposure": 0.0
+    "min_exposure": 0.5
   },
   "Donovan Clingan": {},
   "Shai Gilgeous-Alexander": {
@@ -212,9 +211,7 @@
   "Harry Hall": {
     "min_exposure": 0.2
   },
-  "Corey Conners": {
-    "max_exposure": 0.0
-  },
+  "Corey Conners": {},
   "Jon Rahm": {
     "min_exposure": 0.5
   },
@@ -233,12 +230,8 @@
   "John Konchar": {
     "min_exposure": 0.5
   },
-  "Naz Reid": {
-    "max_exposure": 0.0
-  },
-  "Jaylen Clark": {
-    "max_exposure": 0.0
-  },
+  "Naz Reid": {},
+  "Jaylen Clark": {},
   "Cade Cunningham": {
     "min_exposure": 0.5
   },
