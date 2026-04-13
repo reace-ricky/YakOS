@@ -54,7 +54,9 @@
   "Gary Trent Jr.": {
     "min_exposure": 0.2
   },
-  "Carlton Carrington": {},
+  "Carlton Carrington": {
+    "max_exposure": 0.0
+  },
   "CJ McCollum": {},
   "Jaylen Brown": {
     "min_exposure": 0.5
@@ -250,9 +252,7 @@
   "Julian Reese": {
     "max_exposure": 0.0
   },
-  "Yuki Kawamura": {
-    "max_exposure": 0.0
-  },
+  "Yuki Kawamura": {},
   "LeBron James": {
     "min_exposure": 0.5
   },
