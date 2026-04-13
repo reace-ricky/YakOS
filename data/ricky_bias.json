@@ -122,7 +122,9 @@
   "Cameron Johnson": {
     "min_exposure": 0.2
   },
-  "Bam Adebayo": {},
+  "Bam Adebayo": {
+    "max_exposure": 0.0
+  },
   "Duncan Robinson": {
     "min_exposure": 0.2
   },
@@ -265,9 +267,7 @@
   "Brandin Podziemski": {
     "min_exposure": 0.2
   },
-  "Ousmane Dieng": {
-    "max_exposure": 0.0
-  },
+  "Ousmane Dieng": {},
   "Kobe Bufkin": {
     "max_exposure": 0.0
   }
