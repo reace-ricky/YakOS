@@ -106,10 +106,12 @@ def _build_dk_csv(lineups_df: pd.DataFrame, *, is_pga: bool = False) -> pd.DataF
 
 def render_optimizer_tab(sport: str, *, is_admin: bool = False) -> None:
     """Render the Optimizer tab."""
-    from app.data_loader import load_published_data
+    from app.data_loader import get_published_version, load_published_data
 
     try:
-        meta, pool, edge_analysis, edge_state, _lineups = load_published_data(sport)
+        meta, pool, edge_analysis, edge_state, _lineups = load_published_data(
+            sport, get_published_version(sport)
+        )
     except Exception as e:
         st.error(f"Could not load {sport} data: {e}")
         return
