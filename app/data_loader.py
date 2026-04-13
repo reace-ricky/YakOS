@@ -1,6 +1,10 @@
 """Shared data loading functions for the YakOS Streamlit app.
 
-All public-tab data is read from data/published/{sport}/ and cached for 5 minutes.
+All public-tab data is read from data/published/{sport}/ and cached until the
+published files change.  The cache key includes a ``published_version`` derived
+from the modification times of all relevant artifacts, so the cache busts
+automatically whenever a new publish lands — no manual Refresh required.
+
 Lab tab reads bypass the cache to always get fresh data after writes.
 """
 from __future__ import annotations
@@ -15,16 +19,70 @@ import streamlit as st
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "data" / "published"
 
+# Files tracked for cache-busting (relative to the sport directory).
+_VERSIONED_FILES = [
+    "slate_meta.json",
+    "slate_pool.parquet",
+    "edge_analysis.json",
+    "edge_state.json",
+]
 
-@st.cache_data(ttl=300)
-def load_published_data(sport: str) -> Tuple[
+
+def get_published_version(sport: str) -> str:
+    """Return a version string for the published data of *sport*.
+
+    The version is a colon-separated list of ``<filename>:<mtime_ns>`` pairs
+    for every tracked artifact in ``data/published/{sport}/``.  It changes
+    whenever any of those files is updated, so callers can pass it as a cache
+    key argument to :func:`load_published_data` to get automatic cache
+    invalidation without waiting for the TTL to expire.
+
+    Returns an empty string when the directory does not exist (treated as a
+    single, stable "empty" version by the cache).
+    """
+    base = DATA_DIR / sport.lower()
+    if not base.is_dir():
+        return ""
+
+    parts: list[str] = []
+    # Fixed tracked files
+    for fname in _VERSIONED_FILES:
+        p = base / fname
+        try:
+            parts.append(f"{fname}:{p.stat().st_mtime_ns}")
+        except FileNotFoundError:
+            parts.append(f"{fname}:missing")
+
+    # Dynamic lineup files (names vary by contest slug)
+    for lf in sorted(base.glob("*_lineups.parquet")):
+        try:
+            parts.append(f"{lf.name}:{lf.stat().st_mtime_ns}")
+        except FileNotFoundError:
+            pass
+
+    return ":".join(parts)
+
+
+@st.cache_data(ttl=3600)
+def load_published_data(sport: str, published_version: str = "") -> Tuple[
     Dict[str, Any],        # slate_meta
     pd.DataFrame,          # slate_pool
     Dict[str, Any],        # edge_analysis
     Dict[str, Any],        # edge_state
     Dict[str, pd.DataFrame],  # lineups by contest slug
 ]:
-    """Load all published data for a sport (cached 5 min)."""
+    """Load all published data for a sport.
+
+    Results are cached until *published_version* changes.  Pass the return
+    value of :func:`get_published_version` as the second argument so that
+    Streamlit invalidates the cache automatically whenever the published
+    artifacts are updated (instead of waiting up to 5 minutes for the old
+    TTL-based expiry).
+
+    The ``published_version`` parameter is intentionally included in the
+    function signature so that Streamlit's ``@st.cache_data`` incorporates it
+    into the cache key.
+    """
     base = DATA_DIR / sport.lower()
 
     meta: Dict[str, Any] = {}

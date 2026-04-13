@@ -839,7 +839,7 @@ def _compute_optimizer_notes(lineups: dict | None) -> List[str]:
 
 def render_edge_tab(sport: str) -> None:
     """Render Ricky's Edge Analysis tab."""
-    from app.data_loader import invalidate_published_cache, load_published_data
+    from app.data_loader import get_published_version, invalidate_published_cache, load_published_data
 
     # Load Ricky's bias overrides into session state (persisted to disk)
     from yak_core.bias import save_bias
@@ -857,7 +857,9 @@ def render_edge_tab(sport: str) -> None:
         st.rerun()
 
     try:
-        meta, pool, edge_analysis, edge_state, lineups = load_published_data(sport)
+        meta, pool, edge_analysis, edge_state, lineups = load_published_data(
+            sport, get_published_version(sport)
+        )
         if not isinstance(pool, pd.DataFrame):
             if isinstance(pool, dict):
                 pool = pd.DataFrame(pool)
