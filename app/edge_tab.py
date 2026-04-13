@@ -268,7 +268,7 @@ def _classify_signal(p: Dict[str, Any], pool: pd.DataFrame) -> tuple:
 
     vegas = 0.0
     spread = 0.0
-    if not pool.empty and "player_name" in pool.columns:
+    if isinstance(pool, pd.DataFrame) and not pool.empty and "player_name" in pool.columns:
         match = pool[pool["player_name"] == name]
         if isinstance(match, (pd.DataFrame, pd.Series)) and not match.empty:
             row = match.iloc[0]
@@ -869,8 +869,15 @@ def render_edge_tab(sport: str) -> None:
 
     try:
         meta, pool, edge_analysis, edge_state, lineups = load_published_data(sport)
-        if isinstance(pool, dict):
-            pool = pd.DataFrame(pool)
+        if not isinstance(pool, pd.DataFrame):
+            if isinstance(pool, dict):
+                pool = pd.DataFrame(pool)
+            elif isinstance(pool, list):
+                pool = pd.DataFrame.from_records(pool)
+            elif pool is None:
+                pool = pd.DataFrame()
+            else:
+                pool = pd.DataFrame(pool)
     except Exception as e:
         st.error(f"Could not load {sport} data: {e}")
         return
@@ -887,6 +894,8 @@ def render_edge_tab(sport: str) -> None:
     except Exception as _norm_exc:
         st.error(f"Pool normalization failed ({sport}): {_norm_exc}")
         logging.exception("[edge_tab] normalize_pool raised")
+        if not isinstance(pool, pd.DataFrame):
+            pool = pd.DataFrame()
         pool_errors = []
 
     if pool_errors:
