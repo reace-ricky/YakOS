@@ -59,7 +59,8 @@
         "MAX_EXPOSURE": 0.5,
         "GPP_OWN_PENALTY_STRENGTH": 0.16,
         "NUM_LINEUPS": 10,
-        "GPP_SNIPER_WEIGHT": 0.1
+        "GPP_SNIPER_WEIGHT": 0.1,
+        "GPP_UPSIDE_WEIGHT": 0.25
       },
       "ricky_weights": {
         "w_gpp": 0.25,
