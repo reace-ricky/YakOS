@@ -272,5 +272,8 @@
   },
   "Kobe Bufkin": {
     "max_exposure": 0.0
+  },
+  "LaMelo Ball": {
+    "min_exposure": 0.5
   }
 }
