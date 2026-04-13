@@ -1,27 +1,23 @@
 {
   "sport": "NBA",
-  "date": "2026-04-09",
+  "date": "2026-04-14",
   "core_names": [
-    "Jayson Tatum",
-    "LeBron James",
     "Tyrese Maxey",
-    "Kevin Durant",
-    "Bam Adebayo"
+    "LeBron James",
+    "Bam Adebayo",
+    "Deni Avdija",
+    "LaMelo Ball"
   ],
-  "leverage_names": [
-    "Reed Sheppard",
-    "Jakob Poeltl",
-    "Brandin Podziemski",
-    "Immanuel Quickley",
-    "Kelly Oubre"
+  "leverage_names": [],
+  "value_names": [
+    "Caleb Houstan"
   ],
-  "value_names": [],
   "fade_names": [
-    "Yuki Kawamura",
-    "Lachlan Olbrich",
-    "Tre Scott",
-    "Tyson Etienne",
-    "Robert Dillingham"
+    "Kobe Bufkin",
+    "Jeenathan Williams",
+    "Pat Connaughton",
+    "Trendon Watford",
+    "MarJon Beauchamp"
   ],
   "calibration_slates": 15
 }
