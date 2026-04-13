@@ -252,7 +252,9 @@
   "Julian Reese": {
     "max_exposure": 0.0
   },
-  "Yuki Kawamura": {},
+  "Yuki Kawamura": {
+    "max_exposure": 0.0
+  },
   "LeBron James": {
     "min_exposure": 0.5
   },
