@@ -163,8 +163,12 @@
   "Ron Harper": {
     "max_exposure": 0.0
   },
-  "Marco Penge": {},
-  "Davis Riley": {},
+  "Marco Penge": {
+    "max_exposure": 0.0
+  },
+  "Davis Riley": {
+    "max_exposure": 0.0
+  },
   "Matt Fitzpatrick": {
     "min_exposure": 0.5
   },
