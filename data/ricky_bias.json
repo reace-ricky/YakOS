@@ -271,5 +271,8 @@
   },
   "Brandin Podziemski": {
     "min_exposure": 0.2
+  },
+  "Ousmane Dieng": {
+    "max_exposure": 0.0
   }
 }
