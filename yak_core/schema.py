@@ -451,6 +451,7 @@ def normalize_edge_analysis(
             continue
 
         clean_plays: List[Dict[str, Any]] = []
+        seen_names: set[str] = set()
         for i, play in enumerate(plays):
             if not isinstance(play, dict):
                 all_errors.append(
@@ -472,6 +473,12 @@ def normalize_edge_analysis(
             if not rec.get("player_name"):
                 # Skip plays with no name — they crash the render
                 continue
+            if rec["player_name"] in seen_names:
+                all_errors.append(
+                    f"[{sport}] {section}[{i}]: duplicate '{rec['player_name']}', dropping duplicate"
+                )
+                continue
+            seen_names.add(rec["player_name"])
 
             # Coerce numeric edge-play fields
             for col in ("salary", "proj", "ownership", "edge"):
