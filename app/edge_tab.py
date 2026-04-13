@@ -467,17 +467,6 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     else:
         parts.append('<div class="tb-setup">No strong stack targets on this slate.</div>')
 
-    # ── 3a+. Optimizer Notes (only if present) ─────────────────────
-    _opt_notes = edge_analysis.get("optimizer_notes", [])
-    if _opt_notes:
-        parts.append('<div class="tb-section-label">OPTIMIZER NOTES</div>')
-        for _note in _opt_notes:
-            parts.append(
-                f'<div class="tb-play-row">'
-                f'<span class="tb-meta">{_note}</span>'
-                f'</div>'
-            )
-
     # ── 3b. Sniper Spots (max 3) ──────────────────────────────────────
     board_snipers = compute_sniper_spots(pool, edge_analysis)
     # never allow fades into sniper spots
@@ -932,6 +921,7 @@ def render_edge_tab(sport: str) -> None:
     _render_late_swap_alerts(_late_swap, sport, lineups)
 
     # ── Compute optimizer notes from lineups ────────────────────────
+    # (kept for data layer; not rendered in UI)
     edge_analysis["optimizer_notes"] = _compute_optimizer_notes(lineups)
 
     # ── The Board ─────────────────────────────────────────────────────
@@ -1009,42 +999,6 @@ def render_edge_tab(sport: str) -> None:
             reverse=True,
         )
         _render_edge_box("value_plays", _val, is_pga, _cleared)
-
-    # ── Fade candidates with per-player reasoning ──────────────────────────
-    _all_fades = sorted(
-        _dedupe_players(edge_analysis.get("fade_candidates", [])),
-        key=lambda p: float(p.get("fade_score", 0) or 0),
-        reverse=True,
-    )
-    if _all_fades:
-        st.markdown("---")
-        st.markdown("#### 🚫 Fade Candidates")
-        for _fc in _all_fades:
-            _fc_name    = _fc.get("player_name", "Unknown")
-            _fc_own     = float(_fc.get("own_pct", _fc.get("ownership", 0)) or 0)
-            _fc_sal     = int(_fc.get("salary", 0))
-            _fc_proj    = float(_fc.get("proj", 0))
-            _fc_ceil    = float(_fc.get("ceil", 0) or _fc.get("sim90th", 0))
-            _fc_val     = float(_fc.get("value", 0))
-            _fc_reason  = _fc.get("reasoning", "High ownership, weak edge")
-            _fc_score   = _fc.get("fade_score")
-            _fc_team    = _fc.get("team", "")
-            _header     = (
-                f"💀 **{_fc_name}**"
-                + (f" ({_fc_team})" if _fc_team else "")
-                + f" — {_fc_own:.1f}% owned, ${_fc_sal:,}"
-            )
-            with st.expander(_header, expanded=False):
-                _detail_cols = st.columns(3)
-                with _detail_cols[0]:
-                    st.metric("Proj", f"{_fc_proj:.1f}")
-                with _detail_cols[1]:
-                    st.metric("Ceiling", f"{_fc_ceil:.0f}")
-                with _detail_cols[2]:
-                    st.metric("Value", f"{_fc_val:.1f} pts/$1K")
-                st.markdown(f"**Why fade:** {_fc_reason}")
-                if _fc_score is not None:
-                    st.caption(f"Fade score: {_fc_score:.3f}")
 
     # ── Published lineups ──
     if lineups:
