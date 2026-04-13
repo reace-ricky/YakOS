@@ -307,3 +307,27 @@ class TestClassifyPlays:
         classified = classify_plays(pd.DataFrame(), sport="NBA")
         for key in ("core_plays", "leverage_plays", "value_plays", "fade_candidates"):
             assert classified[key] == [], f"Expected empty list for {key}"
+
+    def test_duplicate_player_rows_do_not_duplicate_output_names(self):
+        pool = _make_pool(12)
+        dup = pool.iloc[[0]].copy()
+        dup["proj"] = dup["proj"] + 5.0  # ensure deterministic "keep highest proj"
+        pool = pd.concat([pool, dup], ignore_index=True)
+
+        classified = classify_plays(pool, sport="NBA")
+        all_names: list[str] = []
+        for key in ("core_plays", "leverage_plays", "value_plays", "fade_candidates"):
+            all_names.extend(p["player_name"] for p in classified[key])
+        assert len(all_names) == len(set(all_names)), "Duplicate player leaked into output buckets"
+
+    def test_value_fallback_populates_when_low_risk_filter_is_empty(self):
+        # Missing risk inputs -> risk_score all zeros -> _low_risk mask empty (0 < p80(0) is false)
+        # Fallback should still populate value plays from sub-$7k pool.
+        pool = pd.DataFrame([
+            {"player_name": "A", "salary": 6200, "proj": 29.0, "ownership": 8.0, "ceil": 40.0, "sim90th": 41.0},
+            {"player_name": "B", "salary": 6400, "proj": 28.0, "ownership": 9.0, "ceil": 39.0, "sim90th": 40.0},
+            {"player_name": "C", "salary": 6800, "proj": 30.0, "ownership": 10.0, "ceil": 42.0, "sim90th": 43.0},
+            {"player_name": "D", "salary": 7200, "proj": 34.0, "ownership": 11.0, "ceil": 46.0, "sim90th": 47.0},
+        ])
+        classified = classify_plays(pool, sport="NBA")
+        assert classified["value_plays"], "Expected non-empty value_plays via fallback path"

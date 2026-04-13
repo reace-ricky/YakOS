@@ -298,6 +298,17 @@ class TestNormalizeEdgeAnalysis:
         _, errors = normalize_edge_analysis(ea, sport="PGA")
         assert any("PGA" in e for e in errors)
 
+    def test_duplicate_names_in_section_are_deduped(self):
+        ea = {
+            "fade_candidates": [
+                {"player_name": "Dup", "salary": 7000, "proj": 30.0},
+                {"player_name": "Dup", "salary": 7100, "proj": 31.0},
+            ]
+        }
+        out, errors = normalize_edge_analysis(ea, sport="NBA")
+        assert len(out["fade_candidates"]) == 1
+        assert any("duplicate 'Dup'" in e for e in errors)
+
 
 # ---------------------------------------------------------------------------
 # EdgePlay dataclass

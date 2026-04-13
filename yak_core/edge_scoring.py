@@ -247,6 +247,16 @@ def classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
         return pd.Series(default, index=frame.index)
 
     df = sdf.copy()
+    # Guard against duplicate rows leaking in from upstream merges (e.g. RG +
+    # model blends). Keep the strongest projection per player.
+    if "player_name" in df.columns and df["player_name"].duplicated().any():
+        _before = len(df)
+        df = (
+            df.sort_values(by="proj", ascending=False, na_position="last")
+              .drop_duplicates(subset=["player_name"], keep="first")
+              .reset_index(drop=True)
+        )
+        print(f"[classify_plays] deduped players: {_before} -> {len(df)}")
     _sal  = _safe_col(df, "salary")
     _proj = _safe_col(df, "proj")
     _own_col = (
@@ -345,6 +355,9 @@ def classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
 
     # ── Value (Salary Savers): best pts/$1K under $6.5K ───────────────────
     _val_pool = df[(df["_sal"] < 6500) & (df["_sal"] > 0) & _low_risk & ~df["player_name"].isin(_used)]
+    # Fallback: when risk filter is too strict, still show value leaders.
+    if _val_pool.empty:
+        _val_pool = df[(df["_sal"] < 7000) & (df["_sal"] > 0) & ~df["player_name"].isin(_used)]
     value     = _val_pool.nlargest(5, "_val")
     _used.update(value["player_name"].tolist())
 
@@ -411,10 +424,12 @@ def classify_plays(sdf: pd.DataFrame, sport: str = "NBA") -> dict:
     for _af in _algo_fades:
         if len(_final_fades) >= MAX_FADE_CANDIDATES:
             break
-        if _af.get("player_name", "") not in _seen_names:
+        _name = _af.get("player_name", "")
+        if _name not in _seen_names:
             _af = dict(_af)
             _af.setdefault("own_pct", _af.get("ownership", 0))
             _final_fades.append(_af)
+            _seen_names.add(_name)
 
     return {
         "core_plays":      _to_list(core,     tag="core"),

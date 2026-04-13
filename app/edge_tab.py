@@ -963,19 +963,50 @@ def render_edge_tab(sport: str) -> None:
         _display_fades = {f.get("player_name", "") for f in edge_analysis["fade_candidates"]}
         _display_fades.discard("")
 
+    def _dedupe_players(players: list[dict]) -> list[dict]:
+        out: list[dict] = []
+        seen: set[str] = set()
+        for p in players or []:
+            _name = p.get("player_name", "")
+            if not _name or _name in seen:
+                continue
+            out.append(p)
+            seen.add(_name)
+        return out
+
     def _strip_fades(players: list, fades: set) -> list:
-        return [p for p in players if p.get("player_name", "") not in fades]
+        cleaned = _dedupe_players(players)
+        return [p for p in cleaned if p.get("player_name", "") not in fades]
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        _render_edge_box("core_plays", _strip_fades(edge_analysis.get("core_plays", []), _display_fades), is_pga, _cleared)
+        _core = sorted(
+            _strip_fades(edge_analysis.get("core_plays", []), _display_fades),
+            key=lambda p: float(p.get("proj", 0) or 0),
+            reverse=True,
+        )
+        _render_edge_box("core_plays", _core, is_pga, _cleared)
     with col2:
-        _render_edge_box("leverage_plays", _strip_fades(edge_analysis.get("leverage_plays", []), _display_fades), is_pga, _cleared)
+        _lev = sorted(
+            _strip_fades(edge_analysis.get("leverage_plays", []), _display_fades),
+            key=lambda p: float(p.get("edge", 0) or 0),
+            reverse=True,
+        )
+        _render_edge_box("leverage_plays", _lev, is_pga, _cleared)
     with col3:
-        _render_edge_box("value_plays", _strip_fades(edge_analysis.get("value_plays", []), _display_fades), is_pga, _cleared)
+        _val = sorted(
+            _strip_fades(edge_analysis.get("value_plays", []), _display_fades),
+            key=lambda p: float(p.get("value", 0) or 0),
+            reverse=True,
+        )
+        _render_edge_box("value_plays", _val, is_pga, _cleared)
 
     # ── Fade candidates with per-player reasoning ──────────────────────────
-    _all_fades = edge_analysis.get("fade_candidates", [])
+    _all_fades = sorted(
+        _dedupe_players(edge_analysis.get("fade_candidates", [])),
+        key=lambda p: float(p.get("fade_score", 0) or 0),
+        reverse=True,
+    )
     if _all_fades:
         st.markdown("---")
         st.markdown("#### 🚫 Fade Candidates")
