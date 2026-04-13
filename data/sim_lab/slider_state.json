@@ -64,8 +64,8 @@
       },
       "ricky_weights": {
         "w_gpp": 0.2,
-        "w_ceil": 1.4,
-        "w_own": 0.2
+        "w_ceil": 0.5,
+        "w_own": 0.15
       }
     },
     "Showdown": {
