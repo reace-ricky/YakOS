@@ -123,7 +123,9 @@
   "Cameron Johnson": {
     "min_exposure": 0.2
   },
-  "Bam Adebayo": {},
+  "Bam Adebayo": {
+    "min_exposure": 0.5
+  },
   "Duncan Robinson": {
     "min_exposure": 0.2
   },
