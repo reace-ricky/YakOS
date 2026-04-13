@@ -54,9 +54,7 @@
   "Gary Trent Jr.": {
     "min_exposure": 0.2
   },
-  "Carlton Carrington": {
-    "max_exposure": 0.0
-  },
+  "Carlton Carrington": {},
   "CJ McCollum": {},
   "Jaylen Brown": {
     "min_exposure": 0.5
@@ -267,7 +265,9 @@
   "Brandin Podziemski": {
     "min_exposure": 0.2
   },
-  "Ousmane Dieng": {},
+  "Ousmane Dieng": {
+    "max_exposure": 0.0
+  },
   "Kobe Bufkin": {
     "max_exposure": 0.0
   }
