@@ -11,10 +11,13 @@ imported and tested without pulling in the full YakOS stack.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, List
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 # Files that constitute an "edge run" and must match the current slate date.
@@ -149,5 +152,5 @@ def clean_stale_edge_artifacts(out_dir: Path) -> List[str]:
                 fpath.unlink()
                 removed.append(fname)
             except Exception as exc:
-                print(f"[edge_integrity] Could not remove {fname}: {exc}")
+                logger.warning("[edge_integrity] Could not remove %s: %s", fname, exc)
     return removed

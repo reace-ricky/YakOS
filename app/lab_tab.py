@@ -3226,9 +3226,6 @@ def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, o
     return lineups_df
 
 
-# Import edge artifact constants from the canonical source.
-from yak_core.edge_integrity import EDGE_ARTIFACT_FILES as _EDGE_ARTIFACT_FILES, EDGE_PLAY_KEYS as _EDGE_PLAY_KEYS
-
 
 def _validate_edge_artifacts(out_dir: Path) -> dict:
     """Validate edge artifacts; delegates to yak_core.edge_integrity."""
