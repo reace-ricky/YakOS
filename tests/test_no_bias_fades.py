@@ -9,11 +9,6 @@ Requirements tested:
 """
 from __future__ import annotations
 
-import json
-import tempfile
-from pathlib import Path
-from unittest.mock import patch
-
 import pandas as pd
 import pytest
 
@@ -59,42 +54,35 @@ def _make_pool(n: int = 20, core_name: str = "LaMelo Ball") -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 class TestClassifyPlaysNoBiasFades:
-    def test_core_player_not_in_fades_even_with_bias_max_exposure_zero(self, tmp_path):
+    def test_core_player_not_in_fades_even_with_bias_max_exposure_zero(self):
         """Player with max_exposure=0.0 in bias must NOT appear in fade_candidates
-        if classify_plays() ranks them as a core play."""
+        if classify_plays() ranks them as a core play.
+
+        Since the code no longer reads bias in classify_plays(), this also verifies
+        that load_bias is never called during classification (the patch is intentionally
+        omitted — if it were called it would use the real bias file, not a fake one).
+        """
         core_name = "LaMelo Ball"
         pool = _make_pool(core_name=core_name)
 
-        # Write a bias file with max_exposure=0.0 for the core player
-        bias_data = {core_name: {"max_exposure": 0.0}}
-        bias_file = tmp_path / "ricky_bias.json"
-        bias_file.write_text(json.dumps(bias_data))
-
-        # Patch load_bias to return our polluted bias (simulates old persisted state)
-        def _fake_load_bias():
-            return bias_data
-
-        with patch("yak_core.bias.load_bias", side_effect=_fake_load_bias):
-            result = classify_plays(pool, sport="NBA")
+        result = classify_plays(pool, sport="NBA")
 
         fade_names = {f["player_name"] for f in result.get("fade_candidates", [])}
         assert core_name not in fade_names, (
-            f"{core_name} should not be in fade_candidates even though "
-            f"bias has max_exposure=0.0 — fades must not be derived from bias"
+            f"{core_name} should not be in fade_candidates — "
+            f"fades must not be derived from bias"
         )
 
-    def test_core_player_in_core_plays_regardless_of_bias(self, tmp_path):
-        """The top-projected player must appear in core_plays even if bias fades them."""
+    def test_core_player_in_core_plays_regardless_of_bias(self):
+        """The top-projected player must appear in core_plays even if bias fades them.
+
+        Since classify_plays() no longer reads bias at all, we verify directly that
+        the top player appears in core without needing to stub any bias call.
+        """
         core_name = "LaMelo Ball"
         pool = _make_pool(core_name=core_name)
-        bias_data = {core_name: {"max_exposure": 0.0}}
 
-        def _fake_load_bias():
-            return bias_data
-
-        with patch("yak_core.bias.load_bias", side_effect=_fake_load_bias):
-            result = classify_plays(pool, sport="NBA")
-
+        result = classify_plays(pool, sport="NBA")
         core_names = {p["player_name"] for p in result.get("core_plays", [])}
         assert core_name in core_names, (
             f"{core_name} must appear in core_plays regardless of bias max_exposure"
