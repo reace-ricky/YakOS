@@ -1,8 +1,7 @@
 {
   "bullets": [
     "Core anchors: LaMelo Ball, Deni Avdija, Bam Adebayo",
-    "Leverage plays: Shaedon Sharpe, Collin Gillespie",
-    "Fade candidates: Coby White, Pelle Larsson"
+    "Leverage plays: Shaedon Sharpe, Collin Gillespie"
   ],
   "recommendation": "5 core plays anchored at $6,300\u2013$9,000. 2 leverage plays at 0\u20130% ownership.",
   "core_plays": [
@@ -102,71 +101,6 @@
   ],
   "value_plays": [],
   "fade_candidates": [
-    {
-      "player_name": "Coby White",
-      "salary": 4200,
-      "proj": 20.765,
-      "ownership": 34.67,
-      "edge": 0.3915436382707507,
-      "value": 4.944047619047619,
-      "risk_score": 0.0,
-      "proj_minutes": 14.0,
-      "sim90th": 30.785000000000004,
-      "ceil": 30.41,
-      "sim_leverage": -29.73
-    },
-    {
-      "player_name": "Pelle Larsson",
-      "salary": 4300,
-      "proj": 21.505,
-      "ownership": 42.53,
-      "edge": 0.3938679201742917,
-      "value": 5.001162790697674,
-      "risk_score": 0.0,
-      "proj_minutes": 14.333333333333334,
-      "sim90th": 30.335,
-      "ceil": 30.27,
-      "sim_leverage": -40.54
-    },
-    {
-      "player_name": "Jaime Jaquez",
-      "salary": 4700,
-      "proj": 23.295,
-      "ownership": 28.45,
-      "edge": 0.3981437224815748,
-      "value": 4.956382978723404,
-      "risk_score": 0.0,
-      "proj_minutes": 15.666666666666666,
-      "sim90th": 32.375,
-      "ceil": 31.39,
-      "sim_leverage": -16.22
-    },
-    {
-      "player_name": "Andrew Wiggins",
-      "salary": 4500,
-      "proj": 22.785,
-      "ownership": 53.33,
-      "edge": 0.40569946084685315,
-      "value": 5.0633333333333335,
-      "risk_score": 0.0,
-      "proj_minutes": 15.0,
-      "sim90th": 32.575,
-      "ceil": 31.99,
-      "sim_leverage": -35.14
-    },
-    {
-      "player_name": "Moussa Diabate",
-      "salary": 4900,
-      "proj": 24.305000000000003,
-      "ownership": 34.94,
-      "edge": 0.40933087505802945,
-      "value": 4.960204081632654,
-      "risk_score": 0.0,
-      "proj_minutes": 16.333333333333332,
-      "sim90th": 33.114999999999995,
-      "ceil": 33.26,
-      "sim_leverage": -18.92
-    },
     {
       "player_name": "LaMelo Ball",
       "team": "CHA",
