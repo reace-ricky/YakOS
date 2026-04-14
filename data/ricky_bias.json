@@ -1,5 +1,4 @@
 {
-  "Kristaps Porzingis": {},
   "Luka Doncic": {
     "min_exposure": 0.5
   },
@@ -48,16 +47,9 @@
   "Pelle Larsson": {
     "min_exposure": 0.2
   },
-  "Jalen Suggs": {},
-  "DeMar DeRozan": {},
-  "Josh Giddey": {},
   "Gary Trent Jr.": {
     "min_exposure": 0.2
   },
-  "Carlton Carrington": {
-    "max_exposure": 0.0
-  },
-  "CJ McCollum": {},
   "Jaylen Brown": {
     "min_exposure": 0.5
   },
@@ -65,10 +57,8 @@
     "min_exposure": 0.2
   },
   "Kyle Filipowski": {
-    "min_exposure": 0.5,
-    "max_exposure": 0.0
+    "min_exposure": 0.5
   },
-  "Donovan Clingan": {},
   "Shai Gilgeous-Alexander": {
     "min_exposure": 0.5
   },
@@ -87,12 +77,8 @@
   "Javonte Green": {
     "min_exposure": 0.2
   },
-  "Yang Hansen": {},
   "Royce O'Neale": {
     "min_exposure": 0.2
-  },
-  "Max Shulga": {
-    "max_exposure": 0.0
   },
   "Precious Achiuwa": {
     "min_exposure": 0.5
@@ -109,9 +95,6 @@
   "Anthony Edwards": {
     "min_exposure": 0.5
   },
-  "Curtis Jones": {
-    "max_exposure": 0.0
-  },
   "Tyrese Maxey": {
     "min_exposure": 0.5
   },
@@ -127,9 +110,6 @@
   "Cameron Johnson": {
     "min_exposure": 0.2
   },
-  "Bam Adebayo": {
-    "max_exposure": 0.0
-  },
   "Duncan Robinson": {
     "min_exposure": 0.2
   },
@@ -141,12 +121,6 @@
   },
   "Bones Hyland": {
     "min_exposure": 0.2
-  },
-  "Jarrett Allen": {
-    "max_exposure": 0.0
-  },
-  "Chaz Lanier": {
-    "max_exposure": 0.0
   },
   "Gregory Jackson": {
     "min_exposure": 0.5
