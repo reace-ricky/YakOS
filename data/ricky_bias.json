@@ -155,7 +155,7 @@
     "min_exposure": 0.2
   },
   "Devin Booker": {
-    "min_exposure": 0.2
+    "min_exposure": 0.5
   },
   "Myron Gardner": {
     "max_exposure": 0.0
@@ -279,5 +279,20 @@
   },
   "LaMelo Ball": {
     "min_exposure": 0.5
+  },
+  "Miles Bridges": {
+    "max_exposure": 0.0
+  },
+  "Coby White": {
+    "max_exposure": 0.0
+  },
+  "Kon Knueppel": {
+    "min_exposure": 0.5
+  },
+  "Shaedon Sharpe": {
+    "min_exposure": 0.2
+  },
+  "Collin Gillespie": {
+    "min_exposure": 0.2
   }
 }
