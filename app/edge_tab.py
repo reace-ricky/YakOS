@@ -587,42 +587,6 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
                 parts.pop()
             parts.append(f'<div class="tb-danger-box">{dangerinner}</div>')
 
-    # -- Auto-write fades + core plays to bias in a single atomic pass ------
-    # Both updates are batched into one save_bias() call so we never write
-    # a half-updated file, and errors are surfaced rather than silently dropped.
-    try:
-        from yak_core.bias import save_bias
-        _bias = st.session_state.setdefault("ricky_bias", load_bias())
-        _dirty = False
-
-        # Fades: cap max_exposure at 0 for bust call and top fade candidate
-        _fade_names: list[str] = []
-        if bust:
-            _fade_names.append(bust["name"])
-        if fades:
-            _fade_names.extend(f.get("player_name", "") for f in fades[:1])
-        for _fn in _fade_names:
-            if _fn:
-                _bias.setdefault(_fn, {})["max_exposure"] = 0.0
-                _dirty = True
-
-        # Core plays: set minimum exposure floor (skip players already faded)
-        _fade_set = set(filter(None, _fade_names))
-        _core_players = edge_analysis.get("core_plays", [])
-        for _cp in _core_players[:5]:  # cap at 5 core plays
-            _cname = _cp.get("player_name", "")
-            if _cname and _cname not in _fade_set:
-                existing = _bias.get(_cname, {})
-                # Only set floor if not already faded/capped low
-                if existing.get("max_exposure", 1.0) > 0.40:
-                    _bias.setdefault(_cname, {})["min_exposure"] = 0.50
-                    _dirty = True
-
-        if _dirty:
-            save_bias(_bias)
-    except Exception as _e:
-        st.toast(f"⚠️ Bias auto-save failed: {_e}", icon="⚠️")
-
     if parts:
         st.markdown('<div class="the-board">' + "".join(parts) + '</div>', unsafe_allow_html=True)
     else:
@@ -842,7 +806,6 @@ def render_edge_tab(sport: str) -> None:
     from app.data_loader import get_published_version, invalidate_published_cache, load_published_data
 
     # Load Ricky's bias overrides into session state (persisted to disk)
-    from yak_core.bias import save_bias
     if "ricky_bias" not in st.session_state:
         st.session_state["ricky_bias"] = load_bias()
 
@@ -926,6 +889,48 @@ def render_edge_tab(sport: str) -> None:
     # (kept for data layer; not rendered in UI)
     edge_analysis["optimizer_notes"] = _compute_optimizer_notes(lineups)
 
+    # ── Session-state manual fades (slate-scoped, user-driven only) ──────────
+    # Manual fades are keyed by sport + slate_date so they reset on a new slate.
+    # They are NEVER derived from ricky_bias.json; only from explicit UI selection.
+    _manual_fades_key = f"manual_fades_{sport}_{slate_date}"
+    _manual_fade_names: list[str] = st.session_state.get(_manual_fades_key, [])
+
+    # Merge manual-fade selections into edge_analysis["fade_candidates"] so
+    # The Board and the 3-box both reflect the user's choices.
+    if _manual_fade_names and not pool.empty and "player_name" in pool.columns:
+        _existing_fade_names = {
+            f.get("player_name", "") for f in edge_analysis.get("fade_candidates", [])
+        }
+        for _mfn in _manual_fade_names:
+            if _mfn in _existing_fade_names:
+                continue
+            _mf_rows = pool[pool["player_name"] == _mfn]
+            if _mf_rows.empty:
+                continue
+            _mf_row = _mf_rows.iloc[0]
+            _mf_own_raw = float(_mf_row.get("ownership", _mf_row.get("own_pct", 0)) or 0)
+            if 0 < _mf_own_raw <= 1.0:
+                _mf_own_raw *= 100
+            _mf_ceil = float(_mf_row.get("ceil", _mf_row.get("sim90th", 0)) or 0)
+            edge_analysis.setdefault("fade_candidates", []).append({
+                "player_name": _mfn,
+                "team": str(_mf_row.get("team", "")),
+                "tag": "fade",
+                "proj": round(float(_mf_row.get("proj", 0) or 0), 1),
+                "salary": int(_mf_row.get("salary", 0) or 0),
+                "ownership": round(_mf_own_raw, 1),
+                "own_pct": round(_mf_own_raw, 1),
+                "ceil": round(_mf_ceil, 1),
+                "edge": round(float(_mf_row.get("edge_score", _mf_row.get("edge", 0)) or 0), 2),
+                "value": round(float(_mf_row.get("value", 0) or 0), 2),
+                "proj_minutes": round(float(_mf_row.get("proj_minutes", 0) or 0), 1),
+                "sim90th": round(_mf_ceil, 1),
+                "risk_score": round(float(_mf_row.get("risk_score", 0) or 0), 1),
+                "fade_score": 0.0,
+                "reasoning": "Manual fade (user-selected this slate)",
+            })
+            _existing_fade_names.add(_mfn)
+
     # ── The Board ─────────────────────────────────────────────────────
     _render_the_board(sport, pool, edge_analysis, slate_date=slate_date)
 
@@ -1001,6 +1006,29 @@ def render_edge_tab(sport: str) -> None:
             reverse=True,
         )
         _render_edge_box("value_plays", _val, is_pga, _cleared)
+
+    # ── Manual Fades (slate-scoped, session only) ──────────────────────────
+    with st.expander("✋ Manual Fades — this slate only", expanded=bool(_manual_fade_names)):
+        st.caption(
+            "Select players to fade on this slate. Fades are session-only and reset "
+            "when you refresh. They are never saved to bias or persisted across slates."
+        )
+        _all_player_names = (
+            sorted(pool["player_name"].dropna().unique().tolist())
+            if not pool.empty and "player_name" in pool.columns
+            else []
+        )
+        st.multiselect(
+            "Fade these players",
+            options=_all_player_names,
+            default=_manual_fade_names,
+            key=_manual_fades_key,
+            label_visibility="collapsed",
+        )
+        if _manual_fade_names:
+            if st.button("🗑️ Clear all manual fades", key=f"clear_manual_fades_{sport}_{slate_date}"):
+                st.session_state[_manual_fades_key] = []
+                st.rerun()
 
     # ── Published lineups ──
     if lineups:

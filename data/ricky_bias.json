@@ -1,5 +1,4 @@
 {
-  "Kristaps Porzingis": {},
   "Luka Doncic": {
     "min_exposure": 0.5
   },
@@ -48,16 +47,9 @@
   "Pelle Larsson": {
     "min_exposure": 0.2
   },
-  "Jalen Suggs": {},
-  "DeMar DeRozan": {},
-  "Josh Giddey": {},
   "Gary Trent Jr.": {
     "min_exposure": 0.2
   },
-  "Carlton Carrington": {
-    "max_exposure": 0.0
-  },
-  "CJ McCollum": {},
   "Jaylen Brown": {
     "min_exposure": 0.5
   },
@@ -67,7 +59,6 @@
   "Kyle Filipowski": {
     "min_exposure": 0.5
   },
-  "Donovan Clingan": {},
   "Shai Gilgeous-Alexander": {
     "min_exposure": 0.5
   },
@@ -86,11 +77,9 @@
   "Javonte Green": {
     "min_exposure": 0.2
   },
-  "Yang Hansen": {},
   "Royce O'Neale": {
     "min_exposure": 0.2
   },
-  "Max Shulga": {},
   "Precious Achiuwa": {
     "min_exposure": 0.5
   },
@@ -106,7 +95,6 @@
   "Anthony Edwards": {
     "min_exposure": 0.5
   },
-  "Curtis Jones": {},
   "Tyrese Maxey": {
     "min_exposure": 0.5
   },
@@ -122,9 +110,6 @@
   "Cameron Johnson": {
     "min_exposure": 0.2
   },
-  "Bam Adebayo": {
-    "max_exposure": 0.0
-  },
   "Duncan Robinson": {
     "min_exposure": 0.2
   },
@@ -137,8 +122,6 @@
   "Bones Hyland": {
     "min_exposure": 0.2
   },
-  "Jarrett Allen": {},
-  "Chaz Lanier": {},
   "Gregory Jackson": {
     "min_exposure": 0.5
   },
@@ -156,18 +139,6 @@
   },
   "Devin Booker": {
     "min_exposure": 0.5
-  },
-  "Myron Gardner": {
-    "max_exposure": 0.0
-  },
-  "Ron Harper": {
-    "max_exposure": 0.0
-  },
-  "Marco Penge": {
-    "max_exposure": 0.0
-  },
-  "Davis Riley": {
-    "max_exposure": 0.0
   },
   "Matt Fitzpatrick": {
     "min_exposure": 0.5
@@ -193,7 +164,6 @@
   "Davis Chatfield": {
     "min_exposure": 0.2
   },
-  "Brooks Koepka": {},
   "Min Woo Lee": {
     "min_exposure": 0.5
   },
@@ -215,7 +185,6 @@
   "Harry Hall": {
     "min_exposure": 0.2
   },
-  "Corey Conners": {},
   "Jon Rahm": {
     "min_exposure": 0.5
   },
@@ -234,10 +203,6 @@
   "John Konchar": {
     "min_exposure": 0.5
   },
-  "Naz Reid": {},
-  "Jaylen Clark": {
-    "max_exposure": 0.0
-  },
   "Cade Cunningham": {
     "min_exposure": 0.5
   },
@@ -253,12 +218,6 @@
   "Keegan Bradley": {
     "min_exposure": 0.2
   },
-  "Julian Reese": {
-    "max_exposure": 0.0
-  },
-  "Yuki Kawamura": {
-    "max_exposure": 0.0
-  },
   "LeBron James": {
     "min_exposure": 0.5
   },
@@ -271,21 +230,8 @@
   "Brandin Podziemski": {
     "min_exposure": 0.2
   },
-  "Ousmane Dieng": {
-    "max_exposure": 0.0
-  },
-  "Kobe Bufkin": {
-    "max_exposure": 0.0
-  },
   "LaMelo Ball": {
-    "min_exposure": 0.5,
-    "max_exposure": 0.0
-  },
-  "Miles Bridges": {
-    "max_exposure": 0.0
-  },
-  "Coby White": {
-    "max_exposure": 0.0
+    "min_exposure": 0.5
   },
   "Kon Knueppel": {
     "min_exposure": 0.5
