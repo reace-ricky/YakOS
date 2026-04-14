@@ -1,23 +1,24 @@
 {
   "sport": "NBA",
-  "date": "2026-04-13",
+  "date": "2026-04-14",
   "core_names": [
-    "Tyrese Maxey",
-    "LeBron James",
-    "Bam Adebayo",
+    "LaMelo Ball",
     "Deni Avdija",
-    "LaMelo Ball"
+    "Bam Adebayo",
+    "Devin Booker",
+    "Kon Knueppel"
   ],
-  "leverage_names": [],
-  "value_names": [
-    "Caleb Houstan"
+  "leverage_names": [
+    "Shaedon Sharpe",
+    "Collin Gillespie"
   ],
+  "value_names": [],
   "fade_names": [
-    "Kobe Bufkin",
-    "Jeenathan Williams",
-    "Pat Connaughton",
-    "Trendon Watford",
-    "MarJon Beauchamp"
+    "Coby White",
+    "Pelle Larsson",
+    "Jaime Jaquez",
+    "Andrew Wiggins",
+    "Moussa Diabate"
   ],
   "calibration_slates": 15
 }
