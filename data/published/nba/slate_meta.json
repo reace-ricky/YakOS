@@ -16,6 +16,17 @@
   "lineup_size": 8,
   "pool_size": 311,
   "proj_source": "RotoGrinders (uploaded)",
-  "matchups": [],
+  "matchups": [
+    {
+      "away": "POR",
+      "home": "PHX",
+      "label": "POR @ PHX"
+    },
+    {
+      "away": "MIA",
+      "home": "CHA",
+      "label": "MIA @ CHA"
+    }
+  ],
   "game_times": {}
 }
