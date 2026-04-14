@@ -298,6 +298,26 @@ def render_lab_tab(sport: str) -> None:
                 if _actuals_clear_path.exists():
                     _actuals_clear_path.unlink(missing_ok=True)
 
+                # ── Remove stale edge artifacts when pool date changes ──────
+                # Any existing edge outputs may be from a prior slate; delete
+                # them so the publish step can never ship a Franken-slate.
+                _existing_edge_val = _validate_edge_artifacts(out_dir)
+                _new_meta_date: str = meta.get("date", "") if isinstance(meta, dict) else ""
+                _edge_stale = (
+                    _existing_edge_val["edge_date"]
+                    and _new_meta_date
+                    and _existing_edge_val["edge_date"] != _new_meta_date
+                )
+                if _edge_stale or not _existing_edge_val["valid"]:
+                    _edge_removed = _clean_stale_edge_artifacts(out_dir)
+                    if _edge_removed:
+                        st.info(
+                            f"🧹 Removed stale edge artifacts from prior slate "
+                            f"({_existing_edge_val.get('edge_date', '?')} → {_new_meta_date}): "
+                            f"{', '.join(_edge_removed)}. "
+                            "Please run **Edge Analysis** before publishing."
+                        )
+
                 # Sync pool + meta to GitHub so they survive cold restarts
                 try:
                     from yak_core.github_persistence import sync_feedback_async
@@ -2084,6 +2104,22 @@ def _run_edge(sport: str, slate_date: str, out_dir: Path) -> tuple:
     from yak_core.edge import compute_edge_metrics
     from yak_core.calibration_feedback import get_correction_factors
 
+    # ── Use slate_meta.json as the canonical date so edge artifacts always
+    #    match the pool/meta date, regardless of what the UI widget says. ──
+    _meta_path = out_dir / "slate_meta.json"
+    if _meta_path.exists():
+        try:
+            _meta_for_date = json.loads(_meta_path.read_text())
+            _canonical_date = _meta_for_date.get("date") or slate_date
+            if _canonical_date != slate_date:
+                print(
+                    f"[_run_edge] Using canonical date from slate_meta.json "
+                    f"({_canonical_date!r}) instead of UI widget value ({slate_date!r})"
+                )
+            slate_date = _canonical_date
+        except Exception:
+            pass
+
     pool = pd.read_parquet(out_dir / "slate_pool.parquet")
 
     # ── Late Swap: snapshot pool status before re-check ──
@@ -3190,9 +3226,52 @@ def _build_lineups(sport, contest_label, num_lineups, lock_list, exclude_list, o
     return lineups_df
 
 
+_EDGE_ARTIFACT_FILES = ("edge_state.json", "edge_analysis.json", "signals.parquet")
+
+_EDGE_PLAY_KEYS = ("core_plays", "leverage_plays", "value_plays", "fade_candidates")
+
+
+def _validate_edge_artifacts(out_dir: Path) -> dict:
+    """Validate edge artifacts; delegates to yak_core.edge_integrity."""
+    from yak_core.edge_integrity import validate_edge_artifacts
+    return validate_edge_artifacts(out_dir)
+
+
+def _clean_stale_edge_artifacts(out_dir: Path) -> list:
+    """Remove stale edge artifact files; delegates to yak_core.edge_integrity."""
+    from yak_core.edge_integrity import clean_stale_edge_artifacts
+    return clean_stale_edge_artifacts(out_dir)
+
+
 def _publish_to_github(sport: str, out_dir: Path) -> dict:
     from yak_core.config import YAKOS_ROOT
     from yak_core.github_persistence import sync_feedback_to_github
+
+    # ── Pre-publish edge integrity check ──────────────────────────────────
+    _val = _validate_edge_artifacts(out_dir)
+    if not _val["valid"]:
+        _removed = _clean_stale_edge_artifacts(out_dir)
+        _removed_str = ", ".join(_removed) if _removed else "none"
+        _reason = _val["reason"]
+        st.warning(
+            f"⚠️ **Stale edge analysis detected — publish blocked.**\n\n"
+            f"**Reason:** {_reason}\n\n"
+            f"**Removed:** {_removed_str}\n\n"
+            "Please click **Run Edge Analysis** to regenerate for the current slate, "
+            "then publish again."
+        )
+        return {"status": "error", "reason": f"stale_edge: {_reason}"}
+
+    # Edge artifacts are either absent or valid for this slate date.
+    # Require at least edge_state.json to be present (forces user to run edge).
+    _edge_state_path = out_dir / "edge_state.json"
+    _edge_analysis_path = out_dir / "edge_analysis.json"
+    if not _edge_state_path.exists() or not _edge_analysis_path.exists():
+        st.warning(
+            "⚠️ **No edge analysis found — publish blocked.**\n\n"
+            "Please click **Run Edge Analysis** before publishing."
+        )
+        return {"status": "error", "reason": "missing_edge_artifacts"}
 
     # ── Snapshot-on-publish: archive the slate pool so the nightly cron
     #    always has a pool to work with, even if the published pool gets
