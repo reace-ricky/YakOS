@@ -2446,25 +2446,6 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
 
     _used.update(value["player_name"].tolist())
 
-    # ── FADE: over-owned relative to edge, or negative sim_leverage ──
-    fade_mask = (
-        ((_own >= own_med * 1.3) & (_edge < _edge_p40))
-        & (~df["player_name"].isin(_used))
-    )
-    # If sim_leverage available, also fade strongly negative
-    if _sim_leverage.abs().sum() > 0:
-        neg_lev_mask = (_sim_leverage < -15) & (_own > 5) & (~df["player_name"].isin(_used))
-        fade_mask = fade_mask | neg_lev_mask
-    # Also fade high-risk players regardless of ownership
-    # Skip when no risk signal exists (all zeros — e.g. PGA pools)
-    _risk_p85 = float(np.percentile(_risk_score.dropna(), 85)) if len(_risk_score.dropna()) > 2 else 85
-    if _risk_p85 > 0:
-        high_risk_mask = (_risk_score >= _risk_p85) & (~df["player_name"].isin(_used))
-        fade_mask = fade_mask | high_risk_mask
-    fade = df[fade_mask][_pick_cols].copy()
-    fade = fade.rename(columns={_own_col: "ownership"})
-    fade = fade.sort_values("edge", ascending=True).head(5)
-
     def _to_records(frame, n=5):
         return frame.head(n).to_dict(orient="records")
 
@@ -2472,7 +2453,7 @@ def _classify_plays(sdf, sport: str = "NBA") -> dict:
         "core_plays": _to_records(core, 5),
         "leverage_plays": _to_records(leverage, 5),
         "value_plays": _to_records(value, 5),
-        "fade_candidates": _to_records(fade, 5),
+        "fade_candidates": [],
     }
 
 
