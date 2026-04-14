@@ -80,6 +80,7 @@
   "Royce O'Neale": {
     "min_exposure": 0.2
   },
+  "Max Shulga": {},
   "Precious Achiuwa": {
     "min_exposure": 0.5
   },
@@ -95,6 +96,7 @@
   "Anthony Edwards": {
     "min_exposure": 0.5
   },
+  "Curtis Jones": {},
   "Tyrese Maxey": {
     "min_exposure": 0.5
   },
@@ -122,6 +124,8 @@
   "Bones Hyland": {
     "min_exposure": 0.2
   },
+  "Jarrett Allen": {},
+  "Chaz Lanier": {},
   "Gregory Jackson": {
     "min_exposure": 0.5
   },
@@ -129,6 +133,154 @@
     "min_exposure": 0.2
   },
   "Jalen Pickett": {
+    "min_exposure": 0.2
+  },
+  "Jeremiah Fears": {
+    "min_exposure": 0.5
+  },
+  "Alperen Sengun": {
+    "min_exposure": 0.2
+  },
+  "Devin Booker": {
+    "min_exposure": 0.5
+  },
+  "Myron Gardner": {
+    "max_exposure": 0.0
+  },
+  "Ron Harper": {
+    "max_exposure": 0.0
+  },
+  "Marco Penge": {
+    "max_exposure": 0.0
+  },
+  "Davis Riley": {
+    "max_exposure": 0.0
+  },
+  "Matt Fitzpatrick": {
+    "min_exposure": 0.5
+  },
+  "Aaron Rai": {
+    "min_exposure": 0.5
+  },
+  "Christiaan Bezuidenhout": {
+    "min_exposure": 0.5
+  },
+  "Max McGreevy": {
+    "min_exposure": 0.5
+  },
+  "J.J. Spaun": {
+    "min_exposure": 0.5
+  },
+  "Brandt Snedeker": {
+    "min_exposure": 0.2
+  },
+  "Dylan Wu": {
+    "min_exposure": 0.2
+  },
+  "Davis Chatfield": {
+    "min_exposure": 0.2
+  },
+  "Brooks Koepka": {},
+  "Min Woo Lee": {
+    "min_exposure": 0.5
+  },
+  "Jake Knapp": {
+    "min_exposure": 0.5
+  },
+  "Nicolai Hojgaard": {
+    "min_exposure": 0.5
+  },
+  "Chris Gotterup": {
+    "min_exposure": 0.5
+  },
+  "Kristoffer Reitan": {
+    "min_exposure": 0.2
+  },
+  "Sam Stevens": {
+    "min_exposure": 0.2
+  },
+  "Harry Hall": {
+    "min_exposure": 0.2
+  },
+  "Corey Conners": {},
+  "Jon Rahm": {
+    "min_exposure": 0.5
+  },
+  "Rory McIlroy": {
+    "min_exposure": 0.5
+  },
+  "Cameron Young": {
+    "min_exposure": 0.5
+  },
+  "Andrew Novak": {
+    "min_exposure": 0.2
+  },
+  "Wyndham Clark": {
+    "min_exposure": 0.2
+  },
+  "John Konchar": {
+    "min_exposure": 0.5
+  },
+  "Naz Reid": {},
+  "Jaylen Clark": {
+    "max_exposure": 0.0
+  },
+  "Cade Cunningham": {
+    "min_exposure": 0.5
+  },
+  "Ryan Rollins": {
+    "min_exposure": 0.2
+  },
+  "Jalen Williams": {
+    "min_exposure": 0.2
+  },
+  "Ajay Mitchell": {
+    "min_exposure": 0.2
+  },
+  "Keegan Bradley": {
+    "min_exposure": 0.2
+  },
+  "Julian Reese": {
+    "max_exposure": 0.0
+  },
+  "Yuki Kawamura": {
+    "max_exposure": 0.0
+  },
+  "LeBron James": {
+    "min_exposure": 0.5
+  },
+  "Reed Sheppard": {
+    "min_exposure": 0.2
+  },
+  "Jakob Poeltl": {
+    "min_exposure": 0.2
+  },
+  "Brandin Podziemski": {
+    "min_exposure": 0.2
+  },
+  "Ousmane Dieng": {
+    "max_exposure": 0.0
+  },
+  "Kobe Bufkin": {
+    "max_exposure": 0.0
+  },
+  "LaMelo Ball": {
+    "min_exposure": 0.5,
+    "max_exposure": 0.0
+  },
+  "Miles Bridges": {
+    "max_exposure": 0.0
+  },
+  "Coby White": {
+    "max_exposure": 0.0
+  },
+  "Kon Knueppel": {
+    "min_exposure": 0.5
+  },
+  "Shaedon Sharpe": {
+    "min_exposure": 0.2
+  },
+  "Collin Gillespie": {
     "min_exposure": 0.2
   }
 }

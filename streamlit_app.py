@@ -48,19 +48,20 @@ else:
 # ── Render tabs ───────────────────────────────────────────────────────────
 from app.edge_tab import render_edge_tab
 from app.optimizer_tab import render_optimizer_tab
+from app.utils.error_handler import safe_render
 
 with tab_edge:
-    render_edge_tab(sport)
+    safe_render(render_edge_tab, sport)
 
 with tab_optimizer:
-    render_optimizer_tab(sport, is_admin=is_admin)
+    safe_render(render_optimizer_tab, sport, is_admin=is_admin)
 
 if is_admin and tab_lab is not None:
     from app.lab_tab import render_lab_tab
     from app.sim_lab import render_sim_lab
 
     with tab_lab:
-        render_lab_tab(sport)
+        safe_render(render_lab_tab, sport)
 
     with tab_hotbox:
-        render_sim_lab(sport)
+        safe_render(render_sim_lab, sport)

@@ -9,6 +9,8 @@ Used by the optimizer (pre-prepare_pool injection) and The Board
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any, Dict
 
@@ -31,9 +33,29 @@ def load_bias() -> Dict[str, Dict[str, Any]]:
 
 
 def save_bias(bias: Dict[str, Dict[str, Any]]) -> None:
-    """Persist bias overrides to disk and sync to GitHub."""
+    """Persist bias overrides to disk and sync to GitHub.
+
+    Uses an atomic write (temp file + rename) so a mid-write crash cannot
+    leave the file in a partially-written or empty state.
+    """
     BIAS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    BIAS_PATH.write_text(json.dumps(bias, indent=2, default=str))
+    payload = json.dumps(bias, indent=2, default=str)
+
+    # Write to a temp file in the same directory, then atomically rename.
+    # os.replace() is POSIX-atomic when src and dst are on the same filesystem.
+    fd, tmp_path = tempfile.mkstemp(dir=BIAS_PATH.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(payload)
+        os.replace(tmp_path, BIAS_PATH)
+    except Exception:
+        # Clean up orphaned temp file before re-raising so callers get the
+        # real error rather than a follow-up PermissionError on the next run.
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
     try:
         from yak_core.github_persistence import sync_feedback_async

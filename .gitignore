@@ -21,3 +21,5 @@ data/api_config.json
 streamlit_app_legacy.py
 data/published/
 !data/ricky_archive/**/*.parquet
+# Error logs (ephemeral, not committed)
+logs/

@@ -268,7 +268,7 @@ def _classify_signal(p: Dict[str, Any], pool: pd.DataFrame) -> tuple:
 
     vegas = 0.0
     spread = 0.0
-    if not pool.empty and "player_name" in pool.columns:
+    if isinstance(pool, pd.DataFrame) and not pool.empty and "player_name" in pool.columns:
         match = pool[pool["player_name"] == name]
         if isinstance(match, (pd.DataFrame, pd.Series)) and not match.empty:
             row = match.iloc[0]
@@ -467,17 +467,6 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     else:
         parts.append('<div class="tb-setup">No strong stack targets on this slate.</div>')
 
-    # ── 3a+. Optimizer Notes (only if present) ─────────────────────
-    _opt_notes = edge_analysis.get("optimizer_notes", [])
-    if _opt_notes:
-        parts.append('<div class="tb-section-label">OPTIMIZER NOTES</div>')
-        for _note in _opt_notes:
-            parts.append(
-                f'<div class="tb-play-row">'
-                f'<span class="tb-meta">{_note}</span>'
-                f'</div>'
-            )
-
     # ── 3b. Sniper Spots (max 3) ──────────────────────────────────────
     board_snipers = compute_sniper_spots(pool, edge_analysis)
     # never allow fades into sniper spots
@@ -535,12 +524,13 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
     _fade_html = ""
 
     if "ownership" in pool.columns and "proj" in pool.columns:
-        _own_col = pd.to_numeric(pool.get("ownership", pool.get("own_proj", 0)), errors="coerce").fillna(0)
+        _zero_series = pd.Series(0, index=pool.index)
+        _own_col = pd.to_numeric(pool.get("ownership", pool.get("own_proj", _zero_series)), errors="coerce").fillna(0)
         if _own_col.max() <= 1.0:
             _own_col = _own_col * 100
         _proj_col = pd.to_numeric(pool["proj"], errors="coerce").fillna(0)
-        _sal_col = pd.to_numeric(pool.get("salary", 0), errors="coerce").fillna(0)
-        _r5_col = pd.to_numeric(pool.get("rolling_fp_5", 0), errors="coerce").fillna(0)
+        _sal_col = pd.to_numeric(pool.get("salary", _zero_series), errors="coerce").fillna(0)
+        _r5_col = pd.to_numeric(pool.get("rolling_fp_5", _zero_series), errors="coerce").fillna(0)
         _trap_mask = (
             (_own_col > 8)
             & (~pool["player_name"].isin(_board_names))
@@ -596,6 +586,42 @@ def _render_the_board(sport: str, pool: pd.DataFrame, edge_analysis: Dict[str, A
             if parts and 'No strong fades' in parts[-1]:
                 parts.pop()
             parts.append(f'<div class="tb-danger-box">{dangerinner}</div>')
+
+    # -- Auto-write fades + core plays to bias in a single atomic pass ------
+    # Both updates are batched into one save_bias() call so we never write
+    # a half-updated file, and errors are surfaced rather than silently dropped.
+    try:
+        from yak_core.bias import save_bias
+        _bias = st.session_state.setdefault("ricky_bias", load_bias())
+        _dirty = False
+
+        # Fades: cap max_exposure at 0 for bust call and top fade candidate
+        _fade_names: list[str] = []
+        if bust:
+            _fade_names.append(bust["name"])
+        if fades:
+            _fade_names.extend(f.get("player_name", "") for f in fades[:1])
+        for _fn in _fade_names:
+            if _fn:
+                _bias.setdefault(_fn, {})["max_exposure"] = 0.0
+                _dirty = True
+
+        # Core plays: set minimum exposure floor (skip players already faded)
+        _fade_set = set(filter(None, _fade_names))
+        _core_players = edge_analysis.get("core_plays", [])
+        for _cp in _core_players[:5]:  # cap at 5 core plays
+            _cname = _cp.get("player_name", "")
+            if _cname and _cname not in _fade_set:
+                existing = _bias.get(_cname, {})
+                # Only set floor if not already faded/capped low
+                if existing.get("max_exposure", 1.0) > 0.40:
+                    _bias.setdefault(_cname, {})["min_exposure"] = 0.50
+                    _dirty = True
+
+        if _dirty:
+            save_bias(_bias)
+    except Exception as _e:
+        st.toast(f"⚠️ Bias auto-save failed: {_e}", icon="⚠️")
 
     if parts:
         st.markdown('<div class="the-board">' + "".join(parts) + '</div>', unsafe_allow_html=True)
@@ -813,7 +839,7 @@ def _compute_optimizer_notes(lineups: dict | None) -> List[str]:
 
 def render_edge_tab(sport: str) -> None:
     """Render Ricky's Edge Analysis tab."""
-    from app.data_loader import invalidate_published_cache, load_published_data
+    from app.data_loader import get_published_version, invalidate_published_cache, load_published_data
 
     # Load Ricky's bias overrides into session state (persisted to disk)
     from yak_core.bias import save_bias
@@ -831,9 +857,18 @@ def render_edge_tab(sport: str) -> None:
         st.rerun()
 
     try:
-        meta, pool, edge_analysis, edge_state, lineups = load_published_data(sport)
-        if isinstance(pool, dict):
-            pool = pd.DataFrame(pool)
+        meta, pool, edge_analysis, edge_state, lineups = load_published_data(
+            sport, get_published_version(sport)
+        )
+        if not isinstance(pool, pd.DataFrame):
+            if isinstance(pool, dict):
+                pool = pd.DataFrame(pool)
+            elif isinstance(pool, list):
+                pool = pd.DataFrame.from_records(pool)
+            elif pool is None:
+                pool = pd.DataFrame()
+            else:
+                pool = pd.DataFrame(pool)
     except Exception as e:
         st.error(f"Could not load {sport} data: {e}")
         return
@@ -841,6 +876,35 @@ def render_edge_tab(sport: str) -> None:
     if not meta:
         st.info(f"No published {sport} data found. Run the pipeline first.")
         return
+
+    # ── Schema normalization (catches null/missing fields early) ──────
+    from yak_core.schema import normalize_pool, normalize_edge_analysis
+
+    try:
+        pool, pool_errors = normalize_pool(pool, sport=sport)
+    except Exception as _norm_exc:
+        st.error(f"Pool normalization failed ({sport}): {_norm_exc}")
+        logging.exception("[edge_tab] normalize_pool raised")
+        if not isinstance(pool, pd.DataFrame):
+            pool = pd.DataFrame()
+        pool_errors = []
+
+    if pool_errors:
+        with st.expander(f"⚠️ {len(pool_errors)} pool data warning(s)", expanded=False):
+            for _e in pool_errors:
+                st.warning(_e)
+
+    try:
+        edge_analysis, ea_errors = normalize_edge_analysis(edge_analysis, sport=sport)
+    except Exception as _ea_exc:
+        st.error(f"Edge analysis normalization failed ({sport}): {_ea_exc}")
+        logging.exception("[edge_tab] normalize_edge_analysis raised")
+        ea_errors = []
+
+    if ea_errors:
+        with st.expander(f"⚠️ {len(ea_errors)} edge analysis warning(s)", expanded=False):
+            for _e in ea_errors:
+                st.warning(_e)
 
     is_pga = sport.upper() == "PGA"
     slate_date = meta.get("date", "")
@@ -859,6 +923,7 @@ def render_edge_tab(sport: str) -> None:
     _render_late_swap_alerts(_late_swap, sport, lineups)
 
     # ── Compute optimizer notes from lineups ────────────────────────
+    # (kept for data layer; not rendered in UI)
     edge_analysis["optimizer_notes"] = _compute_optimizer_notes(lineups)
 
     # ── The Board ─────────────────────────────────────────────────────
@@ -899,16 +964,43 @@ def render_edge_tab(sport: str) -> None:
         _display_fades = {f.get("player_name", "") for f in edge_analysis["fade_candidates"]}
         _display_fades.discard("")
 
+    def _dedupe_players(players: list[dict]) -> list[dict]:
+        out: list[dict] = []
+        seen: set[str] = set()
+        for p in players or []:
+            _name = p.get("player_name", "")
+            if not _name or _name in seen:
+                continue
+            out.append(p)
+            seen.add(_name)
+        return out
+
     def _strip_fades(players: list, fades: set) -> list:
-        return [p for p in players if p.get("player_name", "") not in fades]
+        cleaned = _dedupe_players(players)
+        return [p for p in cleaned if p.get("player_name", "") not in fades]
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        _render_edge_box("core_plays", _strip_fades(edge_analysis.get("core_plays", []), _display_fades), is_pga, _cleared)
+        _core = sorted(
+            _strip_fades(edge_analysis.get("core_plays", []), _display_fades),
+            key=lambda p: float(p.get("proj", 0) or 0),
+            reverse=True,
+        )
+        _render_edge_box("core_plays", _core, is_pga, _cleared)
     with col2:
-        _render_edge_box("leverage_plays", _strip_fades(edge_analysis.get("leverage_plays", []), _display_fades), is_pga, _cleared)
+        _lev = sorted(
+            _strip_fades(edge_analysis.get("leverage_plays", []), _display_fades),
+            key=lambda p: float(p.get("edge", 0) or 0),
+            reverse=True,
+        )
+        _render_edge_box("leverage_plays", _lev, is_pga, _cleared)
     with col3:
-        _render_edge_box("value_plays", _strip_fades(edge_analysis.get("value_plays", []), _display_fades), is_pga, _cleared)
+        _val = sorted(
+            _strip_fades(edge_analysis.get("value_plays", []), _display_fades),
+            key=lambda p: float(p.get("value", 0) or 0),
+            reverse=True,
+        )
+        _render_edge_box("value_plays", _val, is_pga, _cleared)
 
     # ── Published lineups ──
     if lineups:

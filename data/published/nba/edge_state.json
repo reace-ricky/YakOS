@@ -1,33 +1,24 @@
 {
   "sport": "NBA",
-  "date": "2026-04-05",
+  "date": "2026-04-14",
   "core_names": [
-    "Jayson Tatum",
-    "Shai Gilgeous-Alexander",
-    "Jaylen Brown",
-    "Kevin Durant",
-    "Precious Achiuwa"
+    "LaMelo Ball",
+    "Deni Avdija",
+    "Bam Adebayo",
+    "Devin Booker",
+    "Kon Knueppel"
   ],
   "leverage_names": [
-    "AJ Green",
-    "Bones Hyland",
-    "Jake LaRavia",
-    "Jaden Hardy",
-    "Coby White"
+    "Shaedon Sharpe",
+    "Collin Gillespie"
   ],
-  "value_names": [
-    "Grant Williams",
-    "Jordan Miller",
-    "John Konchar",
-    "Jevon Carter",
-    "Cason Wallace"
-  ],
+  "value_names": [],
   "fade_names": [
-    "Max Shulga",
-    "John Tonje",
-    "Alex Antetokounmpo",
-    "TyTy Washington Jr.",
-    "Dalton Knecht"
+    "Coby White",
+    "Pelle Larsson",
+    "Jaime Jaquez",
+    "Andrew Wiggins",
+    "Moussa Diabate"
   ],
   "calibration_slates": 15
 }
