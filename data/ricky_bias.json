@@ -248,5 +248,11 @@
   },
   "Bam Adebayo": {
     "min_exposure": 0.5
+  },
+  "Oso Ighodaro": {
+    "min_exposure": 0.2
+  },
+  "Kel'el Ware": {
+    "min_exposure": 0.2
   }
 }
