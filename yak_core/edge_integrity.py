@@ -18,10 +18,10 @@ import pandas as pd
 
 
 # Files that constitute an "edge run" and must match the current slate date.
-EDGE_ARTIFACT_FILES: tuple = ("edge_state.json", "edge_analysis.json", "signals.parquet")
+EDGE_ARTIFACT_FILES: tuple[str, ...] = ("edge_state.json", "edge_analysis.json", "signals.parquet")
 
 # Keys in edge_analysis.json that contain player classification lists.
-EDGE_PLAY_KEYS: tuple = ("core_plays", "leverage_plays", "value_plays", "fade_candidates")
+EDGE_PLAY_KEYS: tuple[str, ...] = ("core_plays", "leverage_plays", "value_plays", "fade_candidates")
 
 
 def validate_edge_artifacts(out_dir: Path) -> Dict[str, Any]:
@@ -114,7 +114,11 @@ def validate_edge_artifacts(out_dir: Path) -> Dict[str, Any]:
             if phantoms:
                 # Deduplicate while preserving first-seen order.
                 seen: set = set()
-                deduped = [p for p in phantoms if not (p in seen or seen.add(p))]
+                deduped: List[str] = []
+                for p in phantoms:
+                    if p not in seen:
+                        seen.add(p)
+                        deduped.append(p)
                 result["valid"] = False
                 result["phantom_players"] = deduped
                 result["reason"] = (
