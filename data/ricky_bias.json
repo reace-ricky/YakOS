@@ -54,9 +54,7 @@
   "Gary Trent Jr.": {
     "min_exposure": 0.2
   },
-  "Carlton Carrington": {
-    "max_exposure": 0.0
-  },
+  "Carlton Carrington": {},
   "CJ McCollum": {},
   "Jaylen Brown": {
     "min_exposure": 0.5
@@ -157,18 +155,10 @@
   "Devin Booker": {
     "min_exposure": 0.5
   },
-  "Myron Gardner": {
-    "max_exposure": 0.0
-  },
-  "Ron Harper": {
-    "max_exposure": 0.0
-  },
-  "Marco Penge": {
-    "max_exposure": 0.0
-  },
-  "Davis Riley": {
-    "max_exposure": 0.0
-  },
+  "Myron Gardner": {},
+  "Ron Harper": {},
+  "Marco Penge": {},
+  "Davis Riley": {},
   "Matt Fitzpatrick": {
     "min_exposure": 0.5
   },
@@ -235,9 +225,7 @@
     "min_exposure": 0.5
   },
   "Naz Reid": {},
-  "Jaylen Clark": {
-    "max_exposure": 0.0
-  },
+  "Jaylen Clark": {},
   "Cade Cunningham": {
     "min_exposure": 0.5
   },
@@ -253,12 +241,8 @@
   "Keegan Bradley": {
     "min_exposure": 0.2
   },
-  "Julian Reese": {
-    "max_exposure": 0.0
-  },
-  "Yuki Kawamura": {
-    "max_exposure": 0.0
-  },
+  "Julian Reese": {},
+  "Yuki Kawamura": {},
   "LeBron James": {
     "min_exposure": 0.5
   },
@@ -271,12 +255,8 @@
   "Brandin Podziemski": {
     "min_exposure": 0.2
   },
-  "Ousmane Dieng": {
-    "max_exposure": 0.0
-  },
-  "Kobe Bufkin": {
-    "max_exposure": 0.0
-  },
+  "Ousmane Dieng": {},
+  "Kobe Bufkin": {},
   "LaMelo Ball": {
     "min_exposure": 0.5
   },
