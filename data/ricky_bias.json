@@ -256,7 +256,9 @@
     "min_exposure": 0.2
   },
   "Ousmane Dieng": {},
-  "Kobe Bufkin": {},
+  "Kobe Bufkin": {
+    "max_exposure": 0.0
+  },
   "LaMelo Ball": {
     "min_exposure": 0.5
   },
